@@ -2,6 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+<img src="packages/desktop/icons/lyapunov.png" width="72" height="72" alt="Lyapunov application icon" />
+
+![Alpha](docs/assets/badge-alpha.svg) ![Linux x64](docs/assets/badge-linux-x64.svg) [![Lyapunov Modified MIT](docs/assets/badge-lyapunov-license.svg)](LICENSE)
+
+
 **Linux x64 Alpha** · **Lyapunov Modified MIT**
 
 | 出版信息 | 内容 |
@@ -9,16 +14,23 @@
 | 应用版本 | 0.1.0 · A08 Alpha |
 | 文档版本日期 | 2026-10-02 |
 | 作者团队 | Lyapunov contributors |
+| 出品方 | 杭州奇异宇宙人工智能有限公司 |
 | 版权 | © 2026 Lyapunov contributors |
 | 项目许可 | [Lyapunov Modified MIT License](LICENSE) · [保留的版权与许可声明](NOTICE) |
 | 源码仓库 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
-| 图片与概念来源 | 项目贡献者撰写的说明和版本标记；本 README 不含概念图素材。 |
+| 图片与概念来源 | 既有软件图标、获准的原始Source界面截图、本地版本/许可SVG标记；截图标为Source开发预览。 |
 
-Lyapunov 将 Agent 对话、代码、文件、三维视口和物理仿真放在同一桌面工作台。你可以创建三维场景、准备机器人、执行受控仿真，并采集相机数据。
+**杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
 
 **发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/2026-10-linux-a08.md)记录本 Alpha 的变化与已知范围。
 
 [安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/2026-10-linux-a08.md)
+
+![Source开发预览](docs/assets/workbench-source-preview.png)
+
+*原始获准Source开发界面截图；最终发行包UI与任务运行验收分别确认。*
+
+**推荐工作流：** 让Agent使用原生产品工具，或使用工作台控件；本Alpha暂不建议用CUA自动点击替代场景、机器人与仿真工具。
 
 ## 在 Linux 上安装
 
@@ -31,7 +43,7 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 默认安装准备 **MuJoCo 及其 Python 运行环境**，验证原生物理，并创建当前用户的启动器和桌面入口。**Node.js、Electron 和固定版本的 DSH 随主归档提供**；默认安装将 MuJoCo／Python 下载到该版本目录内的专用环境。默认安装器与发行启动器不依赖 PATH 中的 Node、DSH、Python，也不依赖开发者的源码检出目录。用户会话与凭据使用产品的数据目录，升级时继续保留。消费者不需要预装系统 Node.js、DSH、Python、pip、Conda、Bun，也不需要模型 Key 才能安装。
 
-安装器要求 `sh`、`curl`、`tar`、`sha256sum`，以及 `mktemp`、`getconf` 等常规 Linux 工具。当前打包目标为 **使用 glibc 的 Linux x86_64**，需要图形桌面、Electron 所需共享库和可用的渲染后端。版本清单分别声明主包和 MuJoCo 伴随包的最低 glibc。CPU 可以执行物理仿真；相机渲染和较大三维场景仍需要相应图形能力与内存。Intel、AMD、NVIDIA 配置分别验收，本 Alpha 没有覆盖所有 GPU 或 Linux 发行版。本次发行范围不包括 macOS／Windows，也不承诺离线安装。
+安装器要求 `sh`、`curl`、`tar`、`sha256sum`，以及 `mktemp`、`getconf` 等常规 Linux 工具。当前打包目标为 **使用 glibc 的 Linux x86_64**，需要图形桌面、Electron 所需共享库和可用的渲染后端。版本清单分别声明主包和 MuJoCo 伴随包的最低 glibc。CPU 可以执行物理仿真；相机渲染和较大三维场景仍需要相应图形能力与内存。Intel、AMD、NVIDIA 配置分别验收，本 Alpha 没有覆盖所有 GPU 或 Linux 发行版。本次不提供原生 macOS／Windows 安装包；Windows 用户可按 WSL2 + WSLg 路线使用 Linux 包，当前未完成 WSLg 实机验收，也不承诺离线安装。
 
 安装器将不同版本保存在 `~/.local/share/lyapunov/versions/`，检查通过后才切换 `current` 链接，并保留旧版本及用户数据。如果 `~/.local/bin` 已在 PATH 中，可以用 `lyapunov` 启动；否则使用上面的用户启动器路径。下载大小和实际发布批次标识见[官网安装页](https://vorynel.com/lyapunov/)。
 
@@ -59,7 +71,7 @@ sh lyapunov-install.sh
 
 | 工作内容 | 工作台工具 |
 | --- | --- |
-| 创建场景 | 导入支持的 GLB／glTF、Gaussian Splat、MJCF、URDF；选择、变换、保存并重新打开场景实体。 |
+| 创建场景 | 导入GLB、支持的Gaussian表示与原生机器人文档，其他输入按下表走转换/预览；选择、变换、保存并重开Scene实体。 |
 | 编辑代码 | 浏览与编辑文件、搜索、查看 Git 变更，并在 Agent 旁使用终端。 |
 | 准备仿真 | 初始化前核对引擎、机器人控制、模型依赖、放置和碰撞几何。 |
 | 控制机器人 | 按当前能力执行关节、夹爪、车辆、升降、步态或 body-wrench 控制；停止执行并查看真实世界反馈。 |
@@ -81,6 +93,74 @@ sh lyapunov-install.sh
 自由导航时，选择第一人称漫游并点击 Viewer 画布：`W`／`A`／`S`／`D` 水平移动，`Q`／`E` 升降，`Shift` 加速，右键环顾。画布失焦后移动停止，`Esc` 返回环绕模式。这些键操作相机；机器人执行使用机器人控制面或显式 Agent 动作。
 
 各引擎的支持范围和已有证据见[能力总表](docs/CAPABILITY_MATRIX.md)与[相机说明](docs/SCENE_CAMERA_PIPELINE.md)。
+
+## 环境与物体建模
+
+### 环境方法
+
+- **几何与程序化脚本**：用Blender或参数化脚本建立尺寸明确的地面、墙、门洞与装配；保留可编辑源件和派生件。
+- **已有环境与Gaussian表示**：检查比例、轴、方向和依赖；Gaussian负责视觉，真实接触需要另行配准的物理几何。
+- **照片、多视角与图纸重建**：可选外部方法路线，依赖各自工具、数据与输出检查。本Alpha说明不签署外部服务连接或重建结果成功。
+- **编辑与物理派生**：编辑进入Scene版本，为static/environment派生碰撞并应用到当前world；有限表面厚度和预算会影响窄孔与通道。
+
+### 物体方法
+
+使用Blender控制几何、材质并导出GLB，使用参数化脚本建立可重复的几何，或复用源资产。服务辅助建模是可选方法，先确认实际连接、许可和结果；不将某个生成模型或供应商列为默认建模依赖，也不以接口存在代签成功。
+
+## 输入类型与处理入口
+
+按入口选择输入，而不是只看后缀。视觉登记、预览、转换、原生引擎导入和兼容策略执行分别确认。
+
+| 入口类别 | 输入 | 实际处理/边界 |
+| --- | --- | --- |
+| 直接场景可用 | .glb | scene_import登记mesh；完整外部buffer/texture闭包；视觉可见后另核碰撞/物理。 |
+| 需获取组装为GLB | .gltf / glTF+bin/textures | 本地UI走scene_asset_acquire(path)，读取.bin/图片组装asset.glb后import/mount；workspace亦可预览；不是parseAsset直导。 |
+| 直接机器人文档 | .xml / .mjcf | 必须是真实mujoco/robot根，解析include/mesh/texture闭包；导入后按实际引擎、关节、控制映射准备，不等于已运动。 |
+| 直接机器人文档 | .urdf | 登记URDF及依赖；视觉/引擎消费与控制兼容分别核查，未知mesh不伪装原生支持。 |
+| 直接场景泼溅入口 | .ply（高斯属性） | 按PLY头与f_dc_/scale_/rot_/opacity事实判断；视觉Gaussian splat不自动变碰撞。 |
+| 按内容预览/显式转换或派生 | .ply（普通网格/XYZ） | workspace按头分流；parseAsset把PLY登记为splat且记录gaussianProperties，不能宣称所有PLY通用点云直接可用；XYZ碰撞仅显式解码/派生路径。 |
+| 直接场景泼溅入口（解码有条件） | .spz / .splat / .sog / .rad / .ksplat | parseAsset登记splat；SPZ/SPLAT有内容校验，其他格式仍依对应解码器；物理几何需独立来源/绑定。 |
+| 需Blender转换 | .obj / .mtl/贴图 | scene source登记依赖与纹理事实；转换GLB后挂场景。workspace独立OBJ预览不等于Scene物理兼容。 |
+| 需Blender转换 | .fbx | 真实FBX头校验，保源文件/材质闭包，转换GLB；缺纹理如实报告。 |
+| 原工程+Blender转换 | .blend | 原件source入库，外部纹理/linked-library须Blender检查；可编辑/导出GLB，不默认闭包完整。 |
+| 原始source/转换；原生引擎有条件 | .usd / .usda / .usdc | parseAsset仅source；Blender可转换GLB预览/挂场景。Isaac原生USD路径另需对应SDK/SBL等实际依赖和组件，不把USD后缀当全引擎支持。 |
+| 文件预览/Blender转换 | .usdz | workspace支持USDZ预览，二进制ZIP由宿主转换；不在parseAsset直接Scene扩展集合。 |
+| 只文件预览/转换后再场景用 | .stl / .dae / .3mf / .vtk | workspace对象预览；STL还可作机器人文档mesh依赖，不能因此宣称所有上述独立文件Scene直导。 |
+| 需3ds Max导出后再用 | .max | 明确MAX_CONVERSION_REQUIRED；从3ds Max导出带材质FBX或GLB，不能改后缀。 |
+| 环境光照source | .hdr / .exr | 登记真实头/尺寸，应用到Viewer环境；不是机器人或普通碰撞体。 |
+| 参考图/附件，不直接3D资产 | PNG/JPEG等图片 | 作为照片/图纸参考交给模型或drawing_inspect；从图中推断尺寸与背面须区别已知事实。 |
+| 图纸检查/外部转换 | .dxf / .dwg / .pdf | DXF解析，DWG需显式转换器→DXF；矢量PDF读取路径/文本，扫描PDF导出图片；无比例尺不能称米制模型。 |
+| 策略取件后需准备/匹配 | .pt / .pth / .jit / .torchscript / .onnx / .safetensors / bundle.json | 本地loader仅按真实文件/bundle闭包和已登记来源/adapter处理。未知文件只格式预检(graphVerified:false)，匹配joint/order/obs/rate与引擎后再显式执行；不宣称任意权重可运行。 |
+| 工程打开/完整包导入导出 | scene.json / .scene-package.json / portable project directory | scene_open读scene.json；scene_package_import导入自包含测试项目；scene_save portable:true复制原件和闭包，保存完整快照，迁移完整目录；不声称任意ZIP都可作为工程打开。 |
+
+## 机器人来源、兼容与有界控制
+
+从 [Franka](https://github.com/frankarobotics/franka_ros)、[Unitree](https://github.com/unitreerobotics/unitree_ros)、[Universal Robots](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description)或 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)官方根开始，阅读选定模型许可，由客户端获取真实文件。来源根不代表其中每个型号都已兼容。
+
+在支持范围内优先使用原生MJCF/URDF，保留include、mesh、纹理与actuator闭包；匹配轴、单位、关节顺序/限位、执行器映射、dt/控制频率、观测语义和实际引擎。下载、PREPARED、MATCHED是准备事实；就绪后显式执行用户要求的有界动作，再检查状态与停止确认。
+
+多机器人可以共享同Scene/world，并提交有界batch动作。读取同world/generation下每个机器人的结果；共同时间或一个batch不证明任意异构协作或车队任务已完成。
+
+## 相机、标注与可编辑反馈
+
+**world固定相机**使用世界位姿；**body/parent挂载相机**使用局部安装位姿并跟随真实父体。显式“保存当前画面安装”保留当前相机安装，可“恢复安装基线”。“进入相机视角／进入并跟随相机视角”和“返回主视图”控制观察；保存Viewer视角不替代native calibration。
+
+MuJoCo与Isaac有命名相机list/adjust路线；传感器采集需真实渲染后端，Isaac RGB-D需要实际RTX。Newton当前相机接口不支持。RGB-D检查相机名、分辨率、K、worldFromCamera、米制深度、captureId及frame/Scene/world来源。相机看得到环境不证明碰撞几何配准完成。
+
+在实体/当前视图或已登记采集上添加标注，修改位置和文字，保存并重开检查。像素投到三维只用真实深度与标定。可将带标注观察作为参考交给Agent，明确的几何修改经原生Scene编辑与revision核对完成；标注编辑本身不自动改几何或物理。导出实际采集、标注和数据集及其引用。
+
+## 四个入门工作流
+
+下列内容是操作与验收方法，不代表最终包已逐项演示通过。自然语言请求需登录或在Guest显式配置自有provider；手动工作台功能仍可用。
+
+| 工作流 | 输入 | 完成前检查 |
+| --- | --- | --- |
+| MuJoCo地面与箱子 | 静态地面、动态箱子、就绪托管SDK | 实际engine/world/revision、有界步进与真实位姿/contact。 |
+| Panda关节/TCP | 原生模型及完整依赖 | 可控关节/限位/状态、停止确认与真实TCP；IK计划和执行分开。 |
+| 相机与标注采集 | 同步Scene、支持的相机及renderer | 同帧RGB-D/K/深度身份、保存后可编辑标注与真实导出引用。 |
+| 室内碰撞配准 | 室内视觉件及配准静态几何 | 墙正对照/空区负对照、voxel pitch/预算和场景净空。 |
+
+输入、操作顺序、自然语言例子和输出检查见[完整入门教程](docs/QUICKSTART.zh-CN.md)（[English](docs/QUICKSTART.md)）。
 
 ## 物理引擎与可选运行环境
 
@@ -114,6 +194,34 @@ SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 当前
 ```
 
 安装在桌面／沙盒检查处停止时，会打印实际版本路径和处理方式。已校验文件保留，该版本不会被激活。输出要求时才运行 `sudo /the/reported/version/path/lyapunov setup-sandbox`，然后重跑安装器。`CONTEXT_ONLY` 表示当前终端的安全上下文未能确认桌面就绪，应在图形桌面的普通终端复查。`PROVIDER_UNAVAILABLE` 会点名缺失或不兼容的 SDK；核对选定引擎和已保存的外部 Python 路径。日志位置与恢复步骤见[安装手册](https://vorynel.com/lyapunov/guide.html)。
+
+## 路线图与Windows评估路线
+
+原生macOS（Apple Silicon/x64）、微信小程序的已认证远程任务/相机/停止、Genesis、VR/XR输入与坐标、固定DSH伴随升级均为 **TODO**。见[路线图](docs/ROADMAP.md)；不是本Linux Alpha已实现或已验收的功能。
+
+Windows计划评估的是 **WSL2 + WSLg下的Linux包**，不是原生Windows exe。[微软GUI应用前置条件](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps)要求Windows 10 build 19044+或Windows 11、WSL2/WSLg与适用GPU驱动。在管理员PowerShell中：
+
+```powershell
+wsl --install
+wsl --update
+```
+
+完成发行版设置后，在Ubuntu/Linux终端使用：
+
+```sh
+curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+"$HOME/.local/bin/lyapunov"
+```
+
+安装和数据推荐放在Linux文件系统。本次未做Windows/WSLg与全GPU验收；按Linux包实际doctor和sandbox结果处理。
+
+## 基于上游生态的产品整合
+
+Lyapunov负责LLM/3D优先的产品工作台与场景、工具、仿真、观察流程整合。感谢 [DSH](https://github.com/deepseek-ai/deepseek-harness)与Cordis、[MuJoCo](https://github.com/google-deepmind/mujoco)、NVIDIA [Isaac Sim](https://developer.nvidia.com/isaac/sim)与[IsaacLab](https://github.com/isaac-sim/IsaacLab)、Three.js、Electron、Node.js、React、Blender，以及机器人厂商、官方模型库与贡献者。底层仿真、渲染和控制模型成果归各自作者与许可。
+
+## 一起完善Lyapunov
+
+欢迎在 [Discussions](https://github.com/ManfredCh/Lyapunov/discussions)讨论方向，在 [Issues](https://github.com/ManfredCh/Lyapunov/issues)报告可复现问题，通过 [Pull requests](https://github.com/ManfredCh/Lyapunov/pulls)贡献。附版本、最小操作和已去隐私的诊断/截图，不提交Key、会话或客户私有内容；具体流程见[贡献说明](CONTRIBUTING.md)。
 
 ## 从源码开发与贡献
 
