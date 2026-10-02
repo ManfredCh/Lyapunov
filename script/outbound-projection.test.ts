@@ -13,6 +13,7 @@ import type {SessionPage, SessionFollowFrame, SessionFollowRequest, SessionPageR
 import {createSessionOutboundProjection, type SessionOutboundProjection} from '../packages/lyapunov-contracts/src/session-event-projection.ts'
 
 const compiled = process.env.LYAPUNOV_OUTBOUND_COMPILED
+const isolatedTestTimeoutMs = 120_000
 if (!compiled) {
   test('build and execute candidate in an isolated source copy', () => {
     // 用**跑本文件的那个解释器**（`process.execPath`）起子文件，不按名字 spawn `'node'`：这里要的只是
@@ -26,11 +27,11 @@ if (!compiled) {
       ? ['test', join(import.meta.dir, 'upstream-patches.test.mjs')]
       : ['--test', join(import.meta.dir, 'upstream-patches.test.mjs')]
     const result = spawnSync(process.execPath, runnerArguments, {
-      cwd: resolve(import.meta.dir, '..'), encoding: 'utf8', timeout: 120_000,
+      cwd: resolve(import.meta.dir, '..'), encoding: 'utf8', timeout: isolatedTestTimeoutMs,
       env: {...process.env, BUN_BIN: process.execPath},
     })
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
-  })
+  }, isolatedTestTimeoutMs)
 } else {
   interface History {
     page(request: SessionPageRequest, signal: AbortSignal): Promise<SessionPage>

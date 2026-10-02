@@ -14,9 +14,10 @@ const root = resolve(import.meta.dirname, '..')
 const candidate = join(root, 'packages/lyapunov-shell/patches/dsh-session-outbound-projection.patch')
 const upstream = join(root, '.upstream/deepseek-harness-20260911-candidate')
 const native = 'packages/api/session-controller/src'
+const isolatedTestTimeoutMs = 120_000
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: 120_000, ...options})
+  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: isolatedTestTimeoutMs, ...options})
   assert.equal(result.status, 0, `${command} ${args.join(' ')}\n${result.error?.message ?? ''}\n${result.stdout}\n${result.stderr}`)
   return result.stdout
 }
@@ -111,7 +112,7 @@ test('PublicDiagnostics全26完整post保护，尾字节/缺件/改patch不能�
   }finally{rmSync(scratch,{recursive:true,force:true})}
 })
 
-test('实际registry在接受前拒固定base未覆本体与unknown新增source，标准ignored构建物按Git保留',()=>{
+test('实际registry在接受前拒固定base未覆本体与unknown新增source，标准ignored构建物按Git保留', {timeout: isolatedTestTimeoutMs}, ()=>{
   const scratch=mkdtempSync(join(root,'.tmp-sdk-integrity-'))
   try{
     run('git',['clone','--shared','--quiet',upstream,scratch]);run('git',['checkout','--quiet','--detach','7c3f05885033aa3aed74904d59a94692d12a47f7'],{cwd:scratch})
@@ -128,7 +129,7 @@ test('实际registry在接受前拒固定base未覆本体与unknown新增source�
 })
 
 // Registry ownership belongs to Lead; these tests neither require nor add an entry.
-test('candidate compiles and executes native outbound behavior in an isolated copy', () => {
+test('candidate compiles and executes native outbound behavior in an isolated copy', {timeout: isolatedTestTimeoutMs}, () => {
   const scratch = mkdtempSync(join(root, '.tmp-outbound-projection-'))
   try {
     const paths = run('git', ['apply', '--numstat', candidate]).trim().split('\n').map(line => line.split('\t')[2])

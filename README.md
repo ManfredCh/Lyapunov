@@ -1,5 +1,7 @@
 # Lyapunov
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Linux x64 Alpha** · **Lyapunov Modified MIT**
 
 | Publication metadata | Value |
@@ -27,9 +29,9 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-The default installation prepares **MuJoCo and its Python runtime**, verifies native physics, and creates a per-user launcher and desktop entry. Node.js, Electron, and the pinned DSH runtime are supplied with the application; MuJoCo has its own environment inside the installed version. User sessions and credentials use the product data directory across upgrades. You do not need a system Python, Conda, Bun, or a model key to install it.
+The default installation prepares **MuJoCo and its Python runtime**, verifies native physics, and creates a per-user launcher and desktop entry. Node.js, Electron, and the pinned DSH runtime are included in the main archive; the default installation downloads MuJoCo and Python into a dedicated environment inside that version. The default installer and packaged launcher do not depend on Node, DSH, or Python from PATH, or on a developer’s source checkout. User sessions and credentials use the product data directory across upgrades. You do not need a system Node.js, DSH, Python, pip, Conda, Bun, or a model key to install it.
 
-The packaged target is **Linux x86_64 with glibc**. A graphical desktop, Electron's shared libraries, and a working rendering backend are required. The release manifest specifies the minimum glibc version for both the application and MuJoCo companion. Physics can run on CPU; camera rendering and large 3D scenes need the corresponding graphics capabilities and memory. Intel, AMD, and NVIDIA configurations are checked individually; this Alpha does not claim coverage of every GPU or Linux distribution. macOS and Windows packages are outside this release.
+The installer requires `sh`, `curl`, `tar`, `sha256sum`, and standard Linux utilities such as `mktemp` and `getconf`. The packaged target is **Linux x86_64 with glibc**. A graphical desktop, Electron's shared libraries, and a working rendering backend are required. The release manifest specifies the minimum glibc version for both the application and MuJoCo companion. Physics can run on CPU; camera rendering and large 3D scenes need the corresponding graphics capabilities and memory. Intel, AMD, and NVIDIA configurations are checked individually; this Alpha does not claim coverage of every GPU or Linux distribution. macOS and Windows packages are outside this release. This Alpha does not promise offline installation.
 
 The installer keeps versions under `~/.local/share/lyapunov/versions/`, switches the `current` link only after its checks pass, and leaves older versions and user data in place. If `~/.local/bin` is on your `PATH`, you can launch with `lyapunov`; otherwise use the absolute command above. See the [installation page](https://vorynel.com/lyapunov/) for download sizes and published release identifiers.
 
@@ -48,7 +50,7 @@ sh lyapunov-install.sh
 
 1. Open Lyapunov. The welcome page lets you choose a language and theme.
 2. Choose **Sign in**, complete website authorization in your browser, and return to the same application window. The workspace opens after the account is verified. Signed-in model calls use **Peiri** and the account's central Credits.
-3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri or central Credits.
+3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to product servers, including the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri or central Credits.
 4. Create or open a project, then add assets from your files or the local resource library. Guest projects remain separate from signed-in projects; export a guest project and explicitly import it after sign-in when you want to move it.
 
 The account page and settings expose the actual connection, model, and engine state. Provider credentials belong to the provider you configure; the application does not supply credentials for external services.
@@ -69,6 +71,8 @@ Source discovery begins with official project and registry roots. Service-provid
 ## Robots and cameras
 
 Use the same preparation sequence across robot families: **prepare → initialize → ready → explicitly execute**. Select the robot and engine, inspect the available controls and dependencies, place the robot and environment, initialize physics, then run a bounded action and inspect the result. A model can be visible before its physics world is ready. Humanoids, quadrupeds, arms, vehicles, hands, and drones use different control mappings; importing G1 does not automatically stand it up or establish every whole-body behavior.
+
+Prepare the world while it is paused, then explicitly start an action. A pretrained policy requires preparation and matching to the robot before explicit execution. A geometric gait command is separate from getting up and does not establish stable walking.
 
 A visual asset and its collision geometry have separate roles. Add or prepare collision geometry appropriate to the scene before expecting physical contact. For a reconstructed room, use geometry aligned with the room rather than treating the entire room as a solid box. Check the actual world response after scene edits are applied.
 
@@ -122,7 +126,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/2026-10-linux-a08.md) describe the published feature scope. Account and deployment services are maintained separately from this client repository.
+See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/2026-10-linux-a08.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
 
 The top-level Lyapunov project uses the [Lyapunov Modified MIT License](LICENSE), copyright © 2026 Lyapunov contributors. This custom license retains the MIT permission terms. A commercial product or service using the software or a derivative work must prominently credit “Lyapunov” when it reaches 10,000 monthly active users or CNY 1,000,000 in monthly operating revenue (or currency equivalent). Without a UI, attribution belongs in its official documentation or website. These thresholds apply to that product or service; attribution does not require a license fee. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights, and external services retain their respective licenses.
 

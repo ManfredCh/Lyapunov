@@ -10,10 +10,10 @@
  * `bugfixHistory/RELEASE-UPGRADE-20260926.md`（真实 staging 读数 + 变异读数）。
  */
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, type PayloadTopLevelRow } from './payload-contract.ts'
+import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, workspacePayloadDestination, type PayloadTopLevelRow } from './payload-contract.ts'
 
 const root = join(import.meta.dirname, '..', '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
@@ -82,16 +82,40 @@ describe('载荷内符号链接落点判定', () => {
   test('包内链接：写成包内相对目标', () => {
     expect(payloadLinkTarget({ ...base, inside: 'lib/util.js' })).toBe('lib/util.js')
     expect(payloadLinkTarget({ destination: '/stage/pkg', dest: '/stage/pkg/a/b', source: '/src/pkg/a/b', inside: 'c' })).toBe('../c')
+    const fixture=mkdtempSync(join(tmpdir(),'lyapunov-sdk-payload-location-')),logical='.upstream/locked-sdk'
+    try{
+      for(const borrowed of [false,true]){
+        const productRoot=join(fixture,borrowed?'borrowed-product':'ordinary-product'),sdk=join(productRoot,logical)
+        mkdirSync(dirname(sdk),{recursive:true})
+        if(borrowed){const external=join(fixture,'readonly-source-sdk');mkdirSync(external);symlinkSync(external,sdk)}else mkdirSync(sdk)
+        const upstreamReal=realpathSync(sdk),map=(source:string)=>workspacePayloadDestination({root:productRoot,upstreamReal,upstreamDirectory:logical,source})
+        for(const path of ['packages/llm/llm-pi-ai','packages/client/ui-conversation']){
+          mkdirSync(join(sdk,path),{recursive:true})
+          expect(map(realpathSync(join(sdk,path)))).toBe(join(logical,path))
+        }
+        expect(map(join(productRoot,'packages/viewer'))).toBe('packages/viewer')
+        expect(map(join(upstreamReal,'node_modules/external'))).toBeNull()
+        expect(map(join(upstreamReal,'packages/llm/node_modules/external'))).toBeNull()
+        expect(map(join(productRoot,'node_modules/external'))).toBeNull()
+        expect(map(join(productRoot,'packages/viewer/node_modules/external'))).toBeNull()
+      }
+    }finally{rmSync(fixture,{recursive:true,force:true})}
   })
 
   test('负对照：自指链接（相对目标为空）⇒ 返回 null（跳过，不写自环、不 ENOENT）', () => {
     expect(payloadLinkTarget({ ...base, inside: '' })).toBeNull()
     expect(payloadLinkTarget({ ...base, inside: '.' })).toBeNull()
+    const input={root:'/product',upstreamReal:'/shared/sdk',upstreamDirectory:'.upstream/locked-sdk'}
+    expect(workspacePayloadDestination({...input,source:input.upstreamReal})).toBeNull()
+    expect(workspacePayloadDestination({...input,source:'/shared/sdk-neighbor/packages/client'})).toBeNull()
+    expect(workspacePayloadDestination({...input,source:'/other/project/packages/client'})).toBeNull()
   })
 
   test('负对照：越界链接 ⇒ fail-closed 抛错并点名源路径', () => {
     expect(() => payloadLinkTarget({ ...base, inside: '../outside' })).toThrow('未声明外部符号链接')
     expect(() => payloadLinkTarget({ ...base, inside: '/abs/outside' })).toThrow('未声明外部符号链接')
+    const input={root:'/product',upstreamReal:'/shared/sdk',source:'/shared/sdk/packages/client'}
+    for(const upstreamDirectory of ['../outside','/absolute','safe/../../outside'])expect(()=>workspacePayloadDestination({...input,upstreamDirectory})).toThrow('SDK逻辑载荷根不安全')
   })
 })
 
@@ -220,5 +244,9 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
     expect(check).toBeGreaterThan(packager.indexOf('const buildEntries=['))
     expect(check).toBeLessThan(packager.indexOf("join(stage,'RELEASE.json')"))
     expect(packager).toContain("if(productProblems.length)throw new Error(productProblems.join('；'))")
+    expect(packager).toContain('const upstreamReal=await realpath(upstream)')
+    expect(packager).toContain('workspacePayloadDestination({root,upstreamReal,upstreamDirectory:lock.directory,source})')
+    expect(packager).toContain("const destination=workspaceDestination(source)??join('.modules'")
+    expect(packager).not.toContain('workspace(source)?relative(root,source)')
   })
 })

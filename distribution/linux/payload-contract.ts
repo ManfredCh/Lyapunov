@@ -11,6 +11,19 @@
 import { lstatSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 
+/** canonical 来源与载荷逻辑位置分开：借用只读SDK symlink也保持锁定的 .upstream 布局。 */
+export function workspacePayloadDestination(input:{root:string;upstreamReal:string;upstreamDirectory:string;source:string}):string|null{
+  const safeRelative=(path:string)=>path!==''&&!isAbsolute(path)&&!path.split('/').some(part=>part==='..'||part===''||part==='.')
+  if(!safeRelative(input.upstreamDirectory))throw Error(`SDK逻辑载荷根不安全：${input.upstreamDirectory}`)
+  const upstreamInside=relative(input.upstreamReal,input.source),productInside=relative(input.root,input.source)
+  const child=(path:string)=>safeRelative(path)&&!path.split('/').includes('node_modules')
+  // SDK先按真实边界识别；即使它借用到本仓packages下面，目标仍由锁定逻辑根唯一决定。
+  const destination=child(upstreamInside)?join(input.upstreamDirectory,upstreamInside)
+    :productInside.startsWith('packages/')&&child(productInside)?productInside:null
+  if(destination!==null&&!safeRelative(destination))throw Error(`workspace载荷目标越界：${destination}`)
+  return destination
+}
+
 /** 产品在发行载荷里的唯一顶层可执行入口名。 */
 export const PRODUCT_ENTRY = 'lyapunov'
 

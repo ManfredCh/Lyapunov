@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process'
 import {parseArgs} from 'node:util'
 // 发行载荷结构契约（顶层单一可执行入口 + 随包 Provider 定义）：纯函数在 distribution/linux/payload-contract.ts，
 // 这里只做取数与 fail-closed；守卫/负对照见 distribution/linux/payload-contract.test.ts。
-import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
+import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,workspacePayloadDestination,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
 // micromamba 许可证的**取件顺序与身份校验**（env 覆盖 → 入库件 → 缓存 → 网络兜底）：
 // 纯逻辑在 distribution/licenses/mamba-license.ts，这里只注入有界取件器并 fail-closed。
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
@@ -107,6 +107,7 @@ if(provenanceAtStart.verdict==='DIRTY'&&!allowDirty)throw new Error(
 console.log(provenanceLine)
 const product=JSON.parse(await readFile(join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(join(root,'UPSTREAM_LOCK.json'),'utf8'))
 const upstream=resolve(root,lock.directory)
+const upstreamReal=await realpath(upstream)
 async function fileSha256(path:string){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex')}
 if(Boolean(values['mujoco-runtime-archive'])!==Boolean(values['mujoco-runtime-manifest']))throw Error('MuJoCo runtime archive 与 manifest 必须同时指定')
 const runtimeInput=values['mujoco-runtime-manifest']?checkedRuntimeManifest(JSON.parse(await readFile(resolve(values['mujoco-runtime-manifest']),'utf8'))):null
@@ -140,7 +141,8 @@ const skippedSelfLinksInClosure:string[]=[]
 type Manifest={name:string;version?:string;license?:unknown;dependencies?:Record<string,string>;optionalDependencies?:Record<string,string>;peerDependencies?:Record<string,string>;peerDependenciesMeta?:Record<string,{optional?:boolean}>;bin?:string|Record<string,string>}
 type PackageNode={source:string;destination:string;manifest:Manifest;dependencies:Map<string,PackageNode>}
 const ignored=new Set(PAYLOAD_SKIPPED_NAMES)
-function workspace(source:string){const rel=relative(root,source),upstreamRel=relative(upstream,source);return rel.startsWith('packages/')||upstreamRel!==''&&upstreamRel!=='..'&&!upstreamRel.startsWith('../')&&!isAbsolute(upstreamRel)&&!upstreamRel.includes('/node_modules/')}
+const workspaceDestination=(source:string)=>workspacePayloadDestination({root,upstreamReal,upstreamDirectory:lock.directory,source})
+function workspace(source:string){return workspaceDestination(source)!==null}
 async function locate(name:string,from:string){
   let dir=from
   for(;;){const found=join(dir,'node_modules',name);if(existsSync(join(found,'package.json')))return realpath(found);const parent=dirname(dir);if(parent===dir)break;dir=parent}
@@ -166,7 +168,7 @@ async function collect(source:string):Promise<PackageNode|null>{
   source=await realpath(source);const prior=nodes.get(source);if(prior)return prior
   const manifest:Manifest=await manifestOf(source)
   // 保留标准 node_modules/<包名> 布局，原生依赖（如 sharp/libvips）的 RPATH 据此定位兄弟包。
-  const destination=workspace(source)?relative(root,source):join('.modules',`${manifest.name.replaceAll('/','+')}@${manifest.version??'0'}-${nodes.size}`,'node_modules',manifest.name)
+  const destination=workspaceDestination(source)??join('.modules',`${manifest.name.replaceAll('/','+')}@${manifest.version??'0'}-${nodes.size}`,'node_modules',manifest.name)
   const node={source,destination,manifest,dependencies:new Map<string,PackageNode>()};nodes.set(source,node)
   const dependencies={...manifest.peerDependencies,...manifest.dependencies,...manifest.optionalDependencies}
   for(const name of Object.keys(dependencies).sort()){
