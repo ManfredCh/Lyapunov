@@ -1,0 +1,4 @@
+<mujoco model="arm">
+  <asset><mesh name="arm_link" file="arm.stl"/></asset>
+  <worldbody><body name="arm"><geom name="arm_geom" type="mesh" mesh="arm_link"/></body></worldbody>
+</mujoco>

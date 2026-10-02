@@ -1,0 +1,25 @@
+<mujoco model="isaac-torque-inherited-bias-rig">
+  <!-- 官方力矩资产（h1/BHL 同形）的语义陷阱夹具：<motor> 继承类默认 <position kp="50" dampratio="1"/>，
+       编译后 biastype=NONE、gainprm=[1,0,0]、biasprm=[0,-50,1]——biasprm 存在但被 MuJoCo 整体忽略
+       （实测同 ctrl=0、偏角 0.3 rad 出力 0 N·m，而同一偏置的 position 执行器出力 -15 N·m）。
+       适配器必须按 biastype 判定它是 torque；drive 刚度/阻尼只能来自 controller.jointKp/jointKd，
+       不能从失效的 biasprm 里读出 kp=50（那会凭空造出一台源模型里不存在的位置伺服）。 -->
+  <compiler angle="radian" autolimits="true"/>
+  <default>
+    <geom friction="1 .005 .0001"/>
+    <default class="positional"><position kp="50" dampratio="1"/></default>
+  </default>
+  <worldbody>
+    <geom name="floor" type="box" size="2 2 0.05" pos="0 0 -0.05"/>
+    <body name="base" pos="0 0 0.6">
+      <geom name="base_box" type="box" size="0.04 0.04 0.04" mass="0.1"/>
+      <body name="upper" pos="0 0 -0.05">
+        <joint name="spare" type="hinge" axis="0 1 0" damping="0" range="-1.5 1.5"/>
+        <geom name="upper_link" type="box" size="0.03 0.03 0.1" pos="0 0 -0.1" mass="0.8"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="spare_motor" joint="spare" class="positional" forcerange="-20 20"/>
+  </actuator>
+</mujoco>

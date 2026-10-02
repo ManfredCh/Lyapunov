@@ -1,0 +1,236 @@
+diff --git a/packages/llm/llm-pi-ai/src/config.ts b/packages/llm/llm-pi-ai/src/config.ts
+index 2f9e563..a813134 100644
+--- a/packages/llm/llm-pi-ai/src/config.ts
++++ b/packages/llm/llm-pi-ai/src/config.ts
+@@ -101,6 +101,8 @@ export interface PiAiProviderProfile {
+   api?: string
+   /** Endpoint for this route's models; defaults to the installed catalog's endpoint. */
+   baseURL?: string
++  /** Product-owned endpoint that may not be changed when resolving stored credentials. */
++  managedBaseURL?: string
+   /**
+    * This route's model catalog. Omission serves the installed catalog for the
+    * route unchanged; an explicit list replaces it, each entry defaulting its
+@@ -324,6 +326,7 @@ const profile = z.object({
+   displayName: z.string(),
+   api: z.union(supportedProtocols()),
+   baseURL: z.string(),
++  managedBaseURL: z.string(),
+   models: z.array(modelProfile),
+   modelOverrides: z.dict(modelOverride),
+   compat: compatProfile,
+diff --git a/packages/llm/llm-pi-ai/src/discovery.ts b/packages/llm/llm-pi-ai/src/discovery.ts
+index 09be7b6..76a8399 100644
+--- a/packages/llm/llm-pi-ai/src/discovery.ts
++++ b/packages/llm/llm-pi-ai/src/discovery.ts
+@@ -26,6 +26,7 @@ import { INVALID_CREDENTIAL_CODE, LlmError, normalizeApiKey } from '@deepseek-ai
+ import type { LlmDiscoveredModel, LlmModelDiscoveryOperation } from '@deepseek-ai/dsh-llm'
+ import { attributionHeaders } from '@deepseek-ai/dsh-llm'
+ import { catalogModels } from './catalog.ts'
++import { assertManagedDiscoveryEndpoint, sameManagedEndpoint } from './managed-discovery.ts'
+ 
+ /**
+  * Protocols whose model listing this module can read. OpenAI protocols use
+@@ -250,9 +251,13 @@ function usableProbeKey(raw: string): string {
+ 
+ /** Host-owned profile inputs that a configuration draft deliberately omits. */
+ export interface StoredModelDiscoveryProfile {
++  /** Host-composed endpoint for the named route, used as the credential origin. */
++  readonly configuredBaseURL: string | undefined
+   /** Deployment headers configured on the named route. */
+   readonly headers: Readonly<Record<string, string>> | undefined
+-  /** Resolve the named route's credential only when the draft carries none. */
++  /** Endpoint fixed by the deployment for a managed route. */
++  readonly managedBaseURL: string | undefined
++  /** Resolve the named route's credential only for its configured endpoint. */
+   readonly resolveApiKey: () => Promise<string | undefined>
+ }
+ 
+@@ -297,6 +302,14 @@ export async function discoverModels(
+   // when the endpoint speaks something else (an Anthropic gateway answers 401,
+   // which reads as a credential problem), and hand-entry remains the way out.
+   const api = request.api ?? 'openai-completions'
++  const stored = storedProfile?.()
++  if (stored?.managedBaseURL !== undefined) {
++    assertManagedDiscoveryEndpoint(request.provider ?? '', stored.managedBaseURL, request.baseURL)
++  }
++  // A draft endpoint is untrusted input even when the route itself is not
++  // managed. Only bind deployment-owned headers and credentials to the exact
++  // configured endpoint; a changed origin gets a clean request instead.
++  const endpointMatchesStored = sameManagedEndpoint(stored?.configuredBaseURL, request.baseURL)
+   if (!LISTABLE_PROTOCOLS.has(api)) {
+     throw new LlmError(
+       `pi-ai protocol "${api}" has no model listing this build can read; enter this provider's models by hand`,
+@@ -309,12 +322,14 @@ export async function discoverModels(
+   // and its credential resolver remains lazy so a typed key cannot fail over a
+   // stored credential it supersedes. A route may still authenticate through a
+   // deployment-owned Authorization header when neither key exists.
+-  const stored = storedProfile?.()
+-  const supplied = request.apiKey ?? await stored?.resolveApiKey()
++  const supplied = request.apiKey
++    ?? (endpointMatchesStored ? await stored?.resolveApiKey() : undefined)
+   const apiKey = supplied === undefined ? undefined : usableProbeKey(supplied)
+   let response: Response
+   try {
+-    const headers = new Headers(stored?.headers === undefined ? undefined : Object.entries(stored.headers))
++    const headers = new Headers(
++      endpointMatchesStored && stored?.headers !== undefined ? Object.entries(stored.headers) : undefined,
++    )
+     headers.set('accept', 'application/json')
+     if (api === 'anthropic-messages') {
+       headers.set('anthropic-version', ANTHROPIC_VERSION)
+@@ -326,6 +341,7 @@ export async function discoverModels(
+     response = await fetch(url, {
+       method: 'GET',
+       headers,
++      redirect: 'manual',
+       ...request.signal === undefined ? {} : { signal: request.signal },
+     })
+   } catch (error: unknown) {
+@@ -334,6 +350,9 @@ export async function discoverModels(
+     }
+     throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
+   }
++  if (response.status >= 300 && response.status < 400) {
++    throw new LlmError(`${url} returned a redirect; model discovery will not follow it`, 'DISCOVERY_FAILED')
++  }
+   if (!response.ok) {
+     throw new LlmError(
+       `${url} answered ${response.status}${response.status === 401 || response.status === 403 ? '; check the API key' : ''}`,
+diff --git a/packages/llm/llm-pi-ai/src/index.ts b/packages/llm/llm-pi-ai/src/index.ts
+index dfa2a81..4732913 100644
+--- a/packages/llm/llm-pi-ai/src/index.ts
++++ b/packages/llm/llm-pi-ai/src/index.ts
+@@ -66,6 +66,7 @@ import { PiAiAdapter } from './adapter.ts'
+ import { authContextFrom, credentialStoreFrom } from './auth.ts'
+ import { catalogProviderIds } from './catalog.ts'
+ import { assertServiceable, Config, resolveProfiles } from './config.ts'
++import { assertManagedProfileAuthority } from './managed-discovery.ts'
+ import type { ResolvedPiAiProviderProfile } from './config.ts'
+ import { discoverModels } from './discovery.ts'
+ import type { StoredModelDiscoveryProfile } from './discovery.ts'
+@@ -143,6 +144,7 @@ function directoryEntries(
+ 
+ /** Register one generic pi-ai adapter for all configured provider routes. */
+ export function apply(ctx: Context, config: Config): void {
++  assertManagedProfileAuthority(config.providers, config.providers)
+   let current: () => Config = () => config
+   let lastRaw: Config | undefined
+   let memoized: ReadonlyMap<string, ResolvedPiAiProviderProfile> | undefined
+@@ -246,8 +248,12 @@ export function apply(ctx: Context, config: Config): void {
+     if (provider === undefined) return undefined
+     const profile = profiles().get(provider)
+     if (profile === undefined) return undefined
++    // A settings edit must not move a composition credential's destination.
++    const composed = Object.hasOwn(config.providers ?? {}, provider) ? config.providers?.[provider] : undefined
+     return {
+       headers: profile.headers,
++      configuredBaseURL: composed === undefined ? profile.baseURL : composed.baseURL,
++      managedBaseURL: composed?.managedBaseURL,
+       resolveApiKey: () => resolveApiKey(provider, profile),
+     }
+   }
+@@ -302,6 +308,8 @@ export function apply(ctx: Context, config: Config): void {
+         } else {
+           assertServiceable(value, current())
+         }
++        // Only the host composition can establish or retarget managed routes.
++        assertManagedProfileAuthority(value.providers, config.providers)
+       },
+       setSource: (source) => {
+         current = source
+diff --git a/packages/llm/llm-pi-ai/src/managed-discovery.ts b/packages/llm/llm-pi-ai/src/managed-discovery.ts
+new file mode 100644
+index 0000000..1689a65
+--- /dev/null
++++ b/packages/llm/llm-pi-ai/src/managed-discovery.ts
+@@ -0,0 +1,89 @@
++/** Managed route discovery policy shared by product-owned provider profiles. */
++
++/**
++ * Return a normalized endpoint for exact route comparisons.
++ * @param value - configured endpoint URL.
++ * @returns URL without trailing slash.
++ */
++export function normalizeManagedEndpoint(value: string): string {
++  const url = new URL(value)
++  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
++    throw new Error('managed provider endpoint must be HTTP(S) without credentials, query parameters, or fragments')
++  }
++  url.pathname = url.pathname.replace(/\/+$/, '') || '/'
++  return url.toString().replace(/\/$/, '')
++}
++
++/**
++ * Reject a draft endpoint that would reuse a managed route credential elsewhere.
++ * @param provider - configured route id.
++ * @param configuredEndpoint - endpoint allowed for the route.
++ * @param draftEndpoint - endpoint supplied by the current discovery draft.
++ * @throws Error when the draft endpoint is not the managed endpoint.
++ */
++export function assertManagedDiscoveryEndpoint(
++  provider: string,
++  configuredEndpoint: string,
++  draftEndpoint: string | undefined,
++): void {
++  if (draftEndpoint === undefined) return
++  let configured: string
++  let draft: string
++  try {
++    configured = normalizeManagedEndpoint(configuredEndpoint)
++    draft = normalizeManagedEndpoint(draftEndpoint)
++  } catch (error: unknown) {
++    throw new Error(
++      `llm-pi-ai: managed provider route "${provider}" requires its configured endpoint for model discovery`,
++      { cause: error },
++    )
++  }
++  if (configured !== draft) {
++    throw new Error(
++      `llm-pi-ai: managed provider route "${provider}" cannot discover models at a different endpoint`,
++    )
++  }
++}
++
++/**
++ * Bind stored credentials to an exact configured endpoint, not just its origin.
++ * @param configuredEndpoint - endpoint captured by the host profile.
++ * @param draftEndpoint - endpoint supplied by the configuration draft.
++ * @returns false for missing, malformed, or different endpoints.
++ */
++export function sameManagedEndpoint(configuredEndpoint: string | undefined, draftEndpoint: string): boolean {
++  if (configuredEndpoint === undefined) return false
++  try {
++    return normalizeManagedEndpoint(configuredEndpoint) === normalizeManagedEndpoint(draftEndpoint)
++  } catch (_error: unknown) {
++    // An invalid endpoint must not authorize credential resolution.
++    return false
++  }
++}
++
++/**
++ * Keep managed routes and their effective endpoint bound to host composition.
++ * @param providers - resolved profiles from native settings.
++ * @param authority - composition profiles, never a caller's settings payload.
++ * @throws Error when a settings layer creates, removes, or retargets a managed route.
++ */
++export function assertManagedProfileAuthority(
++  providers: Readonly<Record<string, { baseURL?: string; managedBaseURL?: string }>> | undefined,
++  authority: Readonly<Record<string, { baseURL?: string; managedBaseURL?: string }>> | undefined,
++): void {
++  const routes = new Set([...Object.keys(providers ?? {}), ...Object.keys(authority ?? {})])
++  for (const provider of routes) {
++    const profile = Object.hasOwn(providers ?? {}, provider) ? providers?.[provider] : undefined
++    const owned = Object.hasOwn(authority ?? {}, provider) ? authority?.[provider]?.managedBaseURL : undefined
++    if (owned === undefined) {
++      if (profile?.managedBaseURL !== undefined) {
++        throw new Error(`llm-pi-ai: provider route "${provider}" cannot mark itself as managed from settings`)
++      }
++      continue
++    }
++    if (!sameManagedEndpoint(owned, profile?.managedBaseURL ?? '')
++      || !sameManagedEndpoint(owned, profile?.baseURL ?? '')) {
++      throw new Error(`llm-pi-ai: managed provider route "${provider}" requires its composition endpoint`)
++    }
++  }
++}

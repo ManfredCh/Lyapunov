@@ -1,0 +1,58 @@
+diff --git a/packages/api/session-controller/src/client/sessions/service.ts b/packages/api/session-controller/src/client/sessions/service.ts
+--- a/packages/api/session-controller/src/client/sessions/service.ts
++++ b/packages/api/session-controller/src/client/sessions/service.ts
+@@ -178,6 +178,45 @@
+   session: Session
+ }
+ 
++/** Per-window scope cell naming this browser window inside its own storage. */
++const WINDOW_SCOPE_KEY = 'dsh.sessions.window'
++/** Selection key prefix; the window scope id is appended so windows never share one entry. */
++const SELECTION_KEY_PREFIX = 'dsh.sessions.current'
++
++/**
++ * Persist the current-Session selection under a key scoped to this browser
++ * window: two windows of one browser profile hold their own selection instead
++ * of overwriting each other's, and a reload restores the window's own
++ * selection. Without per-window storage the shared key is kept, so hosts with
++ * a single storage area behave as before.
++ * @returns the selection store's persistence options.
++ */
++function windowSelectionPersistence(): { persist: { name: string } } {
++  const windowId = windowScopeId()
++  return windowId === undefined
++    ? { persist: { name: SELECTION_KEY_PREFIX } }
++    : { persist: { name: `${SELECTION_KEY_PREFIX}:${windowId}` } }
++}
++
++/** @returns this browser window's scope id, minted on first use and kept in per-window storage. */
++function windowScopeId(): string | undefined {
++  try {
++    const stored = sessionStorage.getItem(WINDOW_SCOPE_KEY)
++    if (stored !== null) return stored
++    const created = newWindowScopeId()
++    sessionStorage.setItem(WINDOW_SCOPE_KEY, created)
++    return created
++  } catch {
++    // Disabled or unavailable per-window storage: fall back to the shared key.
++    return undefined
++  }
++}
++
++function newWindowScopeId(): string {
++  return globalThis.crypto?.randomUUID?.()
++    ?? `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
++}
++
+ /** Root sessions service: list store, current selection, object-layer manager, scope tree, bindings, and breadcrumb routes. */
+ export class ClientSessions implements ISessions {
+   /**
+@@ -224,7 +263,7 @@
+   ) {
+     this.selection = createSnapshotStore<SessionSelection>(
+       {},
+-      { persist: { name: 'dsh.sessions.current' } })
++      windowSelectionPersistence())
+     const restored = this.selection.getSnapshot()
+     this.manager = new SessionManager(
+       remote,

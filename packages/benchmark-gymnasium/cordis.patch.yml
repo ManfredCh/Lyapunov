@@ -1,0 +1,3 @@
+patch:
+  - id: lyapunov-benchmark-gymnasium
+    name: '@lyapunov/benchmark-gymnasium'

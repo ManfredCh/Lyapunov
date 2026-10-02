@@ -1,0 +1,116 @@
+diff --git a/packages/api/session-controller/README.i18n.yaml b/packages/api/session-controller/README.i18n.yaml
+index 7e100db07..ad5556380 100644
+--- a/packages/api/session-controller/README.i18n.yaml
++++ b/packages/api/session-controller/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/api/session-controller/README.md
+-README.md: 24cfbba626ddec510452e3b6c8bc4333c03876bd
+-README.zh.md: c90357c60eab9427f5656b48c4ea99252d87e2bf
++README.md: ae9c81dfbc097592a7e116c058f9904fd69690c2
++README.zh.md: 5c0734f9e958689489865a01746c134f50b780db
+diff --git a/packages/api/session-controller/README.md b/packages/api/session-controller/README.md
+index 24cfbba62..ae9c81dfb 100644
+--- a/packages/api/session-controller/README.md
++++ b/packages/api/session-controller/README.md
+@@ -10,6 +10,8 @@ English | [中文](README.zh.md)
+ 
+ `@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, workspace-path opening, user-invocable skill discovery, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.
+ 
++Prompt cancellation is honored through asynchronous Agent resolution, image-admission serialization, model validation, and attachment preparation until the native inbox accepts the message. Cancellation after admission does not remove the accepted message or its durable facts.
++
+ ## Table of Contents
+ 
+ - [Use this package](#use-this-package)
+diff --git a/packages/api/session-controller/README.zh.md b/packages/api/session-controller/README.zh.md
+index c90357c60..5c0734f9e 100644
+--- a/packages/api/session-controller/README.zh.md
++++ b/packages/api/session-controller/README.zh.md
+@@ -10,6 +10,8 @@ kind: "package-reference"
+ 
+ `@deepseek-ai/dsh-api-session-controller` 拥有 Host 的 `ctx.sessionController` 服务，以及生成的 Client `session`、`skills` 和 `fileReferences` Remote namespace。它提供 Session 生命周期与历史、Host generation 模型目录、工作区路径打开、用户可调用 skill 发现和面向 Agent 的文件引用。当 Client 需要按 Session 寻址的操作时，请通过 API Gateway 使用它。
+ 
++prompt 的取消信号持续作用于异步 Agent 解析、图片准入串行队列、模型校验和附件准备，直到消息进入原生 inbox。准入完成后的取消不删除已接纳消息或其持久事实。
++
+ ## 目录
+ 
+ - [使用本包](#use-this-package)
+diff --git a/packages/api/session-controller/src/commands.ts b/packages/api/session-controller/src/commands.ts
+index 35fc11340..92f72716f 100644
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -297,9 +297,11 @@ export class SessionCommandController {
+   /**
+    * Reject empty content, then admit one prompt after Agent and attachment validation.
+    * @param request - Session identity, prompt content, source metadata, and delivery mode.
++   * @param signal - optional caller cancellation checked through asynchronous preparation, before inbox admission.
+    * @returns acknowledgement that the Agent accepted the prompt.
+    */
+-  async prompt(request: SessionPromptRequest): Promise<SessionPromptValue> {
++  async prompt(request: SessionPromptRequest, signal?: AbortSignal): Promise<SessionPromptValue> {
++    signal?.throwIfAborted()
+     if (!hasPromptContent(request.content)) {
+       throw new RemoteError(
+         'gateway/bad-request',
+@@ -318,6 +320,7 @@ export class SessionCommandController {
+       )
+     }
+     const agent = await this.resolveAgent(request.sessionId)
++    signal?.throwIfAborted()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     const selection = this.agents.selectionFor(agent).current
+     if (!routeServed(this.ctx, selection.provider)) {
+@@ -335,9 +338,11 @@ export class SessionCommandController {
+     const hasImage = request.content.some(part => part.type === 'image')
+     const admit = async (): Promise<SessionPromptValue> => {
+       try {
++        signal?.throwIfAborted()
+         if (hasImage) {
+           const current = this.agents.selectionFor(agent).current
+           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
++          signal?.throwIfAborted()
+           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+             throw new RemoteError(
+               'session/attachment-invalid',
+@@ -351,6 +356,7 @@ export class SessionCommandController {
+           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+         )
+         const content = await this.ctx.attachments.admitPromptContent(admission.content)
++        signal?.throwIfAborted()
+         const message: UserMessage = createUserMessage({ content, source })
+         if (this.ctx.agents.get(agent.id) !== agent) {
+           throw new RemoteError(
+@@ -360,10 +366,12 @@ export class SessionCommandController {
+           )
+         }
+         using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
++        signal?.throwIfAborted()
+         if (request.mode === 'steer') agent.steer(message)
+         else agent.followup(message)
+         binding.commit()
+       } catch (error) {
++        signal?.throwIfAborted()
+         if (remoteErrorOf(error) !== undefined) throw error
+         if (error instanceof AttachmentError) {
+           throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
+diff --git a/packages/api/session-controller/src/index.ts b/packages/api/session-controller/src/index.ts
+index b5e92ec6e..3197be7b3 100644
+--- a/packages/api/session-controller/src/index.ts
++++ b/packages/api/session-controller/src/index.ts
+@@ -339,13 +339,13 @@ export class SessionController extends TypertRemoteService {
+   /**
+    * Admit one prompt after explicitly resuming its Session.
+    * @param request - Session identity, prompt content, source metadata, and delivery mode.
+-   * @param signal - caller cancellation before prompt admission begins.
++   * @param signal - caller cancellation until the prompt enters the native inbox.
+    * @returns acknowledgement that the Agent accepted the prompt.
+    */
+   @Remote('prompt')
+   prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue> {
+     signal.throwIfAborted()
+-    return this.commands.prompt(request)
++    return this.commands.prompt(request, signal)
+   }
+ 
+   /**

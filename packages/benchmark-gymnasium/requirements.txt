@@ -1,0 +1,2 @@
+# Optional isolated benchmark environment; never install into the product env.
+gymnasium[mujoco]==1.2.0

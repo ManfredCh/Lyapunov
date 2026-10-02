@@ -1,0 +1,244 @@
+--- a/packages/interaction/commands/src/index.ts
++++ b/packages/interaction/commands/src/index.ts
+@@ -17,15 +17,18 @@
+ import { CommandId } from './brand.ts'
+ import type { CommandDefinitionId } from './brand.ts'
+ import type {
++  CommandDisplayMetadata,
+   CommandDescriptor,
+   CommandExecution,
+   CommandInputDescriptor,
+   CommandResult,
+   CommandSubmitAttachment,
+ } from './types.ts'
++import { commandDisplay } from './types.ts'
+
+ export { CommandDefinitionId, CommandId } from './brand.ts'
+ export type * from './types.ts'
++export { commandDisplay, commandDisplayKey } from './types.ts'
+
+ export const name = 'commands'
+
+@@ -358,11 +361,16 @@
+    *   `undefined` when syntax or name does not resolve.
+    */
+   @Remote
+-  async execute(
++  execute(agent:Agent,line:string,attachments:readonly CommandSubmitAttachment[],signal:AbortSignal):Promise<CommandExecution|undefined>{return this.executeWithDisplay(agent,line,attachments,signal)}
++  /** Optional presentation metadata uses its own entry; legacy execute stays unchanged. */
++  @Remote
++  executeDisplayed(agent:Agent,line:string,attachments:readonly CommandSubmitAttachment[],display:CommandDisplayMetadata,signal:AbortSignal):Promise<CommandExecution|undefined>{return this.executeWithDisplay(agent,line,attachments,signal,display)}
++  private async executeWithDisplay(
+     agent: Agent,
+     line: string,
+     submittedAttachments: readonly CommandSubmitAttachment[],
+     signal: AbortSignal,
++    display?: CommandDisplayMetadata,
+   ): Promise<CommandExecution | undefined> {
+     const parsed = parseCommand(line)
+     if (parsed === undefined) return undefined
+@@ -370,15 +378,18 @@
+     if (command === undefined) return undefined
+     if (signal.aborted) throw abortError(signal)
+     const commandId = this.mintCommandId()
++    const presentation=commandDisplay(display)
+     this.appendLifecycle(agent.session, 'command/run', {
+       commandId,
+       name: parsed.name,
+       ...command.definition.recordInput === false ? {} : { args: parsed.rawInput },
+       source: { kind: 'user' },
++      ...presentation?{display:presentation}:{},
+     })
+     const settle = (result: CommandResult): CommandExecution => {
+       this.appendLifecycle(agent.session, 'command/done', {
+         commandId, kind: result.kind,
++        ...presentation?{display:presentation}:{},
+         ...result.text === undefined ? {} : { text: result.text },
+         ...result.kind === 'success' && result.sourceEventSeq !== undefined
+           ? { sourceEventSeq: result.sourceEventSeq }
+@@ -405,7 +416,7 @@
+         if (error instanceof AttachmentError) {
+           return settle({ kind: 'error', text: error.message })
+         }
+-        this.settleThrown(agent.session, parsed.name, commandId, error)
++        this.settleThrown(agent.session, parsed.name, commandId, error, presentation)
+         throw error
+       }
+       // Cancellation must be honored BEFORE the handler runs: admission may
+@@ -414,7 +425,7 @@
+       // image objects stay unreferenced and are deferred-GC territory.)
+       const cancelledDuringAdmission = cancellationOf(signal)
+       if (cancelledDuringAdmission !== undefined) {
+-        this.settleThrown(agent.session, parsed.name, commandId, cancelledDuringAdmission)
++        this.settleThrown(agent.session, parsed.name, commandId, cancelledDuringAdmission, presentation)
+         throw cancelledDuringAdmission
+       }
+     }
+@@ -424,17 +435,18 @@
+       const output = command.definition.handler(invocation)
+       result = normalizeResult(parsed.name, await withAbort(Promise.resolve(output), signal))
+     } catch (error: unknown) {
+-      this.settleThrown(agent.session, parsed.name, commandId, error)
++      this.settleThrown(agent.session, parsed.name, commandId, error, presentation)
+       throw error
+     }
+     return settle(result)
+   }
+
+   /** Contained `command/done` error append for a thrown handler or admission failure. */
+-  private settleThrown(session: Session, command: string, commandId: CommandId, error: unknown): void {
++  private settleThrown(session: Session, command: string, commandId: CommandId, error: unknown, display?:CommandDisplayMetadata): void {
+     try {
+       this.appendLifecycle(session, 'command/done', {
+         commandId, kind: 'error',
++        ...display?{display}:{},
+         text: error instanceof Error ? error.message : renderThrown(error),
+       })
+     } catch (appendError: unknown) {
+--- a/packages/interaction/commands/src/types.ts
++++ b/packages/interaction/commands/src/types.ts
+@@ -10,6 +10,28 @@
+ import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
+ import type { CommandDefinitionId, CommandId } from './brand.ts'
+ import type { EncodedImageAttachment } from '@deepseek-ai/dsh-attachment/types'
++
++/** Optional presentation correlation only; it grants no execution or model authority. */
++export interface CommandDisplayMetadata {
++  kind: 'control-gesture'
++  clientId: string
++  gestureId: string
++  worldId: string
++  generation: number
++  entityId: string
++  jointName: string
++  phase: 'update' | 'final' | 'stop'
++  sequence: number
++}
++export function commandDisplay(value: unknown): CommandDisplayMetadata | undefined {
++  if(value===undefined)return
++  const v=value as CommandDisplayMetadata
++  if(!v||v.kind!=='control-gesture'||!['update','final','stop'].includes(v.phase)||!Number.isSafeInteger(v.generation)||v.generation<0||!Number.isSafeInteger(v.sequence)||v.sequence<0||[v.clientId,v.gestureId,v.worldId,v.entityId,v.jointName].some(s=>typeof s!=='string'||!s||s.length>256||/[\u0000-\u001f]/u.test(s)))throw Error('INVALID_COMMAND_DISPLAY')
++  return Object.freeze({kind:v.kind,clientId:v.clientId,gestureId:v.gestureId,worldId:v.worldId,generation:v.generation,entityId:v.entityId,jointName:v.jointName,phase:v.phase,sequence:v.sequence})
++}
++export function commandDisplayKey(value: CommandDisplayMetadata): string {
++  return JSON.stringify([value.clientId,value.gestureId,value.worldId,value.generation,value.entityId,value.jointName])
++}
+
+ /** One browser-submitted command attachment: encoded image input or a staged file receipt. */
+ export type CommandSubmitAttachment =
+@@ -102,7 +124,7 @@
+      * a line. `args` is absent when the definition sets `recordInput: false`
+      * because an authoritative domain event owns the input payload.
+      */
+-    'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource }
++    'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource; display?: CommandDisplayMetadata }
+     /**
+      * The paired command settled. `kind`/`text` carry the handler's verbatim
+      * outcome (a thrown/aborted handler settles as `kind: 'error'` with the
+@@ -114,6 +136,7 @@
+       kind: 'success' | 'error'
+       text?: string
+       sourceEventSeq?: import('@deepseek-ai/dsh-session/types').SessionSeq
++      display?: CommandDisplayMetadata
+     }
+   }
+ }
+--- a/packages/client/ui-conversation/src/client/contract/records.ts
++++ b/packages/client/ui-conversation/src/client/contract/records.ts
+@@ -3,6 +3,7 @@
+ // live readers rather than time-point views.
+
+ import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
++import type { CommandDisplayMetadata } from '@deepseek-ai/dsh-commands/types'
+ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+ import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
+ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+@@ -225,6 +226,9 @@
+  */
+ export interface CommandNode {
+   kind: 'command'
++  display?: CommandDisplayMetadata
++  /** Derived public outcomes; durable command events are never removed. */
++  gestureHistory?: Array<{ commandId: CommandId; phase: CommandDisplayMetadata['phase']; sequence: number; name: string | null; outcome: CommandNode['outcome'] }>
+   /** Seq of the command/run event; the done event's seq when only the done is in-window. */
+   seq: number
+   /** Unix epoch ms of the anchoring event. */
+--- a/packages/client/ui-chat/src/client/conversation-nodes/command.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
+@@ -5,6 +5,8 @@
+ import type { CompactionCheckpointSource } from '@deepseek-ai/dsh-compaction/checkpoint'
+ import type {} from '@deepseek-ai/dsh-compaction/types'
+ import type {} from '@deepseek-ai/dsh-commands/types'
++import type {CommandDisplayMetadata} from '@deepseek-ai/dsh-commands/types'
++function gestureKey(value:CommandDisplayMetadata):string|undefined{if(value?.kind!=='control-gesture'||!['update','final','stop'].includes(value.phase)||!Number.isSafeInteger(value.generation)||!Number.isSafeInteger(value.sequence)||[value.clientId,value.gestureId,value.worldId,value.entityId,value.jointName].some(s=>typeof s!=='string'||!s||s.length>256))return;return JSON.stringify([value.clientId,value.gestureId,value.worldId,value.generation,value.entityId,value.jointName])}
+ import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+ import type { ManualCompactionChatData } from '../contract/chat-nodes.ts'
+ import { chatNode } from './common.ts'
+@@ -38,6 +40,7 @@
+   const data = match.event.data
+   return {
+     kind: 'command',
++    ...data.display?{display:data.display}:{},
+     seq: match.event.seq,
+     time: match.event.time,
+     commandId: data.commandId,
+@@ -57,6 +60,7 @@
+     : undefined
+   return {
+     kind: 'command',
++    ...data.display?{display:data.display}:{},
+     seq: previous?.seq ?? match.event.seq,
+     time: previous?.time ?? match.event.time,
+     commandId: data.commandId,
+@@ -68,6 +72,19 @@
+       ...sourceEventSeq === undefined ? {} : { sourceEventSeq },
+     },
+   }
++}
++
++/** Fold one exact gesture from immutable matches; no timer grouping or replacement log. */
++export function gestureCommand(matches:readonly ConversationMatch[]):CommandNode|undefined {
++  const rows=new Map<CommandId,CommandNode>()
++  for(const match of matches){
++    if(match.event.type==='command/run')rows.set(match.event.data.commandId,commandFromRun(match))
++    else if(match.event.type==='command/done')rows.set(match.event.data.commandId,commandFromDone(match,rows.get(match.event.data.commandId)))
++  }
++  const ordered=[...rows.values()].filter(node=>node.display).sort((a,b)=>a.display!.sequence-b.display!.sequence)
++  const latest=ordered.at(-1),first=matches[0]
++  if(!latest||!first)return
++  return {...latest,seq:first.event.seq,time:first.event.time,gestureHistory:ordered.map(node=>({commandId:node.commandId,name:node.name,phase:node.display!.phase,sequence:node.display!.sequence,outcome:node.outcome}))}
+ }
+
+ /**
+@@ -177,9 +194,11 @@
+   target: 'chat',
+   match: (event) => {
+     if (event.type === 'command/run') {
++      if(event.data.display){const key=gestureKey(event.data.display);if(key)return {id:'gesture:'+key,role:'update'}}
+       return { id: String(event.data.commandId), role: 'start' }
+     }
+     if (event.type === 'command/done') {
++      if(event.data.display){const key=gestureKey(event.data.display);if(key)return {id:'gesture:'+key,role:'update'}}
+       return { id: String(event.data.commandId), role: 'update' }
+     }
+     const checkpoint = compactSource(event)
+@@ -203,6 +222,7 @@
+     return updateCompactionState(context.state, match)
+   },
+   buildViewNode: (context) => {
++    if(context.id.startsWith('gesture:')){const node=gestureCommand(context.matches);return node?chatNode(context,'command',node.seq,node):null}
+     const state = context.state ?? fallbackState(context)
+     if (state === undefined) return null
+     if (state.command.name !== 'compact') {
+--- a/packages/client/ui-chat/src/client/chat/GenericCommandCard.tsx
++++ b/packages/client/ui-chat/src/client/chat/GenericCommandCard.tsx
+@@ -33,7 +33,8 @@
+   // command name.
+   const title = node.name ?? t('command.title')
+   const state = stateOf(node.outcome)
+-  const body = text !== undefined && text.includes('\n') ? text : null
++  const history=node.gestureHistory?.map(row=>`${row.phase} #${row.sequence}: ${row.outcome?.text??'Pending'}`).join('\n')
++  const body = history ?? (text !== undefined && text.includes('\n') ? text : null)
+   const open = expanded && body !== null
+   return (
+     <div className={css.root} data-variant="others" data-state={state}>

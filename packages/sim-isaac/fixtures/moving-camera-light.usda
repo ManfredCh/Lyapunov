@@ -1,0 +1,61 @@
+#usda 1.0
+(
+    defaultPrim = "Rig"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Rig" (
+    prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+) {
+    def DomeLight "key_light" {
+        float inputs:intensity = 800
+    }
+    def Xform "base" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    ) {
+        float physics:mass = 10
+        def Cube "geometry" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        ) {
+            double size = 0.2
+        }
+    }
+    def Xform "wrist" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    ) {
+        float physics:mass = 1
+        double3 xformOp:translate = (0.4, 0, 0.5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        def Cube "geometry" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        ) {
+            double size = 0.1
+        }
+        def Camera "native_cam" {
+            float focalLength = 24
+            float verticalAperture = 24
+            float horizontalAperture = 32
+            float2 clippingRange = (0.01, 100)
+            double3 xformOp:translate = (0.1, 0, 0.2)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+    def PhysicsFixedJoint "base_fixed" {
+        rel physics:body1 = </Rig/base>
+    }
+    def PhysicsRevoluteJoint "wrist_joint" (
+        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+    ) {
+        rel physics:body0 = </Rig/base>
+        rel physics:body1 = </Rig/wrist>
+        uniform token physics:axis = "Z"
+        point3f physics:localPos0 = (0, 0, 0.5)
+        point3f physics:localPos1 = (-0.4, 0, 0)
+        float physics:lowerLimit = -90
+        float physics:upperLimit = 90
+        float drive:angular:physics:stiffness = 1000
+        float drive:angular:physics:damping = 100
+        float drive:angular:physics:maxForce = 100
+        float drive:angular:physics:targetPosition = 0
+    }
+}

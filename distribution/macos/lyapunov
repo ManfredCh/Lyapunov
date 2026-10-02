@@ -1,0 +1,92 @@
+#!/bin/sh
+# macOS 源码树启动器（不是发行包，不是签名产物，也不做任何安装）
+#
+# 本脚本只做三件事：检查前置、检查本机已有构建、把参数交给
+# `node script/desktop.ts --mode formal`。它不下载依赖、不写系统目录、
+# 不创建 .app、不签名、不公证，也不读取任何凭据；正式登录仍走官网 OAuth。
+#
+# 用法：
+#   sh distribution/macos/lyapunov [--software-rendering] [Electron 参数...]
+#   sh distribution/macos/lyapunov doctor
+#   sh distribution/macos/lyapunov --help
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+
+usage() {
+  cat <<'EOF'
+macOS 源码树启动器（未打包、未签名）
+
+  sh distribution/macos/lyapunov [参数...]   启动正式桌面（= node script/desktop.ts --mode formal）
+  sh distribution/macos/lyapunov doctor     只检查前置与构建产物，不启动
+  sh distribution/macos/lyapunov --help     显示本帮助
+
+前置与首次准备（详见 distribution/macos/README.md）：
+  node script/bootstrap.mjs     安装 node_modules（含 packages/desktop 的 Electron）
+  bun run build:plugins         重建 packages/*/dist/plugin.js
+  bun run build:desktop         生成 packages/desktop/dist/main.js 与 renderer/account.js
+
+数据目录：默认 <仓库根>/.runtime/desktop/formal，可用 LYAPUNOV_DESKTOP_DATA_DIR 覆盖。
+账户服务：默认 https://vorynel.com/lyaup-api，可用 LYAPUNOV_API_URL 覆盖。
+环境变量清单：distribution/macos/env.example（其中的变量对从终端启动有效）。
+EOF
+}
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2:-1}"
+}
+
+check_platform() {
+  [ "$(uname -s)" = "Darwin" ] || fail "此启动器是 macOS 源码树入口；当前系统为 $(uname -s)。其它平台请用仓库 README 中的对应入口。"
+}
+
+check_node() {
+  command -v node >/dev/null 2>&1 || fail "未找到 node。需要 Node.js >= 24（见 package.json engines）。"
+  node -e 'const major=Number(process.versions.node.split(".")[0]);if(major<24){console.error("需要 Node.js >= 24，当前为 "+process.versions.node);process.exit(1)}' \
+    || fail "Node.js 版本不满足要求（需要 >= 24）。"
+}
+
+electron_path() {
+  node -e 'const{createRequire}=require("node:module");process.stdout.write(String(createRequire(process.argv[1])("electron")))' \
+    "$root/packages/desktop/package.json" 2>/dev/null
+}
+
+check_build() {
+  [ -d "$root/node_modules" ] || fail "缺少 node_modules。请先运行：node script/bootstrap.mjs"
+  electron=$(electron_path) || fail "packages/desktop 的 electron 依赖不可用。请先运行：node script/bootstrap.mjs"
+  [ -n "$electron" ] && [ -x "$electron" ] || fail "Electron 可执行文件不可用：${electron:-<空>}。请重新运行 node script/bootstrap.mjs"
+  [ -f "$root/packages/desktop/dist/main.js" ] || fail "缺少 packages/desktop/dist/main.js。请先运行：bun run build:desktop"
+  [ -f "$root/packages/desktop/renderer/account.js" ] || fail "缺少 packages/desktop/renderer/account.js。请先运行：bun run build:desktop"
+}
+
+report() {
+  printf '%s\n' "仓库根：$root"
+  printf '%s\n' "系统：$(uname -s) $(uname -m)（Electron 架构跟随本机安装，本仓库没有 universal 合并步骤）"
+  printf '%s\n' "Node：$(node --version)"
+  if electron=$(electron_path); then
+    printf '%s\n' "Electron：$electron"
+  else
+    printf '%s\n' "Electron：不可用（先运行 node script/bootstrap.mjs）"
+  fi
+  for file in packages/desktop/dist/main.js packages/desktop/renderer/account.js; do
+    if [ -f "$root/$file" ]; then printf '%s\n' "已构建：$file"
+    else printf '%s\n' "未构建：$file（运行 bun run build:desktop）"; fi
+  done
+  printf '%s\n' "数据目录：${LYAPUNOV_DESKTOP_DATA_DIR:-$root/.runtime/desktop/formal}（未打包运行；打包后才是 ~/Library/Application Support/...）"
+  printf '%s\n' "账户服务：${LYAPUNOV_API_URL:-https://vorynel.com/lyaup-api}"
+  printf '%s\n' "说明：本启动器不构建、不签名、不公证；以上只是本机现状，不代表任何发布状态。"
+}
+
+case "${1:-}" in
+  --help|-h|help) usage; exit 0 ;;
+  doctor) check_platform; check_node; report; exit 0 ;;
+esac
+# 其余参数直接透传给桌面进程（例如 --software-rendering）
+
+check_platform
+check_node
+check_build
+
+printf '%s\n' "[macOS 源码树启动器] 未打包、未签名：运行本机 Electron + 当前源码构建（正式登录走官网 OAuth）。" >&2
+exec node "$root/script/desktop.ts" --mode formal "$@"

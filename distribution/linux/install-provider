@@ -1,0 +1,191 @@
+#!/bin/sh
+set -eu
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP NODE_PATH NODE_OPTIONS
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+provider=${1:-}
+case "$provider" in mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium) shift ;; *) printf '%s\n' '用法：./lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula]' >&2; exit 2 ;; esac
+accept_eula=false
+if [ "${1:-}" = --accept-omniverse-eula ]; then accept_eula=true; shift; fi
+if [ "$#" -ne 0 ]; then printf '%s\n' '无效安装参数' >&2; exit 2; fi
+if [ "$provider" = isaac ] && [ "$accept_eula" != true ]; then
+  printf '%s\n' '{"provider":"isaac","status":"BLOCKED","code":"LICENSE_CONFIRMATION_REQUIRED","message":"安装并运行 Isaac 前请阅读 NVIDIA Omniverse 许可；明确同意后使用 --accept-omniverse-eula。","eulaUrl":"https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html"}'
+  exit 2
+fi
+# 只有源码检出允许 PATH Node 回退；发行缺件和显式覆盖错误不得被系统 Node 掩盖。
+micromamba=${LYAPUNOV_MICROMAMBA:-"$root/runtime/micromamba/micromamba"}
+node_bin=${LYAPUNOV_NODE_BIN:-"$root/runtime/node/bin/node"}
+dev_checkout=false
+if [ ! -f "$root/RELEASE.json" ] && [ -f "$root/script/package-linux.ts" ]; then dev_checkout=true; fi
+if [ ! -x "$node_bin" ] && [ -z "${LYAPUNOV_NODE_BIN:-}" ] && [ "$dev_checkout" = true ]; then
+  command -v node >/dev/null 2>&1 && node_bin=$(command -v node)
+fi
+[ -x "$node_bin" ] || { printf '%s\n' "PROVIDER_NODE_MISSING: 找不到可执行 Node：$node_bin；请重新完整解包或检查 LYAPUNOV_NODE_BIN。" >&2; exit 2; }
+json_blocked() {
+  "$node_bin" -e 'const [provider,code,message]=process.argv.slice(1); console.log(JSON.stringify({provider,status:"BLOCKED",code,message}))' "$1" "$2" "$3"
+  exit 2
+}
+[ -x "$micromamba" ] || json_blocked runtime PROVIDER_ENV_TOOL_MISSING "找不到 micromamba：$micromamba（发行布局应自带 runtime/micromamba；开发检出可用 LYAPUNOV_MICROMAMBA 指向 .runtime/bin/micromamba）"
+assetbake_requirements="$root/packages/asset-bake/requirements.txt"
+if [ "$provider" = isaac ]; then assetbake_requirements="$root/packages/asset-bake/requirements-isaac.txt"; fi
+case "$provider" in
+  mujoco|isaac) for file in "$assetbake_requirements" "$root/packages/asset-bake/requirements-common.txt"; do
+    [ -f "$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $file；请重新完整解包。"
+  done ;;
+esac
+case "$provider" in
+  policy-cpu) for file in distribution/linux/policy-cpu.mjs packages/lyapunov-product-bundle/src/policy-runtime.mjs packages/policy-registry/requirements-cpu.txt; do
+       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
+     done ;;
+  benchmark-*) [ -f "$root/distribution/linux/benchmark.js" ] || [ "$dev_checkout" = true ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/distribution/linux/benchmark.js；请重新完整解包。" ;;
+  *) for file in distribution/linux/doctor.mjs distribution/linux/sandbox.mjs packages/lyapunov-product-bundle/src/sdk-python.mjs; do
+       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
+     done ;;
+esac
+export HF_ENDPOINT=https://hf-mirror.com
+export MAMBA_ROOT_PREFIX="$root/.runtime/conda"
+export PIP_CACHE_DIR="$root/.runtime/provider-download-cache/pip"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PYTHONNOUSERSITE=1
+if [ "$provider" = mujoco ]; then prefix="$root/.runtime/sim-python"
+elif [ "$provider" = isaac ]; then prefix="$root/.runtime/conda/envs/isaac"
+elif [ "$provider" = policy-cpu ]; then prefix="$root/.runtime/policy-python"
+elif [ "$provider" = newton ]; then prefix="$root/.runtime/newton-env"
+elif [ "$provider" = benchmark-libero ]; then prefix="$root/.runtime/bench/libero-env"
+else prefix="$root/.runtime/bench/gymnasium-env"; fi
+# 已有前缀的处理：可复用时直接继续安装缺失依赖（正常重试即可修复半安装的 pip）；
+# 非空且无法确认为可复用前缀时失败关闭并保留原目录，绝不先删或替换稳定环境。
+# “可复用”必须实际运行该解释器确认归属：sys.prefix 规范化后就是本前缀（正常 Conda/venv 都满足）；
+# 指向系统/其他环境的 python 链接会输出别的前缀，不能拿它的 pip 改动外部环境。
+reuse_prefix=false
+if [ -e "$prefix" ] || [ -L "$prefix" ]; then
+  expected_prefix=$(realpath "$prefix" 2>/dev/null || printf '%s' "$prefix")
+  actual_prefix=
+  if [ -x "$prefix/bin/python" ]; then
+    actual_prefix=$("$prefix/bin/python" -c 'import os,sys;print(os.path.realpath(sys.prefix))' 2>/dev/null || :)
+  fi
+  case "$expected_prefix/" in
+    "$root/"*) ;;
+    *) json_blocked "$provider" PROVIDER_PREFIX_OUTSIDE_ROOT "$prefix 指向产品根之外（实际前缀：$expected_prefix）；为避免改写其它应用环境已停止。请在包内前缀安装或显式准备独立产品根。" ;;
+  esac
+  if [ -n "$actual_prefix" ] && [ "$actual_prefix" = "$expected_prefix" ]; then
+    reuse_prefix=true
+    printf '%s\n' '复用已有 Python 前缀并补齐依赖：'"$prefix"
+  elif [ -d "$prefix" ] && [ -z "$(ls -A "$prefix" 2>/dev/null || printf x)" ]; then
+    : # 空前缀目录交给 micromamba 复用（其原生行为不删除空目录）
+  else
+    json_blocked "$provider" PROVIDER_PREFIX_CONFLICT "$prefix 已存在但不是可复用的 Python 前缀；为不删除或替换现有环境已停止。请人工确认后移走或改名该目录再重试。"
+  fi
+fi
+# 几何烘焙沿各 SDK 的兼容 pin，公共 numpy/scipy 范围仍由 requirements-common.txt 唯一维护。
+mkdir -p "$root/.runtime/provider-download-cache"
+pip_cache_dir="$root/.runtime/provider-download-cache/pip"
+mkdir -p "$pip_cache_dir"
+# 复用 uv/Conda 前缀时 pip 可能缺失，或旧 pip 在 Python 3.12 上 import 失败。
+# 只在目标包内前缀修复：先验证 -m pip --version，失败才用该解释器的 ensurepip，随后再次验证。
+# 不调用系统 pip，也不把 PIP_CACHE_DIR 当作唯一缓存配置（pip --isolated 会忽略它）。
+ensure_pip() {
+  if ! "$prefix/bin/python" -m pip --version >/dev/null 2>&1; then
+    "$prefix/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 ||
+      json_blocked "$provider" PROVIDER_PIP_UNAVAILABLE "包内 Python 前缀缺少可用 pip，ensurepip 修复失败：$prefix"
+  fi
+  "$prefix/bin/python" -m pip --version >/dev/null 2>&1 ||
+    json_blocked "$provider" PROVIDER_PIP_UNAVAILABLE "包内 Python 前缀的 pip 仍不可用：$prefix"
+}
+pip_install() {
+  # 隔离模式忽略 PIP_* 配置；直接传有界网络参数，慢元数据连接不受隐式 15 秒限制。
+  # 保持原索引和依赖解析；失败照常非零退出，由正常 Repair 复用包内 partial 前缀。
+  "$prefix/bin/python" -m pip --isolated install --cache-dir "$pip_cache_dir" --timeout 60 --retries 3 --disable-pip-version-check "$@"
+}
+# --no-rc 只使用此包的显式配置，不读取或更改机器 Conda 配置。官方 LIBERO 锁 Python 3.8.13，其余 Provider 用 3.12。
+if [ "$reuse_prefix" != true ]; then
+  if [ "$provider" = benchmark-libero ]; then
+    "$micromamba" --no-rc create --yes --prefix "$prefix" --channel conda-forge 'python=3.8.13' pip
+  else
+    "$micromamba" --no-rc create --yes --prefix "$prefix" --channel conda-forge 'python=3.12' pip
+  fi
+fi
+ensure_pip
+# MuJoCo/规划组合与 Isaac 官方 SDK 分治；Isaac 6.0.1 固定 MuJoCo 3.8，不能混入 3.13/Mink。
+# 传输依赖仅维护一次；MuJoCo 的最终安装版本与原组合完全相同。
+# 取值与冲突依据见 docs/robot-dependencies.md。
+transport_pins='pyzmq==27.2.0 msgpack==1.2.2 msgpack-numpy==0.4.8'
+physics_pins='mujoco==3.13.0 mink==1.3.0 ompl==2.0.1 daqp==0.9.1'
+if [ "$provider" = mujoco ]; then
+  pip_install --index-url https://pypi.org/simple $physics_pins $transport_pins -r "$assetbake_requirements"
+elif [ "$provider" = policy-cpu ]; then
+  # CPU策略与物理SDK使用独立前缀，安装器收尾只核包内本次前缀。
+  policy_wheel=$("$node_bin" "$root/distribution/linux/policy-cpu.mjs" wheel)
+  pip_install --index-url https://pypi.org/simple "$policy_wheel" -r "$root/packages/policy-registry/requirements-cpu.txt"
+  exec "$node_bin" "$root/distribution/linux/policy-cpu.mjs" doctor --managed-sdk
+elif [ "$provider" = newton ]; then
+  # Newton 自带 mujoco~=3.12.0 / mujoco-warp~=3.12.0 的 pin，与产品 mujoco 3.13.0 不是同一组合，
+  # 所以**必须**装进独立前缀（.runtime/newton-env），不与 sim-python 混装。sim extra 带 warp-lang；
+  # GPU 可选：无 NVIDIA GPU 时 provider 内部退回 cpu（见 packages/sim-newton/README.md）。
+  # sim extra 只带 mujoco/mujoco-warp；**importers 必须带**——产品的机器人（Panda/UR5e/IIWA/Go2…）
+  # 绝大多数是带 <mesh> 的 MJCF，缺 trimesh 时 Newton 的 import_mjcf 直接导不进来
+  # （provider 会明确报 PROVIDER_DEPENDENCY_MISSING，而不是静默跳过实体）。
+  # Newton 自带的复用前缀可能由 uv 创建且没有 pip；统一由上方 ensure_pip 修复。
+  pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0"
+elif [ "$provider" = isaac ]; then
+  pip_install --index-url https://pypi.org/simple --extra-index-url https://pypi.nvidia.com 'isaacsim[all,extscache]==6.0.1.0' $transport_pins -r "$assetbake_requirements"
+  # 只有本次显式许可参数允许写当前 SDK 自有许可标记。
+  "$prefix/bin/python" -c 'import importlib.metadata,pathlib; p=pathlib.Path(importlib.metadata.distribution("isaacsim").locate_file("isaacsim/kit/EULA_ACCEPTED")); p.write_text("yes\n")'
+elif [ "$provider" = benchmark-libero ]; then
+  # 官方源码固定提交，经 GitHub codeload 取 tar 包；不要求系统 git、不改系统 Python。
+  # 只安全复用已有源码，绝不删除现存目录：先解到本轮临时目录，再移到空缺的正式落点；冲突明确失败关闭。
+  source_root="$root/.runtime/bench/libero-source"
+  if [ -d "$source_root/libero/libero" ]; then
+    printf '%s\n' '复用已有官方源码目录：'"$source_root"
+  elif [ -e "$source_root" ] || [ -L "$source_root" ]; then
+    json_blocked "$provider" LIBERO_SOURCE_CONFLICT "$source_root 已存在但缺 libero/libero；为不覆盖现有文件已停止，未删除任何内容。请人工确认后移走或改名该目录再重试。"
+  else
+    mkdir -p "$root/.runtime/bench"
+    incoming="$(mktemp -d "$root/.runtime/bench/libero-source-incoming.XXXXXX")"
+    # 只清理本轮临时目录；trap 覆盖失败与中断路径。
+    trap 'rm -rf "$incoming"' EXIT HUP INT TERM
+    "$node_bin" -e 'fetch(process.argv[1]).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.arrayBuffer()}).then(b=>require("node:fs").writeFileSync(process.argv[2],Buffer.from(b))).catch(e=>{console.error(String(e));process.exit(1)})' 'https://codeload.github.com/Lifelong-Robot-Learning/LIBERO/tar.gz/8f1084e3132a39270c3a13ebe37270a43ece2a01' "$incoming/libero-source.tar.gz"
+    tar -xzf "$incoming/libero-source.tar.gz" -C "$incoming"
+    if [ ! -d "$incoming/LIBERO-8f1084e3132a39270c3a13ebe37270a43ece2a01/libero/libero" ]; then
+      json_blocked "$provider" LIBERO_SOURCE_ARCHIVE_UNEXPECTED '官方源码包解出的目录不符合预期（缺 LIBERO-固定提交/libero/libero）；未改动任何现有目录。'
+    fi
+    if [ -e "$source_root" ] || [ -L "$source_root" ]; then
+      # 二次失败关闭：避免 mv 把源码塞进并发现身的目标目录（含悬空符号链接）。
+      json_blocked "$provider" LIBERO_SOURCE_CONFLICT "$source_root 在解包期间出现；未覆盖、未删除，请人工确认后重试。"
+    fi
+    mv "$incoming/LIBERO-8f1084e3132a39270c3a13ebe37270a43ece2a01" "$source_root"
+    rm -rf "$incoming"
+    trap - EXIT HUP INT TERM
+  fi
+  pip_install --index-url https://pypi.org/simple setuptools wheel
+  pip_install --index-url https://pypi.org/simple -r "$source_root/requirements.txt"
+  # 官方锁定的 CUDA 11.3 组合取自 PyTorch 官方源；只在隔离前缀内安装。
+  pip_install --index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu113 'torch==1.11.0+cu113' 'torchvision==0.12.0+cu113' 'torchaudio==0.11.0'
+  pip_install --index-url https://pypi.org/simple -e "$source_root"
+else
+  pip_install --index-url https://pypi.org/simple 'gymnasium[mujoco]==1.2.0'
+fi
+# 两种几何依赖已随各自 SDK 安装；pip 成功仍须核本次前缀能加载原生 CoACD。
+# 不检查父环境的解释器，不改外置 SDK；失败时保留前缀供正常重试。
+case "$provider" in
+  mujoco|isaac)
+    if ! "$prefix/bin/python" -c 'import numpy,scipy,trimesh,coacd'; then
+      json_blocked "$provider" ASSET_BAKE_DEPENDENCY_MISSING "本次包内前缀无法导入 numpy/scipy/trimesh/coacd：$prefix；请查看导入错误并重试 install-provider 补齐依赖。"
+    fi ;;
+esac
+# 基准 provider 的收尾自检由发行打包产物 distribution/linux/benchmark.js 完成；开发检出没有它，
+# 直接 exec 会 MODULE_NOT_FOUND（环境其实已装好）。缺文件时如实说明并跳过，不假装失败。
+# **只对基准 provider 生效**：引擎（mujoco/isaac/newton）仍要走 doctor.mjs 自检。
+if [ "$provider" = benchmark-libero ] || [ "$provider" = benchmark-gymnasium ]; then
+  if [ ! -f "$root/distribution/linux/benchmark.js" ]; then
+    "$node_bin" -e 'const [provider]=process.argv.slice(1); console.log(JSON.stringify({provider,status:"OK",code:"PROVIDER_CHECK_SKIPPED",message:"环境已就绪；开发检出没有发行打包产物 distribution/linux/benchmark.js，跳过基准自检（发行包内会自动执行）。"}))' "$provider"
+    exit 0
+  fi
+  if [ "$provider" = benchmark-libero ]; then
+    exec "$node_bin" "$root/distribution/linux/benchmark.js" --provider libero --check
+  fi
+  exec "$node_bin" "$root/distribution/linux/benchmark.js" --provider gymnasium --check
+fi
+# 本次安装的验收只能指向刚处理的包内前缀，不能借父环境的已有 SDK 报安装成功。
+unset LYAPUNOV_MUJOCO_PYTHON LYAPUNOV_ISAAC_PYTHON LYAPUNOV_NEWTON_PYTHON
+exec "$node_bin" "$root/distribution/linux/doctor.mjs" "$provider" --managed-sdk

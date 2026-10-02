@@ -1,0 +1,15 @@
+<mujoco model="mounted-base-free-body">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002"/>
+  <default><joint damping="1" armature=".05"/><geom friction="1 .005 .0001"/></default>
+  <worldbody>
+    <geom name="pad" type="box" size=".4 .4 .02" pos="0 0 -.02" rgba=".5 .5 .5 1"/>
+    <body name="mount" pos="0 0 .1">
+      <geom name="mount_geom" type="box" size=".05 .05 .05" rgba=".3 .3 .8 1"/>
+    </body>
+    <body name="cube" pos=".15 0 .12">
+      <freejoint name="cube_free"/>
+      <geom name="cube_geom" type="box" size=".03 .03 .03" mass=".2" rgba=".9 .2 .2 1"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,1759 @@
+{
+  "driver": "real-data-contract",
+  "sourceDirectory": "/home/s18/WS/Lyapunov/.lya/developer-runtime/data/opencode",
+  "scratch": "/dev/shm/lyaup-migration-contract-TqqTGf",
+  "startedAt": "2026-09-26T04:41:47.527Z",
+  "checks": [
+    {
+      "name": "真实旧库：首次迁移已导入 6 个旧会话",
+      "ok": true,
+      "reading": {
+        "created": 6
+      }
+    },
+    {
+      "name": "真实旧库：旧源 456 消息 / 1721 part 全部读到",
+      "ok": true,
+      "reading": {
+        "project": 1,
+        "workspace": 0,
+        "session": 6,
+        "message": 456,
+        "part": 1721,
+        "session_message": 0,
+        "session_share": 0,
+        "todo": 0,
+        "permission": 0
+      }
+    },
+    {
+      "name": "真实旧库：重跑不新建会话（幂等）",
+      "ok": true,
+      "reading": {
+        "created": 0,
+        "unchanged": 6
+      }
+    },
+    {
+      "name": "真实旧库：重跑读数与首次一致（资源/场景/缺失）",
+      "ok": true,
+      "reading": {
+        "resources": 0,
+        "scenes": 0
+      }
+    },
+    {
+      "name": "真实旧库：第二次与第三次缺失清单逐条相同",
+      "ok": true,
+      "reading": {
+        "second": 31,
+        "third": 31
+      }
+    },
+    {
+      "name": "真实旧库：31 条缺原件逐条带路径与原因，状态 BLOCKED 且不伪装 PASS",
+      "ok": true,
+      "reading": {
+        "status": "BLOCKED",
+        "missing": 31
+      }
+    },
+    {
+      "name": "真实旧库：缺失分类为空（31 条全是资源原件缺失，不是会话/场景）",
+      "ok": true,
+      "reading": [
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource",
+        "resource"
+      ]
+    },
+    {
+      "name": "真实旧库：未导入的旧库表逐条留名（不是静默略过）",
+      "ok": true,
+      "reading": {
+        "__drizzle_migrations": 19,
+        "account": 0,
+        "account_state": 0,
+        "control_account": 0,
+        "event": 0,
+        "event_sequence": 0
+      }
+    },
+    {
+      "name": "真实旧库副本：迁移前后逐字节一致（迁移只读源）",
+      "ok": true,
+      "reading": {
+        "opencode-local.db": "9e0742a49dc9a0cb41501fd5d9266a052489242dc530c3dc47c154276bab56bf",
+        "opencode-local.db-wal": "cd7f5f2a8f5a75f327d6b8e97d1da24b1c7c7830aea26093f716ac36158b469f",
+        "opencode-local.db-shm": "778864b815716f16ea0105782de2333f815e41dee1b05ac92a9a886a6a1dafe4"
+      }
+    },
+    {
+      "name": "两次运行读到同一份数据：导出 JSON 与 SQLite 快照逐字节相同",
+      "ok": true,
+      "reading": {
+        "exportHashes": [
+          "5c7813c577cc0894d75b61af8175e24eb7d9be5050f6f1d48762ed45762c321a",
+          "5c7813c577cc0894d75b61af8175e24eb7d9be5050f6f1d48762ed45762c321a"
+        ],
+        "snapshotHashes": [
+          "eff364cd03c67fee5202cc629fa4d45392cc4d172ed0e5a1f42164429115e526",
+          "eff364cd03c67fee5202cc629fa4d45392cc4d172ed0e5a1f42164429115e526"
+        ]
+      }
+    },
+    {
+      "name": "重复迁移稳定：账本在第三次运行后逐字节不变",
+      "ok": true,
+      "reading": {
+        "sha256Second": "c798eafab658755e25be284add2cbd33767656a5bd48634e5459831b07d4cf45",
+        "sha256Fourth": "c798eafab658755e25be284add2cbd33767656a5bd48634e5459831b07d4cf45"
+      }
+    },
+    {
+      "name": "干净新装的账本 eventCount 与持久化日志长度一致（首次导入即对得上）",
+      "ok": true,
+      "reading": [
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+          "ledger": 52,
+          "reopened": 52
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+          "ledger": 42,
+          "reopened": 42
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+          "ledger": 69,
+          "reopened": 69
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+          "ledger": 30,
+          "reopened": 30
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+          "ledger": 1144,
+          "reopened": 1144
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+          "ledger": 717,
+          "reopened": 717
+        }
+      ]
+    },
+    {
+      "name": "幂等：干净新装目录的首次迁移产物与老目录的第二次运行一致（只差目标 sceneRoot 这一项）",
+      "ok": true,
+      "reading": {
+        "files": 15,
+        "freshFiles": 15,
+        "freshCreated": 6,
+        "fourthCreated": 0,
+        "artifactDiff": {
+          "onlySecond": [],
+          "onlyFresh": [],
+          "changed": []
+        },
+        "ledgerDiff": []
+      }
+    },
+    {
+      "name": "真实旧库：6/6 会话可用产品原生持久化后端重开，事件数与账本一致",
+      "ok": true,
+      "reading": [
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+          "ledger": 52,
+          "reopened": 52
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+          "ledger": 42,
+          "reopened": 42
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+          "ledger": 69,
+          "reopened": 69
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+          "ledger": 30,
+          "reopened": 30
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+          "ledger": 1144,
+          "reopened": 1144
+        },
+        {
+          "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+          "ledger": 717,
+          "reopened": 717
+        }
+      ]
+    },
+    {
+      "name": "真实旧库：源 message/part 在账本里逐条有归属（不丢记录）",
+      "ok": true,
+      "reading": [
+        {
+          "oldId": "ses_f97827af0ffeiZo78CbrVHI9Ey",
+          "messages": 9,
+          "parts": 39
+        },
+        {
+          "oldId": "ses_f977529faffe413Cq4t1tciyJx",
+          "messages": 9,
+          "parts": 36
+        },
+        {
+          "oldId": "ses_f9772b2f6ffeQSCKgxYxT46WhV",
+          "messages": 14,
+          "parts": 66
+        },
+        {
+          "oldId": "ses_f97707c40ffe6j3NUSmSJLJ6qJ",
+          "messages": 7,
+          "parts": 19
+        },
+        {
+          "oldId": "ses_f976cd47dffebjmnTPpB1WmVNj",
+          "messages": 263,
+          "parts": 990
+        },
+        {
+          "oldId": "ses_f93f8ec4affekUlV6zQ7OkKSO5",
+          "messages": 154,
+          "parts": 571
+        }
+      ]
+    },
+    {
+      "name": "真实旧库：源文本/工具输出逐字出现在迁移后的事件里（不丢内容）",
+      "ok": true,
+      "reading": [
+        {
+          "oldId": "ses_f97827af0ffeiZo78CbrVHI9Ey",
+          "sourceStrings": 24,
+          "unmatched": 0
+        },
+        {
+          "oldId": "ses_f977529faffe413Cq4t1tciyJx",
+          "sourceStrings": 20,
+          "unmatched": 0
+        },
+        {
+          "oldId": "ses_f9772b2f6ffeQSCKgxYxT46WhV",
+          "sourceStrings": 40,
+          "unmatched": 0
+        },
+        {
+          "oldId": "ses_f97707c40ffe6j3NUSmSJLJ6qJ",
+          "sourceStrings": 11,
+          "unmatched": 0
+        },
+        {
+          "oldId": "ses_f976cd47dffebjmnTPpB1WmVNj",
+          "sourceStrings": 565,
+          "unmatched": 0
+        },
+        {
+          "oldId": "ses_f93f8ec4affekUlV6zQ7OkKSO5",
+          "sourceStrings": 318,
+          "unmatched": 0
+        }
+      ]
+    },
+    {
+      "name": "真实旧库：tool part 数与迁移后的 tool-call / tool-result 数相等",
+      "ok": true,
+      "reading": [
+        {
+          "oldId": "ses_f97827af0ffeiZo78CbrVHI9Ey",
+          "kinds": {
+            "text": 4,
+            "step-start": 8,
+            "reasoning": 8,
+            "tool": 12,
+            "step-finish": 7
+          },
+          "calls": 12,
+          "results": 12
+        },
+        {
+          "oldId": "ses_f977529faffe413Cq4t1tciyJx",
+          "kinds": {
+            "text": 8,
+            "step-start": 8,
+            "reasoning": 5,
+            "tool": 7,
+            "step-finish": 8
+          },
+          "calls": 7,
+          "results": 7
+        },
+        {
+          "oldId": "ses_f9772b2f6ffeQSCKgxYxT46WhV",
+          "kinds": {
+            "text": 14,
+            "step-start": 13,
+            "reasoning": 13,
+            "tool": 13,
+            "step-finish": 13
+          },
+          "calls": 13,
+          "results": 13
+        },
+        {
+          "oldId": "ses_f97707c40ffe6j3NUSmSJLJ6qJ",
+          "kinds": {
+            "text": 6,
+            "tool": 4,
+            "step-start": 4,
+            "step-finish": 4,
+            "reasoning": 1
+          },
+          "calls": 4,
+          "results": 4
+        },
+        {
+          "oldId": "ses_f976cd47dffebjmnTPpB1WmVNj",
+          "kinds": {
+            "text": 262,
+            "step-start": 213,
+            "reasoning": 126,
+            "tool": 177,
+            "step-finish": 212
+          },
+          "calls": 177,
+          "results": 177
+        },
+        {
+          "oldId": "ses_f93f8ec4affekUlV6zQ7OkKSO5",
+          "kinds": {
+            "text": 153,
+            "step-start": 128,
+            "reasoning": 38,
+            "tool": 127,
+            "step-finish": 125
+          },
+          "calls": 127,
+          "results": 127
+        }
+      ]
+    },
+    {
+      "name": "真实旧库：旧会话历史目录原样成为新会话 cwd",
+      "ok": true,
+      "reading": [
+        {
+          "oldId": "ses_f97827af0ffeiZo78CbrVHI9Ey",
+          "cwd": "/home/s18/WS/LyapunovCheck"
+        },
+        {
+          "oldId": "ses_f977529faffe413Cq4t1tciyJx",
+          "cwd": "/home/s18/WS/Lyapunov"
+        },
+        {
+          "oldId": "ses_f9772b2f6ffeQSCKgxYxT46WhV",
+          "cwd": "/home/s18/WS/Lyapunov"
+        },
+        {
+          "oldId": "ses_f97707c40ffe6j3NUSmSJLJ6qJ",
+          "cwd": "/home/s18/WS/Lyapunov"
+        },
+        {
+          "oldId": "ses_f976cd47dffebjmnTPpB1WmVNj",
+          "cwd": "/home/s18/WS/Lyapunov"
+        },
+        {
+          "oldId": "ses_f93f8ec4affekUlV6zQ7OkKSO5",
+          "cwd": "/home/s18/WS/Lyapunov"
+        }
+      ]
+    },
+    {
+      "name": "账号身份稳定：与历史轮次（同一真实副本、同一 accountKey）的迁移 ID 逐字相同",
+      "ok": true,
+      "reading": {
+        "previousLedger": "/home/s18/WS/Lyapunov/Dev/.runtime/lane-env33/migrate-new/dsh/migrations/lyaup-old/ledger.json"
+      }
+    },
+    {
+      "name": "账号路径兼容：migration 产物落在 runtimePaths 给出的 developer 账号目录下并可重开",
+      "ok": true,
+      "reading": {
+        "dshHome": "/dev/shm/lyaup-migration-contract-TqqTGf/product/developer/dsh",
+        "created": 6,
+        "reopened": 6
+      }
+    },
+    {
+      "name": "账号路径兼容：正式账号目录 = accounts/<账号哈希前缀>，同一账号稳定、不同账号不撞，且登录名不会被当 ID",
+      "ok": true,
+      "reading": {
+        "rawEmailRejected": true,
+        "identity": "fc969da6a371d9c295e028b3f1c75f7a",
+        "otherIdentity": "a4f07ef29b3b14217374d4866b1c9653",
+        "root": "/dev/shm/lyaup-migration-contract-TqqTGf/product/accounts/fc969da6a371d9c295e028b3f1c75f7a",
+        "created": 6
+      }
+    },
+    {
+      "name": "账号身份进入迁移 ID：同一旧源在两个账号下得到不同原生会话",
+      "ok": true,
+      "reading": {
+        "formalSessionIds": [
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+          "legacy-fc969da6a371d9c295e028b3f1c75f7a-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5"
+        ],
+        "developerSessionIds": [
+          "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+          "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+          "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+          "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+          "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+          "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5"
+        ]
+      }
+    },
+    {
+      "name": "恢复前：派生库里那条真实旧资源按原路径报 BLOCKED（报的是那一条路径）",
+      "ok": true,
+      "reading": [
+        {
+          "kind": "resource",
+          "id": "res_041d57f2c002BYpbO4afPrxA6e",
+          "path": "/dev/shm/lyaup-migration-contract-TqqTGf/recovery-workspace/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/dev/shm/lyaup-migration-contract-TqqTGf/recovery-workspace/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb'"
+        }
+      ]
+    },
+    {
+      "name": "找回原件后重跑：该资源导入成功、缺失清单清空、状态转 PASS",
+      "ok": true,
+      "reading": {
+        "resources": 1,
+        "missing": 0,
+        "status": "PASS"
+      }
+    },
+    {
+      "name": "找回原件后重跑：资源库 missing 记录同步清空（不留过期 BLOCKED）",
+      "ok": true,
+      "reading": []
+    },
+    {
+      "name": "找回原件后重跑：第三次运行稳定（0 新增、1 保持不变）",
+      "ok": true,
+      "reading": {
+        "created": 0,
+        "unchanged": 6,
+        "resources": 0
+      }
+    },
+    {
+      "name": "JSON 旧存储：父目录里的 storage/ 不在兼容布局内 ⇒ 显式留名而不是静默 0 结果",
+      "ok": true,
+      "reading": [
+        {
+          "kind": "json-record",
+          "id": "storage",
+          "path": "/dev/shm/lyaup-migration-contract-TqqTGf/real-json/opencode/storage",
+          "reason": "UNRECOGNIZED_LAYOUT_DIRECTORY；该旧存储子目录不在兼容布局内，原目录原样保留"
+        }
+      ]
+    },
+    {
+      "name": "JSON 旧存储：真实 session_diff 逐条保留在旧元数据产物里（内容逐字相同）",
+      "ok": true,
+      "reading": {
+        "files": 6,
+        "preserved": 6,
+        "diffPreserved": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "JSON 旧存储：重复迁移稳定（0 新增、0 缺失、计数一致）",
+      "ok": true,
+      "reading": {
+        "first": {
+          "project": 0,
+          "workspace": 0,
+          "session": 0,
+          "message": 0,
+          "part": 0,
+          "todo": 0,
+          "permission": 0,
+          "session_diff": 6,
+          "session_share": 0
+        },
+        "second": {
+          "project": 0,
+          "workspace": 0,
+          "session": 0,
+          "message": 0,
+          "part": 0,
+          "todo": 0,
+          "permission": 0,
+          "session_diff": 6,
+          "session_share": 0
+        }
+      }
+    },
+    {
+      "name": "真实旧库（G14 夹具）：附件迁移后存储对象与原件 sha256 相同，且重跑不新增不丢失",
+      "ok": true,
+      "reading": [
+        {
+          "account": "fixture-a",
+          "expectedImageRefs": true,
+          "first": {
+            "status": "PASS",
+            "created": 2,
+            "resources": 1,
+            "attachments": 2,
+            "missing": []
+          },
+          "second": {
+            "status": "PASS",
+            "created": 0,
+            "unchanged": 2,
+            "attachments": 2,
+            "missing": []
+          },
+          "third": {
+            "status": "PASS",
+            "created": 0,
+            "unchanged": 2,
+            "resources": 0
+          },
+          "ledgerAttachments": 2,
+          "sourceSha": "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+          "storedSha": [
+            "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+            "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b"
+          ],
+          "storedShaMatchesSource": true,
+          "events": [
+            {
+              "id": "legacy-fixture-a-legacy-fixture-c2Vzc2lvbi0w",
+              "ledger": 12,
+              "reopened": 12
+            },
+            {
+              "id": "legacy-fixture-a-legacy-fixture-c2Vzc2lvbi0x",
+              "ledger": 14,
+              "reopened": 14
+            }
+          ],
+          "ledgerEventsMatch": true,
+          "ledgerStableAfterRepair": true,
+          "missing": []
+        },
+        {
+          "account": "fixture-b",
+          "expectedImageRefs": true,
+          "first": {
+            "status": "PASS",
+            "created": 2,
+            "resources": 1,
+            "attachments": 2,
+            "missing": []
+          },
+          "second": {
+            "status": "PASS",
+            "created": 0,
+            "unchanged": 2,
+            "attachments": 2,
+            "missing": []
+          },
+          "third": {
+            "status": "PASS",
+            "created": 0,
+            "unchanged": 2,
+            "resources": 0
+          },
+          "ledgerAttachments": 2,
+          "sourceSha": "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+          "storedSha": [
+            "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+            "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b"
+          ],
+          "storedShaMatchesSource": true,
+          "events": [
+            {
+              "id": "legacy-fixture-b-legacy-fixture-c2Vzc2lvbi0w",
+              "ledger": 12,
+              "reopened": 12
+            },
+            {
+              "id": "legacy-fixture-b-legacy-fixture-c2Vzc2lvbi0x",
+              "ledger": 14,
+              "reopened": 14
+            }
+          ],
+          "ledgerEventsMatch": true,
+          "ledgerStableAfterRepair": true,
+          "missing": []
+        }
+      ]
+    },
+    {
+      "name": "真实旧库（G14 夹具）：夹具原件 sha256 未被迁移改写",
+      "ok": true,
+      "reading": {
+        "fixture-a": "14b4a5317265681ef5039efb2b4f7b8d8be9091fa19c6969bb33ecb9293c1912",
+        "fixture-b": "cd2c5ab924b32c86c7d951e38194e34250051a95d175c3344e78d7aeafc53176"
+      }
+    },
+    {
+      "name": "产物级复跑（dist/index.js = script/migrate.ts 的真实入口）：与源码层读数一致、幂等、可重开",
+      "ok": true,
+      "reading": {
+        "sha256": "92fbf7d87f34a0aac712d0454fdb5f622365a7f606bfe78bcc65676ed21658f0",
+        "first": {
+          "status": "BLOCKED",
+          "created": 6,
+          "resources": 17,
+          "scenes": 2,
+          "missing": 31
+        },
+        "second": {
+          "status": "BLOCKED",
+          "created": 0,
+          "unchanged": 6
+        },
+        "reopened": [
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+            "ledger": 52,
+            "reopened": 52
+          },
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+            "ledger": 42,
+            "reopened": 42
+          },
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+            "ledger": 69,
+            "reopened": 69
+          },
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+            "ledger": 30,
+            "reopened": 30
+          },
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+            "ledger": 1144,
+            "reopened": 1144
+          },
+          {
+            "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+            "ledger": 717,
+            "reopened": 717
+          }
+        ]
+      }
+    }
+  ],
+  "sourceCopies": {
+    "files": [
+      "opencode-local.db",
+      "opencode-local.db-wal",
+      "opencode-local.db-shm"
+    ],
+    "copiesMatchOriginals": true,
+    "sha256": {
+      "opencode-local.db": "9e0742a49dc9a0cb41501fd5d9266a052489242dc530c3dc47c154276bab56bf",
+      "opencode-local.db-wal": "cd7f5f2a8f5a75f327d6b8e97d1da24b1c7c7830aea26093f716ac36158b469f",
+      "opencode-local.db-shm": "778864b815716f16ea0105782de2333f815e41dee1b05ac92a9a886a6a1dafe4"
+    }
+  },
+  "sqliteRuns": {
+    "first": {
+      "status": "BLOCKED",
+      "exitCode": 2,
+      "created": 6,
+      "unchanged": 0,
+      "updated": 0,
+      "resources": 17,
+      "resourceMetadataUpdated": 0,
+      "scenes": 2,
+      "attachments": 0,
+      "repairedSessions": 0,
+      "repairedAttachments": 0,
+      "interruptedTools": 0,
+      "metadataOnlyParts": 743,
+      "sourceCounts": {
+        "project": 1,
+        "workspace": 0,
+        "session": 6,
+        "message": 456,
+        "part": 1721,
+        "session_message": 0,
+        "session_share": 0,
+        "todo": 0,
+        "permission": 0
+      },
+      "sourceUnmigrated": {
+        "__drizzle_migrations": 19,
+        "account": 0,
+        "account_state": 0,
+        "control_account": 0,
+        "event": 0,
+        "event_sequence": 0
+      },
+      "sourceUnchanged": true,
+      "missing": 31,
+      "missingEntries": [
+        {
+          "kind": "resource",
+          "id": "res_041d57f2c002BYpbO4afPrxA6e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3e00823c001JkuYeP8KiIfr0l",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3f4bd7d2001XZOivYDU7Tefd1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e443de37c001PJpCIChjIbxF38",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e6c599eda001Gw3wwLqXGpVmK1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e72f98db5001vquRRmR9chnYTs",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7306572f001iPC98gMLvE0sAI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e730665eb001F1YH1TSDPHITOu",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7670dca0001U3rrpJk7RMsnSq",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e77312fd1001TdgYdxFWI5u5gL",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e773139d9001D26SS1kbx4i4tI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7731495a001vE9WFtXU1FMZ1E",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e782b7aed0018eE6r88q3qAolj",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795bf35d001AQc2vCbEyPdrLV",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795c0058001O8zbXD4Tg4Z9du",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e8332e7660018mrQVvqcxBjXAZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9109303400149G67OyEEYsbTW",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e91e1ce8b001m1a5aBSGSKlk0f",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e95fbd8f20015qnCvn0gkb6KxE",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9c198a300016ySFT2t5Zoah2i",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea5b58bf6001jB6zgwMPQk9MIv",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea618e256001Pzo0mQhCpm8oV7",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed55fd6ec001x8cKjU17B9ncTZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed57a46100024Q5GsE4k10c5CS",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed580bebb001fStKwlO2S1L9X2",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed585ccf10017kF8l7U789ost1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed58c3151001f2daF2uKt3LiSP",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_f2193a0d1001WqsOEsHYOBCVOb",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1d05d0d0019KVHOXQqRplC0e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1dd2031002EFfzcjeF10Rem1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1e7e56e002apsapNckoCuz8z",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb'"
+        }
+      ]
+    },
+    "second": {
+      "status": "BLOCKED",
+      "exitCode": 2,
+      "created": 0,
+      "unchanged": 6,
+      "updated": 0,
+      "resources": 0,
+      "resourceMetadataUpdated": 0,
+      "scenes": 0,
+      "attachments": 0,
+      "repairedSessions": 0,
+      "repairedAttachments": 0,
+      "interruptedTools": 0,
+      "metadataOnlyParts": 0,
+      "sourceCounts": {
+        "project": 1,
+        "workspace": 0,
+        "session": 6,
+        "message": 456,
+        "part": 1721,
+        "session_message": 0,
+        "session_share": 0,
+        "todo": 0,
+        "permission": 0
+      },
+      "sourceUnmigrated": {
+        "__drizzle_migrations": 19,
+        "account": 0,
+        "account_state": 0,
+        "control_account": 0,
+        "event": 0,
+        "event_sequence": 0
+      },
+      "sourceUnchanged": true,
+      "missing": 31,
+      "missingEntries": [
+        {
+          "kind": "resource",
+          "id": "res_041d57f2c002BYpbO4afPrxA6e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3e00823c001JkuYeP8KiIfr0l",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3f4bd7d2001XZOivYDU7Tefd1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e443de37c001PJpCIChjIbxF38",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e6c599eda001Gw3wwLqXGpVmK1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e72f98db5001vquRRmR9chnYTs",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7306572f001iPC98gMLvE0sAI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e730665eb001F1YH1TSDPHITOu",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7670dca0001U3rrpJk7RMsnSq",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e77312fd1001TdgYdxFWI5u5gL",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e773139d9001D26SS1kbx4i4tI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7731495a001vE9WFtXU1FMZ1E",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e782b7aed0018eE6r88q3qAolj",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795bf35d001AQc2vCbEyPdrLV",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795c0058001O8zbXD4Tg4Z9du",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e8332e7660018mrQVvqcxBjXAZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9109303400149G67OyEEYsbTW",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e91e1ce8b001m1a5aBSGSKlk0f",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e95fbd8f20015qnCvn0gkb6KxE",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9c198a300016ySFT2t5Zoah2i",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea5b58bf6001jB6zgwMPQk9MIv",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea618e256001Pzo0mQhCpm8oV7",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed55fd6ec001x8cKjU17B9ncTZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed57a46100024Q5GsE4k10c5CS",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed580bebb001fStKwlO2S1L9X2",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed585ccf10017kF8l7U789ost1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed58c3151001f2daF2uKt3LiSP",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_f2193a0d1001WqsOEsHYOBCVOb",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1d05d0d0019KVHOXQqRplC0e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1dd2031002EFfzcjeF10Rem1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1e7e56e002apsapNckoCuz8z",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb'"
+        }
+      ]
+    },
+    "third": {
+      "status": "BLOCKED",
+      "exitCode": 2,
+      "created": 0,
+      "unchanged": 6,
+      "updated": 0,
+      "resources": 0,
+      "resourceMetadataUpdated": 0,
+      "scenes": 0,
+      "attachments": 0,
+      "repairedSessions": 0,
+      "repairedAttachments": 0,
+      "interruptedTools": 0,
+      "metadataOnlyParts": 0,
+      "sourceCounts": {
+        "project": 1,
+        "workspace": 0,
+        "session": 6,
+        "message": 456,
+        "part": 1721,
+        "session_message": 0,
+        "session_share": 0,
+        "todo": 0,
+        "permission": 0
+      },
+      "sourceUnmigrated": {
+        "__drizzle_migrations": 19,
+        "account": 0,
+        "account_state": 0,
+        "control_account": 0,
+        "event": 0,
+        "event_sequence": 0
+      },
+      "sourceUnchanged": true,
+      "missing": 31,
+      "missingEntries": [
+        {
+          "kind": "resource",
+          "id": "res_041d57f2c002BYpbO4afPrxA6e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_041d57f2c0010b0j6iaVUz5YQX/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3e00823c001JkuYeP8KiIfr0l",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e3e006c28001mfQv6xHXOSgH9R.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e3f4bd7d2001XZOivYDU7Tefd1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/a-small-room-scn_e3f4bb342001v51LPj732OoAFc.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e443de37c001PJpCIChjIbxF38",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/日本合室/日本合室.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e6c599eda001Gw3wwLqXGpVmK1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/boxroom/boxroom.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e72f98db5001vquRRmR9chnYTs",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/b1-second_floor.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7306572f001iPC98gMLvE0sAI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Grand_Theater_Performance_Hall.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e730665eb001F1YH1TSDPHITOu",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Zhejiang_University_Night_Entrance.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7670dca0001U3rrpJk7RMsnSq",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Fight_Club_Gym.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e77312fd1001TdgYdxFWI5u5gL",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/abandoned-industrial-yard-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e773139d9001D26SS1kbx4i4tI",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/automated-robotic-warehouse-facility-upright.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e7731495a001vE9WFtXU1FMZ1E",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Modern_Campus_Building_and_Bicycles.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e782b7aed0018eE6r88q3qAolj",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Dramatic_Waterfall_Stage_Set.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795bf35d001AQc2vCbEyPdrLV",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Serene_Bamboo_Forest_Path.compressed.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e795c0058001O8zbXD4Tg4Z9du",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Sunrise_at_Taj_Mahal.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e8332e7660018mrQVvqcxBjXAZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e8332c1ab001RO7FrirODr6rAh.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9109303400149G67OyEEYsbTW",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e9108e61a001hHABT5d0oh0PSy.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e91e1ce8b001m1a5aBSGSKlk0f",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e91e1c20700152POifa6zfrruZ.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e95fbd8f20015qnCvn0gkb6KxE",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_e95fbcb840014dDDC20umYqO3D.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_e9c198a300016ySFT2t5Zoah2i",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/cafe_scene/咖啡馆.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea5b58bf6001jB6zgwMPQk9MIv",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Futuristic_Space_Station_Command_Center.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ea618e256001Pzo0mQhCpm8oV7",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/Robotic_Arm_Research_Laboratory.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed55fd6ec001x8cKjU17B9ncTZ",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/机械臂操作台.ply'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed57a46100024Q5GsE4k10c5CS",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-workspace-scene-scn_ed57a39a4001lxLCGjQpO7Bok2.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed580bebb001fStKwlO2S1L9X2",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/scene-scn_ed580b478001PikKHuq7jpj6fC.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed585ccf10017kF8l7U789ost1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed585c2b5001wTExxyiB83zD5u.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_ed58c3151001f2daF2uKt3LiSP",
+          "path": "/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/scenes/office-scene-scn_ed58c2826001DJC4y2SfZYFCI5.spz'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_f2193a0d1001WqsOEsHYOBCVOb",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_f21903c64002ns87kpicvjokgN/normalized/mug.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1d05d0d0019KVHOXQqRplC0e",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1cce6780010n1w2ueDlgBvyO/normalized/cube.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1dd2031002EFfzcjeF10Rem1",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1dd2031001qla7jPRGMN1neh/normalized/object.glb'"
+        },
+        {
+          "kind": "resource",
+          "id": "res_fb1e7e56e002apsapNckoCuz8z",
+          "path": "/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb",
+          "reason": "Error: ENOENT: no such file or directory, statx '/home/s18/WS/Lyapunov/History/Main/assets/objects/obj_fb1e7e56e001u8OSIUp4hZK8Dk/normalized/object.glb'"
+        }
+      ]
+    }
+  },
+  "ledgerDiffSecondVsFresh": [],
+  "freshInstallEvents": [
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+      "ledger": 52,
+      "reopened": 52
+    },
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+      "ledger": 42,
+      "reopened": 42
+    },
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+      "ledger": 69,
+      "reopened": 69
+    },
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+      "ledger": 30,
+      "reopened": 30
+    },
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+      "ledger": 1144,
+      "reopened": 1144
+    },
+    {
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+      "ledger": 717,
+      "reopened": 717
+    }
+  ],
+  "accounting": [
+    {
+      "oldId": "ses_f97827af0ffeiZo78CbrVHI9Ey",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+      "sourceMessages": 9,
+      "sourceParts": 39,
+      "sourceKinds": {
+        "text": 4,
+        "step-start": 8,
+        "reasoning": 8,
+        "tool": 12,
+        "step-finish": 7
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 52,
+      "reopenedEvents": 52,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/LyapunovCheck",
+      "textBlocks": 16,
+      "reasoningBlocks": 8,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 12,
+      "toolResults": 12,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 24
+    },
+    {
+      "oldId": "ses_f977529faffe413Cq4t1tciyJx",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+      "sourceMessages": 9,
+      "sourceParts": 36,
+      "sourceKinds": {
+        "text": 8,
+        "step-start": 8,
+        "reasoning": 5,
+        "tool": 7,
+        "step-finish": 8
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 42,
+      "reopenedEvents": 42,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/Lyapunov",
+      "textBlocks": 15,
+      "reasoningBlocks": 5,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 7,
+      "toolResults": 7,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 20
+    },
+    {
+      "oldId": "ses_f9772b2f6ffeQSCKgxYxT46WhV",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+      "sourceMessages": 14,
+      "sourceParts": 66,
+      "sourceKinds": {
+        "text": 14,
+        "step-start": 13,
+        "reasoning": 13,
+        "tool": 13,
+        "step-finish": 13
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 69,
+      "reopenedEvents": 69,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/Lyapunov",
+      "textBlocks": 27,
+      "reasoningBlocks": 13,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 13,
+      "toolResults": 13,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 40
+    },
+    {
+      "oldId": "ses_f97707c40ffe6j3NUSmSJLJ6qJ",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+      "sourceMessages": 7,
+      "sourceParts": 19,
+      "sourceKinds": {
+        "text": 6,
+        "tool": 4,
+        "step-start": 4,
+        "step-finish": 4,
+        "reasoning": 1
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 30,
+      "reopenedEvents": 30,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/Lyapunov",
+      "textBlocks": 10,
+      "reasoningBlocks": 1,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 4,
+      "toolResults": 4,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 11
+    },
+    {
+      "oldId": "ses_f976cd47dffebjmnTPpB1WmVNj",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+      "sourceMessages": 263,
+      "sourceParts": 990,
+      "sourceKinds": {
+        "text": 262,
+        "step-start": 213,
+        "reasoning": 126,
+        "tool": 177,
+        "step-finish": 212
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 1144,
+      "reopenedEvents": 1144,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/Lyapunov",
+      "textBlocks": 439,
+      "reasoningBlocks": 126,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 177,
+      "toolResults": 177,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 565
+    },
+    {
+      "oldId": "ses_f93f8ec4affekUlV6zQ7OkKSO5",
+      "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+      "sourceMessages": 154,
+      "sourceParts": 571,
+      "sourceKinds": {
+        "text": 153,
+        "step-start": 128,
+        "reasoning": 38,
+        "tool": 127,
+        "step-finish": 125
+      },
+      "ledgerHasAllMessages": true,
+      "ledgerHasAllParts": true,
+      "ledgerEvents": 717,
+      "reopenedEvents": 717,
+      "eventCountMatches": true,
+      "cwd": "/home/s18/WS/Lyapunov",
+      "textBlocks": 280,
+      "reasoningBlocks": 38,
+      "imageBlocks": 0,
+      "fileBlocks": 0,
+      "toolCalls": 127,
+      "toolResults": 127,
+      "toolCountsMatch": true,
+      "unmatchedSourceStrings": [],
+      "sourceStrings": 318
+    }
+  ],
+  "previousRoundLedger": {
+    "path": "/home/s18/WS/Lyapunov/Dev/.runtime/lane-env33/migrate-new/dsh/migrations/lyaup-old/ledger.json",
+    "sessions": {
+      "ses_f97827af0ffeiZo78CbrVHI9Ey": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+      "ses_f977529faffe413Cq4t1tciyJx": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+      "ses_f9772b2f6ffeQSCKgxYxT46WhV": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+      "ses_f97707c40ffe6j3NUSmSJLJ6qJ": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+      "ses_f976cd47dffebjmnTPpB1WmVNj": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+      "ses_f93f8ec4affekUlV6zQ7OkKSO5": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081"
+    }
+  },
+  "attachments": {
+    "accounts": [
+      {
+        "account": "fixture-a",
+        "expectedImageRefs": true,
+        "first": {
+          "status": "PASS",
+          "created": 2,
+          "resources": 1,
+          "attachments": 2,
+          "missing": []
+        },
+        "second": {
+          "status": "PASS",
+          "created": 0,
+          "unchanged": 2,
+          "attachments": 2,
+          "missing": []
+        },
+        "third": {
+          "status": "PASS",
+          "created": 0,
+          "unchanged": 2,
+          "resources": 0
+        },
+        "ledgerAttachments": 2,
+        "sourceSha": "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+        "storedSha": [
+          "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+          "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b"
+        ],
+        "storedShaMatchesSource": true,
+        "events": [
+          {
+            "id": "legacy-fixture-a-legacy-fixture-c2Vzc2lvbi0w",
+            "ledger": 12,
+            "reopened": 12
+          },
+          {
+            "id": "legacy-fixture-a-legacy-fixture-c2Vzc2lvbi0x",
+            "ledger": 14,
+            "reopened": 14
+          }
+        ],
+        "ledgerEventsMatch": true,
+        "ledgerStableAfterRepair": true,
+        "missing": []
+      },
+      {
+        "account": "fixture-b",
+        "expectedImageRefs": true,
+        "first": {
+          "status": "PASS",
+          "created": 2,
+          "resources": 1,
+          "attachments": 2,
+          "missing": []
+        },
+        "second": {
+          "status": "PASS",
+          "created": 0,
+          "unchanged": 2,
+          "attachments": 2,
+          "missing": []
+        },
+        "third": {
+          "status": "PASS",
+          "created": 0,
+          "unchanged": 2,
+          "resources": 0
+        },
+        "ledgerAttachments": 2,
+        "sourceSha": "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+        "storedSha": [
+          "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b",
+          "d54374b6e389cb82c32b0300487ee7bfb77c7e205ed2de12f9535611d8bcdd0b"
+        ],
+        "storedShaMatchesSource": true,
+        "events": [
+          {
+            "id": "legacy-fixture-b-legacy-fixture-c2Vzc2lvbi0w",
+            "ledger": 12,
+            "reopened": 12
+          },
+          {
+            "id": "legacy-fixture-b-legacy-fixture-c2Vzc2lvbi0x",
+            "ledger": 14,
+            "reopened": 14
+          }
+        ],
+        "ledgerEventsMatch": true,
+        "ledgerStableAfterRepair": true,
+        "missing": []
+      }
+    ],
+    "fixtureHashes": {
+      "fixture-a": "14b4a5317265681ef5039efb2b4f7b8d8be9091fa19c6969bb33ecb9293c1912",
+      "fixture-b": "cd2c5ab924b32c86c7d951e38194e34250051a95d175c3344e78d7aeafc53176"
+    },
+    "fixtureUnchanged": true
+  },
+  "dist": {
+    "sha256": "92fbf7d87f34a0aac712d0454fdb5f622365a7f606bfe78bcc65676ed21658f0",
+    "first": {
+      "status": "BLOCKED",
+      "created": 6,
+      "resources": 17,
+      "scenes": 2,
+      "missing": 31
+    },
+    "second": {
+      "status": "BLOCKED",
+      "created": 0,
+      "unchanged": 6
+    },
+    "reopened": [
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5NzgyN2FmMGZmZWlabzc4Q2JyVkhJOUV5",
+        "ledger": 52,
+        "reopened": 52
+      },
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5Nzc1MjlmYWZmZTQxM0NxNHQxdGNpeUp4",
+        "ledger": 42,
+        "reopened": 42
+      },
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcyYjJmNmZmZVFTQ0tneFl4VDQ2V2hW",
+        "ledger": 69,
+        "reopened": 69
+      },
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5NzcwN2M0MGZmZTZqM05VU21TSkxKNnFK",
+        "ledger": 30,
+        "reopened": 30
+      },
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5NzZjZDQ3ZGZmZWJqbW5UUHBCMVdtVk5q",
+        "ledger": 1144,
+        "reopened": 1144
+      },
+      {
+        "id": "legacy-developer-lyaup-old-c2VzX2Y5M2Y4ZWM0YWZmZWtVbFY2elE3T2tLU081",
+        "ledger": 717,
+        "reopened": 717
+      }
+    ]
+  },
+  "finishedAt": "2026-09-26T04:42:24.125Z",
+  "passed": 32,
+  "failed": 0
+}

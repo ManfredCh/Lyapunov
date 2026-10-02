@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "composition": "browser-root-owner",
+  "patches": {
+    "dsh-browser-use-recovery.patch": "0636c005d87dca92510ef063e2de2937487f7736de91aef70553d4d2fc4917bb",
+    "dsh-browser-use-runtime-diagnostics.patch": "ee245e9a111a5cb54648e2f8f9c5e5a1fe8f5e31a25e4bcbf00aff760e1766f9",
+    "dsh-browser-root-owner.patch": "095979700cccdc87966a96fa06fd8bab8bb694a3f10f88ed2b314f0d694a259a"
+  },
+  "postimages": [
+    {
+      "path": "packages/experimental/browser-use-chrome-devtools-mcp/package.json",
+      "sha256": "0bf3acd5890e9e3aacbc612417f916ab5d219bf8b3cf847975695f48869f99bd"
+    },
+    {
+      "path": "packages/experimental/browser-use-chrome-devtools-mcp/src/index.ts",
+      "sha256": "7f70a216e76f614fa927ad57b6b88ff87125c6ca476d231221d20ceeaf64a4a8"
+    },
+    {
+      "path": "packages/experimental/browser-use-chrome-devtools-mcp/src/owner-server.ts",
+      "sha256": "4f3b291360db1c705fc0c0ce76d63fedf1a00312b64ae4659a44839df883f6d3"
+    },
+    {
+      "path": "packages/experimental/browser-use-chrome-devtools-mcp/src/owner-state.ts",
+      "sha256": "1f238f3a243ec33b5d7a8050b0e8c897ba284d471bdecced73b746f20fecc57a"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/src/index.ts",
+      "sha256": "c7ba92b89f38d28bfa2714ff348a51411b3ac34c25999e437625675ec239a646"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/src/mcp.ts",
+      "sha256": "9baf3f5e7c7c3f0a440c2fa6c897b690b9db8723cf14d5346d7aeb5ab060e3f8"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/src/root-state.ts",
+      "sha256": "d12935ece0a147a367226bd1dbbd2e2e85e429df8e9803e1a95f7be2e40402e9"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs",
+      "sha256": "2b174a77fca9db825bb7844995c6489787503e6fbcb4407eacfcd4d0050170a0"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/tests/mcp.spec.ts",
+      "sha256": "074b7a3462baba13117972331c91a062b95b63844bb934ec71792f4a55c92d4b"
+    },
+    {
+      "path": "packages/experimental/browser-use-runtime/tests/resources.spec.ts",
+      "sha256": "9cd987327745661a9c5228e9d31a4dcb96ef50cd1ee28f1b197f6a2b254d7228"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/connection.ts",
+      "sha256": "682248b61371953d40fccee236ba16c1de02cd6ad4ea90e41275332957397d6c"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/index.ts",
+      "sha256": "bff7afbabf4f9d6487fde0670b4de8ebfd1325da909bdc29ded8df2834059871"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/tools.ts",
+      "sha256": "5d7f5a936dd718edbdb15314279c0cf73d03d2781fb93d225e1fed755e49ba6b"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/reconnect.spec.ts",
+      "sha256": "4d1f954bff3f1c4413b88e2ecfb86301509a2b87dca71245c0c622b24d33fb51"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<mujoco model="robot-glb-ktx2">
+  <!-- 机器人文档（MJCF）：可视图元是一个 `.glb` 网格，而那份 `.glb` 自带 KTX2（`KHR_texture_basisu`）贴图。
+       本文件是**手写的最小真文档**（不是从别处拷来的件），它引用的网格 `cube-ktx2-etc1s.glb` 是真编码器产物，
+       见同目录 PROVENANCE.md。`geom` 故意**不声明** `material`：这样 glTF 自带的材质/贴图不被 MJCF 调制色替换，
+       "贴图有没有挂上"才是可读的（声明了 material 的那种文档另有一份 `robot-ktx2-material.xml`）。 -->
+  <compiler angle="radian" meshdir="." />
+  <asset>
+    <mesh name="shell" file="cube-ktx2-etc1s.glb" />
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 0.1">
+      <joint name="yaw" type="hinge" axis="0 0 1" />
+      <geom name="shell_visual" type="mesh" mesh="shell" contype="0" conaffinity="0" group="1" />
+      <geom name="base_collision" type="box" size="0.05 0.05 0.05" />
+    </body>
+  </worldbody>
+</mujoco>

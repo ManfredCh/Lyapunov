@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+[ "$(uname -s)" = Linux ] || { echo "LyapunovDev 这个入口只用于 Linux" >&2; exit 2; }
+exec node "$ROOT/script/developer.ts" "$@"

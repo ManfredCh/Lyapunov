@@ -1,0 +1,220 @@
+diff --git a/packages/api/gateway/package.json b/packages/api/gateway/package.json
+index 985db89e9..bc2515b37 100644
+--- a/packages/api/gateway/package.json
++++ b/packages/api/gateway/package.json
+@@ -27,7 +27,11 @@
+       "default": "./lib/types/types.js"
+     },
+     "./src/*": "./src/*",
+-    "./package.json": "./package.json"
++    "./package.json": "./package.json",
++    "./node": {
++      "types": "./lib/types/node.d.ts",
++      "default": "./lib/node.js"
++    }
+   },
+   "dsh": {
+     "client": {
+@@ -47,7 +51,8 @@
+     "lib/index.js",
+     "lib/client.js",
+     "lib/types/**/*.js",
+-    "lib/types/**/*.d.ts"
++    "lib/types/**/*.d.ts",
++    "lib/node.js"
+   ],
+   "license": "MIT",
+   "dependencies": {
+diff --git a/packages/api/gateway/src/client/index.ts b/packages/api/gateway/src/client/index.ts
+index 853fc4242..7712cd3b6 100644
+--- a/packages/api/gateway/src/client/index.ts
++++ b/packages/api/gateway/src/client/index.ts
+@@ -132,12 +132,17 @@ declare module '@deepseek-ai/cordis' {
+ /** Required Client services: the Typert registry and the existing Connection carrier. */
+ export const inject = ['typert', 'connection']
+
++/** Optional Node socket construction; all logical Remote streams still use the native mux. */
++export interface ClientRemoteOptions {
++  readonly createWebSocket?: (url: string) => WebSocket
++}
++
+ /**
+  * Install the typed Client Remote service.
+  * @param ctx - Client Cordis root.
+  */
+-export function apply(ctx: Context): void {
+-  new ClientRemoteService(ctx)
++export function apply(ctx: Context, options: ClientRemoteOptions = {}): void {
++  new ClientRemoteService(ctx, options)
+ }
+
+ class ClientRemoteService extends Service implements ClientRemote {
+@@ -145,12 +150,13 @@ class ClientRemoteService extends Service implements ClientRemote {
+   private readonly connection: ConnectionHandle
+   private readonly namespaces = new Map<string, RemoteNamespaceHandle>()
+   private hostFacts: RemoteHostFacts | undefined
+-  private readonly streams = new RemoteStreamMuxClient()
++  private readonly streams: RemoteStreamMuxClient
+   private readonly events: ClientRemoteEvents
+   private mutations = Promise.resolve()
+
+-  constructor(ctx: Context) {
++  constructor(ctx: Context, options: ClientRemoteOptions) {
+     super(ctx, 'remote')
++    this.streams = new RemoteStreamMuxClient(options.createWebSocket)
+     this.ownerCtx = ctx
+     const connection = ctx.get('connection') as ConnectionHandle
+     this.connection = connection
+diff --git a/packages/api/gateway/src/client/stream-client.ts b/packages/api/gateway/src/client/stream-client.ts
+index 3310cfd39..bcfd8f6da 100644
+--- a/packages/api/gateway/src/client/stream-client.ts
++++ b/packages/api/gateway/src/client/stream-client.ts
+@@ -41,6 +41,9 @@ export class RemoteStreamMuxClient {
+   private running = false
+   private disposed = false
+
++  /** Node shells may provide an authenticated socket factory; the mux protocol stays shared. */
++  constructor(private readonly createWebSocket: (url: string) => WebSocket = url => new WebSocket(url)) {}
++
+   /** Ensure a physical attempt exists, following the current attempt once if needed. */
+   start(): void {
+     if (this.disposed) return
+@@ -140,7 +143,7 @@ export class RemoteStreamMuxClient {
+   }
+
+   private connect(): Promise<WebSocket> {
+-    const socket = new WebSocket(remoteStreamUrl())
++    const socket = this.createWebSocket(remoteStreamUrl())
+     const connecting = new Promise<WebSocket>((resolve, reject) => {
+       let settled = false
+       const rejectCandidate = (error: Error): void => {
+diff --git a/packages/api/gateway/tsconfig.client.json b/packages/api/gateway/tsconfig.client.json
+index 57ebeae4c..cf10ebe90 100644
+--- a/packages/api/gateway/tsconfig.client.json
++++ b/packages/api/gateway/tsconfig.client.json
+@@ -13,7 +13,8 @@
+     "src/client/snapshot-stream.ts",
+     "src/client/stream-client.ts",
+     "src/remote-error-codes.ts",
+-    "src/stream-protocol.ts"
++    "src/stream-protocol.ts",
++    "src/node.ts"
+   ],
+   "references": [
+     {
+diff --git a/packages/api/gateway/tsdown.config.ts b/packages/api/gateway/tsdown.config.ts
+index 2f199f0d1..51864742d 100644
+--- a/packages/api/gateway/tsdown.config.ts
++++ b/packages/api/gateway/tsdown.config.ts
+@@ -1,3 +1,5 @@
+ import { clientBundle } from '../../client/tsdown.client.ts'
+
+-export default clientBundle('@deepseek-ai/dsh-api-gateway', ['lib/types/index.js'])
++export default clientBundle('@deepseek-ai/dsh-api-gateway', ['lib/types/index.js'], {
++  companions: [{ entry: ['lib/types/node.js'], outDir: 'lib', format: ['esm'], platform: 'node', target: 'es2024', fixedExtension: false, dts: false, clean: false }],
++})
+diff --git a/packages/client/connection/package.json b/packages/client/connection/package.json
+index 4732dcdd7..6e08a2e9d 100644
+--- a/packages/client/connection/package.json
++++ b/packages/client/connection/package.json
+@@ -23,7 +23,11 @@
+       "default": "./lib/client.js"
+     },
+     "./src/*": "./src/*",
+-    "./package.json": "./package.json"
++    "./package.json": "./package.json",
++    "./node": {
++      "types": "./lib/types/node.d.ts",
++      "default": "./lib/node.js"
++    }
+   },
+   "dsh": {
+     "client": {
+@@ -41,7 +45,8 @@
+   "files": [
+     "lib/index.js",
+     "lib/client.js",
+-    "lib/types/**/*.d.ts"
++    "lib/types/**/*.d.ts",
++    "lib/node.js"
+   ],
+   "peerDependencies": {
+     "@deepseek-ai/cordis": "workspace:^"
+diff --git a/packages/client/connection/src/client/index.ts b/packages/client/connection/src/client/index.ts
+index 24deda96a..f58069f0a 100644
+--- a/packages/client/connection/src/client/index.ts
++++ b/packages/client/connection/src/client/index.ts
+@@ -105,6 +105,13 @@ interface ClientTransportGlobal {
+   __DSH_CONNECTION_RECOVERY__?: unknown
+ }
+
++/** Explicit carrier inputs for a Node shell; omitted values preserve browser boot behavior. */
++export interface ClientConnectionOptions {
++  readonly origin?: string
++  readonly transport?: ClientTransportHooks
++  readonly recovery?: ConnectionRecoveryConfig
++}
++
+ /**
+  * The ctx.connection service API. API Gateway supplies generation readiness
+  * and reset callbacks; Connection stays independent of downstream domain state.
+@@ -179,12 +186,14 @@ function watchBrowserNetwork(controller: ConnectionController): () => void {
+  * Client plugin body: pick physical carriers by page mode and provide ctx.connection.
+  * @param ctx - client cordis context.
+  */
+-export function apply(ctx: Context): void {
+-  const pageLocation = typeof location === 'undefined' ? undefined : location
++export function apply(ctx: Context, options: ClientConnectionOptions = {}): void {
++  const pageLocation = options.origin === undefined
++    ? typeof location === 'undefined' ? undefined : location
++    : new URL(options.origin)
+   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
+   const fixtureRpc = fixture ? createFixtureConnectionRpc() : undefined
+-  const transport = (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__
+-  const recovery = resolveConnectionConfig((globalThis as ClientTransportGlobal).__DSH_CONNECTION_RECOVERY__)
++  const transport = options.transport ?? (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__
++  const recovery = resolveConnectionConfig(options.recovery ?? (globalThis as ClientTransportGlobal).__DSH_CONNECTION_RECOVERY__)
+   const rpc = fixtureRpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
+   let generationSource: ConnectionGenerationSource | undefined
+   let owner: ConnectionOwner | undefined
+diff --git a/packages/client/connection/tsconfig.client.json b/packages/client/connection/tsconfig.client.json
+index 4266a1def..104793099 100644
+--- a/packages/client/connection/tsconfig.client.json
++++ b/packages/client/connection/tsconfig.client.json
+@@ -15,7 +15,8 @@
+     "src/client/rpc.ts",
+     "src/loopback-hostname.ts",
+     "src/recovery-config.ts",
+-    "src/rpc.ts"
++    "src/rpc.ts",
++    "src/node.ts"
+   ],
+   "references": [
+     {
+diff --git a/packages/client/connection/tsdown.config.ts b/packages/client/connection/tsdown.config.ts
+index 69cd7ce36..29e901d51 100644
+--- a/packages/client/connection/tsdown.config.ts
++++ b/packages/client/connection/tsdown.config.ts
+@@ -1,3 +1,5 @@
+ import { clientBundle } from '../tsdown.client.ts'
+
+-export default clientBundle('@deepseek-ai/dsh-client-connection', ['lib/types/index.js'])
++export default clientBundle('@deepseek-ai/dsh-client-connection', ['lib/types/index.js'], {
++  companions: [{ entry: ['lib/types/node.js'], outDir: 'lib', format: ['esm'], platform: 'node', target: 'es2024', fixedExtension: false, dts: false, clean: false }],
++})
+diff --git a/packages/client/connection/src/node.ts b/packages/client/connection/src/node.ts
+new file mode 100644
+index 000000000..ed16576b7
+--- /dev/null
++++ b/packages/client/connection/src/node.ts
+@@ -0,0 +1,2 @@
++/** Node-importable face of the same Connection implementation used by the Web client. */
++export * from './client/index.ts'
+diff --git a/packages/api/gateway/src/node.ts b/packages/api/gateway/src/node.ts
+new file mode 100644
+index 000000000..47f46053c
+--- /dev/null
++++ b/packages/api/gateway/src/node.ts
+@@ -0,0 +1,2 @@
++/** Node-importable face of the same generated Remote and stream implementation as the Web client. */
++export * from './client/index.ts'

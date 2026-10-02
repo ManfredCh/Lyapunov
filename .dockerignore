@@ -1,0 +1,19 @@
+# 仓库根构建上下文的**兜底排除**：只在 legacy builder（不认按 Dockerfile 命名的 ignore）下生效。
+# 本文件不参与任何镜像的白名单裁剪，只在回落路径上兜住仓库级噪声：
+# 产品面现存的 Dockerfile 是 distribution/providers/graspgenx/{Dockerfile.worker,Dockerfile.assets}，
+# 它们是**随产品分发、由用户自建 worker** 的可选 Provider 定义，各有同目录的 .dockerignore。
+# （服务端 API 的 Dockerfile 及 services/lyapunov-api/Dockerfile.dockerignore 已于 2026-09-26
+# 随服务端源码移出本仓库，归 LyapunovOM backend/dev-server/。）
+#
+# 全部写成**路径锚定**（带结尾 `/`），只匹配仓库根这一层：
+# materials/、packs/、.runtime/、workspace/ 等同名目录若出现在 packages/* 下是产品资源与内置素材，
+# 不会被误伤（本仓实测：packages/foo/materials/h 与 nested/.runtime/j 均保留在上下文中）。
+.runtime/
+.baseline/
+.upstream/
+.git/
+packs/
+materials/
+bugfixHistory/
+lane-*/
+workspace/

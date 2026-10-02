@@ -1,0 +1,37 @@
+{
+  "name": "@lyapunov/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./generation": "./src/generation.ts",
+    "./generation-approval": "./src/generation-approval.ts",
+    "./world-generation-contract": "./src/world-generation-contract.ts",
+    "./search": "./src/search.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-credentials": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-user-questions": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-web": "0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-credentials": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-user-questions": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-web": {
+      "optional": true
+    }
+  }
+}

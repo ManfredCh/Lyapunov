@@ -1,0 +1,1118 @@
+diff --git a/packages/experimental/browser-use-runtime/src/index.ts b/packages/experimental/browser-use-runtime/src/index.ts
+index 131c20f68f..7fb1f5dc0d 100644
+--- a/packages/experimental/browser-use-runtime/src/index.ts
++++ b/packages/experimental/browser-use-runtime/src/index.ts
+@@ -13,6 +13,31 @@ export interface OwnedSessionResource<T> {
+   value: T
+   /** Stop admission, interrupt pending operations, and await resource shutdown. */
+   close: () => Promise<void>
++  /**
++   * Rebuild this owner's provider connection in place while retaining the resource
++   * entry, its tool registrations, and exclusive ownership. Omit a provider that has
++   * no connection to rebuild. The failed operation is never replayed.
++   * @returns settlement after the replacement connection is ready.
++   */
++  recycle?: () => Promise<void>
++  /**
++   * Release this owner's connection and await the underlying process without
++   * starting a replacement; {@link recycle} then mounts a fresh connection.
++   * Cancellation awaits this so "canceled" never reports a process as stopped
++   * while it is still alive. Concurrent calls share one release.
++   * @returns settlement after the connection and its process are released.
++   */
++  release?: () => Promise<void>
++}
++
++/** One Session's automatic-rebuild budget after consecutive provider failures. */
++export interface SessionRebuildHealth {
++  /** Consecutive reported browser failures not yet cleared by a successful operation. */
++  readonly failures: number
++  /** Message from the most recent reported failure or failed rebuild. */
++  readonly lastReason?: string
++  /** Whether the budget is spent and automatic rebuilds have stopped. */
++  readonly suspended: boolean
+ }
+ 
+ /** Resource creation and attachment ownership selected by one provider. */
+@@ -21,6 +46,14 @@ export interface SessionResourceOptions<T> {
+   label: string
+   /** Reserve one existing browser for at most one live Session. */
+   exclusive: boolean
++  /**
++   * Consecutive reported provider failures for one Session that may start a
++   * replacement connection before automatic rebuilds stop. Omission keeps
++   * rebuilds unbounded. The cap exists for providers whose replacement can fail
++   * the same way as the failure it replaces; a successful operation or a new
++   * activation starts a fresh budget.
++   */
++  rebuildBudget?: number
+   /**
+    * Acquire one resource; reject only after rolling back partial acquisition.
+    * @param agent - exact live owner of this acquisition.
+@@ -35,6 +68,10 @@ interface Entry<T> {
+   ready: Promise<OwnedSessionResource<T>>
+   tail: Promise<void>
+   closing?: Promise<void>
++  /** Consecutive reported failures for this Session, cleared by a successful operation. */
++  failures: number
++  /** Message from the most recent reported failure or failed rebuild. */
++  lastReason?: string
+ }
+ 
+ /** Stop a caller's wait while retaining handlers on the resource owner's work. */
+@@ -61,13 +98,20 @@ export class SessionResources<T> {
+   private readonly entries = new Map<Agent, Entry<T>>()
+   private readonly ownerCleanups = new Map<Agent, () => Promise<void>>()
+   private readonly disposedOwners = new WeakSet<Agent>()
++  private readonly recycling = new Map<Agent, Promise<void>>()
++  private readonly releasing = new Map<Agent, Promise<void>>()
+   private disposing: Promise<void> | undefined
+ 
+   /**
+    * @param ctx - provider context with the live Agent registry.
+    * @param options - provider-owned acquisition and attachment policy.
+    */
+-  constructor(private readonly ctx: Context, private readonly options: SessionResourceOptions<T>) {}
++  constructor(private readonly ctx: Context, private readonly options: SessionResourceOptions<T>) {
++    const budget = options.rebuildBudget
++    if (budget !== undefined && (!Number.isInteger(budget) || budget < 1)) {
++      throw new Error(`${options.label}: rebuildBudget must be a positive integer`)
++    }
++  }
+ 
+   /**
+    * Check admission without reserving or acquiring a browser.
+@@ -95,6 +139,100 @@ export class SessionResources<T> {
+     return resource.value
+   }
+ 
++  /**
++   * Rebuild one live Session's provider connection without releasing its ownership.
++   * Concurrent callers share one rebuild, so a burst of failures or cancellations
++   * cannot start several replacement providers for the same Session.
++   * @param agent - exact live resource owner.
++   * @returns settlement after the replacement connection is ready, or immediately
++   *   when the owner has no entry or its provider declares no rebuild.
++   */
++  recycle(agent: Agent): Promise<void> {
++    const pending = this.recycling.get(agent)
++    if (pending !== undefined) return pending
++    const entry = this.entries.get(agent)
++    if (entry === undefined) return Promise.resolve()
++    const task = entry.ready.catch(() => undefined).then(async (resource) => {
++      if (resource?.recycle !== undefined) await resource.recycle()
++    }).finally(() => {
++      if (this.recycling.get(agent) === task) this.recycling.delete(agent)
++    })
++    this.recycling.set(agent, task)
++    return task
++  }
++
++  /**
++   * Release one live Session's provider connection without starting a
++   * replacement, and await the release. Concurrent callers share one release.
++   * @param agent - exact live resource owner.
++   * @returns settlement after the connection and its process are released, or
++   *   immediately when the owner has no entry or its provider declares no release.
++   */
++  release(agent: Agent): Promise<void> {
++    const pending = this.releasing.get(agent)
++    if (pending !== undefined) return pending
++    const entry = this.entries.get(agent)
++    if (entry === undefined) return Promise.resolve()
++    const task = entry.ready.catch(() => undefined).then(async (resource) => {
++      if (resource?.release !== undefined) await resource.release()
++    }).finally(() => {
++      if (this.releasing.get(agent) === task) this.releasing.delete(agent)
++    })
++    this.releasing.set(agent, task)
++    return task
++  }
++
++  /**
++   * Record one provider-observed browser failure and rebuild this Session's
++   * connection while its budget allows. A burst of reports shares one rebuild,
++   * and a failed rebuild is counted too, so a resource whose replacements keep
++   * failing stops instead of starting a process every round.
++   * @param agent - exact live resource owner.
++   * @param reason - provider message describing what failed.
++   * @returns the health after this report, or undefined when the owner has no entry.
++   */
++  reportFailure(agent: Agent, reason: string): SessionRebuildHealth | undefined {
++    const entry = this.entries.get(agent)
++    if (entry === undefined) return undefined
++    entry.failures += 1
++    entry.lastReason = reason
++    const budget = this.options.rebuildBudget
++    if (budget !== undefined && entry.failures >= budget) {
++      this.ctx.logger.warn(`${this.options.label}: automatic browser rebuild stopped after ${entry.failures} consecutive failures: ${reason}; a new Session activation can probe again`)
++      return this.healthOf(entry)
++    }
++    void this.recycle(agent).catch((error: unknown) => {
++      const message = error instanceof Error ? error.message : String(error)
++      entry.failures += 1
++      entry.lastReason = `connection rebuild failed: ${message}`
++      this.ctx.logger.warn(`${this.options.label}: automatic browser rebuild failed (${entry.failures}): ${message}`)
++    })
++    return this.healthOf(entry)
++  }
++
++  /**
++   * Clear a Session's consecutive-failure budget after a successful operation.
++   * Connection establishment and tool discovery must not call this: only an
++   * actual provider operation's success shows the resource works.
++   * @param agent - exact live resource owner.
++   */
++  reportSuccess(agent: Agent): void {
++    const entry = this.entries.get(agent)
++    if (entry === undefined) return
++    entry.failures = 0
++    delete entry.lastReason
++  }
++
++  /**
++   * Read one Session's current automatic-rebuild health.
++   * @param agent - exact live resource owner.
++   * @returns the health, or undefined before this Session acquired a resource.
++   */
++  health(agent: Agent): SessionRebuildHealth | undefined {
++    const entry = this.entries.get(agent)
++    return entry === undefined ? undefined : this.healthOf(entry)
++  }
++
+   /**
+    * Run after earlier operations on this Session settle; other Sessions proceed independently.
+    * Cancellation stops this caller's acquisition wait without canceling Session-owned initialization.
+@@ -117,15 +255,61 @@ export class SessionResources<T> {
+         this.ctx.logger.warn(`${this.options.label}: browser cleanup during Session cancellation failed: ${String(error)}`)
+       })
+     }
++    // A user or parent cancellation must also end the provider's underlying work,
++    // not merely reject this caller: closing the connection is what interrupts an
++    // upstream call that ignores its signal. This caller does not report
++    // settlement until that release settles, so a canceled operation never claims
++    // a process stopped that is still alive. A disposed owner is already closing.
++    // `started` is this call's own execution slot: a call still queued behind an
++    // earlier one owns no connection, so its cancellation must not release the
++    // connection that earlier call still owns.
++    let started = false
++    let interrupted: Promise<void> | undefined
++    const releaseOnAbort = (): void => {
++      if (!started || entry.closing !== undefined) return
++      const released = this.release(agent)
++      interrupted = released.catch((error: unknown) => {
++        throw new Error(
++          `${this.options.label}: the canceled browser operation could not confirm that its owned connection and process were released (${error instanceof Error ? error.message : String(error)})`,
++          { cause: error },
++        )
++      })
++      // Restore this Session's connection in the background so its browser tools
++      // stay available; the canceled caller waits only for the release. A refused
++      // release keeps whatever the provider still owns, so a replacement is
++      // requested only after the release itself settles.
++      void released.then(
++        () => this.recycle(agent).catch((error: unknown) => {
++          this.ctx.logger.warn(`${this.options.label}: restoring the browser connection after cancellation failed: ${String(error)}`)
++        }),
++        () => {},
++      )
++    }
+     signal.addEventListener('abort', releaseDisposed, { once: true })
++    signal.addEventListener('abort', releaseOnAbort, { once: true })
+     const task = entry.tail.then(async () => {
+       combined.throwIfAborted()
+-      const resource = await awaitOperation(entry.ready, combined)
++      const pendingRecycle = this.recycling.get(agent)
++      if (pendingRecycle !== undefined) await pendingRecycle.catch(() => undefined)
+       combined.throwIfAborted()
+-      const result = await operation(resource.value, combined)
++      const resource = await awaitOperation(entry.ready, combined)
+       combined.throwIfAborted()
+-      return result
+-    }).finally(() => { signal.removeEventListener('abort', releaseDisposed) })
++      started = true
++      try {
++        const result = await operation(resource.value, combined)
++        combined.throwIfAborted()
++        return result
++      } finally {
++        started = false
++        // Await the release a cancellation started during this operation. A
++        // rejection replaces the plain cancellation, so a refused release is
++        // reported as a failure instead of a clean stop.
++        if (interrupted !== undefined) await interrupted
++      }
++    }).finally(() => {
++      signal.removeEventListener('abort', releaseDisposed)
++      signal.removeEventListener('abort', releaseOnAbort)
++    })
+     // The queue tracks settlement independently of a caller observing its error.
+     entry.tail = task.then(() => {}, () => {})
+     return task
+@@ -175,6 +359,7 @@ export class SessionResources<T> {
+         throw error
+       }),
+       tail: Promise.resolve(),
++      failures: 0,
+     }
+     // Acquisition can outlive every canceled caller; later consumers still receive its failure.
+     void entry.ready.catch(() => {})
+@@ -182,10 +367,25 @@ export class SessionResources<T> {
+     return entry
+   }
+ 
++  private healthOf(entry: Entry<T>): SessionRebuildHealth {
++    const budget = this.options.rebuildBudget
++    return {
++      failures: entry.failures,
++      ...entry.lastReason === undefined ? {} : { lastReason: entry.lastReason },
++      suspended: budget !== undefined && entry.failures >= budget,
++    }
++  }
++
+   private closeEntry(agent: Agent, entry: Entry<T>): Promise<void> {
+     return entry.closing ??= Promise.resolve().then(async () => {
+       entry.controller.abort(new Error(`${this.options.label}: Session browser is closing`))
+-      const resource = await entry.ready.catch(() => undefined)
++      // A rebuild started before this close must settle before the scope is disposed,
++      // so a replacement connection cannot be mounted onto a disposed owner.
++      const [resource] = await Promise.all([
++        entry.ready.catch(() => undefined),
++        this.recycling.get(agent)?.catch(() => undefined),
++        this.releasing.get(agent)?.catch(() => undefined),
++      ])
+       try {
+         await resource?.close()
+       } finally {
+diff --git a/packages/experimental/browser-use-runtime/src/mcp.ts b/packages/experimental/browser-use-runtime/src/mcp.ts
+index 51dec8eade..fdb6f0a334 100644
+--- a/packages/experimental/browser-use-runtime/src/mcp.ts
++++ b/packages/experimental/browser-use-runtime/src/mcp.ts
+@@ -5,9 +5,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import Schema from '@deepseek-ai/schemastery'
+ import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
+ import * as McpClient from '@deepseek-ai/dsh-mcp-client'
++import type { ConnectionDisposal } from '@deepseek-ai/dsh-mcp-client'
+ import { createScope } from '@deepseek-ai/dsh-scope'
+ import type { Scope } from '@deepseek-ai/dsh-scope'
+ import { SessionResources } from './index.ts'
++import type { SessionRebuildHealth } from './index.ts'
+ import type {} from '@deepseek-ai/dsh-browser-use'
+ import type {} from '@deepseek-ai/dsh-tools'
+ import type {} from '@deepseek-ai/dsh-system-prompt'
+@@ -37,6 +39,56 @@ export interface BrowserMcpAttachConfig {
+ /** Fixed launch or attachment choice for one MCP browser provider. */
+ export type BrowserMcpConfig = BrowserMcpLaunchConfig | BrowserMcpAttachConfig
+ 
++/**
++ * A live Chrome DevTools MCP server reporting that its browser target is gone.
++ * MCP transport failures (a dead server process, a closed socket) are deliberately
++ * excluded: the provider must not silently replace a server that exited. Only a
++ * still-live server reporting a closed browser target is recyclable.
++ */
++const BROWSER_TARGET_FAILURE = /Target closed|Target\.setDiscoverTargets|Protocol error \([^)]*Target|Target page, context or browser has been closed|Browser closed/u
++
++/**
++ * Recognize one browser operation failure caused by a closed browser target.
++ * @param error - value thrown by the provider tool call.
++ * @returns the provider's message when the browser target is gone, otherwise undefined.
++ */
++export function browserTargetFailureReason(error: unknown): string | undefined {
++  const message = error instanceof Error ? error.message : String(error)
++  return BROWSER_TARGET_FAILURE.test(message) ? message : undefined
++}
++
++/**
++ * Consecutive browser failures for one live Session before automatic rebuilds
++ * stop. Fixed rather than configurable: the cap only bounds the case where the
++ * MCP server starts but every browser target it reaches is already closed, so
++ * each replacement process is doomed the same way and no deployment tuning
++ * would help. A successful browser operation or a new activation starts over.
++ */
++const BROWSER_REBUILD_BUDGET = 3
++
++/** A browser failure already observed and budgeted by this provider. */
++class BrowserConnectionError extends Error {}
++
++/**
++ * Require the MCP connection owner to confirm transport closure before this
++ * Session sheds ownership of its browser connection and process. Cordis fiber
++ * teardown contains effect failures, and the connection's own dispose resolves
++ * even when closure is unconfirmed, so only the owner's recorded outcome
++ * settles release.
++ * @param outcome - the connection owner's recorded disposal outcome.
++ * @param name - provider name for the failure message.
++ * @returns nothing when the owner confirmed transport closure.
++ * @throws {BrowserConnectionError} when closure is unverified; the caller must
++ *   keep the previous owner and must not start a replacement beside it.
++ */
++export function requireVerifiedRelease(outcome: ConnectionDisposal | undefined, name: string): void {
++  if (outcome?.closed === true) return
++  const detail = outcome?.reason ?? 'the MCP connection owner recorded no disposal outcome'
++  throw new BrowserConnectionError(
++    `${name}: this Session's browser connection and process could not be confirmed released (${detail}); the previous connection stays owned by this Session and no replacement was started.`,
++  )
++}
++
+ /** Validate the browser mode before the provider reserves browser use. */
+ export const BrowserMcpConfig: Schema<BrowserMcpAttachConfig | (Omit<BrowserMcpLaunchConfig, 'headless'> & { headless?: boolean }), BrowserMcpConfig> = Schema.union([
+   Schema.object({
+@@ -100,6 +152,9 @@ interface ClientState {
+ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void {
+   let resources!: SessionResources<Scope>
+   const clients = new Map<Agent, ClientState>()
++  // Whether each Session currently has a mounted client, so a rebuild that could
++  // not start is observed as a failure instead of a missing-tool mystery.
++  const connections = new Map<Agent, { mounted: boolean }>()
+   const toolPrefix = `mcp__${options.name}__`
+   const resourceTools = new Set(['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'])
+   let stopping = false
+@@ -126,11 +181,49 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void
+     resources = new SessionResources(ctx, {
+       label: options.name,
+       exclusive: options.exclusive,
++      rebuildBudget: BROWSER_REBUILD_BUDGET,
+       async open(agent, signal) {
+         const scope = createScope(ctx, agent)
+         let cancellation: Promise<void> | undefined
+         const cancel = (): void => { cancellation = scope.dispose() }
+         signal.addEventListener('abort', cancel, { once: true })
++        const connection = { mounted: false }
++        connections.set(agent, connection)
++        const clientConfig = McpClient.Config({
++          transport: 'stdio',
++          serverName: options.name,
++          command: options.command,
++          args: options.args,
++          ...options.env === undefined ? {} : { env: options.env },
++          ...agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd },
++          ...options.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: options.toolCallTimeoutMs },
++          failOnStartupError: true,
++          reconnect: { enabled: false },
++        })
++        // The MCP client is remounted in place on a dead browser target: the scope,
++        // its namespaced tools, and this Session's ownership entry all stay.
++        let client: (PromiseLike<unknown> & { dispose: () => Promise<void>, ctx: Context }) | undefined
++        let releasing: Promise<void> | undefined
++        const mountClient = (): void => { client = scope.ctx.plugin(McpClient, clientConfig) as unknown as typeof client }
++        // One shared release: a cancellation awaits it as proof the old process
++        // is gone, and a rebuild reuses it before mounting the replacement. The
++        // client owner is dropped only after the MCP connection handle records a
++        // confirmed transport closure, so an unverified release keeps the previous
++        // owner and a replacement can never run beside a process that may live.
++        const releaseClient = (): Promise<void> => {
++          if (releasing !== undefined) return releasing
++          const previous = client
++          if (previous === undefined) return Promise.resolve()
++          const owner = McpClient.connectionHandleOf(previous.ctx)
++          releasing = previous.dispose().then(() => {
++            requireVerifiedRelease(owner?.disposal(), options.name)
++            if (client === previous) {
++              client = undefined
++              connection.mounted = false
++            }
++          }).finally(() => { releasing = undefined })
++          return releasing
++        }
+         try {
+           signal.throwIfAborted()
+           scope.ctx.on('tools/execute', async (exec, next) => {
+@@ -141,26 +234,30 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void
+             }
+             return next()
+           })
+-          await scope.ctx.plugin(McpClient, McpClient.Config({
+-            transport: 'stdio',
+-            serverName: options.name,
+-            command: options.command,
+-            args: options.args,
+-            ...options.env === undefined ? {} : { env: options.env },
+-            ...agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd },
+-            ...options.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: options.toolCallTimeoutMs },
+-            failOnStartupError: true,
+-            reconnect: { enabled: false },
+-          }))
++          mountClient()
++          await client
+           signal.throwIfAborted()
++          connection.mounted = true
+           return {
+             value: scope,
++            async release() {
++              await releaseClient()
++            },
++            async recycle() {
++              await releaseClient()
++              if (signal.aborted) return
++              mountClient()
++              await client
++              connection.mounted = true
++            },
+             close() {
+               clients.delete(agent)
++              connection.mounted = false
+               return scope.dispose()
+             },
+           }
+         } catch (error) {
++          connection.mounted = false
+           await (cancellation ?? scope.dispose())
+           throw error
+         } finally {
+@@ -172,12 +269,14 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void
+       stopping = true
+       await resources.dispose()
+       clients.clear()
++      connections.clear()
+     }
+   }, `${options.name}.sessions`)
+   ctx.on('agent/created', async ({ agent, signal }) => {
+     const state: ClientState = { status: resources.available(agent) ? 'ready' : 'blocked' }
+     agent.ctx.effect(() => async () => {
+       clients.delete(agent)
++      connections.delete(agent)
+       await state.mask?.dispose()
+     }, `${options.name}.activation`)
+     if (state.status === 'blocked') {
+@@ -198,11 +297,65 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void
+     if (agent === undefined || clients.get(agent)?.status !== 'ready') {
+       throw new Error(`${options.name}: browser tool belongs to another Session`)
+     }
++    // Only a real browser tool call counts as a browser operation. Discovery,
++    // connection establishment, and MCP resource reads do not: Chrome often
++    // starts, and reports a closed target, only on the first real call.
++    const browserOperation = exec.name.startsWith(toolPrefix)
++    const suspended = (health: SessionRebuildHealth): BrowserConnectionError => new BrowserConnectionError(
++      `${options.name}: this Session's browser is suspended after ${health.failures} consecutive failures`
++      + `${health.lastReason === undefined ? '' : ` (last: ${health.lastReason})`}. `
++      + `Automatic restart was stopped so a failing browser cannot loop, and other tools are unaffected. `
++      + `Fix the configured browser and then open or resume this Session as a new activation to probe again.`,
++    )
++    const lost = (reason: string, cause: unknown): BrowserConnectionError => new BrowserConnectionError(
++      `${options.name}: the browser connection for this Session was lost (${reason}). `
++      + `Recovery was requested and nothing else was stopped; `
++      + `the next browser operation waits for the rebuild and then starts a fresh ${options.exclusive ? 'connection to the configured endpoint' : 'isolated browser'}.`,
++      { cause },
++    )
++    const loseConnection = (reason: string, cause: unknown): never => {
++      const health = resources.reportFailure(agent, reason)
++      if (health === undefined) throw new BrowserConnectionError(`${options.name}: the browser connection for this Session was lost (${reason}).`, { cause })
++      if (health.suspended) throw suspended(health)
++      throw lost(reason, cause)
++    }
+     return resources.run(agent, exec.signal, async (_scope, combined) => {
+       const original = exec.signal
+       exec.signal = combined
+       try {
+-        return await next()
++        if (browserOperation) {
++          const health = resources.health(agent)
++          if (health?.suspended === true) throw suspended(health)
++          if (!(connections.get(agent)?.mounted ?? false)) {
++            // A rebuild that could not start left no live connection; count it so
++            // repeated startup failures also stop at the budget.
++            const observed = resources.reportFailure(agent, health?.lastReason ?? 'the browser connection is not mounted')
++            if (observed?.suspended === true) throw suspended(observed)
++            throw new BrowserConnectionError(
++              `${options.name}: the browser connection for this Session is not mounted (${observed?.lastReason ?? 'rebuild failed'}); a fresh connection is starting, retry the browser operation.`,
++            )
++          }
++        }
++        const result = await next()
++        // The tool runtime materializes a tool body failure as an isError result,
++        // so a closed target is read from the result as well as from a throw.
++        if (browserOperation) {
++          if (result.isError) {
++            const reason = browserTargetFailureReason(result.error.message)
++            if (reason !== undefined) loseConnection(reason, result.error)
++          } else {
++            // Only a real browser operation proves the resource works: discovery
++            // and connection success deliberately do not reset the budget.
++            resources.reportSuccess(agent)
++          }
++        }
++        return result
++      } catch (error) {
++        if (browserOperation && !(error instanceof BrowserConnectionError)) {
++          const reason = browserTargetFailureReason(error)
++          if (reason !== undefined) loseConnection(reason, error)
++        }
++        throw error
+       } finally {
+         exec.signal = original
+       }
+diff --git a/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs b/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
+index 4ae1cd276c..a75085bd14 100644
+--- a/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
++++ b/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
+@@ -1,5 +1,5 @@
+ /** Private stdio browser fixture; each process owns independent state. */
+-import { appendFileSync, existsSync, watch } from 'node:fs'
++import { appendFileSync, existsSync, watch, writeFileSync } from 'node:fs'
+ import { join } from 'node:path'
+ import { createInterface } from 'node:readline'
+ 
+@@ -49,6 +49,24 @@ lines.on('line', line => {
+     case 'tools/call':
+       record('call', { name: request.params.name })
+       if (request.params.name === 'disconnect') process.exit(0)
++      if (request.params.name === 'visit' && mode === 'hold-call') return
++      if (request.params.name === 'visit' && mode === 'target-closed' && !existsSync(join(root, 'recovered'))) {
++        // The first browser target is already gone: report the provider's own
++        // error once, then recover for every later process in this test.
++        writeFileSync(join(root, 'recovered'), '')
++        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
++          content: [{ type: 'text', text: 'Protocol error (Target.setDiscoverTargets): Target closed' }], isError: true,
++        } }) + '\n')
++        break
++      }
++      if (request.params.name === 'visit' && mode === 'target-closed-until-healthy' && !existsSync(join(root, 'healthy'))) {
++        // Every fresh process reaches an already-closed target until the test
++        // writes `healthy`: a crash loop that no replacement connection escapes.
++        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
++          content: [{ type: 'text', text: 'Protocol error (Target.setDiscoverTargets): Target closed' }], isError: true,
++        } }) + '\n')
++        break
++      }
+       counter += 1
+       reply(request.id, { content: [{ type: 'text', text: `Visit ${counter}: ${request.params.arguments.label}` }], structuredContent: { counter, pid: process.pid } })
+       break
+diff --git a/packages/experimental/browser-use-runtime/tests/mcp.spec.ts b/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
+index ff9426d0aa..98f37220cd 100644
+--- a/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
++++ b/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
+@@ -20,7 +20,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+ import Projections from '@deepseek-ai/dsh-session-projection'
+ import { bindScopeParent } from '@deepseek-ai/dsh-scope'
+-import { BrowserMcpConfig, mountSessionMcp, validateBrowserMcpConfig } from '../src/mcp.ts'
++import { BrowserMcpConfig, mountSessionMcp, requireVerifiedRelease, validateBrowserMcpConfig } from '../src/mcp.ts'
+ 
+ const fixture = fileURLToPath(new URL('./mcp-fixture.mjs', import.meta.url))
+ const roots: string[] = []
+@@ -116,6 +116,11 @@ function browserState(result: Awaited<ReturnType<typeof resource>>): { counter:
+   return JSON.parse(value.contents[0]!.text) as { counter: number; pid: number }
+ }
+ 
++/** Flatten one tool result's text for assertions on the provider's own message. */
++function resultText(result: Awaited<ReturnType<typeof execute>>): string {
++  return result.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
++}
++
+ function registerIndependentTool(ctx: Context) {
+   ctx.tools.register({
+     name: 'unrelated', description: 'An independent capability.', parameters: { type: 'object' },
+@@ -308,6 +313,133 @@ describe('Session MCP Loader composition', () => {
+     expect((await execute(ctx, owner.agent)).isError).toBe(true)
+   })
+ 
++  it('releases a closed browser target and starts a fresh session browser on the next operation', async () => {
++    const { ctx, root } = await load(false, 'target-closed')
++    const owner = await ctx.agents.create({ sessionId: SessionId('target-closed') })
++    await warm(ctx, owner.agent)
++    const failed = await execute(ctx, owner.agent)
++    expect(failed.isError).toBe(true)
++    if (!failed.isError) throw new Error('expected a closed-target failure')
++    const text = failed.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
++    // The provider's own cause survives, and recovery is reported as a pending
++    // rebuild instead of claiming the dead browser was already released.
++    expect(text).toContain('Target closed')
++    expect(text).toContain('Recovery was requested')
++    expect(text).toContain('next browser operation waits for the rebuild and then starts a fresh isolated browser')
++    expect(text).not.toContain('was released')
++    // The dead connection is not reused: the next operation starts a new MCP process.
++    await vi.waitFor(async () => {
++      expect((await events(root)).filter(event => event.event === 'initialize')).toHaveLength(2)
++    })
++    const recovered = await execute(ctx, owner.agent)
++    expect(recovered.isError).toBe(false)
++    expect(recovered.content).toEqual([{ type: 'text', text: 'Visit 1: direct' }])
++    const starts = (await events(root)).filter(event => event.event === 'start')
++    expect(starts.length).toBeGreaterThanOrEqual(2)
++    expect(() => process.kill(starts[0]!.pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
++  })
++
++  it('bounds automatic rebuilds when every fresh browser target is already closed', async () => {
++    const { ctx, root } = await load(false, 'target-closed-until-healthy')
++    const owner = await ctx.agents.create({ sessionId: SessionId('bounded-rebuild') })
++    await warm(ctx, owner.agent)
++    // Two failures each rebuild; the third spends the budget and stops restarting.
++    for (let attempt = 0; attempt < 2; attempt += 1) {
++      const failed = await execute(ctx, owner.agent)
++      expect(failed.isError).toBe(true)
++      expect(resultText(failed)).toContain('Target closed')
++      expect(resultText(failed)).toContain('starts a fresh isolated browser')
++    }
++    const spent = await execute(ctx, owner.agent)
++    expect(spent.isError).toBe(true)
++    expect(resultText(spent)).toContain('suspended after 3 consecutive failures')
++    expect(resultText(spent)).toContain('Target closed')
++    expect(resultText(spent)).not.toContain('starts a fresh')
++    expect((await events(root)).filter(event => event.event === 'initialize')).toHaveLength(3)
++    // A later call reports the suspended browser instead of mounting a connection.
++    expect(resultText(await execute(ctx, owner.agent))).toContain('suspended after 3 consecutive failures')
++    expect((await events(root)).filter(event => event.event === 'initialize')).toHaveLength(3)
++  })
++
++  it('starts a fresh budget only after a real browser operation succeeds', async () => {
++    const { ctx, root } = await load(false, 'target-closed-until-healthy')
++    const owner = await ctx.agents.create({ sessionId: SessionId('success-restores-budget') })
++    await warm(ctx, owner.agent)
++    expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    // A real visit once the browser is healthy clears the two failures above.
++    await writeFile(join(root, 'healthy'), '')
++    expect((await execute(ctx, owner.agent)).isError).toBe(false)
++    await rm(join(root, 'healthy'))
++    const before = (await events(root)).filter(event => event.event === 'initialize').length
++    // The next failure opens a new budget, so it still rebuilds.
++    expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    await vi.waitFor(async () => {
++      expect((await events(root)).filter(event => event.event === 'initialize').length).toBe(before + 1)
++    })
++  })
++
++  it('does not clear the failure budget for a successful MCP resource read', async () => {
++    const { ctx, root } = await load(false, 'target-closed-until-healthy')
++    await ctx.plugin(McpResources)
++    const owner = await ctx.agents.create({ sessionId: SessionId('metadata-does-not-reset') })
++    await warm(ctx, owner.agent)
++    expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    // The same server still serves resources while its browser target is closed:
++    // transport liveness is not browser health, so the budget must not reset.
++    expect(browserState(await resource(ctx, owner.agent)).counter).toBe(0)
++    const spent = await execute(ctx, owner.agent)
++    expect(resultText(spent)).toContain('suspended after 3 consecutive failures')
++    expect((await events(root)).filter(event => event.event === 'initialize')).toHaveLength(3)
++  })
++
++  it('probes again from a new activation after the budget suspends the browser', async () => {
++    const { ctx, root } = await load(false, 'target-closed-until-healthy')
++    const owner = await ctx.agents.create({ sessionId: SessionId('new-activation-probe') })
++    await warm(ctx, owner.agent)
++    for (let attempt = 0; attempt < 3; attempt += 1) expect((await execute(ctx, owner.agent)).isError).toBe(true)
++    const suspended = await execute(ctx, owner.agent)
++    expect(resultText(suspended)).toContain('suspended')
++    expect(resultText(suspended)).toContain('open or resume this Session as a new activation')
++    // Fixing the browser does not resurrect the suspended activation...
++    await writeFile(join(root, 'healthy'), '')
++    expect(resultText(await execute(ctx, owner.agent))).toContain('suspended')
++    // ...but a new activation starts a fresh budget and probes the configured browser.
++    await owner.dispose()
++    const successor = await ctx.agents.create({ sessionId: SessionId('new-activation-probe') })
++    await warm(ctx, successor.agent)
++    expect((await execute(ctx, successor.agent)).isError).toBe(false)
++  })
++
++  it('ends the held browser work when its Session cancels and leaves another Session browser running', async () => {
++    const { ctx, root } = await load(false, 'hold-call')
++    await ctx.plugin(McpResources)
++    const first = await ctx.agents.create({ sessionId: SessionId('cancel-held-call') })
++    const second = await ctx.agents.create({ sessionId: SessionId('untouched-browser') })
++    await warm(ctx, first.agent)
++    await warm(ctx, second.agent)
++    const initialized = (await events(root)).filter(event => event.event === 'initialize')
++    const firstPid = initialized[0]!.pid
++    const secondPid = initialized[1]!.pid
++    expect(firstPid).not.toBe(secondPid)
++    const controller = new AbortController()
++    const held = ctx.tools.execute({
++      agent: first.agent, name: TOOL, arguments: { label: 'held' },
++      callId: ToolCallId('held'), signal: controller.signal,
++    })
++    await vi.waitFor(async () => {
++      expect((await events(root)).some(event => event.event === 'call' && event.name === 'visit')).toBe(true)
++    })
++    controller.abort(new Error('user stop'))
++    expect((await held).isError).toBe(true)
++    // The canceled call settled only after its owned MCP/browser process was released.
++    expect(() => process.kill(firstPid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
++    // ...while the other Session's independently owned browser still answers.
++    expect(() => process.kill(secondPid, 0)).not.toThrow()
++    expect(browserState(await resource(ctx, second.agent)).pid).toBe(secondPid)
++  })
++
+   it('keeps browser ownership exact when scopes inherit tools and leaves unrelated tools usable', async () => {
+     const { ctx } = await load()
+     await ctx.systemPrompt.assemble()
+@@ -574,3 +706,16 @@ describe('Session MCP Loader composition', () => {
+     expect((await execute(ctx, future.agent)).isError).toBe(false)
+   })
+ })
++
++describe('browser connection release verification', () => {
++  it('accepts only a connection owner outcome that confirmed transport closure', () => {
++    expect(() => requireVerifiedRelease({ closed: true }, 'browser-fixture')).not.toThrow()
++    // Cordis fiber teardown and the MCP connection's own dispose both resolve
++    // even when closure is unconfirmed, so the consumer refuses an unverified
++    // outcome instead of shedding ownership of a possibly live process.
++    expect(() => requireVerifiedRelease(undefined, 'browser-fixture'))
++      .toThrow('recorded no disposal outcome')
++    expect(() => requireVerifiedRelease({ closed: false, reason: 'transport closure could not be confirmed' }, 'browser-fixture'))
++      .toThrow('transport closure could not be confirmed')
++  })
++})
+diff --git a/packages/experimental/browser-use-runtime/tests/resources.spec.ts b/packages/experimental/browser-use-runtime/tests/resources.spec.ts
+index f838191d44..f3f9ada812 100644
+--- a/packages/experimental/browser-use-runtime/tests/resources.spec.ts
++++ b/packages/experimental/browser-use-runtime/tests/resources.spec.ts
+@@ -355,3 +355,141 @@ it('reports early disposal cleanup failure while retaining the owned resource',
+   await expect(resources.dispose()).rejects.toThrow('browser cleanup failed')
+   warning.mockRestore()
+ })
++
++it('rebuilds one live resource in place and shares concurrent rebuilds', async () => {
++  const { ctx, owner } = await fixture()
++  const a = await owner('recycle')
++  const b = await owner('no-resource')
++  const recycle = vi.fn(async () => {})
++  const close = vi.fn(async () => {})
++  const resources = new SessionResources<number>(ctx, {
++    label: 'test', exclusive: false,
++    open: async () => ({ value: 1, close, recycle }),
++  })
++  await resources.get(a.agent)
++  await Promise.all([resources.recycle(a.agent), resources.recycle(a.agent), resources.recycle(a.agent)])
++  expect(recycle).toHaveBeenCalledTimes(1) // a burst of rebuild requests starts one replacement
++  expect(await resources.get(a.agent)).toBe(1) // the entry and its value survive
++  await resources.recycle(b.agent) // no acquired resource is a no-op, not an error
++  await resources.dispose()
++  expect(close).toHaveBeenCalledTimes(1)
++})
++
++it('rebuilds the connection when an in-flight operation is canceled', async () => {
++  const { ctx, owner } = await fixture()
++  const a = await owner('recycle-on-abort')
++  const recycle = vi.fn(async () => {})
++  const resources = new SessionResources<number>(ctx, {
++    label: 'test', exclusive: false,
++    open: async () => ({ value: 1, close: async () => {}, recycle }),
++  })
++  await resources.get(a.agent)
++  // A canceled in-flight operation ends the provider connection rather than only
++  // rejecting its caller; the operation keeps ownership until its work settles.
++  const controller = new AbortController()
++  const entered = Promise.withResolvers<undefined>()
++  const release = Promise.withResolvers<undefined>()
++  const running = resources.run(a.agent, controller.signal, async () => { entered.resolve(undefined); await release.promise; return 7 })
++  await entered.promise
++  controller.abort(new Error('user stop'))
++  await vi.waitFor(() => { expect(recycle).toHaveBeenCalledTimes(1) })
++  release.resolve(undefined)
++  await expect(running).rejects.toThrow('user stop')
++  expect(await resources.get(a.agent)).toBe(1)
++  await resources.dispose()
++})
++
++it('leaves an in-flight operation owned when a queued call is canceled', async () => {
++  const { ctx, owner } = await fixture()
++  const a = await owner('queued-cancel')
++  const release = vi.fn(async () => {})
++  const recycle = vi.fn(async () => {})
++  const resources = new SessionResources<number>(ctx, {
++    label: 'test', exclusive: false,
++    open: async () => ({ value: 1, close: async () => {}, recycle, release }),
++  })
++  await resources.get(a.agent)
++  const entered = Promise.withResolvers<undefined>()
++  const finish = Promise.withResolvers<undefined>()
++  const running = resources.run(a.agent, new AbortController().signal, async () => {
++    entered.resolve(undefined)
++    await finish.promise
++    return 'running'
++  })
++  await entered.promise
++  // Cancel only the queued call. It never acquired the connection, so its
++  // cancellation must not release or rebuild the connection the running call
++  // still owns.
++  const controller = new AbortController()
++  const queued = resources.run(a.agent, controller.signal, async () => 'queued')
++  controller.abort(new Error('cancel queued only'))
++  await new Promise(resolve => setTimeout(resolve, 0))
++  expect(release).not.toHaveBeenCalled()
++  expect(recycle).not.toHaveBeenCalled()
++  finish.resolve(undefined)
++  expect(await running).toBe('running')
++  await expect(queued).rejects.toThrow('cancel queued only')
++  await resources.dispose()
++})
++
++it('shares one replacement across a burst of failures and suspends at the budget', async () => {
++  const { ctx, owner } = await fixture()
++  const a = await owner('failure-burst')
++  const held = Promise.withResolvers<undefined>()
++  const recycle = vi.fn(() => held.promise)
++  const resources = new SessionResources<number>(ctx, {
++    label: 'test', exclusive: false, rebuildBudget: 3,
++    open: async () => ({ value: 1, close: async () => {}, recycle }),
++  })
++  await resources.get(a.agent)
++  // Three failures arrive before the first replacement settles: the burst
++  // starts one rebuild, and the third spends the budget.
++  resources.reportFailure(a.agent, 'Target closed')
++  resources.reportFailure(a.agent, 'Target closed')
++  const spent = resources.reportFailure(a.agent, 'Target closed')
++  expect(spent).toMatchObject({ failures: 3, suspended: true, lastReason: 'Target closed' })
++  await vi.waitFor(() => { expect(recycle).toHaveBeenCalledTimes(1) })
++  held.resolve(undefined)
++  await resources.dispose()
++})
++
++it('reports a refused release during cancellation instead of a clean stop', async () => {
++  const { ctx, owner } = await fixture()
++  const a = await owner('release-refused')
++  const releaseEntered = Promise.withResolvers<undefined>()
++  const releaseResult = Promise.withResolvers<undefined>()
++  const recycle = vi.fn(async () => {})
++  const resources = new SessionResources<number>(ctx, {
++    label: 'test', exclusive: false, rebuildBudget: 3,
++    open: async () => ({
++      value: 1,
++      close: async () => {},
++      recycle,
++      async release() { releaseEntered.resolve(undefined); await releaseResult.promise },
++    }),
++  })
++  await resources.get(a.agent)
++  const controller = new AbortController()
++  const entered = Promise.withResolvers<undefined>()
++  const running = resources.run(a.agent, controller.signal, async (_value, signal) => {
++    // The provider operation observes cancellation immediately; the release it
++    // triggers is still in flight when it settles.
++    entered.resolve(undefined)
++    await new Promise<never>((_resolve, reject) => { signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true }) })
++  })
++  const canceled = running.catch((error: unknown) => error)
++  await entered.promise
++  controller.abort(new Error('user stop'))
++  await releaseEntered.promise
++  releaseResult.reject(new Error('release refused'))
++  const failure = await canceled
++  // The refused release must not be reported as a clean stop.
++  expect(failure).toBeInstanceOf(Error)
++  expect((failure as Error).message).toContain('could not confirm')
++  expect((failure as Error).cause).toMatchObject({ message: 'release refused' })
++  // The provider still owns the connection it refused to release, so no
++  // replacement may be mounted beside it.
++  await new Promise(resolve => setTimeout(resolve, 0))
++  expect(recycle).not.toHaveBeenCalled()
++  await resources.dispose()
++})
+diff --git a/packages/mcp/mcp-client/src/connection.ts b/packages/mcp/mcp-client/src/connection.ts
+index 50f851fa30..16ca2d23aa 100644
+--- a/packages/mcp/mcp-client/src/connection.ts
++++ b/packages/mcp/mcp-client/src/connection.ts
+@@ -112,6 +112,14 @@ export interface ConnectionOutcome {
+   error?: unknown
+ }
+ 
++/** Verifiable result of one {@link ConnectionHandle.dispose} attempt. */
++export interface ConnectionDisposal {
++  /** Whether every generation this handle owned confirmed transport closure. */
++  readonly closed: boolean
++  /** Diagnostic detail when closure was not confirmed. */
++  readonly reason?: string
++}
++
+ /** Handle for one plugin instance's supervised connection. */
+ export interface ConnectionHandle extends ServerContext {
+   /**
+@@ -126,6 +134,15 @@ export interface ConnectionHandle extends ServerContext {
+    * unregister every tool this server still owns.
+    */
+   dispose(): Promise<void>
++  /**
++   * Outcome of this handle's disposal, or `undefined` before any disposal work
++   * or failed-generation cleanup recorded one. Cordis contains effect failures
++   * while unloading a fiber, so a consumer that must know whether the transport
++   * actually closed reads this accessor instead of trusting the disposal
++   * promise. An unconfirmed closure stays recorded for the handle's lifetime.
++   * @returns whether transport closure was confirmed, with its diagnostic.
++   */
++  disposal(): ConnectionDisposal | undefined
+ }
+ 
+ /**
+@@ -172,6 +189,13 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
+   let connectedAt: number | undefined
+   /** The real error from the first connection attempt, for startup-await diagnostics. */
+   let firstAttemptError: unknown
++  /** Verifiable disposal outcome; an unconfirmed closure stays recorded. */
++  let disposalOutcome: ConnectionDisposal | undefined
++
++  /** Record once that an owned generation's transport closure was never confirmed. */
++  function recordUnconfirmed(reason: string): void {
++    disposalOutcome ??= { closed: false, reason }
++  }
+ 
+   // 只暴露按需资源/提示词RPC，不暴露可变Client、不创建第二条连接或执行提示内容。
+   ctx.on('mcp/content-request', async (request, next) => {
+@@ -230,7 +254,9 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
+     if (!quiesced) {
+       client = undefined
+       closeClient = undefined
+-      ctx.logger.error(`${label}: failed generation could not confirm transport closure — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry`)
++      const reason = `${label}: failed generation could not confirm transport closure — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry`
++      recordUnconfirmed(reason)
++      ctx.logger.error(reason)
+       return
+     }
+     generationDown(generation)
+@@ -472,7 +498,10 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
+       const close = closeClient
+       client = undefined
+       closeClient = undefined
++      let closed = true
+       if (close !== undefined && !await close()) {
++        closed = false
++        recordUnconfirmed(incompleteDisposalMessage)
+         ctx.logger.error(incompleteDisposalMessage)
+       }
+       // Quiesce, don't just request it: the in-flight attempt enqueues its
+@@ -481,6 +510,12 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
+       await syncChain
+       for (const dispose of disposers.values()) dispose()
+       disposers = new Map()
++      // A closure this handle confirmed stays confirmed; recordUnconfirmed keeps
++      // any earlier unconfirmed generation instead of overwriting it.
++      if (closed) disposalOutcome ??= { closed: true }
++    },
++    disposal(): ConnectionDisposal | undefined {
++      return disposalOutcome
+     },
+   }
+ }
+diff --git a/packages/mcp/mcp-client/src/index.ts b/packages/mcp/mcp-client/src/index.ts
+index 97e1526259..9c263b5931 100644
+--- a/packages/mcp/mcp-client/src/index.ts
++++ b/packages/mcp/mcp-client/src/index.ts
+@@ -18,7 +18,7 @@ import z from '@deepseek-ai/schemastery'
+ import { scopeOf } from '@deepseek-ai/dsh-scope'
+ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+ import { DEFAULT_MAX_INSTRUCTION_BYTES, RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './connection.ts'
+-import type { ReconnectConfig } from './connection.ts'
++import type { ConnectionHandle, ReconnectConfig } from './connection.ts'
+ import { registerServerContext } from './server-context.ts'
+ import type { McpOAuthConfig } from './oauth.ts'
+ // Side-effect type import: declaration-merges `ctx.tools` onto Context.
+@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-tools'
+ 
+ export { createMcpToolDefinition } from './tools.ts'
+ export type { McpResult, McpToolDefinitionOptions } from './tools.ts'
+-export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
++export type { ConnectionDisposal, ConnectionHandle, ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
+ export type { McpOAuthConfig, McpOAuthBridgeRequest, OAuthClientProvider, OAuthClientMetadata, OAuthClientInformationMixed, OAuthTokens, OAuthDiscoveryState } from './oauth.ts'
+ 
+ /** Cordis plugin name used by loader diagnostics. */
+@@ -48,6 +48,23 @@ const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
+  */
+ const activeServerNames = new WeakMap<object, Set<string>>()
+ 
++/**
++ * Live connection handles keyed by the context of their mounted fiber. Cordis
++ * contains effect failures while a fiber unloads, so a consumer that must know
++ * whether the transport actually closed reads {@link connectionHandleOf}
++ * instead of trusting the fiber's disposal promise.
++ */
++const connectionHandles = new WeakMap<Context, ConnectionHandle>()
++
++/**
++ * Read the connection handle owned by one mounted mcp-client instance.
++ * @param ctx - the plugin context of a mounted mcp-client (a fiber's `ctx`).
++ * @returns the handle, or `undefined` when `ctx` is not a live mcp-client context.
++ */
++export function connectionHandleOf(ctx: Context): ConnectionHandle | undefined {
++  return connectionHandles.get(ctx)
++}
++
+ // ---- Config ----
+ 
+ /** Config for connecting to an MCP server via a spawned child process over stdio. */
+@@ -184,6 +201,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
+   // loop, and the live tool registrations; disposal stops reconnection,
+   // quiesces in-flight work, and unregisters the current generation.
+   const connection = startConnection(ctx, config, reconnect)
++  connectionHandles.set(ctx, connection)
+   registerServerContext(ctx, config.serverName, connection)
+   let stopping: Promise<void> | undefined
+   const dispose = (): Promise<void> => stopping ??= connection.dispose()
+diff --git a/packages/mcp/mcp-client/tests/reconnect.spec.ts b/packages/mcp/mcp-client/tests/reconnect.spec.ts
+index f41670178c..c8c11b39e0 100644
+--- a/packages/mcp/mcp-client/tests/reconnect.spec.ts
++++ b/packages/mcp/mcp-client/tests/reconnect.spec.ts
+@@ -55,7 +55,7 @@ vi.mock('@modelcontextprotocol/client/stdio', () => ({
+ 
+ // vi.mock is hoisted above static imports, so the modules under test see the
+ // mocked SDK even through a static import.
+-import { apply } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
++import { apply, connectionHandleOf } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
+ import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from '@deepseek-ai/dsh-mcp-client/src/connection.ts'
+ 
+ // ---- Helpers ----
+@@ -364,6 +364,65 @@ describe('reconnect supervisor', () => {
+       expect(mockListTools).toHaveBeenCalledTimes(phase === 'connect' ? 0 : 1)
+       expect(ctx.tools.get('mcp__srv__late')).toBeUndefined()
+       expect(errors.some(line => line.includes('server shutdown may be incomplete'))).toBe(true)
++      // The general disposal promise still resolves, so a consumer that must
++      // verify release reads the owner's recorded outcome instead.
++      expect(handle.disposal()).toMatchObject({
++        closed: false,
++        reason: expect.stringContaining('server shutdown may be incomplete'),
++      })
++    } finally {
++      vi.useRealTimers()
++    }
++  })
++
++  it('exposes a verifiable confirmed closure to a consumer that mounts the plugin itself', async () => {
++    const fiber = ctx.plugin({ name: 'mcp-client', inject: ['tools'], apply }, stdioConfig())
++    await fiber
++    const handle = connectionHandleOf(fiber.ctx)
++    expect(handle).toBeDefined()
++    await fiber.dispose()
++    // Cordis contains fiber-teardown failures, so the mounting consumer reads the
++    // connection owner's outcome instead of trusting the disposal promise.
++    expect(handle!.disposal()).toEqual({ closed: true })
++  })
++
++  it('reports an unconfirmed transport closure through the mounted handle', async () => {
++    vi.useFakeTimers()
++    try {
++      const { errors } = captureLogs(ctx)
++      mockClose.mockResolvedValue(undefined)
++      const fiber = ctx.plugin({ name: 'mcp-client', inject: ['tools'], apply }, stdioConfig())
++      await vi.advanceTimersByTimeAsync(0)
++      await fiber
++      const handle = connectionHandleOf(fiber.ctx)
++      const disposing = fiber.dispose()
++      await vi.advanceTimersByTimeAsync(5_000)
++      await disposing
++
++      expect(errors.some(line => line.includes('server shutdown may be incomplete'))).toBe(true)
++      expect(handle?.disposal()).toMatchObject({
++        closed: false,
++        reason: expect.stringContaining('server shutdown may be incomplete'),
++      })
++    } finally {
++      vi.useRealTimers()
++    }
++  })
++
++  it('keeps an unconfirmed generation recorded when a later disposal finds nothing left to close', async () => {
++    vi.useFakeTimers()
++    try {
++      mockConnect.mockRejectedValue(new Error('initialize failed'))
++      mockClose.mockResolvedValue(undefined)
++      const handle = startConnection(ctx, stdioConfig(), resolveReconnectPolicy(undefined, 'reconnect'))
++      await vi.advanceTimersByTimeAsync(5_000)
++      await handle.ready
++      expect(handle.disposal()).toMatchObject({ closed: false })
++      // The failed generation already cleared closeClient, so disposal has no
++      // transport to close; that absence must not turn the leak into a
++      // confirmed closure.
++      await handle.dispose()
++      expect(handle.disposal()).toMatchObject({ closed: false })
+     } finally {
+       vi.useRealTimers()
+     }

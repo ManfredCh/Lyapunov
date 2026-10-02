@@ -1,0 +1,18 @@
+<mujoco model="banana">
+  <compiler angle="radian" meshdir="." />
+  <option timestep="0.002" />
+  <asset>
+    <mesh name="banana_mesh" file="banana.glb" />
+    <material name="peel" rgba="0.96 0.80 0.10 1" specular="0.35" roughness="0.45" />
+  </asset>
+  <worldbody>
+    <body name="banana" pos="0 0 0">
+      <freejoint name="banana_free" />
+      <geom name="banana_visual" type="mesh" mesh="banana_mesh" material="peel"
+            contype="0" conaffinity="0" group="1" />
+      <geom name="banana_collision" type="box" size="0.16 0.12 0.04"
+            pos="0 0 0" mass="0.145" friction="0.7 0.02 0.005" condim="3"
+            rgba="0.96 0.80 0.10 0.25" group="3" />
+    </body>
+  </worldbody>
+</mujoco>

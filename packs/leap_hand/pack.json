@@ -1,0 +1,27 @@
+{
+  "packId": "leap_hand",
+  "version": "2026.09.22",
+  "family": "hand",
+  "asset": { "modelEntry": "asset/scene_left.xml", "model": "asset/left_hand.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#leap_hand" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gripper", "tendon"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "LEAP Hand 模型（ASSET_STAGING_MANIFEST.json#leap_hand 落账）",
+    "commit": null,
+    "author": "LEAP Hand 项目（模型）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#leap_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控（tendon/关节/夹持通道）；包内容为 LyapunovDev 自有"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,225 @@
+--- a/packages/mcp/mcp-client/src/index.ts
++++ b/packages/mcp/mcp-client/src/index.ts
+@@ -19,11 +19,13 @@
+ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+ import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './connection.ts'
+ import type { ReconnectConfig } from './connection.ts'
++import type { McpOAuthConfig } from './oauth.ts'
+ // Side-effect type import: declaration-merges `ctx.tools` onto Context.
+ import type {} from '@deepseek-ai/dsh-tools'
+ 
+ export type { McpResult } from './tools.ts'
+ export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
++export type { McpOAuthConfig, McpOAuthBridgeRequest, OAuthClientProvider, OAuthClientMetadata, OAuthClientInformationMixed, OAuthTokens, OAuthDiscoveryState } from './oauth.ts'
+ 
+ /** Cordis plugin name used by loader diagnostics. */
+ export const name = 'mcp-client'
+@@ -75,7 +77,7 @@
+ /** Config for connecting to an MCP server over Streamable HTTP (SSE). */
+ export interface StreamableHttpConfig {
+   /** Selects Streamable HTTP transport. */
+-  transport: 'streamable-http'
++  transport: 'streamable-http' | 'sse'
+   /**
+    * Stable local namespace for this server's model-facing tool names
+    * (`mcp__<serverName>__<rawName>`). Must match `[A-Za-z0-9_-]{1,32}` and be
+@@ -86,6 +88,8 @@
+   url: string
+   /** Additional headers attached to MCP requests. */
+   headers: Record<string, string>
++  /** Browser authorization through the product's credential adapter. */
++  oauth?: true | McpOAuthConfig
+   /** Per-tool-call timeout in milliseconds. */
+   toolCallTimeoutMs: number
+   /** Fail plugin activation when the initial connection or tool synchronization fails. */
+@@ -123,10 +127,11 @@
+     reconnect: Reconnect,
+   }),
+   z.object({
+-    transport: z.const('streamable-http'),
++    transport: z.union([z.const('streamable-http'), z.const('sse')]),
+     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
+     url: z.string().required(),
+     headers: z.dict(String).default({}),
++    oauth: z.union([z.const(true), z.object({ clientId: z.string(), clientSecretEnv: z.string(), scope: z.string(), redirectUri: z.string() })]),
+     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
+     failOnStartupError: z.boolean().default(false),
+     reconnect: Reconnect,
+--- a/packages/mcp/mcp-client/src/transport.ts
++++ b/packages/mcp/mcp-client/src/transport.ts
+@@ -9,8 +9,10 @@
+ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
++import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+ import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+ import type { Config } from './index.ts'
++import type { OAuthClientProvider } from './oauth.ts'
+ 
+ /**
+  * The subprocess seam's scrubbed parent env (credential-shaped and stale
+@@ -28,7 +30,7 @@
+  * @param config - Resolved plugin config discriminated on `transport`.
+  * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
+  */
+-export function createTransport(config: Config): Transport {
++export function createTransport(config: Config, authProvider?: OAuthClientProvider): Transport {
+   switch (config.transport) {
+     case 'stdio':
+       return new StdioClientTransport({
+@@ -37,6 +39,8 @@
+         env: buildChildEnv(config.env),
+         cwd: config.cwd,
+       })
++    case 'sse':
++      return new SSEClientTransport(new URL(config.url), { requestInit: { headers: config.headers }, ...(authProvider ? { authProvider } : {}) }) as Transport
+     case 'streamable-http':
+       // The MCP SDK's StreamableHTTPClientTransport has optional callback
+       // properties typed without `| undefined` (exactOptionalPropertyTypes
+@@ -44,7 +48,7 @@
+       // object, so the cast records only that widening.
+       return new StreamableHTTPClientTransport(
+         new URL(config.url),
+-        { requestInit: { headers: config.headers } },
++        { requestInit: { headers: config.headers }, ...(authProvider ? { authProvider } : {}) },
+       ) as Transport
+   }
+ }
+--- a/packages/mcp/mcp-client/src/connection.ts
++++ b/packages/mcp/mcp-client/src/connection.ts
+@@ -45,6 +45,10 @@
+   maxAttempts?: number
+ }
+ 
++import { auth, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
++import { scopeTarget } from '@deepseek-ai/dsh-scope'
++import type { OAuthClientProvider } from './oauth.ts'
++
+ /** Defaults shared by the Config schema and {@link resolveReconnectPolicy}. */
+ export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
+   enabled: true,
+@@ -144,6 +148,10 @@
+     : opts
+ 
+   let disposed = false
++  let paused = false
++  let awaitingAuthorization = false
++  let authProvider: OAuthClientProvider | undefined
++  let authProviderResolved = false
+   /** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
+   let client: Client | undefined
+   /** Close signal paired with {@link client}; captured by dispose before current ownership is cleared. */
+@@ -222,6 +230,7 @@
+   }
+ 
+   function scheduleReconnect(): void {
++    if (paused || awaitingAuthorization || disposed) return
+     const lostEstablishedConnection = connectedAt !== undefined
+     if (!policy.enabled) {
+       const message = lostEstablishedConnection
+@@ -301,7 +310,17 @@
+       },
+     )
+     try {
+-      await generation.connect(createTransport(config))
++      if (config.transport !== 'stdio' && config.oauth && !authProviderResolved) {
++        const oauthConfig = config.oauth === true ? {} : config.oauth
++        authProvider = await ctx.waterfall(scopeTarget({}, scopeOf(ctx)), 'mcp/oauth-provider', {
++          owner: ctx, serverName: config.serverName, serverUrl: config.url, config: oauthConfig,
++          authorize: (provider, code) => auth(provider, { serverUrl: config.url, ...(code !== undefined ? { authorizationCode: code } : {}), ...(oauthConfig.scope ? { scope: oauthConfig.scope } : {}) }),
++          control: controlAuthorization,
++        }, () => Promise.resolve(undefined))
++        if (!authProvider) throw new Error('MCP_OAUTH_PROVIDER_UNAVAILABLE: install the product OAuth credential adapter')
++        authProviderResolved = true
++      }
++      await generation.connect(createTransport(config, authProvider?.forTransport?.() ?? authProvider))
+       if (hasClosed()) {
+         attemptSettled = true
+         generationDown(generation)
+@@ -309,6 +328,7 @@
+       }
+       await enqueueSync(generation, startup ? startupOpts : opts)
+     } catch (error) {
++      if (authProvider && error instanceof UnauthorizedError) awaitingAuthorization = true
+       if (firstAttemptError === undefined) firstAttemptError = error
+       // Disposal clears current ownership before it closes the generation, so
+       // only a live supervisor reports an attempt failure.
+@@ -333,11 +353,36 @@
+     }
+     if (!isCurrent(generation)) return
+     connectedAt = Date.now()
++    awaitingAuthorization = false
+     if (failedAttempts > 0) ctx.logger.info(`${label}: reconnected and re-synced tools (attempt ${failedAttempts}/${policy.maxAttempts})`)
+   }
+ 
+   /** The in-flight (or last settled) connection attempt; dispose awaits it for quiescence. */
+   let settling = connectGeneration(true)
++  let authControl: Promise<void> = Promise.resolve()
++  /** Pause/restart this same supervisor after credential changes; never create a competing client owner. */
++  function controlAuthorization(action: 'pause' | 'reconnect'): Promise<void> {
++    const next = authControl.catch(() => {}).then(async () => {
++      if (disposed) throw new Error('MCP_PROVIDER_UNAVAILABLE: ' + config.serverName)
++      paused = true
++      if (reconnectTimer !== undefined) { clearTimeout(reconnectTimer); reconnectTimer = undefined }
++      await settling
++      const current = client, closed = clientClosed
++      client = undefined; clientClosed = undefined; connectedAt = undefined
++      if (current) { await current.close(); if (closed && !await waitForClose(closed)) throw new Error('MCP_CONNECTION_CLOSE_TIMEOUT') }
++      await syncChain
++      for (const dispose of disposers.values()) dispose()
++      disposers = new Map()
++      if (action === 'reconnect') {
++        paused = false; awaitingAuthorization = false; failedAttempts = 0
++        settling = connectGeneration(false)
++        await settling
++        if (!client) throw new Error('MCP_AUTH_RECONNECT_FAILED: ' + config.serverName)
++      }
++    })
++    authControl = next
++    return next
++  }
+ 
+   // The ready promise settles when the first attempt finishes (regardless of
+   // success). If the first attempt fails and reconnect is enabled, the
+@@ -349,7 +394,7 @@
+     // Note: settling.then() is a microtask; stdio onclose is a macrotask — so
+     // a server that crashes AFTER a successful initial sync cannot flip client
+     // to undefined before this continuation runs.
+-    if (client !== undefined) return {}
++    if (client !== undefined || awaitingAuthorization) return {}
+     /* v8 ignore next -- defensive: firstAttemptError is always set when connect/sync fails */
+     return { error: firstAttemptError ?? new Error(`${label}: initial connection failed`) }
+   })
+--- /dev/null
++++ b/packages/mcp/mcp-client/src/oauth.ts
+@@ -0,0 +1,30 @@
++import type { Context } from '@deepseek-ai/cordis'
++import type { OAuthClientProvider as SdkOAuthClientProvider, AuthResult } from '@modelcontextprotocol/sdk/client/auth.js'
++
++export type { AuthResult, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
++export type OAuthClientProvider = SdkOAuthClientProvider & { forTransport?(): SdkOAuthClientProvider }
++export type { OAuthClientMetadata, OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
++
++/** OAuth is opt-in on the existing HTTP MCP connection. Secrets remain credential references. */
++export interface McpOAuthConfig {
++  clientId?: string
++  clientSecretEnv?: string
++  scope?: string
++  redirectUri?: string
++}
++
++/** Product-owned credential/UI adapter; native MCP keeps sole ownership of transports and tools. */
++export interface McpOAuthBridgeRequest {
++  owner: Context
++  serverName: string
++  serverUrl: string
++  config: McpOAuthConfig
++  authorize(provider: OAuthClientProvider, code?: string): Promise<AuthResult>
++  control(action: 'pause' | 'reconnect'): Promise<void>
++}
++
++declare module '@deepseek-ai/cordis' {
++  interface Events {
++    'mcp/oauth-provider'(request: McpOAuthBridgeRequest, next: () => Promise<OAuthClientProvider | undefined>): Promise<OAuthClientProvider | undefined>
++  }
++}

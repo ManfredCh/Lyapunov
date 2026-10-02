@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-generate-hunyuan
+      name: '@lyapunov/generate-hunyuan'

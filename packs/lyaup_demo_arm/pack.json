@@ -1,0 +1,27 @@
+{
+  "packId": "lyaup_demo_arm",
+  "version": "2026.09.22",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/Lyaup演示机械臂.mjcf" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#lyaup_demo_arm" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "control"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "conversation-local-robot:Lyaup演示机械臂.mjcf（本地生成；materials/robots/lyaup-demo-arm/）",
+    "commit": null,
+    "author": "LyapunovDev 会话内生成（conversation-local-robot，演示级单文件 MJCF）；context/policy/vla/tests 内容为 LyapunovDev 自有"
+  },
+  "license": {
+    "model": "本地生成作品（conversation-local-robot:Lyaup演示机械臂.mjcf），源树无 LICENSE、无第三方再分发条款；原件随 asset/ 由 staging 提供",
+    "policy": "无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "baseSdkCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
+  "patchSha256": "c2979105ca1554c84f301db55e162385ce20f749f4def3153bb9bf464061ff21",
+  "files": [
+    {
+      "path": "packages/api/workspace-files/src/index.ts",
+      "beforeSha256": "456eae095aa45812926c703fbb1f8ba2c601e72edfb60c4a3d4fa01af11f0176",
+      "afterSha256": "5dd107524251e53fe0eaea6b0d88b25f95a0320d2a74f611c13fc1439877d517"
+    },
+    {
+      "path": "packages/api/workspace-files/src/types.ts",
+      "beforeSha256": "4aa08faff00c9180cf5c9eed4f0367d6a37eb01d1334c28de2da882073767865",
+      "afterSha256": "2c8f5d93ddb45c6c7c9f9bbb6ecf07d61e0b52af6b88f2fb04088a2782af1a2e"
+    },
+    {
+      "path": "packages/api/workspace-files/tests/create.spec.ts",
+      "beforeSha256": null,
+      "afterSha256": "349196b7ec4109f35eb9af41c311972823351a7149457628faa748dc4c440096"
+    },
+    {
+      "path": "packages/api/workspace-files/tests/list.spec.ts",
+      "beforeSha256": "ba932d5cc690f488e59b54c348ce16478a86b9df2d6cb6cfcb196f68ada871a6",
+      "afterSha256": "c600af010eca8bd044a41ff225f606ac9e214298a80c26e877296ec9a703a35d"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/FilesBody.module.css",
+      "beforeSha256": "7d6c415274c2923b5e40399c67cf05c4b06f2ca29274a1012d19c62a1da23a87",
+      "afterSha256": "cc854e09efb3630c7808cfabdfb4341524f9285d8d9d16e8e8bda779e9bb8478"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/FilesBody.tsx",
+      "beforeSha256": "1d7671ab1daa42a8f44afcbea4e9de9acc97f013fdd412414ea17d65481773f4",
+      "afterSha256": "916c287aafe3e64effefaac1a0db78084a275afa7c07e4d9c88916fb6376a60a"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/face.ts",
+      "beforeSha256": "0a46d364ea570222cb287863ac868db2de5d062c99bbf6cf91138f6bcee803bf",
+      "afterSha256": "5ba303479e6f09cdee37cc836beb270c0e6d77ad1674834a1140f92a255c1e24"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/index.ts",
+      "beforeSha256": "8546e2ced11471e38fc0601c239033c5a6e05e9beffe2dff1121316ab860f942",
+      "afterSha256": "2e19f73b5f15b5dff70cce793a82f9d8a51af4addcdf5376ccd4156a149ecf64"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/locales.ts",
+      "beforeSha256": "cc4c9aa87e63b895f8ceeb02e1afedf55d79657894a66bd1c8e0adde63396c79",
+      "afterSha256": "6fb05170c0f02b7487eb1e2b519f34658f4f781d741d793a6616ad22da17f249"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/navigation.ts",
+      "beforeSha256": null,
+      "afterSha256": "fe5c8ec0144c740c8f097c97e2ce156cfb9c3ed75b3d995b613b795a25d885e0"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/src/client/store.ts",
+      "beforeSha256": "030ec36f293f4bc224f1f4ffe4214ba2f9fca0e1fd35e5fa76c9958011b6299b",
+      "afterSha256": "c296abe02dc88b06532a441805faa7146f291e889a1efa882bc3c2a1f942bfff"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/tests/files-body.client.spec.tsx",
+      "beforeSha256": "bdccb9b1262325d34709339226e9844f06136510d41fc170bc63bce90c8e48db",
+      "afterSha256": "9a85ded1e0cdabc6951aae15020ae76372400f9d54dded5ad610d726a4e6f693"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/tests/mount.client.tsx",
+      "beforeSha256": "c9305671a02f09fabff04ee0d966a079fbb87f78f700f16ede2b60195e4bd63d",
+      "afterSha256": "5e1473dfa7c10ad859b2e9bd3b542187e100446b7017f9401220adc2549930d1"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/tests/navigation.client.spec.ts",
+      "beforeSha256": null,
+      "afterSha256": "7d75bf5621654e1d2b921247b00322abb5854ef9597b7c7496576b81b3ecefee"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/tests/operations.client.spec.tsx",
+      "beforeSha256": null,
+      "afterSha256": "cbe265a7ad62c2a17bc853ead63fe255422999b726c0962920b79c6d40d6d11b"
+    },
+    {
+      "path": "packages/client/ui-sidebar-files/tests/store.client.spec.ts",
+      "beforeSha256": "4584fd79d47ef45f73b7aedb90dea7e1308f289b27e51a51f61bcc54cb38efec",
+      "afterSha256": "a2ada269660973498cded02f695b84ac23d17bb58d40a9a15e4907d5889c03e6"
+    },
+    {
+      "path": "packages/fs/fs-local/src/index.ts",
+      "beforeSha256": "25fbe20ae347f392386852df0a5293370651304866eb572fe171e95596dab704",
+      "afterSha256": "3a23df9f2e2f105035bf6b728c0cdf34871e9558b3290b661fc4aff86941db08"
+    },
+    {
+      "path": "packages/fs/fs-sandbox/src/index.ts",
+      "beforeSha256": "baba926440e3bcaf9c5f70c4e7d5478efd977d66c76e025c4deb82534ce3256b",
+      "afterSha256": "8d94bcb85a465c96016e887fbe0bc3b19f659b2d229fe23f3c021dc6498281d7"
+    },
+    {
+      "path": "packages/fs/fs/src/index.ts",
+      "beforeSha256": "13a078be4951313536e4563e8b87a506b07cd7336821f4ecd28b0bb276872401",
+      "afterSha256": "fb6980cc304a06f1ce337ce3681ac73d5cc9f437138d19097efc72cf5ebff30a"
+    }
+  ],
+  "order": "dsh-native-workspace-tabs → dsh-rightbar-files-toggle → dsh-native-files-operations",
+  "consumer": "script/upstream-patches.mjs → script/native-files-patch.mjs",
+  "note": "只核本patch完整pre/postimage，其他代理SDK修改不在清单，不可整文件覆盖。"
+}

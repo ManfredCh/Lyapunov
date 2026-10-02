@@ -1,0 +1,34 @@
+{
+  "packId": "robotstudio_so101",
+  "version": "2026.09.23",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/so101.xml" },
+  "pieces": {
+    "asset": {
+      "ref": "ASSET_STAGING_MANIFEST_T1.json#robotstudio_so101"
+    },
+    "context": "ready",
+    "policy": "blocked:no-client-inference-adapter",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": [
+      "joint",
+      "trajectory",
+      "gripper",
+      "control"
+    ],
+    "directControl": "suitable"
+  },
+  "status": "PARTIAL:policy-no-client-inference-adapter",
+  "provenance": {
+    "source": "https://github.com/google-deepmind/mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7#robotstudio_so101/so101.xml",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "TheRobotStudio / LeRobot（SO-101 硬件与 CAD）；Google DeepMind MuJoCo Menagerie（模型原件）；Xinghaitu/Galaxea（G0.5/G05 权重与统计，OpenGalaxea/G05）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "Apache-2.0（asset/LICENSE 正文判读 2026-09-23：Apache License Version 2.0, January 2004 全文；与 ASSET_STAGING_MANIFEST_T1.json#robotstudio_so101 记载一致；全文随 asset/ 由 staging 提供）",
+    "policy": "G0.5 Community License Agreement（NON-COMMERCIAL + LIMITED PATENT，Release 2026-06-16，Licensor=Xinghaitu (Beijing) AI Technology / Galaxea；LICENSE-G0.5 正文判读 2026-09-23，仓内 LICENSE-G0/LICENSE-G0.5/LICENSE-G0Plus 三许可并存、逐包适用范围以正文为准）：Permitted Purpose 仅限学术研究/个人使用/教育/评估（含受限 Internal Evaluation PoC）；Commercial Use 定义极宽（含 SaaS/API/托管推理服务、生产部署），商用须另签商业授权且商用无专利授权；再分发须附协议与 NOTICE。⚠ 合规红旗：产品对外提供 G05 推理服务很可能构成 Commercial Use，部署前必须取得商业授权或经合规审查——技术可用≠许可可用。G05 权重/统计来源 OpenGalaxea/G05@g05-so101（2026-09-23 全量入库，sha256 全值入 policy/manifest.json 台账），权重不随包分发（服务端执行）；policy/dataset_stats.json 为官方统计复制件（逐字节对账）；context/vla/tests 为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

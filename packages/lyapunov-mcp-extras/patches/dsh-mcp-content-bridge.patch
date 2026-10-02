@@ -1,0 +1,53 @@
+--- a/packages/mcp/mcp-client/src/connection.ts
++++ b/packages/mcp/mcp-client/src/connection.ts
+@@ -18,11 +18,20 @@
+ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+ import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
+ import type { Context } from '@deepseek-ai/cordis'
++import { scopeOf } from '@deepseek-ai/dsh-scope'
+ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+ import { createTransport } from './transport.ts'
+ import { syncTools } from './tools.ts'
+ import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
+ import type { Config } from './index.ts'
++
++/** 供产品资源/提示词扩展使用的同连接RPC；连接、重连与释放仍由本Provider独占。 */
++declare module '@deepseek-ai/cordis' {
++  interface Events {
++    'mcp/content-request'(request: { serverName: string; ownerScope?: object; method: 'listServers' | 'listResources' | 'readResource' | 'listResourceTemplates' | 'listPrompts' | 'getPrompt'; params: Record<string, unknown>; signal: AbortSignal }, next: () => Promise<unknown>): Promise<unknown>
++  }
++}
++
+ 
+ /** Automatic reconnect policy for one MCP server connection. */
+ export interface ReconnectConfig {
+@@ -148,6 +157,29 @@
+   let connectedAt: number | undefined
+   /** The real error from the first connection attempt, for startup-await diagnostics. */
+   let firstAttemptError: unknown
++
++  // 只暴露按需资源/提示词RPC，不暴露可变Client、不创建第二条连接或执行提示内容。
++  ctx.on('mcp/content-request', async (request, next) => {
++    if (request.ownerScope !== scopeOf(ctx)) return next()
++    if (request.method === 'listServers') {
++      const rest = await next() as unknown[] | undefined
++      const connected = !disposed && client !== undefined && connectedAt !== undefined
++      return [...rest ?? [], { serverName: config.serverName, status: connected ? 'connected' : 'unavailable', capabilities: connected ? client!.getServerCapabilities() ?? {} : {} }]
++    }
++    if (request.serverName !== config.serverName) return next()
++    const current = client
++    if (disposed || current === undefined || connectedAt === undefined) {
++      throw new Error(`MCP_PROVIDER_UNAVAILABLE: ${config.serverName}`)
++    }
++    const options = { signal: request.signal, timeout: config.toolCallTimeoutMs }
++    switch (request.method) {
++      case 'listResources': return current.listResources(request.params, options)
++      case 'readResource': return current.readResource(request.params as Parameters<Client['readResource']>[0], options)
++      case 'listResourceTemplates': return current.listResourceTemplates(request.params, options)
++      case 'listPrompts': return current.listPrompts(request.params, options)
++      case 'getPrompt': return current.getPrompt(request.params as Parameters<Client['getPrompt']>[0], options)
++    }
++  })
+ 
+   /** A generation may act only while it is the current one on a live plugin. */
+   const isCurrent = (generation: Client): boolean => !disposed && client === generation

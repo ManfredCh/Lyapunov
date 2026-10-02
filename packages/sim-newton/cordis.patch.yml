@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-sim-newton
+      name: '@lyapunov/sim-newton/plugin'

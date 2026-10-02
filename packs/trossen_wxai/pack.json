@@ -1,0 +1,27 @@
+{
+  "packId": "trossen_wxai",
+  "version": "2026.09.23",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/wxai_follower.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_T1.json#trossen_wxai" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "control", "ik"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie trossen_wxai（ASSET_STAGING_MANIFEST_T1.json#trossen_wxai 落账，mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7/trossen_wxai）",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "Trossen Robotics（WXAI 硬件与公开 URDF 描述）；Google DeepMind MuJoCo Menagerie（MJCF 模型）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Trossen Robotics；ASSET_STAGING_MANIFEST_T1.json#trossen_wxai license=BSD-3-Clause 落账）",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控内容（context/policy/vla/tests）为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

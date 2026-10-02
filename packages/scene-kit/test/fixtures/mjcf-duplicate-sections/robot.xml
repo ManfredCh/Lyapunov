@@ -1,0 +1,25 @@
+<mujoco model="arm child">
+  <compiler angle="radian" meshdir="meshes"/>
+
+  <asset>
+    <mesh name="arm_link" file="a.stl"/>
+  </asset>
+
+  <worldbody>
+    <body name="arm_base">
+      <joint name="arm_joint" type="hinge" axis="0 0 1"/>
+      <geom type="mesh" mesh="arm_link"/>
+    </body>
+  </worldbody>
+
+  <asset>
+    <mesh name="tool_link" file="b.stl"/>
+  </asset>
+
+  <worldbody>
+    <body name="tool">
+      <joint name="tool_joint" type="hinge" axis="0 1 0"/>
+      <geom type="mesh" mesh="tool_link"/>
+    </body>
+  </worldbody>
+</mujoco>

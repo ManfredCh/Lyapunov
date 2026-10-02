@@ -1,0 +1,2871 @@
+{
+  "schema": 1,
+  "note": "CCMM-07 默认安全行为清单：由 CCMM-06 的库存 TSV（total=190）逐行分类生成；decision=include 才会在 CI 跑，exclude 全部带 not-run 理由（不跑 ≠ 通过）。 CCMM-07 自身的 harness 判据 script/test-ci.test.ts 手工并入本清单（06 库存早于它存在）。 CCMM-09 按**真实副作用**复核了被 06 误标成 realmodel/net_fetch/hf_download 的 28 个本地用例（services/lyapunov-api、services/pack-endpoint、packages/generate-{image,tripo,hunyuan}、lyapunov-shell、policy-registry/vla-*、scene-kit/map-* 等）：它们用的是注入 fetcher/替身/本机 HTTP 夹具/仓内夹具数据，不触碰真实供应商、不出网、不下载权重、不计费，故改判 include 并逐条写明依据。**不要**再用 --emit-manifest-from-tsv 从 06 的 TSV 整份重生成本清单：那会把这次复核连同理由一起冲掉。 2026-09-26：15 条 services/* 测试条目随服务端源码移出本仓库（归 LyapunovOM backend/dev-server/）一并删除。 2026-09-26（补）：4 条依赖服务端源码而随之移出的测试条目（image-formal-chain、policy-registry 三个 pack 测试）一并删除。 2026-09-26：Jev 客户端路由退役，删除 2 条对应测试条目（jev-context-routing.test.ts、jev-routing-env.test.ts）。 2026-09-26：补 1 条 conversation-history.test.ts（Jev 退役时提取出的模块，补回被删测试的覆盖）。 2026-09-26：补 1 条 sim-isaac/test/isaac-entry-lifecycle.test.ts（W3 交付）。 2026-09-26：补 1 条 sim-newton/test/capability-truth.test.ts（W5 交付）。 2026-09-26：补 1 条 lyapunov-shell/test/environment-readiness.test.ts（W14 交付）。 2026-09-26：补 1 条 distribution/linux/payload-contract.test.ts（W6 交付）。 2026-09-26：补 4 条 lyapunov-shell 测试（W4 交付：session-ownership-two-sessions / cua-input-single-flight / domain-pointer-rules-turn / engine-panel-decision）。 2026-09-26：补 1 条 lyapunov-shell/test/html-preview-entry.test.ts（W10 交付）。 2026-09-26：SEARCH_ROOTS 追加 distribution/*（修 W6 条目落在发现根外导致的 CONFIG-ERROR）；补登记 render-failure.test.ts（Lead 遗漏）与 licenses/mamba-license.test.ts（W16）。 2026-09-26：补 2 条 scene-kit G19 测试（W13 交付）。 2026-09-26：补 1 条 lyapunov-workspace/test/dev032-html-plan-wiring.test.ts（W10 第二轮）。 2026-09-26：补 2 条 lyapunov-session-undo 测试（W8 交付）。 2026-09-26：补 1 条 sim-isaac/test/isaac-orphan-close-failure.test.ts（W18 交付）。 2026-09-26：补登记 W21 gpu-device-hidden-notice 与 W22 computer-use-input-scope（preflight 的 UNCLASSIFIED 报出）。 2026-09-26：补登记 benchmark-libero/test/prepare-env-guard.test.ts（preflight 报出）。 2026-09-26：W24 改名 scene-bridge.test.ts → scene-projection.test.ts（Lead 补登记；此前只提交了源码改名，清单遗漏）。 2026-09-26：补登记 policy-registry/test/policy-source-bounded-fetch.test.ts（W25）。 2026-09-26：补登记 lyapunov-share/test/operations-bounded-fetch.test.ts（P8，preflight 报出）。 2026-09-26：preflight 报出的在途测试文件补登记 3 条。 2026-09-26：补登记 script/release-gate.test.ts（P9）。 2026-09-26：补登记 viewer/test/projection-consumer.test.ts（release-gate 报出）。 2026-09-26：补登记 policy-registry/test/policy-source-github-quota.test.ts（P18）。 2026-09-26：R-fix#4 报的两条清单问题由 Lead 更正。 2026-09-26：preflight 报出的在途新测试文件补登记 3 条（W3 两条 + W7 一条）。 2026-09-26：再补登记在途新测试文件 1 条（W5 媒体路由）。 2026-09-26：补登记 script/gate-drivers.test.ts（申请方上报，Lead 登记）。 2026-09-27：撤掉过早登记的 script/gate-drivers.test.ts（文件尚不存在，我登记早了）+ 补登记 supported-surface-truth.test.ts。 2026-09-27：补登记 4 条（含 W11 从误删中恢复的两个客户端用例）。 2026-09-27：补登记 3 条（R-fix#13 / W9 / R-fix#16 的用例）。 2026-09-27：按 W11 实测把三条误标护栏 exclude→include（engine-preference / terminal-options / engine-selection-consistency）。 2026-09-27：preflight 报出的在途新测试文件补登记 1 条。 2026-09-27：撤掉盘上不存在的登记 1 条（发现规则扫到但清单未覆盖：packages/lyapunov-shell/test/gpu-misdiagnosis-guard.test.ts）—— 在途 lane 改名或未落盘，等落盘后再登记。 2026-09-27：按 preflight 输出正确解析路径补登记 1 条（前一次自动登记把整句当路径，已修）。 2026-09-27（维护队接力，回执 bugfixHistory/MANIFEST-KEEPER-20260926.md）：①补登记 2 条——policy-registry/test/policy-source-github-429-noheader.test.ts（W26-R2 建）与 lyapunov-shell/test/scene-robot-asset-locators.test.ts（DEV-PROJ-02 建）；路径解析一律取该行最后一个『：』之后那段，登记前先确认文件真在盘上；②按实测更新 4 条 reason 的读数——lyapunov-share/test/operations-bounded-fetch.test.ts（单文件 26 pass/200 expect、整包 2 文件 27 pass/203 expect；并按 R-fix#7 回执 §9 换掉 P8 的『去停摆上限』半截 no-op 负对照，★别把 27/203 当单文件读数）、distribution/licenses/mamba-license.test.ts（24 用例/117 expect）、policy-registry/test/policy-source-github-quota.test.ts（39 用例/212 expect，原 27/136 已过期）、policy-registry/test/pack-client-face.test.ts（11 用例/72 expect，补实测并标注未重跑项）；③注：上文『撤掉 gpu-misdiagnosis-guard 登记 1 条』已过期——在途 lane 已重新落盘（26359 B，00:21），该条目现在清单、文件在盘，missing=0。 2026-09-27（维护队 R1 续）：再补登记 5 条——policy-registry/test/policy-source-stall-cap.test.ts（W25 停摆上限修正；★计时敏感：真 30s 常量那条使整文件单跑约 105s，而 harness 只有**全局** TESTCI_TIMEOUT_MS（默认 120s）、ManifestEntry 无 per-entry 超时字段）、benchmark-contract/test/adapter-concurrency.test.ts 与 benchmark-{gymnasium,libero}/test/load-serialization.test.ts（DEV-018 并发 load 串行化/释放窗口）、robot-tools/test/gait-open-loop-scope.test.ts（GAIT 语义对齐）。★**在途竞态提醒**：这些文件落盘后数秒内的首跑会红（本队实测 stall-cap 4 pass/2 fail、adapter-concurrency 2/3、gymnasium load-serialization 1/4），**复跑即绿** ⇒ 登记前必须复跑确认，别把半成品的红当稳定红写进 reason。 2026-09-27（维护队 R1 再续）：又补登记 4 条——policy-registry/test/mirror-archive.test.ts（W7 整仓归档门；★**稳定红 22 pass/2 fail**，两次连跑复现，两条失败名见其 reason）、lyapunov-product-bundle/test/runtime-paths-workspace-mapping.test.ts（ensureWorkspaceMapping 行为用例，13/0）、sim-isaac/test/camera-annotation-dataset.test.ts（DEV-009 相机标注/数据集导出；★**稳定红 6 pass/4 fail**，且**不需要 GPU/Isaac 真机**——它自述取不到 RTX 读数、只钉 provider 转发/真实算术/真实文件层三层）、viewer/test/asset-marker-resolution.test.ts（res: 标记语义，6/0，首跑 4/2 属竞态）。**两条稳定红均按纪律登记为 include + 如实记账，不为凑 exit 0 标 exclude**（它们不需要任何外部条件）。 2026-09-27（GATE-NOTRUN-AND-ASSEMBLY-ORDER 单）：把 packages/lyapunov-shell/test/gpu-misdiagnosis-guard.test.ts 那条占位 reason（『在途 lane 新建…细节待补全』）换成实测读数——16 pass/0 fail/173 expect、静态站点 145、文件 sha256 04a6efb88393…；并登记：该文件是**本轮最强的那条顺序守卫**，但当时**不在发布门 CASES 里**（落在 manifestGap.notRun）⇒ 门不跑它。接进 CASES 的条目已按纪律交 Lead 转 R2（本单不改 release-gate.ts）。⚠️ 同时如实记两条**与本单无关**的当前红：engine-panel-decision 因 packages/sim-newton/python/worker.py 被另一条 lane 在 00:58:16 改过而 3 pass/2 fail（panelSliceMatchesWorker 对不上）〔⚠️ **本句已过期**：2026-09-27 收口批复跑该文件＝**5 pass / 0 fail / 50 expect**，panelSliceMatchesWorker 同源守卫已绿〕，以及根 tsc 的报错列表已被两处在途语法错（policy-registry/src/mirror-search.ts、lyapunov-product-bundle/test/runtime-paths-workspace-mapping.test.ts）压成只剩语法错——见对应条目 reason 与该单回执。 2026-09-27（CI-REDS-CLEAR 单）：preflight 的 UNCLASSIFIED 报出的 9 条在途用例补登记为 include（逐条实测读数——两次复跑 pass/fail/expect + 门 countAssertSites() 静态站点 + sha256/mtime——写在各自 reason 里），UNCLASSIFIED 9→0。★两条如实记账：①本单只补清单，**没有**把这 9 条接进发布门 CASES（Lead 已裁「不接」）⇒ 登记后 caseset-coverage 的 unregistered 9→0、drift 141→150（同一条红，口径从「清单里没有」变成「登记了但发布门不跑」）；②登记会让 manifest-gate-gap 的 notRun 由 131 涨到 140、digest 由 62127a5e1e71 变成 40dc696e9e67（超过 MANIFEST_GAP_FROZEN 的冻结值 ⇒ 该判据与 script/release-gate.test.ts「真仓不变式：冻结点与现算值一致」会一起红），配对修法（COVERAGE_WAIVERS ×9 或重冻）落在 script/release-gate.ts，**本单未动那个文件**，交 Lead 裁定。",
+  "safeDefault": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据",
+  "runnerNotes": {
+    "bun:test": "TESTCI_BUN --no-env-file test <file>（未设置时回退到 bun）",
+    "node:test": "声明 node:test，仍由 TESTCI_BUN --no-env-file test <file> 执行（未设置时回退到 bun；裸 node --test 在本树跑不起来，见文件头实测）",
+    "python": "TESTCI_PYTHON <file>（未设置时回退到 .runtime/bench/gymnasium-env/bin/python 或 python3；缺 numpy/Pillow 的解释器不算通过）",
+    "plain": "TESTCI_BUN --no-env-file <file>（未设置时回退到 bun；脚本自带 main，退出码即结果）"
+  },
+  "entries": [
+    {
+      "path": "distribution/licenses/mamba-license.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W16：消除打包的隐式联网依赖（后续单扩到五组 + 打包接线漂移守卫）。①入库件命中：取件器调用 0 次（含按打包脚本默认路径调用、sha256/字节数双重核对内容确为上游那份）；②env 覆盖与 .runtime/licenses 缓存命中均 0 网络，缓存内容对不上登记身份 ⇒ 拒用该候选并继续走网络（可自愈），取件成功回写缓存后下一次命中零网络；③入库件/缓存/env 全缺 + 网络失败 ⇒ fail-closed 且报文含上游 URL、各候选路径与原因（网络拿回的内容对不上登记身份、入库件被改动同样 fail-closed，不拿网络掩盖）；④登记身份不可用（meta.json 缺失/损坏/无 sha256、内容被换）⇒ 一律拒绝采用、点名缺失项、不落到网络；⑤交付闸门 hashMatchesPin 是三态——null/false 都不是通过（字节与上游相同但无登记身份、缓存命中但无身份同样拒；env 覆盖则标成'未证实 + 由操作者处置'并给原因）。漂移守卫：打包脚本走 resolveMambaLicense、全脚本只剩一处联网点（就是那个有界兜底）、许可证在写进载荷**之前**先过交付闸门（顺序断言）。2026-09-27 维护队实测 24 用例 / 0 fail / 117 expect（原'14 用例/61 断言'已过期）。"
+    },
+    {
+      "path": "distribution/linux/install.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08：真实安装入口的本地回归。只在临时目录中生成小型 tar、Python/provider/doctor/physics 替身与用户路径，下载地址显式指向 127.0.0.1 HTTP 夹具；覆盖校验、续传、升级失败保留 current、用户入口冲突、宿主导入环境隔离与 Conda 单引号 prefix 的下载前拒绝。不访问公网、不下载权重、不安装真实 SDK、不调用真实 provider；不代表正式安装或原生物理已验。"
+    },
+    {
+      "path": "distribution/linux/payload-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W6/DEV-020 发行载荷契约：顶层恰一个可执行入口（变异加第二个 ⇒ fail-closed 报违约）、自指链接跳过并入 RELEASE.json.skippedSelfLinks 记账、micromamba LICENSE 取用有界超时不再裸等。Lead 登记。"
+    },
+    {
+      "path": "distribution/linux/rollback-boundary-doc.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "preflight 的 UNCLASSIFIED 报出的在途用例（2026-09-27 CI-REDS-CLEAR 单补登记）：回退边界的「覆盖不对称」（同一句安全边界只写在随包出货的 linux README、macos README 里「回退/升级」零命中）与 Linux 侧四条欠账 L1–L4 必须在门里变红。三面断言全部只读文件、离线、不需要任何引擎。★登记前复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，文件静止：mtime 2026-09-27 01:28:34、13009 B、sha256 c321dfaec5ef8eb6…）：两次均 9 pass / 0 fail / 14 expect；门 countAssertSites() 静态站点 13。★本单只补清单，不改判据、不接进发布门 CASES（是否接线由 Lead 裁定）。"
+    },
+    {
+      "path": "distribution/linux/sandbox.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "发行沙箱检查：普通用户与上下文限制、root4755及nosuid事实；不执行sudo或修改系统策略。"
+    },
+    {
+      "path": "packages/asset-bake/test/bake-route.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/asset-bake/test/physicalize-environment-auto.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/asset-bake/test/physicalize-prune-ownership.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/asset-bake/test/sdf-consumer-claim.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/benchmark-contract/test/adapter-concurrency.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-018：适配器并发/串行队列。钉住队列语义——后进入的 body 必须等前一个交回 turn 才开始且按调用顺序、前一个 body 失败不吃掉队列（后续 body 照常进入）、pending 指向队列尾（在途 turn 未交回前不 resolve，交回后 resolve）、disposeOnce 并发/重复调用只跑一次 teardown（后来的 teardown 不被执行）；另含结构约束：串行队列/『释放只跑一次』只有共享模块一处实现，两包适配器不再内联。离线纯逻辑。2026-09-27 维护队实测 5 用例 / 0 fail / 9 expect（★落盘当时抓到过一次 2 pass/3 fail，属在途竞态；随后复跑稳定 5/0）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/benchmark-contract/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/benchmark-gymnasium/python/test_worker_protocol.py",
+      "declaredRunner": "python",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/benchmark-gymnasium/test/load-serialization.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-018：并发 load 的串行化与释放窗口（benchmark-gymnasium 侧）。钉住——第二个 load 在第一个交回 turn 之前不进入独占段（按调用顺序放行）、第一个 load 失败不吃掉队列（后续 load 照常进入独占段）、dispose 等在途 load 交回 turn（释放不早于真实回收，且释放窗口内的 load fail-closed）、并发+重复 dispose 只跑一次真实回收（teardown 进入 1 次、transport 回收 1 轮）；另含真 prepare 路径（无隔离解释器）⇒ BLOCKED 原样穿过串行队列、不 spawn worker。离线纯逻辑。2026-09-27 维护队实测 5 用例 / 0 fail / 14 expect（★落盘当时抓到过一次 1 pass/4 fail，属在途竞态；随后复跑稳定 5/0）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/benchmark-libero/test/continuation-boundaries.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/benchmark-libero/test/episode-record-fields.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/benchmark-libero/test/load-serialization.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-018 残留小口：benchmark-libero 适配器侧对『并发 load 串行 + 释放只跑一次』的接线。证据边界（如实，取自文件头）：**没有拉起真 python worker**——需要控制交回 turn 时机的三个用例把公开方法 prepare() 换成返回 BLOCKED 的替身（真 prepare 缺解释器时本来就返回 BLOCKED，形状一致）；但**队列、guard、load 的排队路径、teardown、closeWorld 全部是真实执行**。释放单飞那一例走**真实 protocol 替身**（createProtocolDouble，与既有 continuation-boundaries.test.ts 同族）：世界与 env 都是真的，只统计官方 env 的 close() 次数，不涉及 worker 进程。未覆盖：真实 worker 进程泄漏、跨进程竞争（需要 .runtime/bench 隔离 Python 与真套件）。2026-09-27 维护队实测 5 用例 / 0 fail / 14 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/benchmark-libero/test/prepare-env-guard.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "benchmark-libero 环境准备守卫。由 preflight 的 UNCLASSIFIED 报出（无主在途文件）。Lead 登记；具体覆盖内容由 W24 在清理由时补全 reason。"
+    },
+    {
+      "path": "packages/benchmark-libero/test/real-sdk-boundaries.smoke.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：GATE-C-20260927（冷检出 CI 准备）复核后更正分类为真实的**外部 SDK／离屏渲染条件**，此前误归『默认离线安全集合』。该文件头部自述『真实隔离 LIBERO SDK/worker，手工驱动，不是 bun test 用例；缺 SDK 时 prepare 返回 BLOCKED 并退出 2』：它会真实加载官方 libero_object 并推进/取消，依赖机器本地的隔离 SDK 环境（`.runtime/bench/libero-env` 的 robosuite 等外部 SDK，含离屏渲染），普通 GitHub runner 无此条件。1C 完整离线 CI 实测此项 **exit=2**：该隔离环境导入 robosuite 时 numba 报 `RuntimeError: cannot cache function 'mat2quat': no locator available`，驱动按合同在 `load.BLOCKED` 时退出 2。故按纪律归 `exclude`（not-run），**不是**记为通过；不删断言、不换替身、不改门槛。脚本保留，在本 goal 功能阶段（首次 commit/CI 之后）由主控在已有 SDK 的环境下真实执行并回收终态。"
+    },
+    {
+      "path": "packages/benchmark-libero/test/scene-projection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据（2026-09-26 W24 A1/A2 改名：scene-bridge → scene-projection。原因是 g17 的 legacy_owner 探针把裸词 scene-bridge 当旧平台残留命中 4 处，实为**同一模块的命名冲突、不是缺陷**；修法是产品侧改名而**不放宽门的探针**。Lead 补登记。）"
+    },
+    {
+      "path": "packages/blender/test/blender-run.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：GATE-C-20260927 复核后**保持 exclude**，理由更正为真实原因：①该文件是 Node 原生 node:test，而离线 CI（test-ci.ts）统一用 bun 执行 node:test —— 本机实测 bun 1.3.13 在加载期即报 `SyntaxError: Export named 'getSystemErrorMessage' not found in module 'node:util'`（Node 24 API，bun 未导出），0 pass / 1 fail，无法作为离线覆盖；②真实程序分支必须真跑 BLENDER_EXECUTABLE/PATH 上的 Blender（world.py --fixture），属外部可执行要求。不删断言、不换替身。"
+    },
+    {
+      "path": "packages/blender/test/cad-plugin.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/cad.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/camera-fit.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：GATE-C-20260927 复核后**保持 exclude**，理由更正：①Node 原生 node:test，离线 CI 用 bun 加载即报 `getSystemErrorMessage` 未导出（本机实测 0 pass / 1 fail），无法作为离线覆盖；②真实点拟合分支需要 LYAPUNOV_CAMERA_FIT_PYTHON（装了 opencv-python-headless + numpy 的隔离 venv），回灌闭环还要求可执行的 blender。不删断言、不换替身。"
+    },
+    {
+      "path": "packages/blender/test/drawing-input.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/export-uv-pbr.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/photo-registration.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_action_fcurves_compat.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_bounds_lifetime.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_collision_frame.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender",
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；需要 Isaac 仿真栈（isaac）"
+    },
+    {
+      "path": "packages/blender/test/test_world_content_hash_locale.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_derived_mesh.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_harness.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_incremental_export.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_locale.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/test_world_operations.py",
+      "declaredRunner": "python",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/blender/test/textures.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender",
+        "net_fetch",
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；需要出网抓取（net_fetch）；调用真实供应商模型/计费（realmodel）"
+    },
+    {
+      "path": "packages/blender/test/world-content-hash-locale.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/world-locale.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/world-orphan-material-wiring.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/world-resource-id-locale.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/depth-estimation/test/depth-estimate.test.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate",
+        "hf_download"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：GATE-C-20260927 复核后**保持 exclude**，理由更正：真实前置三项缺一即 exit 2（LYAPUNOV_DEPTH_TEST_PYTHON 含 torch/transformers/Pillow 的 venv、LYAPUNOV_DEPTH_TEST_MODEL_DIR 经 hf-mirror 下载的 Depth-Anything-V2-Small 权重、LYAPUNOV_DEPTH_TEST_IMAGE 真照片）；且该 plain 驱动在 bun 下加载期即报 `getSystemErrorMessage` 未导出（本机实测 exit 1）。不联网取模型、不伪装通过。"
+    },
+    {
+      "path": "packages/depth-estimation/test/depth-geometry.test.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/desktop/test/account-controller.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Round57 local account-controller lifecycle and stale-response tests use injected fetcher/store/host stubs; no account service, payment, provider, or network call."
+    },
+    {
+      "path": "packages/desktop/test/account-view-helpers.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑：账户异步结果身份、支付方式和错误文案归一化；不访问支付服务"
+    },
+    {
+      "path": "packages/desktop/test/restart-recovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯恢复规划、错误文本分类和临时合成 workspace 记录解析；没有 GPU、Electron 或 Host 调用。此前按文字出现 GPU 错误消息误分类，已按实际副作用复核。"
+    },
+    {
+      "path": "packages/desktop/test/software-rendering.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯开关合同：软件回退固定为 X11 ANGLE/SwiftShader，不使用 no-sandbox、disable-gpu-sandbox 或 ignore-gpu-blocklist；不启动 Electron。"
+    },
+    {
+      "path": "packages/desktop/test/data-root.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯数据根合同：不同 desktop 数据根的 userData/window-state/runtime 路径保持隔离；不启动 Electron、不访问用户数据。"
+    },
+    {
+      "path": "packages/generate-hunyuan/test/artifact-transfer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "generate-hunyuan 的产物转存用例（W3 DEV-007 客户端残留单新建）。由 preflight 的 UNCLASSIFIED 报出，Lead 登记；覆盖细节待该 lane 交付后补全。"
+    },
+    {
+      "path": "packages/generate-hunyuan/test/env-forwarding.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：只测隔离环境搬运清单（HUNYUAN_DEVELOPER_ENV_KEYS 与读取处一一对应）与四份清单去重。无 HTTP、无出网、无供应商调用。"
+    },
+    {
+      "path": "packages/generate-hunyuan/test/job-record.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "在途 lane 新建的测试文件，由 preflight 的 UNCLASSIFIED 报出。Lead 登记；覆盖细节待该 lane 交付后补全。"
+    },
+    {
+      "path": "packages/generate-hunyuan/test/recovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-29: injected HTTP and temporary records verify same-request recovery, invalid lookup refusal, stored success reuse, and local-only cancellation without paid submission or external network."
+    },
+    {
+      "path": "packages/generate-image/test/env-forwarding.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：只测 script/profile.ts 的隔离环境搬运（清单键搬、清单外不搬、HOME/XDG 隔离），父环境给占位值。无 HTTP、无出网、无供应商调用。"
+    },
+    {
+      "path": "packages/generate-image/test/plugin.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：供应商侧是 support/dashscope-stub.ts 的**本机 HTTP 夹具**（127.0.0.1 随机端口），结果图 URL 指向同一夹具；用假 key，真原生工具/问答/附件装配。无出网、无真实百炼、无计费。"
+    },
+    {
+      "path": "packages/generate-image/test/provider.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：同上本机 dashscope 夹具 + 测试假 key（TEST_KEY，只断言它出现在 Authorization 头）；核提交形状/轮询/字节落盘/官方用量字段。无出网、无真实百炼、无计费。"
+    },
+    {
+      "path": "packages/generate-marble/test/artifact-transfer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "generate-marble 的产物转存用例（W3 DEV-007 客户端残留单新建）。由 preflight 的 UNCLASSIFIED 报出，Lead 登记。"
+    },
+    {
+      "path": "packages/generate-marble/test/env-forwarding.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/generate-marble/test/job-record.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "在途 lane 新建的测试文件，由 preflight 的 UNCLASSIFIED 报出。Lead 登记；覆盖细节待该 lane 交付后补全。"
+    },
+    {
+      "path": "packages/generate-tripo/test/artifact-transfer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：替身 fetch（含注入 artifactFetch），产物 URL 是文档段 IP 字面量 203.0.113.7（供 url-safety 判定，不解析 DNS、不发请求）。不产生费用。"
+    },
+    {
+      "path": "packages/generate-tripo/test/env-forwarding.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：只测隔离启动的环境搬运清单（TRIPO_DEVELOPER_ENV_KEYS 与读取处一一对应），父环境给占位值。无 HTTP、无出网、无供应商调用。"
+    },
+    {
+      "path": "packages/generate-tripo/test/recovery-identity.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：替身 fetcher 驱动真 runGeneration（真状态机/真 JobRecord 落盘/真共享中央客户端），供应商与中央服务都是确定性本地应答。不发真实请求、不产生费用。"
+    },
+    {
+      "path": "packages/grasp-analytic/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/grasp-anygrasp/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/grasp-graspgenx/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-api-client/test/generation-client.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "客户端生成客户端用例 —— 【W11 从误删中恢复】：原在 services/lyapunov-api/test/，边界收敛时被一并删除，但它【只 import 被保留的客户端模块】、零服务端依赖，本可逐字移入。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-api-client/test/world-generation-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "世界生成契约用例（12 条判的是已移入客户端的契约）—— W11 从误删中恢复。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-contracts/test/command-privacy-error-code.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "publicErrorCode() 的**判据形状**：**形状在前、按码分类**，不是在消息里搜词（来源 SHARE-STATUS-SHAPE-20260926 §1.2③ + §9-3(a)；同形误判的实测现场是诊断消息第二行就是上游 URL（…/ACCOUNT/v1/me），于是「上游 503」被 /AUTH|ACCOUNT/ 抢成 401「请重新登录」，用户下一步动作与真实故障完全相反）。本文件钉四件事，读数对着 321 个真实源文件 / 2,400+ 真实码形状 token 取。★该文件于 2026-09-27 03:37:09 由在途 lane 落盘；按「验静止」等到两次检查 mtime/sha 不变后复跑两次（bun 1.3.13，2026-09-27 03:41）：**两次都是 14 pass / 1 fail（rc=1）/ 147 expect ⇒ 稳定红，按纪律如实登记为 include，不为凑 exit 0 标 exclude**（它不需要任何外部条件）。失败的那一条逐字是：④ 不许放宽：`*_UNDECLARED` 九个真实码必须仍是 P422（段级词表两段都登记） > 固定句类目一个都不能变少：真实码 corpus 里落在 P402/P403/P404/P422 的，答案与改前逐字相同。★红在在途 lane 的用例侧，**不是本单引入**（本单不改任何判据）；静态站点 45；16540 B、232 行、mtime 2026-09-27 04:03:59 +0800、sha256 6cfd6a2958cd8100…（采样 2026-09-27 04:1x）。★**2026-09-27 MANIFEST-REGISTER-AND-REASONS 按实测订正本行的身份与站点**：原文写的是 13062 B / 旧指纹 532879149bff9a51… / 静态站点 41 —— 那是 03:37:09 那一版，已过期。★**并如实登记一条版本漂移（原文那句行为读数按要求逐字保留、没有被改写）**：上面那句「两次都是 14 pass / 1 fail（rc=1）/ 147 expect ⇒ 稳定红」是 13062 B 那一版的读数；现树 16540 B 那一版由在途 lane 继续扩写后，本单两次独立复跑（rc=0）都是 **16 pass / 0 fail / 183 expect** ⇒ **现字节已不再红**。两条读数各自锚定自己的版本；本单只订正身份与站点，不改判据、不删断言、不放宽任何判据。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-contracts/test/context-envelope.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Round78 product-owned context envelope schema tests validate category/session/revision/lifetime/expiry/visibility/privacy and JSON-safe payloads; no network, provider, or runtime context mutation."
+    },
+    {
+      "path": "packages/lyapunov-contracts/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-mcp-extras/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-product-bundle/test/account-client.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Round57 account usage normalization and ledger contract tests use local response fixtures; no credentials, account service, payment, provider, or network call."
+    },
+    {
+      "path": "packages/lyapunov-product-bundle/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-product-bundle/test/formal-model.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地目录与虚构账户 URL 的模型目录一致性检查；不启动 Host、不联网、不读取凭据"
+    },
+    {
+      "path": "packages/lyapunov-product-bundle/test/runtime-paths-workspace-mapping.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RUNTIME-PATHS-AND-FROZEN-VALUES 单：ensureWorkspaceMapping() 的**行为**用例。为什么现在才写（取自文件头）：这条函数此前**一条用例都没有**——script/verify-asset-layout.test.ts 只经 createCiLayoutFixture() 覆盖了『产品根 workspace 映射软链』这一个 happy path，而那个夹具**不传 claimProductEntry**（⇒ 走 undefined ⇒ 认领），所以另一半行为从未被量过。用真临时树 + 真软链（mkdtempSync/lstatSync/readlinkSync，测完 rmSync）钉 runtimePaths/ensureWorkspaceMapping 的映射与 fail-closed 检查。离线，只在系统临时目录里建删。2026-09-27 维护队实测 13 用例 / 0 fail / 33 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/lyapunov-session-undo/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-session-undo/test/history-boundary.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W8/DEV-022 撤销边界稳定性：throughSeq=user.seq-1 在'用户在回合中发消息（inbox 拼接）'时落在 step/start 上，原生 checkout 报 'history checkout requires a stable boundary outside turn, step and compaction'，导致 /undo 整次失败、文件一字节未回退。stableHistoryBoundary() 与原生同一状态机退回最近稳定边界，undo/redo 存点/读点三处归一。产品内修前/修后对照：throughSeq 199(error)→194(success)。负对照：边界函数退回旧行为 8 pass/3 fail。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-session-undo/test/worktree-snapshots.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W8/DEV-022 撤销覆盖五类改动（新建文本/新建二进制/删除/修改/Bash 副作用）+ 冷恢复：checkpoint 路径差集、/undo 字节级全回退、/redo 字节级全恢复、两次真实 Host 重启后 canUndo/canRedo 与真实 checkout 成功。并钉住'会话私有运行目录不得进撤销文件域'（<工作区>/.lyapunov/sessions/** 曾把另一条会话的运行文件回滚 = 跨会话误写）。负对照：移除排除 5 pass/1 fail，逐字还原后 11 pass/0 fail。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-share/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-share/test/operations-bounded-fetch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-fix#7（P8 验收更正）：lyapunov-share 取件的有界超时 + 四条真缺陷的回归。常量仍为 SHARE_FETCH_TIMEOUT_MS=30_000 / SHARE_FETCH_ATTEMPTS=3 / SHARE_FETCH_STALL_MS=30_000（与 W25 的 POLICY_FETCH_*、W16 的 fetchMambaLicense 一一对应），但口径已按 R-fix#7 更正：①取消在 4 条路径（两个出网点 × {联网阶段, 读正文/解析阶段}）原样传播 SHARE_CANCELLED_BY_CALLER（改前 identity()/request() 都吞成 SHARE_AUTH_REQUIRED / SHARE_*_INVALID_RESPONSE）；②isTransientShareStatus 两条调用点共用同一个判定（消除 P8 的『只有 /v1/me 重试』不对称），瞬时状态一律重试到上界后抛五要素齐的 ShareFetchError(retryable=true)；③非瞬时 4xx 也记进尝试轨迹；④attemptDeadline 只覆盖『发出请求（含请求体上传）→ 拿到应答头』，拿到头即 clear() 解除，正文改由 readBoundedText 的『30s 无数据到达』窗口约束（真 loopback 三点读数：头快/正文 2000ms·上限 500ms ⇒ 读得完 2043ms；头 700ms 才到·上限 200ms ⇒ 219ms 失败；正文停摆·窗口 300ms·上限 5s ⇒ 302ms 失败）。另钉 preview-route 状态码映射：取消 ⇒ 404（不是 401）、真认证失败 ⇒ 401、上游 5xx 不是 401。读数（2026-09-27 收口批复跑）：**本条目对应的单文件**＝36 pass / 0 fail / 267 expect；整包（2 文件）＝37 pass / 0 fail / 270 expect。★**别把整包数当单文件读数**：「27 pass/203 expect」是整包、「26 pass/200 expect」是单文件，这两版都已过期（本条目只声明这一个文件）。负对照**重做，且跑的就是交付版**：变异 A（ATTEMPTS 3→1）7 pass/4 fail；B1（只去 connect 超时）8 pass/3 fail/15.32s，停摆用例 [205ms] 仍通过；B2（两半都去）7 pass/4 fail/20.10s，多出的第 4 条正是『正文永不吐字节』5000ms 超时。★P8 原文『去每次尝试超时+去停摆上限 3 fail』**不成立**：『去停摆上限』那半是半截 no-op（脚本 str.replace 按独立语句写，未命中交付版的单行箭头体，静默未改），3 fail 只对应 connect 超时那半；本轮另补一条判别性用例专门钉停摆上限。未覆盖：没有真实分享服务端点，全部上游是桩；包内出网点 1 处（src/fetch.ts:121），全仓同形裸 fetch 仍有 ≥6 处；packages/lyapunov-share/dist/plugin.js 未重建（grep -c transientStatus = 2 ⇒ 运行时若加载 dist 走的仍是旧口径），且 cordis.patch.yml 里本插件 disabled: true（2026-09-27 维护队复核这两条仍成立）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/app-side.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08：应用层 Portal 侧面板边界的 4 个纯几何用例，只调用 appSidePanelGeometry；覆盖已知 1070×863 Camera 点、不同工具轨宽度、窄工作面与出界/不可见边界。无 DOM、桌面输入、网络、provider 或 SDK 副作用；GUI 命中与实际切换另行验收。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/balance-section-helpers.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑：账户加载/错误/登出和 bridge 缺失状态；不访问远程计费"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/balance-section-render.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "React SSR 初始加载文案测试，不启动浏览器、不访问账户或网络。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/camera-list-ui.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/capability-facts.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：行为测试用**注入的 hasTool** 与本地技能目录事实，只钉环境路由提示文本；不启动 Blender/Unity、不联网、无需凭据（原标记 blender,unity 是词法误标）。本机实跑：6 pass / 0 fail / 16 expect。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/computer-use-input-scope.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W22：computer-use 合成输入的作用域。用户投诉 agent 每次打开 GNOME 屏幕阅读器（Super+Alt+S 被全局快捷键捕获）；Lead 自证复现。断言全局快捷键拒绝清单（Super+*、Ctrl+Alt+*、媒体键、a11y 开关…）不被合成、会话前后 a11y 快照被恢复、负对照（还原为直接全局发送）精确变红。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/computer-use-visibility.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "D1+D3 可见性回归（VISIBILITY-HOLES，在途 lane 新建；preflight 的 UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：宿主一直在投影 computerUse 与 WorldHandle.warnings/deviceDegraded/deviceNote/deviceKind/warpVersion，而 workbench.tsx 里命中 0 ⇒ 这里把「用户看到的那句话」逐字钉住。两层证据：渲染层用 renderToStaticMarkup 渲染真组件（含黄色告警态与空态不占位），挂载层如实登记本仓无浏览器 DOM 夹具。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:39:13、12270 B、sha256 8e247b45ba0d6cbd…）：两次均 11 pass / 0 fail / 54 expect；静态站点 50。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/computer-use-wording.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "USER-VISIBLE-WORDING-20260927：computer-use 三句用户文案的可读性判据（与 computer-use-visibility 分工：那个钉 D1 事实有没有渲染出来，这个钉渲染出来的话用户读不读得懂、且安全事实一条不少）。①中文三句不许出现内部标识（CUA_*、rule id、cua_driver_*、裸 ISO 时间戳、内部英文枚举、判据函数/字段名、data-*），第 2 句只豁免 `原话：` 之后那份逐字 note 引用；②可行动信息必须保留（哪个动作被拒/为什么/去哪儿能改）；③被拒条数、可见指示、恢复失败项数一条不少，refusals 段不许整段删。渲染层用 renderToStaticMarkup 渲真组件、判据层扫真源码，离线无网络/GPU。2026-09-27 本单实测 15 pass / 0 fail / 409 expect。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/conversation-history.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "会话历史投影的纯函数单测（意图/压缩摘要/判定输入过滤/routingHistory 保住被挤出窗口的意图/latestUserText 优先级）。从 jev-context-routing.ts 提取成独立模块时原测试随 Jev 删除，本条目补回该覆盖。不调用模型、不出网、不读凭据；Lead 离线运行 7 pass。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/cua-input-single-flight.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W4/DEV-006：真实桌面输入类工具的宿主级单飞。钉住本次修复——单飞日志原先在整条链结束后才算 waited，导致首个动作自己占用桌面的时间被记成假等待；现改为真正轮到自己执行那一刻取等待时长，并新增排队计数、失败路径同样释放。6 pass/34 expect。（GATE-AB-20260927 实测更新：本包已长到 15 pass / 0 fail / 105 expect，发布门 `minPass` 由 12 上调到 15；此前的 6/34 是 2026-09-26 那一版的读数，按纪律保留不删。）"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/domain-command-summary.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/domain-pointer-rules-turn.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W4/DEV-019：规则路径下的真实模型回合 + 真实 skill 工具加载 + 两条负对照（Jev 已退役，只走规则路径）。3 pass/27 expect。注意：该文件曾因 SkillRegistration.source 缺失与 UserMessage.turn 不存在而 tsc 报错，修法是补必填字段与改用 turn/start 边界算回合，断言一条未删。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/engine-install-routing.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Round71 closed-set natural-language engine install classification and next-turn one-time confirmation tests; pure local logic, no process/install/engine/EULA side effect."
+    },
+    {
+      "path": "packages/lyapunov-shell/test/isaac-local-discovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地Isaac候选有限扫描与真实Python无import探测、选择持久读回、standalone兼容和包内安装自检隔离；不启动Kit或GPU，不下载SDK。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/engine-panel-decision.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W4：引擎面板可解释（detail 带上游 resolveEngine() 原话，两次调用分别答'实际装配值'与'清掉启动参数后按偏好/默认会选谁'，UI 零推导；runningEngine 与 preference 两个独立显示位）；并含防变旧用例——直接读 packages/sim-newton/python/worker.py 的 CAPABILITIES 核对 Newton 第一切片能力范围。2026-09-27 收口批复跑实测 5 pass / 0 fail / 50 expect（用例数仍 5；「5 pass/37 expect」与「40 expect」两版都已过期 —— 收口批实测该文件改名/加断言后断言数 40→50）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/env-panel-enable.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/env-route-visibility.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/environment-capture-face.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/environment-readiness.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W14 环境契约 D1–D4：GPU 8 态分型（/dev/nvidia-caps 目录与字符设备分开判定，消除 device-hidden/driver-broken 跳变）、统一话术、N4 声明判定、N3 安装期前置。全部合成事实离线跑。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/environment-routing-selection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/environment-routing.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-24 按真实副作用复核：离线输入/附件/技能矩阵与真实 Shell pre-step 接线，Blender 仅为工具可见性字符串，未运行可执行。插件强制 rules 路由并恢复环境，原生 Context/JobsLocal 持有清理，安装器回执工厂隔离到逐例临时根；无真实模型、网络、GPU 或安装。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/external-install-session.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "设置中的外部工具创建全新原生会话、仅向新绑定提交自然语言安装请求及失败处理；无下载、网络或真实模型调用。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/gpu-misdiagnosis-guard.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GPU 误诊守卫（A1 缺诊断工具≠驱动坏 / A2 读不到≠没有 / A3 声称有卡必须有证据 / W21 主路径锁 / B2 探测不把自己造的条目写进证据 / B3 装配点也走同一条『顺序+收口』不变式 / C1 装配点与契约共用同一份设备可见判据）。离线纯逻辑 + 真机读数锁，无外部标记。实测（bun 1.3.13，2026-09-27 04:1x，文件 sha256 01c6d7bf8a537c19…、659 行、45188 B、mtime 2026-09-27 01:43:09 +0800）：22 pass / 0 fail / 242 expect；门的 countAssertSites() 静态站点 210。★**2026-09-27 MANIFEST-REGISTER-AND-REASONS 按实测订正本行的身份与站点**：原文写的是 31353 B / 旧指纹 04a6efb88393865e… / 443 行 / 静态站点 145 —— 那是 01:1x 那一版，已过期（该旧指纹在现树 1149 个文件里已无任何文件以它开头）。★**并如实登记一条版本漂移（原文那句行为读数按要求逐字保留、没有被改写）**：原文的「16 pass / 0 fail / 173 expect」是 01:1x 那一版（31353 B）的读数；现树（45188 B）两次独立复跑（rc=0）都是 **22 pass / 0 fail / 242 expect** —— 两组数各自锚定自己的版本。**它同时是本轮最强的那条顺序守卫**（连读三次 + 副作用/自造条目都不许改读数）。2026-09-27 GATE-NOTRUN-AND-ASSEMBLY-ORDER 单登记：它原先在本清单是 include、却**不在发布门 CASES 里**（落在 manifestGap.notRun）⇒ 门不跑它；接进 CASES 的条目（原文交接值 minPass 16 / minAssert 173 / minSites 145 / claimPass 16）已交 Lead 转 R2 落地 —— 按纪律，本单**没有**改 script/release-gate.ts。★2026-09-27 MANIFEST-REGISTER-AND-REASONS 只读复核（未改该文件）：它确已落地，且下限已随该文件长大被并行 lane 抬到 minPass 22 / minAssert 242 / minSites 210 / claimPass 22 —— 与上面现树实测逐项相符。（GATE-AB-20260927 更新：`W21 真机读数锁` 的宿主条件分支改为**合成夹具合同矩阵**（device-hidden / no-device / driver-missing / ready / card-unknown 五态）全覆盖，真机那格退化为宿主观测 ⇒ 读数与宿主无关，实测 23 pass / 0 fail / 265 expect、静态站点 218；minPass 22→23、minAssert 242→265、minSites 210→218。）"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/host-projection-candidate.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "候选出站投影的离线 marker/生命周期回归；不注册候选补丁，不构成产品 Loader/Host 或浏览器安全验收。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/html-preview-entry.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W10/DEV-032 HTML 通用入口：四种真实 Demo 文件（小文件/15.78MiB 大文件/带 <base> 素材/单文件图集）分别读数；区分'页面预览成功'与'源码编辑成功'两条独立判据；三个上限分开（4MB=4,000,000B ≠4MiB、32MiB）；四类扰动下判定与指纹一致（纯函数不读时钟）。抓到的三个'判定说假话'缺陷均已钉住：忽略 <base href> 造假警报、<video poster>/<source type> 误分类导致不支持 Range 的服务被判就绪、经 <base> 提供的素材被判成不需服务。48 用例全离线。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/html-preview-served-root.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "BASE-SERVED-ROOT-MISMATCH 回归（F1/F2/F3，在途 lane 新建；preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：根因是「存在性问的树 ≠ 浏览器问的树」——<base> 指向的服务根与页面目录没有关系，本地找不到只能说明映射错了树，不能说明素材不存在（真机现场：素材服务 ready + 206，而页面同块计划里同时报缺件）。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:58:19、20718 B、sha256 1d633edfc3344833…）：两次均 13 pass / 0 fail / 68 expect；静态站点 66。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/local-correction.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/local-file-import.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "桌面直接导入：批量去重、空场景创建、库与显示分流、切换后的迟到回执、glTF 依赖入口、场景工程。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/local-policy-import.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A07：本地策略选择与拖入的纯协议/SSR与跨作用域迟到拒绝；无网络、权重执行或SDK"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/lod-capture-face.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/model-download-routing.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "按真实副作用复核：纯路由/授权/文案函数与合成元数据，不调用模型、不下载权重、不读取凭据；Lead 离线运行 5 pass。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/notification-no-replay.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/orientation-check.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "方向检查纯协议：导入目标、会话去重、两次上限、原生图像回读身份和不确定零继续；无模型请求或 GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/orientation-native-inbox.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真 DSH AgentLoop/Session 事件：活动回合 next-step 图像消息与 Stop 清待处理 Inbox；MockAdapter 不出网、不计费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/pack-library-actions.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：只覆盖能力包面板的客户端编排与错误传播（文件头自证：不跑 python、不下载权重），载入/装配端口注入。无出网、无供应商、无计费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/privacy-boundary.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。用合成标记核对命令/会话出站投影，不碰真实凭据、不出网、不计费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/provider-installer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原生 JobsLocal + 临时目录 + 假 subprocess handle 验证安装收尾/回执；不执行安装脚本、下载或真实供应商。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/recording-panel-missing-visibility.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "D2 回归：录制**缺件**用户在面板上看得到（ZERO-CONSUMER-FIELD-AUDIT-20260926 D2）。缺陷形状（审计原文）：missingCount/missing 由 recordingSummary()（robot-workflows/src/recording-files.ts:33）一直在算、由 register(recordings)（plugin.ts:2053）一直在发（面板每 1.5s 轮询），而客户端 recording-panel.tsx 的 Pick<...> **缺这两个键** ⇒ 全仓 0 读 ⇒ 缺件对用户不可见。两层证据缺一不可（渲染层 + 挂载层，与本仓 D1/D3 回归同一形状）：渲染层用 renderToStaticMarkup 渲染「渲染与判据共用的同一个」组件，把用户看到的那句话（含 lya-warning 色与 missingCount 真总数）逐字钉住。★该文件于 2026-09-27 03:37:08 由在途 lane 落盘；静止后复跑两次（bun 1.3.13，03:41）：两次均 5 pass / 0 fail / 19 expect；静态站点 19；8541 B、sha256 2e5f828b60f7c014…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/render-failure.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-039 回归：WebGL 不可用时必须明确说清、不得静默留空座位。覆盖 WebGLUnavailableError 的 code 与原始原因保留、三类'环境缺能力'判定、非 WebGL 负对照（不得误判）、四条可执行处置话术、非 WebGL 走通用分支。**10 用例 / 51 断言**（2026-09-27 收口批复跑：10 pass / 0 fail / 51 expect；原「6 用例/26 断言」已过期）。Lead 登记（此前遗漏）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/resource-route-base-token.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "媒体路由接受「基址标记 + 相对引用」的用例（W5 RESOURCE-ROUTE-BASE-TOKEN 单新建）。由 preflight 的 UNCLASSIFIED 报出，Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-robot-asset-locators.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-PROJ-02：交给浏览器的场景里，机器人文档资产引用必须先换成『已授权件的媒体标记』（plugin.ts 的 projectSceneForBrowser，state/scene 两条路由共用）。此前出站投影只认字符串形状、看不见『这条引用相对哪份文档写』，于是两种形状在浏览器里都换不回字节：相对引用（meshdir=meshes + file=a.stl）的基址已是标记 ⇒ 客户端只能把 meshes/a.stl 原样交给媒体路由（ROBOT_VISUAL_REFERENCE_UNRESOLVED）；域内绝对路径被投影成域引用，而路由按『标记／绝对件』等值匹配 ⇒ 匹配不上。用真夹具（scene-kit/test/fixtures/mjcf-duplicate-sections 的 XML 与 STL 真在磁盘上，生产者是 scene-kit 自己的 robotVisual + parseAsset）钉三件事：①走这一层之后文档引用是标记，且标记能在该 Scene 的已授权候选集里换回磁盘上的那一件；②负对照——同一个域内绝对引用不走这一层（= 今天 HEAD 的 projectPathsOnly 直出）就换不回字节，还原修改点即精确变红；③候选集外的件一条都不改（不放宽授权）。另含接线门（形状门，不是行为门）：state 与 scene 两条路由的场景载荷都经 projectSceneOutbound，不再有 projectPathsOnly(scene,…) 直出。离线，只读仓内夹具。2026-09-27 维护队实测 5 用例 / 0 fail / 25 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/session-context-cross.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线真实 Cordis/AgentLoop/Skill/JSONL与辅助压缩消费者；临时安装器工厂隔离并断言拦截。验证当前快照、旧系统/合成安装提醒退役、用户授权/批注/真实工具图片、跨Session/turn与技能正文复用；无真实模型/网络/安装。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/session-history.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/session-ownership-two-sessions.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W4/DEV-003 ①②③④ + ISAAC-21 会话侧：两会话共享世界时的控制归属、选择事实按会话隔离、并发不丢不重、结构化错误。Lead 登记，12 pass/92 expect。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/surface-lines-boundary.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/target-window.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：真 plugin.ts 注册面 + 就地构造的 Request（http://test 只是 Request 的 origin 字面量，路由在进程内直接调用）。无出网、无供应商、无计费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/ui-action-open.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原生资源打开确认：地址、方式、可见性与窗口会话归属。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/viewer-observe.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实 Cordis/ToolRuntime/附件存储 + 模拟窗口的原生观察协议脚本；方向检查新增同会话图片投递、UI/Tool 去重、Stop 迟到图、相机与组根分支。单独 bun --no-env-file 进程运行，脚本自身 process.exit；不启 GUI/GPU/公网。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/workbench-camera-initial-framing.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "在途 lane 新建的测试文件，由 preflight 的 UNCLASSIFIED 报出。Lead 登记；覆盖细节待该 lane 交付后补全。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/workbench-import-surface.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "workbench.tsx 在宿主侧导入边界（已登记为未覆盖项的替代件；在途 lane 新建，preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：用 mock.module 只替掉 @lyapunov/viewer/client，于是产品源码那两句（viewerResourceURI / prepareViewerScene）是真被 import 进来跑的，不在别处复刻正则或逻辑。★边界如实登记：这不是 prepareViewerScene 的行为验收（属 P3 接线层口径），只保证宿主侧能拿到那两句并被测到。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:33:13、1540 B、sha256 98641cdd27ceb2db…）：两次均 1 pass / 0 fail / 5 expect；静态站点 5。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/workbench-surface-scope.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-terminal/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/lyapunov-terminal/test/startup-model-selection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-24 离线复核：真实 startTerminalSession、原生内存 Session/projection 和 typed controller 替身，逐例临时 cwd 与原生 teardown；覆盖 created 默认、resume/continue/fork 保存选择、显式/仅 reasoning 覆盖和不完整参数对的早拒绝。不运行 Agent/Host、持久会话或真实供应商，也不证明完整未知路由的副作用前校验。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/dev032-html-open-choice.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/dev032-html-plan-wiring.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W10/DEV-032 接线与话术通用化：宿主 action='html-plan' 复用既有 target() 越界校验；界面不再自持上限（第二份 grep=0）、开不开由 plan.choices[].enabled 决定；环境话术的 GPU 专用句已下移到 GPU_STATE_WORDING['device-hidden']，宿主 GL 与桌面行不再吃到 GPU 那句话。全离线（SSR + 源码静态契约）。Lead 登记。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/gltf-glb-content-sniff.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/model-convert-cache.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "转换缓存版本及依赖变化的本地文件验证，不启动Blender。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/restart-tab-notice.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyaup-migrations/test/portability.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/motion-mink/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/motion-ompl/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/policy-registry/test/adapter-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "hf_download",
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 HuggingFace 权重下载（hf_download）；调用真实供应商模型/计费（realmodel）"
+    },
+    {
+      "path": "packages/policy-registry/test/behavior-evidence-integration.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "临时能力包夹具验证 inspectPack 的 symlink 拒绝与 JSON receipt 身份不匹配；不下载或执行策略。"
+    },
+    {
+      "path": "packages/policy-registry/test/behavior-evidence.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "标准包测试入口运行根目录 evidence 校验回归；临时文件与合成 JSON，无外部副作用。"
+    },
+    {
+      "path": "packages/policy-registry/test/env-processor-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/policy-registry/test/mirror-archive-body-timeout-shape.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "**U4** 回归：正文阶段超时**不再裸奔**（ARCHIVE-FETCH-MEMOIZATION-20260926 §7 U4）。机制（来源回执逐字）：abort 落在 fetchArchiveBytes 的**正文循环**里，而那里在 boundedFetch 的 try/catch **之外** ⇒ 抛出来的是**裸 DOMException（TimeoutError）**：trace.attempts **为空**、没有五要素、也不重试 ⇒ 用户/模型拿到的是一句不带任何诊断的 The operation timed out.。本文件用「正文停摆」替身造出那个状态（应答头立刻给、正文一个字节不发，超时 signal 一 abort 就让 body 以 signal.reason 拒绝，与真 fetch 同形）；判据两条（其一：错误**带五要素**且 attempts 非空）。★该文件于 2026-09-27 03:37:01 由在途 lane 落盘；静止后复跑两次（bun 1.3.13，03:41）：两次均 4 pass / 0 fail / 24 expect；静态站点 24；8071 B、sha256 fbfd6c94d0e8d587…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/mirror-archive-memo.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "归档取件的两条真缺口（U3/U4，2026-09-27；在途 lane 新建，preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：U3 记忆化——同一个归档 URL 只取一次字节、只解一次包，其余件从那份解包结果里取，而判据一步不省（每件各自命中、各自写盘、各自过门）；U4 只放宽归档这一跳（30 min），其它每一跳的 30 s 逐字不变。为什么单列：G1 实测一次取件 68 件里 68 次取字节+68 次解包＝509.8 s 全花在重复解包上。全部用例离线（归档字节 gzipSync 现场造，一次都不打 GitHub）。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:49:12、22709 B、sha256 fe44c77c8b324b0b…）：两次均 13 pass / 0 fail / 54 expect；静态站点 49。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/mirror-archive.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W7：第 3 级的**整仓归档**形态（U1，codeload.github.com/{id}/tar.gz/{sha}）的门。归档是 T0 里唯一**零 API 配额、零凭据、且换了一整族主机**的通道（配额正是 P13/G1 那格的卡点），价值最高；也正因为它换了一整族主机、拿回来的是一整包别人打包好的字节，这一族用例钉同一句话：**只能换 URL，不能换判据**——归档里那条『名字对上了』的条目必须与可信声明**逐字**相符才许落地。四组判据：G 解析即校验（路径穿越含 PAX 路径覆盖／软链与硬链／权限位／截断／坏校验和）；H 命中是逐字的（有/无顶层目录两种形态、歧义即拒、缺条目即拒、非普通文件即拒）等。全部在 mkdtempSync 造的临时树里解包，离线。★★**当前状态：已完成——2026-09-27 收口批复跑实测 24 pass / 0 fail / 86 expect**（原「在途未完成 22 pass/2 fail」已过期：`PAX 路径覆盖也过同一道闸` 与 `两种拼法同时命中 ⇒ 歧义即拒` 两条已修绿）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/policy-registry/test/mirror-search.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "policy-registry 的镜像搜索回退用例（W7 DOWNLOAD-SEARCH-FALLBACK 单新建）。由 preflight 的 UNCLASSIFIED 报出，Lead 登记。注意：验收队报告该文件当前有 3 条红，属在途未完成状态。"
+    },
+    {
+      "path": "packages/policy-registry/test/pack-client-face.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "客户端包面用例（W11 从 DEV-007 残留中补回）：钉住 6 个【仍在产品里使用但 surviving_tests=0】的客户端符号——packModelFace（客户端 UI 在用）· resolveModelFace（内容侧 blocked 优先 / requiresAuth 非阻断两条会把事实说反）· adapterDownloadFiles（丢目录前缀 ⇒ G1 取不全）· weightsFetchPlan（用户照着敲的 policy_download 参数）· readPolicyCache（只读 manifest、不重算哈希、不联网）· createModelRoutes 的 UNREACHABLE 分支。9 条整 + 1 条的一半逐字；负对照：8/8 变异各自精确变红。未覆盖：createModelRoutes 的 OK/STALE 路径本仓仍零覆盖（需已移出的服务端端点，不用桩顶替）。Lead 登记。2026-09-27 维护队复核：实测 11 用例 / 0 fail / 72 expect，与文件头自述的恢复面（9 条整 + 1 条的一半）及未覆盖面一致；『8/8 变异精确变红』那条负对照本轮未重跑，维持 Lead 登记值。"
+    },
+    {
+      "path": "packages/policy-registry/test/pack-plugin.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：fetch 走 pack-source 的 **PackFetcher 注入替身**（apply 的 packFetcher 选项），全部流量在替身内，不出网、不调供应商（原标记 hf_download,net_fetch,realmodel 误标）。本机实跑：16 pass / 0 fail / 206 expect。"
+    },
+    {
+      "path": "packages/policy-registry/test/pack-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-archive-level3-wiring.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "第 3 级（整仓归档 codeload）在产品路径上的接线判据（来源回执 bugfixHistory/ARCHIVE-REACHABILITY-AND-MEMO-20260927.md；在途 lane 新建，preflight 的 UNCLASSIFIED 报出后由本单登记）。缺口实测形态：唯一的取字节产品入口 policy_download → downloadPolicy → downloadFile 的端点链**最多两跳**（raw → 内容接口），两个端点都传输层失败之后**没有第 3 跳** —— codeload.github.com 接触次数 0（接线后为 1；负对照见该回执）。本文件把「补上那一跳」的判据逐条钉住：①只有传输层失败才换级（校验不符／4xx／状态类一律不换）②换的是取字节的方式，不是判据（身份只来自 sourceSnapshot 清单）③身份强度 none 不走 ④门①／门②逐件不省，坏字节不留盘 ⑤archive.root 给对才有命中、给错当场拒 ⑥不许编钉（走模块共享实例那条路，默认实例不动）⑦只补在 downloadPolicy（downloadFile 仍是两跳；含静态机器守卫：fetchPolicyFileViaArchive 全文件恰好一个调用点且落在 downloadPolicy 里）⑧取消不换级 ⑨第 3 级也失败要留痕（transfers 记 attempt-failed ＋ 第 1/2 级五要素错挂 cause；失败不进缓存，紧接着的重试必须真的再取字节/再解包）⑩换级成功写明 shape:'archive' 与 servedByEndpoint ⑪packs 源不适用（PACK_PUBLIC_FALLBACK_FORBIDDEN／POLICY_MIRROR_PACKS_FORBIDDEN）⑫读数从 policyArchiveCacheStats() 取**增量**（该实例是进程唯一共享实例，前面用例已动过它）。全部用例**离线**：归档字节由 tarGz 现场造，网络是 globalThis.fetch 替身、未登记 host 当场抛（含未登记 API URL）—— 一次都不打 GitHub。★**登记前复跑两次**（bun 1.3.13，2026-09-27 04:1x）：两次均 **13 pass / 0 fail / 79 expect**（rc=0）；门的 countAssertSites() 静态站点 68。★**验静止**：自 04:11:40 起连续 11 次采样（间隔 15 s、共 2.5 min）内容指纹与字节数逐条不变；文件 21434 B、325 行、mtime 2026-09-27 03:59:21 +0800、sha256 2d763042ffa5f849…。★本单只补清单，不改判据、不接进发布门 CASES（是否接线由 Lead 裁定）。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-archive-memo-wiring.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "**产品侧接线**：source.ts 的 fetchPolicyFileViaArchive() 把归档记忆化真正接上（2026-09-27；回执 SOURCE-MEMO-WIRING-AND-SENTINEL-20260927.md）。它钉的是：mirror-search.ts 的记忆化**没钉时默认不缓存**（resolveMirrorArchiveCache = options.cache ?? (options.expectedSha256 ? defaultMirrorArchiveCache : undefined)），而产品侧既没有钉、也没有交实例 ⇒ 一次取件里 68 件同属一棵树时仍然是 **68 次取字节 + 68 次解包**。★该文件于 2026-09-27 03:32:48 由在途 lane 落盘；静止后复跑两次（bun 1.3.13，2026-09-27 04:1x，mtime 2026-09-27 03:46:36 +0800、191 行、12405 B、sha256 5b740299f4ab28d6…）：两次均 5 pass / 0 fail / 25 expect；静态站点 20。★**2026-09-27 MANIFEST-REGISTER-AND-REASONS 按实测订正本行的身份与站点**：原文写的是 11786 B / 旧指纹 c8b7a6afc4582213… —— 那是 03:32:48 那一版，已过期；**行为读数（5 pass / 0 fail / 25 expect）与静态站点（20）不受影响**，两次复跑与旧版逐字相同。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-match-scene-read.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-mirror-refusal.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "D4 回归（mirrorDiscoveryRequest() 的 refuses 明文真的送进了给模型的失败报文；在途 lane 新建，preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：缺陷是 mirrorDiscoveryRequest() 自称把 refuses 写成给模型看的明文，而产品 src 零调用、唯一调用方是它自己的单测 ⇒ 端点全不通时模型永远看不到那条明文拒绝。本文件钉三件事：①有强身份（本机 manifest 已有 sha256）就有 refuses 逐条原文与指纹判据 ②没身份就如实说出不了，不编一份没有指纹的拒绝清单 ③packs 源走它自己的拒绝原文（POLICY_MIRROR_PACKS_FORBIDDEN，不回落公开源）。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:43:01、10768 B、sha256 e62801fc97eaffc2…）：两次均 7 pass / 0 fail / 33 expect；静态站点 33。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-bounded-fetch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W25：取件链的有界超时与可诊断错误（W16 那一类从'一个点'扩到'一类'）。boundedFetch 每次尝试 AbortSignal.timeout(30_000) ×3、保留调用方取消语义、非瞬时 4xx 不重试；错误带五要素（步骤／上游 URL／来源坐标／每次尝试原因／可否重试）；失败尝试以 kind:'attempt-failed' 落 manifest.transfers（正常逐件结果无 kind，两类可区分）。负对照：重试 3→1 得 3 fail、去掉每次尝试超时得 1 fail，逐字节还原（sha256 e5b76780…）后 8 pass/0 fail。Lead 登记。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-exhausted-rate-limit-evidenced.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "耗尽出口的**第二类输入**：429 带 x-ratelimit-* 证据（hasRateLimitEvidence 为真 ⇒ 走「配额（限流）已用尽」+「重置于 <时刻>」+处置建议那一支）。与同目录 policy-source-exhausted-rate-limit.test.ts 的分工：那个钉**证据缺失**那一支，本文件钉**证据在场**那一支；两者走同一个耗尽出口但报文分支不同，只钉一支时另一支的措辞可在无人察觉时退化。在途 lane 新建（CLASSIFYEXHAUSTED-RESTORE／本 lane，2026-09-27）；preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:37:16、8360 B、sha256 15e2a2bf5398113d…）：两次均 2 pass / 0 fail / 19 expect；静态站点 19。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-exhausted-rate-limit.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "「429 尝试耗尽之后仍要给出限流诊断」这条**已验收出口**的钉子（CLASSIFYEXHAUSTED-RESTORE／F3，2026-09-27）。它钉的是「绿着断开」那一次：并发 lane-stall 在 00:48:16 的 922 行版里把 boundedFetch 里 W26-R2 的应答级分类接线整段切掉（const classified = options.classifyExhausted?.(…) 与 retryable/diagnosis 两项投递点一起消失）。在途 lane 新建；preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:22:35、8977 B、sha256 35273b6cb000062e…）：两次均 3 pass / 0 fail / 21 expect；静态站点 21。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-github-429-noheader.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W26-R2：429 **无限流头**时『这是限流』的诊断必须送达用户。缺口（V10 §3.C-1 查出、本单独立重取）：githubRateLimited(429, 空头) 为真，但旧口径的 githubRateLimitNoRetry 为假（要求限流证据在场）⇒ boundedFetch 把 429 当瞬时故障重试 3 次后抛 PolicyFetchError，githubStatusError 根本没被调用 ⇒ 报文里连『限流』二字都没有、还写着『可否重试：true』；中间代理剥掉 x-ratelimit-* 正是触发场景。本文件钉住 Lead 裁定的变体 A（docs/REMAINING_WORK_PLAN.md §7.16：429 一律走分类器、重试覆盖不再要求限流证据在场）：①429（含有头/无头）一律只打 1 次——报文说不重试就必须真的只打 1 次，且匿名配额不再被烧 3 倍；②诊断走当场分类器（githubStatusError ⇒ githubRateLimitDiagnosis），报文含『限流』+ 重置指引（无证据时不编时刻，给『去哪儿查』）；③与内容路不变式一致：同一个 429 在元数据路与逐件路给出同一套诊断与同一个『不重试』结论。另钉接缝与不外溢：不传 classifyExhausted ⇒ 报文与改前逐字一致（别的 provider 不受影响），别的 host 的 429 无头仍只报『瞬时故障』。全部替身 fetch：0 次真实网络、0 真实配额。2026-09-27 维护队实测 9 用例 / 0 fail / 53 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-github-quota.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P18 + W26/W26-R1/W27：GitHub 匿名配额、凭据入口与端点回退链。①配额成本：github 分支每次取件打 3 个 api.github.com 请求（commit/repo/tree；匿名 60/h ⇒ 20 次取件/小时；G1 那种 68 件/54MB 与配额无关，成本只跟取件次数走），内容字节走 raw、不进 API 配额，且件数不改变 API 成本。②凭据入口 LYAPUNOV_GITHUB_TOKEN（兼容 GITHUB_TOKEN/GH_TOKEN）+ githubHeaders：作用域只认 api.github.com，raw/别的 host 一个字节凭据都不带；只报变量名、凭据值绝不回显（有断言）。③403/429 分类：配额⇒新码 POLICY_GITHUB_RATE_LIMITED（含 resource/limit/used/remaining、重置时刻、本次成本、凭据来源、处置点名 env 变量）；权限 403⇒旧码逐字不变但报文区分（同一个 403 两种成因报文必须不同）；404/451 等保持 POLICY_REMOTE_<status>；401 分『没有凭据』与『凭据被拒』；带凭据仍被限流 ⇒ 说『这个凭据自己的配额也用尽了』。④W26-R1 429 不重试：只在 github 这条链上覆盖重试判定（全局 TRANSIENT_STATUS 一个字不改），429（含有头 / 仅 retry-after / 无头，§7.16 改判后不再要求限流证据在场）一律只打 1 个请求。⑤W27 端点回退链：github 每件主端点 raw + 备用内容接口；raw 断流/超时 ⇒ 回退且记账说清『本次由哪个端点提供』；确定性应答（raw 404、字节校验不符）不回退（换端点只会再烧一份配额 / 等于把『来源不可信』换成『再抓一次看看』）；调用方取消不回退；跨主机跳转逐跳按 host 现算、跳过去那一跳不转送凭据；链长为 1 的来源行为不变。负对照 B 非 github host（modelscope）429 不覆盖、C HF 429 不覆盖（裁决要保护的就是它）。2026-09-27 维护队实测 39 用例 / 0 fail / 212 expect（原『27 用例/136 expect』已过期：W27 端点回退链再追加 12 条）。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-github-status-who-layering.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "① 401 与「权限 403」两条正文的 who 按层分岔（F5／2026-09-27；来源 RETRYLAYER-WIRING-20260926 §5③ 与 §10 U3）：上一单把**限流正文**（403 配额/429）按 retryLayer 分岔了三处，但**如实登记未修**——401 与权限 403 两条正文仍共用含 core 口径的 who ⇒ 检索链（policy_search，打 api.github.com/search/repositories）的报文里写着「未设置（匿名 ⇒ core 仅 60 次/小时…）」，而 core 是**取件链**吃的那个桶（检索端点自己有单独一份、与 core 分开计）⇒ 报文指向那条路径上不存在的东西。判据沿用上一单 Lead 裁定的那一句：**同一句报文不许在两条路径上给出对方的事实**。★该文件于 2026-09-27 03:26:56 由在途 lane 落盘（本单**第一次** preflight 时还不在盘上）；按「验静止」等到两次检查 mtime/sha 不变后复跑两次（bun 1.3.13，03:41）：两次均 7 pass / 0 fail / 43 expect；静态站点 33；11493 B、sha256 1a6320a90c63ec36…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-huggingface.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-json-body-timeout-shape.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "「同形残留」：boundedFetch 的 try/catch 只包住 fetch()（建连/应答头），正文阶段读到的裸 DOMException(TimeoutError) 此前 attempts 为空、五要素全无。本文件用『正文停摆』替身（200 头立刻给、body 先吐 0 或 1234 字节再以同形 TimeoutError 拒绝）钉：①错误是 PolicyFetchError 且 attempts 非空、五要素齐、点名端点与『读正文阶段撞上本次尝试的上限』及已收字节数；②没被顺手改掉的东西（POLICY_FETCH_ATTEMPTS 仍 3、超时那一跳不新增重试层、调用方取消原样传播、404 裸码、正文非 JSON 仍原样抛 SyntaxError）。全部离线：globalThis.fetch 换替身，0 次真实网络。2026-09-27 本单实测 5 pass / 0 fail / 29 expect。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-source-stall-cap.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W25 缺陷修正：停摆上限 POLICY_DOWNLOAD_STALL_MS 必须**按它的名字**工作。W25 把建连时创建的 AbortSignal.timeout(30s) 一直挂在 body 上 ⇒ body 阶段的停摆计时器必然比它晚 ⇒ 读正文永远被总时限掐断，而注释/回执却写『整体耗时不限』。本文件钉住修好后的三句话：①trickle（每 100ms 到 8 字节）在停摆上限之内必须能收完，即使整段耗时超过建连上限——按比例缩放常量（connectMs 300ms）与真实默认常量（30s/30s）各一条；②只有『一个字节都不来』才抛 POLICY_DOWNLOAD_STALL（应答头必须已经到手，3 次尝试全留痕）；③中途停摆照样要掐（修的不是『把守卫关掉』）。网络一律本机回环（Bun.serve / 裸 TCP + 真 fetch），不打任何外网。★风险（维护队实测，两条都与判据本身无关，但会影响集成门）：①**耗时**——『真·判据』那条用真实 30s 常量、32.5s 的 trickle，整文件单跑约 105s；而 harness 只有**全局** TESTCI_TIMEOUT_MS（默认 120_000），ManifestEntry **无 per-entry 超时字段** ⇒ 机器负载高时有撞 TIMEOUT（=红）的余地，另按文件头自述『还原修改点后变红』那一次约 90s+；②**时序敏感**——文件落盘当时（00:45）我抓到过一次 4 pass / 2 fail（未及抓失败名），随后 **4 次连跑均 6 pass / 0 fail** ⇒ 判为在途竞态＋计时敏感，不是稳定红。2026-09-27 维护队实测 6 用例 / 0 fail（本队复跑 7 用例 / 0 fail，整文件单跑 55s）。★★**per-entry 超时**：本文件单跑约 55s（其中「真·判据」那条用**真实默认常量** 30s 做 32.5s trickle；还原修改点做负对照那一次更久），而全局 TESTCI_TIMEOUT_MS 默认只有 120_000 ⇒ 机器负载高时会撞成`TIMEOUT`（记成红）——那是**假红**（把「机器忙」记成「用例失败」）。判据就是「真实 30s 常量下收得完」，**不许 skip、不许缩短它的真尺度**，所以按 `ManifestEntry.timeoutMs` 单列：实测 55s 的 ≈5.5 倍余量，同时仍在 `MAX_ENTRY_TIMEOUT_MS` 上界之内（挂住照样记 timeout + 退出码 1）。本字段的纪律由 harness 的 `timeoutProblems()` 在跑之前强制：只有 include 条目能写、正整数、有上界，且 reason 里必须出现 `per-entry 超时`（缺了 ⇒ 退出码 2，不许偷偷单列）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。",
+      "timeoutMs": 600000
+    },
+    {
+      "path": "packages/policy-registry/test/tier-roster.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（planning-only T0 roster schema 与 exact-ID lookup）；不推断 readiness、不下载模型、不执行策略"
+    },
+    {
+      "path": "packages/policy-registry/test/vla-infer-module-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：经系统 python3 + numpy 复算官方算子与产品推理模块的 JSON 行协议（不加载 865 MB 真权重、不联网——文件头自证）。CI 侧由 Test envs 的同一 venv 提供 numpy。"
+    },
+    {
+      "path": "packages/policy-registry/test/vla-infer-timeout.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：pythonPath 指向实现同构 JSON 行协议的 node 桩，只核推理预算的取值语义与接线是否真被采纳。不加载权重、不联网。"
+    },
+    {
+      "path": "packages/policy-registry/test/vla-official-scene-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/policy-registry/test/vla-reply-shape.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：桩引擎回产品模块同形对象，只核消费侧归一化与自相矛盾回包的显式失败。不加载权重、不联网。"
+    },
+    {
+      "path": "packages/policy-registry/test/vla-route-match-exec.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：产品 matchPolicy/execution 通路 + 仓内派生件 + node 协议同构桩（不 mock 产品函数）。不加载权重、不联网。"
+    },
+    {
+      "path": "packages/policy-registry/test/wtw-identity-dispatch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "net_fetch",
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "R-fix#4 复核更正：原写 net_fetch/realmodel，但该文件头明写【网络无关】（合成夹具、全用替身）。真正原因是【需要产品策略 python】：它在加载期解析 `.runtime/sim-python/bin/python`，接进门会让发布门依赖某台开发机的运行时根（违反 gate「不判真机、不碰 .runtime」的边界）。负对照证明它是硬失败而非 skip：LYAPUNOV_POLICY_PYTHON=/nonexistent/python ⇒ 3 pass / 4 fail（ENOENT 于 adapter.ts:344）。残余洞口：该路径不受 case-integrity 保护。Lead 更正。原 reason：not-run：需要出网抓取（net_fetch）；调用真实供应商模型/计费（realmodel）"
+    },
+    {
+      "path": "packages/robot-tools/test/camera-family-scope.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：本文件只对 packages/robot-tools/src/tool-schema.ts 的**描述文本**做断言（五个相机入口各挂哪条范围常量、旧口径常量名不再导出），不启动 Isaac/MuJoCo、不联网、不碰设备；原标记 isaac 是词法误标。本机实跑（bun --no-env-file test，2026-09-27）：4 pass / 0 fail / 22 expect。"
+    },
+    {
+      "path": "packages/robot-tools/test/gait-open-loop-scope.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GAIT 语义对齐（『三处各说各话』）——把『合同 kind 元组 / 工具文案 / 几何开环通道』钉成同一句话。改前事实（VERIFY-ISAAC-GAIT-DRONE-20260926 §5 乙类）：合同 RobotCapability.kind 是封闭 6 元组、不含 gait/tendon ⇒ gait.available 的语义没有合同承载；工具文案把 gait 讲成『策略』；通道实跑 sim-mujoco/python/gait.py 的几何开环相位目标、且不保证净位移方向。本文件钉：①合同 kind 元组必须等于 provider 实际投递的 kind 集合（锚点取自 Isaac worker 源码，不是抄常量）；②『不保证稳定行走/不携带位移方向』必须是合同里有名字的字段，且该字段名有真实生产者；③工具文案必须与几何开环一致（『策略』字样清掉，两条路线分开写）；④『几何开环』必须在 gait.py 的依赖面与载荷项上可核（不许只改文案）。证据边界（不冒充引擎实测）：**不跑 worker、不跑 Isaac/MuJoCo 引擎**——合同侧是声明面证据（读源码文本 + tsc；运行时常量 ROBOT_CAPABILITY_KINDS 是唯一运行时可核面），通道侧只核源码结构（依赖面、载荷项、两个 worker 是否 import 同一份实现）。未覆盖：Isaac worker 的 gait 能力行/回执**实际是否投递** stableWalkingNotGuaranteed（它目前**没投**，补丁在工作面写域之外）。2026-09-27 维护队实测 12 用例 / 0 fail / 61 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/robot-tools/test/output-path-mujoco.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/robot-tools/test/output-path.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/robot-tools/test/session-path.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/robot-tools/test/sim-open-cancel.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/robot-tools/test/sim-open-engine-facts.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/robot-workflows/test/fleet-fork-engagement-fields.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "D5（ZERO-CONSUMER-FIELD-AUDIT-20260926 D5）：measureForkPocketEngagement 逐叉孔行里那个「带符号侧向误差」字段——审计给的两个选项（删／接诊断导出）本单裁定**删**，判据（Lead 逐字）是「改完那个字段要么有消费点、要么不存在」。为什么删：产品 src 0 个读取点、它不是数据出口（唯一带它出去的路径在工具出口被 render 裁成 {phase,frameId,stepIndex}）、幅值已被 transverse_error_m 覆盖（剩下丢的只是符号）、而「接诊断导出」要先新增一条交付面。★**在途实证**：本单实测到它**正在被写**——2026-09-27 03:30:36 是 6612 B，03:31:00 变成 7084 B ⇒ 按「验静止」等到 03:34 两次检查 mtime/sha 不变才登记（**没有**把中间态登记进去）。静止后复跑两次（bun 1.3.13，03:41）：两次均 5 pass / 0 fail / 23 expect；静态站点 17；7084 B、sha256 ce6b0a0d9061e166…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/robot-workflows/test/pick-place-args-validation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/robot-workflows/test/recording-root.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/asset-acquisition.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：本机 HTTP 夹具服务器 + 按 ZIP 规范自拼的夹具（node:zlib crc32/deflateRawSync）；传输钩子注入。不发往公网（文件头自证）。"
+    },
+    {
+      "path": "packages/scene-kit/test/fault-recovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：服务器只监听 127.0.0.1 的故障夹具（断流/慢体/404）；URL 虽写真来源主机名，字节全部来自本机合成夹具。不发往公网、不冒充真实公网故障。"
+    },
+    {
+      "path": "packages/scene-kit/test/formats-hdri.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/formats-mjcf-sections.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/g19-building-robot-task.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W13/DEV-011 ③ 机器人任务回执：建筑+真实 franka_panda 同场、真机 MuJoCo 3.13.0。open=ready、7 受控关节、门 door_hinge；无指令负对照漂移 0.006524rad、门恒 0、接触 0；关节任务 completed 最大误差 0.004117rad；同一条门铰链自由侧 1.199565（误差 4.35e-4）而机器人侧被真实接触挡在 −0.524974，正负对照在同一次 open 内成立。需要 .runtime/sim-python 且真 import mujoco 成功，缺则整组显式 skip。Lead 登记。"
+    },
+    {
+      "path": "packages/scene-kit/test/g19-building-scale-animation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W13/DEV-011 ① 尺寸绝对误差与 ② 动画≠物理：声明 0.9×0.06×2.0m 对产品几何事实 glbGeometryFacts 绝对误差 [0,0,0]（<1e-6m），世界系（绕Z 90°）误差 <1e-5m；负对照把 Y-up 当 Z-up 错 1.94m、本地当世界错 0.84m。被动画驱动的节点要静态几何 ⇒ GEOMETRY_ANIMATION_UNSUPPORTED；负对照同 BIN 去动画即成功且包围盒逐轴相同 <1e-9。物理化一例依赖 LYAPUNOV_ALGORITHM_PYTHON，缺则显式 skip。Lead 登记。"
+    },
+    {
+      "path": "packages/scene-kit/test/glb-material-facts.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/hdri-payload.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/map-compare-candidates.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：compareCandidates 的几何指纹/比例/完整性/体量/许可比较，纯内存计算。无 fetch、无出网。"
+    },
+    {
+      "path": "packages/scene-kit/test/map-constraints-real-data.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/map-constraints.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：map_geojson_to_local 换算 + 真 ToolRegistry（真 Context + dsh-tools）注册与执行；输入为内联/夹具 GeoJSON。无 fetch、无出网。"
+    },
+    {
+      "path": "packages/scene-kit/test/map-cross-check.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：crossCheckSources 只吃声明值与仓内 swisstopo 夹具派生量；源里的 api3.geo.admin.ch 是**来源元数据字段**（page），全文件无 fetch。"
+    },
+    {
+      "path": "packages/scene-kit/test/map-field-fusion.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：fuseDeclaredFields 字段级融合，读仓内 swisstopo 夹具几何算局部米制周长。全文件无 fetch。"
+    },
+    {
+      "path": "packages/scene-kit/test/map-place-check.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：checkPlace 消歧/边界/相邻地标核对，边界几何用内联小方块。全文件无 fetch。"
+    },
+    {
+      "path": "packages/scene-kit/test/map-reference-consistency.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/map-tool-registration.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/mesh-geometry-frames.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/scene-kit/test/network-assets-file.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地传输夹具验证流式下载、取消/重试、内容识别与分享页解析；无真实外网请求。"
+    },
+    {
+      "path": "packages/scene-kit/test/network-assets-retry.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地集成（CCMM-09 按真实副作用复核）：服务器只监听 127.0.0.1 的故障夹具（断流/慢体/5xx/4xx）。不发往公网、不冒充真实公网故障（文件头自证）。"
+    },
+    {
+      "path": "packages/scene-kit/test/persistence.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/physicalize-usage.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/scene-kit/test/portable-environment.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "packages/scene-kit/test/portable-identity.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/scene-kit/test/portable-relocation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/proj-cli.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/prototype-inspection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/readonly-policy-gate.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/reference-image-fetch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "net_fetch",
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要出网抓取（net_fetch）；调用真实供应商模型/计费（realmodel）"
+    },
+    {
+      "path": "packages/scene-kit/test/reference-image-helpers.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/scene-kit/test/replace-resource.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/scene-kit/test/resource-license.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：normalizeResourceLicense 归一化（缺省 unknown、不猜）。全文件无 fetch。"
+    },
+    {
+      "path": "packages/scene-kit/test/robot-visual-assets.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "scene-kit 机器人可视资产用例（在途 lane 修改/新增）。由 preflight 报出，Lead 登记。"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-args-validation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-open-path-argument.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-open-tool.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-replace-tool.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-save-changeset.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-save-tool.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/session-isolation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/share-pages.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地传输夹具验证流式下载、取消/重试、内容识别与分享页解析；无真实外网请求。"
+    },
+    {
+      "path": "packages/scene-kit/test/splat-acquisition.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地传输夹具验证流式下载、取消/重试、内容识别与分享页解析；无真实外网请求。"
+    },
+    {
+      "path": "packages/scene-kit/test/splat-collision-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线 3DGS 碰撞路由合同：哈希匹配的配对 mesh 进入可信绑定/挂载 collision，失配降级 candidate，纯 splat 保持视觉-only；无公网、GPU 或物理 worker。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/scene-collision-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线 MuJoCo collisionPatches 编译合同：可信 splat binding 生成 hfield/box patch，candidate 对齐在 worker 前被拒；无真实 worker/GPU。"
+    },
+    {
+      "path": "packages/scene-kit/test/sog-zip.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本机小型 SOG ZIP 夹具：真实流式封装/成员校验、截断伪 WebP、CRC 改写、目标已存在和预取消；无公网或 GPU。"
+    },
+    {
+      "path": "packages/scene-kit/test/ssog-manifest.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯内联 Streamed SOG v1 小清单：tree/filenames 选层、整块引用、环境与负路径；无下载或用户素材。"
+    },
+    {
+      "path": "packages/scene-kit/test/store-scene-not-found.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/streamed-ply.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "分块读取 PLY 顶点位置与同一字节资源流核验，覆盖属性偏移、源文件变化与取消。"
+    },
+    {
+      "path": "packages/scene-kit/test/streamed-sog-acquisition.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本机 HTTP 小型 SOG/SSOG 夹具与真实 SceneOperations/ToolRuntime：默认/显式 LOD、多块环境资源、一次 CAS、预算/取消/部分登记、单文件真假 SOG 与模型参数；无公网/GPU。"
+    },
+    {
+      "path": "packages/scene-kit/test/unity-exchange.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/scene-kit/test/viewpoint-coverage.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/segment-sam3/test/export.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/sim-contract/test/isaac-startup-budget.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-contract/test/media-relay-boundary.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-contract/test/policy-recheck.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/sim-contract/test/pre-spawn-disposal.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地 fake launch/worker ownership 测试 dispose-before-spawn 与并发关闭；不启动 Python SDK 或物理引擎"
+    },
+    {
+      "path": "packages/sim-contract/test/provider-reported-declarations.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-contract/test/session-factory.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/sim-contract/test/session-launch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-contract/test/session-world-projection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Round81 serializable per-session world projection facts and identity cache tests use local WorldHandle fixtures; no physics worker, GPU, provider, or network call."
+    },
+    {
+      "path": "packages/sim-contract/test/startup-lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/camera-adjust.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/camera-annotation-dataset.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-009 剩下的 2/5：camera_project_annotation 与 camera_dataset_export 在 Isaac 侧的接线与落地。证据边界（取自文件头，如实）：本机没有 /dev/nvidia*（nvidia-smi 也连不上驱动）⇒ **RTX 渲染本身**这一层在本机取不到读数，本用例**不假装取到了**，只钉另外三层可复算的真实读数：①provider 转发——发出的请求名就是 camera_project_annotation／camera_dataset_export，入参原样透传（不被客户端改写/补默认值），worker 的结构化拒绝原样带出（错误码保留），与已实现的三个相机接口同一形状；②真实算术（不是替身）——『像素+米制深度 → camera/world 坐标』用 packages/sim-isaac/python/camera_math.py **真文件**（worker.project_annotation 调用的就是它），在真实 numpy 上做 unproject→reproject 往返核对、背景/远平面与无效深度的判定；③真实文件层——数据集导出用**真实落盘**的 fixture（真 PNG/真 npy + 真 capture 记录形状）跑真实现，核对 samples.jsonl/calibration.json/annotations.json/dataset.json 的内容与真实副本，并核对『captureId 不属于本 world／是标注 ephemeral 记录』被明确拒绝。★无外部标记：**不需要 GPU/Isaac 真机**（正因取不到 RTX 读数才只钉这三层，本机可跑）。★★**当前状态：已完成——2026-09-27 收口批复跑实测 11 pass / 0 fail / 107 expect**（原「在途未完成 6 pass/4 fail」已过期：provider 转发三条与『camera_math.py 往返残差为 0』那条已由后续 lane 修绿）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/sim-isaac/test/camera-capture-multi.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/camera-list.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/engine-selection-consistency.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "DEV-001/002 入口一致性护栏。原标 markers=[isaac] 属误标——:15 自述『不启动任何引擎』；『isaac』只作字符串值。unshare -rn 下 5/5/18 expect EXIT=0。此前 CI 从不执行本护栏（W11 实测）。"
+    },
+    {
+      "path": "packages/sim-isaac/test/glb-import-handle-warnings.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：GATE-C-20260927 复核后**保持 exclude**：①离线 AST 提取那 3 条可跑，但**最强断言需要真实 Isaac** —— 用例用 .runtime/conda/envs/isaac/bin/python 起 worker.py + omni.kit.asset_converter；干净 checkout 没有 .runtime/** 时会**静默 skip**。②把\"缺解释器就静默 skip\"的用例接进离线 CI，等于让发布门依赖某台开发机的运行时根（与 wtw-identity-dispatch 豁免同一类）。故保持 exclude、不伪造。"
+    },
+    {
+      "path": "packages/sim-isaac/test/glb-import-report.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/gpu-device-hidden-notice.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W21：有卡有驱动但设备不可见的运行期消费。断言 Isaac 插件在 device-hidden 时抛的报文仍含既有稳定码 ISAAC_GPU_DEVICE_UNAVAILABLE（保留作前缀，下游与既有用例按它匹配），并追加 ENVIRONMENT_GPU_DEVICE_HIDDEN 与处置；不得把它说成'没有设备'。Lead 登记。（GATE-AB-20260927：五态合同分支改用合成夹具 + 替身探针（宿主观测与合同测试分清），不再靠宿主恰好是 device-hidden；实测设备隐藏宿主 11 pass / 71 expect、设备可见宿主 61 expect，minPass 5→11、minAssert 31→61、minSites 31→71。）"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac-1315-wiring.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：用**假 worker**（只实现行协议的 python 脚本，系统 python3）验证 action kind 透传/拒绝原码/site 观测，不启动 Isaac Kit、不需 envgate 凭据（原标记 isaac,envgate 误标）。本机实跑：6 pass / 0 fail / 15 expect。"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac-entry-lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W3/ISAAC-01+02 入口与生命周期回归：多 world 并发时 lifecyclePhases 按 worldId 归属、close 成功清理 closing 标记、未交付 world 报 WORLD_STARTING、装配期拒绝未知 GPU/RTX 取值（不再静默按 CPU/none 起）。经真实 plugin.apply() 装配到真 Kit 6.0.1.0（CPU/rendering:none）；负对照还原三处修点后 5 fail/2 pass。Lead 离线运行 7 pass。（GATE-AB-20260927：`test.skipIf(... probeGpuDeviceVisibility().visible)` 已改为**可控探针替身**构造无 GPU 会话（真实 plugin.apply/launcher/Provider 照跑），不再因宿主有 GPU 而跳过 ⇒ 实测 8 pass / 0 fail / 48 expect、skip=0，minPass 7→8。）"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac-orphan-close-failure.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W18：close/open 失败路径的残余静默面。dispose 失败不再被 catch(()=>{}) 吞掉——登记 OrphanedWorker（worldId/pid/路径/dispose 原文/最后阶段）并保留原始 code；close 的 finally 不再无条件摘除 instance，dispose 失败时抛 WORLD_CLOSE_INCOMPLETE 且 Host 级 dispose 仍枚举得到、可重试。真 Provider + 真子进程 + 只注入 dispose 失败。负对照全还原 0 pass/3 fail，逐字还原（sha 4e6f40b0…）后全目录 105 pass/0 fail。Lead 登记。"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac-startup-budget-entry.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac-startup-budget-wiring.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/isaac10-visual-only-warning.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-isaac/test/lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "延迟 launch hook 与假的 worker 路径验证 dispose-before-spawn 和 worldId 并发预留，不启动 Isaac 或 GPU。"
+    },
+    {
+      "path": "packages/sim-isaac/test/provider-capability.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：只用 new IsaacProvider() 对**未打开世界**的调用面断言能力声明与拒绝码（WORLD_NOT_FOUND / UNSUPPORTED_CAPABILITY），拒绝发生在触达 worker 之前，不启动 Isaac Kit/PhysX（原标记 isaac 误标）。本机实跑：11 pass / 0 fail / 33 expect。"
+    },
+    {
+      "path": "packages/sim-isaac/test/scene-adapter-primitive.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate",
+        "isaac",
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）；调用真实供应商模型/计费（realmodel）"
+    },
+    {
+      "path": "packages/sim-isaac/test/scene-adapter-transform.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate",
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）"
+    },
+    {
+      "path": "packages/sim-isaac/test/worker-robot-metadata.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/action-window.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/camera-capture-generation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "MuJoCo 采集代次守卫（DEV-009 待裁 ②，Lead 裁定：补 MuJoCo、不放宽 Isaac）：captureId 必须与**当前世界代次**同代——Isaac 侧 select_capture / export_dataset 同时校验 generation，而 MuJoCo 侧改前只校验「captureId 存在 / 相机在不在这次采集里 / 深度可不可复用」、**不校验 generation** ⇒ 同一个 captureId 在 sync 之后仍被算成一个世界点、仍被导出。同一件事两个 Provider 行为不同，判据以 Isaac 为准。钉两条方向（缺一不可）：①旧代次 captureId ⇒ 明确拒绝 STALE_GENERATION（与 Isaac 同码同义）且发生在写盘之前 ②新代次 captureId 仍然放行。★该文件于 2026-09-27 03:25:00 由在途 lane 落盘（本单**第一次** preflight 时还不在盘上）⇒ 由第二次 preflight 的 UNCLASSIFIED 报出后补登记。★按「验静止」等到 mtime/sha 两次检查不变后复跑两次（bun 1.3.13，03:41）：两次均 3 pass / 0 fail / 35 expect；门 countAssertSites() 静态站点 35；11393 B、sha256 f2569bb22bd9ecec…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/camera-intrinsics.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：真实MuJoCo相机内参/逐像素RGB与深度回归，node:test声明；需已有MuJoCo/Pillow Python及可用EGL或OSMesa离屏渲染环境，软件llvmpipe也能验证，不要求Isaac或硬件CUDA。单独实际执行并核零skip，默认离线不计通过。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/camera-rig-mount.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate",
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/collision-affine-frames.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/mirrored-collision.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/native-worldbody-only.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate",
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/open-cancel.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/sim-mujoco/test/scene-camera.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：真实MuJoCo Scene/native body相机注册、运动、RGB/深度、Stop/reset和旧代次拒绝；node:test声明，需已有MuJoCo/Pillow Python及可用离屏渲染环境，不依赖Isaac。独立命令使用Node transform-types并核实际零skip。"
+    },
+    {
+      "path": "packages/sim-newton/test/capability-truth.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "W5/DEV-008 能力如实性：describe() 能力枚举补满合同 6 元组、capabilities 补 kernelCacheNote；无 CUDA 时 auto 降级标 deviceDegraded=true 并给原因，显式 cuda:0 / 环境变量 cuda:0 结构化拒绝，三条路径都不静默顶替。负对照回退 worker 得精确 3 red/8 green。Newton 环境缺失时整体 skip。Lead 离线运行 15 pass。（GATE-AB-20260927：降级分支改用 `CUDA_VISIBLE_DEVICES=''` + `NVIDIA_VISIBLE_DEVICES=''` 的**可验证隔离**，GPU 主机上不再把两个负对照提前 return ⇒ 实测 11 pass / 0 fail / 109 expect，minAssert 100→109。）"
+    },
+    {
+      "path": "packages/sim-newton/test/lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "系统 Python -B -S 导入真实 worker，使用 inert numpy/newton/warp 模块与假原生句柄验证故障清理、恢复、回滚及主协议循环；不运行 Newton SDK/GPU。"
+    },
+    {
+      "path": "packages/sim-newton/test/supported-surface-truth.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "sim-newton「支持面真相」用例（DEV-008／W5 反查，2026-09-27 收口批补全实测）：把 `CAPABILITIES.supported` 里 **12 个声明为 true 的键逐个配上另一条路径的真机读数**（不是第二份自报），并对三处被真机推翻的 README/worker 注释措辞加守卫；另有一条完整性断言（`supported` 里出现本文件没有真机读数的键 ⇒ 红）。**2026-09-27 收口批复跑实测 8 pass / 0 fail / 45 expect**（本机 `.runtime/newton-env/bin/python` 在盘 ⇒ 引擎面真跑了，**无 skip**；文件头自述：引擎面缺环境即整体 skip、文档面只读文件不 skip）。"
+    },
+    {
+      "path": "packages/sim-newton/test/warp-cache-dir.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/asset-locator-pairing.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "asset-locator 配对用例（含 normalizeAssetLocator 与 ?ext= 形状 A/纯标记两路）—— R-fix#13 单新建。Lead 登记。"
+    },
+    {
+      "path": "packages/viewer/test/asset-marker-resolution.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "`res:<指纹>` 的**真实语义**：它是**定位符**的指纹（product-paths.ts 的 resourceToken），**不是**文件内容的 sha256、**不是**派生目录名（scene_projection.py:596/660 的那个 16 位十六进制）。为什么必须有这一条：2026-09-27 的裁定（docs/REMAINING_WORK_PLAN.md §七之十八之后的派单）把标记当成了『内容指纹，且本身就是派生目录名』，于是要求消费端按 <derived_root>/meshes/<指纹>/ 去解析。本文件用**可复算的判据**说明那条路走不通，同时把走得通的那一条（候选集重算匹配 resolveAssetMarker）钉住：标记是 `res:` + 32 位十六进制且**高 16 位恒为 0**（fingerprint 只填满低 64 位）；内容摘要是 16 位十六进制、没有这个补零形状 ⇒ 两者**不可能是同一个串**；派生目录名确实等于内容摘要（sha256(bytes)[:16]），但那个摘要在**候选集那一侧**（file:///…/derived-assets/meshes/<摘要>/<名字>.obj），**不在标记里**。环境说明：只做纯函数 + 一个自建临时目录的往返，不读仓库外语料、不读 .runtime/**。2026-09-27 维护队实测 6 用例 / 0 fail / 39 expect（★落盘当时抓到过一次 4 pass/2 fail，属在途竞态；复跑稳定 6/0）。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/viewer/test/camera-frustum.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/camera-rig-view.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/camera-view.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/capture-gate-view.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/environment-viewer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/environment.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/gltf-draco-decoder.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "根因判据：viewer 的 glTF 读取路径必须带 DRACO 解码器，而且解码器字节来自产品自己（内联）。现场是真件 天安门广场_网页.glb（68,730,772 B，extensionsRequired=[KHR_draco_mesh_compression]）归属成立却一个网格都没建出来，标签页逐字报 THREE.GLTFLoader: No DRACOLoader instance provided.，成因是 GLTFLoader 构造 Draco 扩展时抛错、整个 loadAsync() 被拒。本文件钉四件事：①装载器真带 DRACOLoader，且解码器基址与改写器判据是同一个（不一致 ⇒ 改写永不命中）②内联的 344,510 B 与盘上 three/examples/jsm/libs/draco 的真实解码器逐字节相同（长度+sha256+wasm 魔数），不是占位不是空壳 ③改写器只认解码器请求，glTF 自身 bin/贴图 URL 与 res: 媒体路由 URL 一律原样放行。在途 lane 新建；preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记。离线。★复跑两次（bun 1.3.13，2026-09-27 04:1x，mtime 2026-09-27 03:31:25 +0800、169 行、10039 B、sha256 494336c5f8c24acf…）：两次均 8 pass / 0 fail / 39 expect；静态站点 30。★**2026-09-27 MANIFEST-REGISTER-AND-REASONS 按实测订正本行的身份与站点**：原文写的是 9699 B / 旧指纹 8c45a262d3e8e1e8… / mtime 2026-09-27 01:48:28 —— 那是 01:48 那一版，已过期；**行为读数（8 pass / 0 fail / 39 expect）不受影响**，两次复跑与旧版逐字相同；静态站点同为 30。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/viewer/test/gltf-ktx2-meshopt-decoders.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "根因判据：**viewer 的 glTF 读取路径必须带 KTX2（KHR_texture_basisu）与 meshopt（EXT_meshopt_compression）解码器**，而且解码器字节来自产品自己（内联/模块自带）。现场（GLB-DRACO-RENDER-20260926 §7 第 3 条）：DRACO 修好之后渲染路径**仍然没有**接这两个解码器，与 DRACO 修前**同形**——client.tsx:36-37 只是把 KTX2Loader/MeshoptDecoder **对外转出**（那是给 workspace 用的公开面），index.ts 一处都没 new 过 ⇒ **转出 ≠ 接上**，带这两个扩展的 .glb 整件加载失败。★**在途实证**：该文件在本单登记窗口内被改过多次（03:36:58 的 21441 B → 03:39:11 的 21650 B → 03:43:26 的 22219 B → **03:53:59 的 22545 B**）⇒ 按「验静止」等到 03:54:29 起连续 11 次采样（间隔 15 s、共 2.5 min）mtime/sha 逐条不变，两次复跑**都落在 03:53:59 那份字节**（两次读数一致）；16 pass / 0 fail / 80 expect；静态站点 59；22545 B、sha256 4cf5c08a7cc1f86f…。★**2026-09-27 P29-R5 按实测订正本行的身份与站点**：原文写的是 21650 B / 旧指纹 509d3919… / 静态站点 58 —— 那是 03:39:11 那一版，已过期（该旧指纹在现树 1149 个文件里已无任何文件以它开头）；**行为读数（16 pass / 80 expect）不受影响**，两次复跑与旧版逐字相同。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/viewer/test/lod-runtime-reading.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/lod-shared-release.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：用仓内真 GLB 夹具走真实 GLTFLoader，renderer 只是\"记一次 render\"的替身；唯一的\"网络\"是 127.0.0.1 回环 HTTP（在途释放用例），不出网、不需 GPU/CUDA（原标记 gpu_cuda,net_fetch 误标）。本机实跑：6 pass / 0 fail / 48 expect。"
+    },
+    {
+      "path": "packages/viewer/test/lod.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/projection-consumer.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P1/R-fix：投影消费侧（P15 实测 5 处被打坏的消费点）。夹具须为【投影后的真实形状】—— viewer 既有 5 处 baseUri 测试全是 file:///robot/，测不到这条回归。由 release-gate 的 preflight 判据报出 UNCLASSIFIED，Lead 登记。"
+    },
+    {
+      "path": "packages/viewer/test/robot-glb-ktx2-texture.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "机器人文档里带 KTX2（KHR_texture_basisu）贴图的 .glb：贴图必须真的贴上、贴不上必须明确报错（ROBOT-GLB-KTX2-TEXTURE-20260927）。真件夹具（robot-glb-ktx2：真编码器产出的 KTX2 .glb + 真 MJCF 文档），三个方向：①传 renderer ⇒ CompressedTexture 8×8、4 级 mipmap 真挂上且 warnings 为空；②不带 KTX2 的 banana.glb 与真 STL Go1 读数逐项不变；③不传 renderer / 声明 MJCF material / 外部贴图取不到 ⇒ 各自必须有一条指名警告，不再是『无贴图、无报错』的静默丢失。离线：字节经真 file: URL 从盘上读，无网络/GPU（本机无 WebGL，渲染器能力用替身）。2026-09-27 本单实测 13 pass / 0 fail / 69 expect。"
+    },
+    {
+      "path": "packages/viewer/test/robot-glb-mesh.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "机器人文档里的 .glb 网格：**登记得进依赖闭包、装载器分派建得出网格**（ROBOT-GLB-MESH-20260927）。真件不是合成夹具：test/fixtures/robot-glb-mesh/banana.{xml,glb} 是**未改一个字节**的真件拷贝（原件在 .runtime/desktop/developer/runtime/developer/worlds/scenes/banana-p2.json 这条真落盘场景的 CAS 依赖目录里，全工作区扫描「机器人文档引用 .glb」只命中这一处）；banana.xml 是标准 MJCF（mesh 元素指向 banana.glb + geom type=mesh 引用它）。★该文件于 2026-09-27 03:34:16 由在途 lane 落盘；静止后复跑两次（bun 1.3.13，03:41）：两次均 14 pass / 0 fail / 45 expect；静态站点 41；14332 B、sha256 3e22aeb093c1d54f…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/viewer/test/robot-visual.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/source-axis.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/splat-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "固定 Spark 的极小 LOD 容器、缓存源边界与坐标转换、分片让出和取消、交互参数合同与上下文读数；不创建真实 WebGL、GUI 或 GPU 压力。"
+    },
+    {
+      "path": "packages/viewer/test/splat-support.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/texture-and-autoframe.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/first-person-speed.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "第一人称相机真实按键事件与位移：默认速度、Shift加速和释放、失焦停止及组合归一化；不创建GUI或GPU上下文。"
+    },
+    {
+      "path": "script/administrator-engine.test.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：loginAdministrator/startWebHost 只在被 spawn 的子进程内用 node --import 解析钩子替换为替身，不登录真实账号、不出网、起的是 stub Host；原标记 isaac,net_fetch,realmodel 只来自被替身模拟的入口名。本机实跑（plain，bun）：18/18 通过。"
+    },
+    {
+      "path": "script/blender-executable.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "script/creative-tool-install-catalog.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实 creative-tools-catalog 的离线适配器测试；只生成官方页面/HF mirror/MCP 惰性计划，不执行进程或外部服务。"
+    },
+    {
+      "path": "script/creative-tool-install.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "合成目录与注入 executor 测试安装/MCP 计划，仅处理惰性数据；不调用下载器或外部服务。"
+    },
+    {
+      "path": "script/creative-tools-catalog.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "核对目录元数据、argv、mirror endpoint 及凭据不入计划；不执行 hf 或软件安装。"
+    },
+    {
+      "path": "script/dist-inventory.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "产物盘点用例 —— W9（盘点盲区）单新建。Lead 登记。"
+    },
+    {
+      "path": "script/engine-preference.test.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "include",
+      "reason": "W2 五级引擎优先级与四入口拒绝的护栏。原标 markers=[isaac] 属误标——本文件 :3/:9-10/:48-56 自述『不起 Host、不联网』，Isaac 就绪判据用【临时目录的假解释器】。决定性证据：unshare -rn（全新 netns，连 loopback 都没有）下 37/37 EXIT=0 ⇒『需要出网/需要 Isaac』在物理上被排除。此前 CI 从不执行本护栏（W11 实测）。★采纳前须知：:119 按名字 spawn 'node'（非 process.execPath）⇒ CI 机 PATH 里必须有 node，否则那 6 条进程级用例会红。"
+    },
+    {
+      "path": "script/env-self-link-guard.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "SELFLINK-READONLY-GUARD（P10 的只读守卫，作用域按 V15 §B.1 + Lead 裁决扩到所有 node_modules 落点）：判据函数、临时树上的造链/删链/复查负对照、以及 release-gate 接线（两类数字都进 metrics）。**只读**——所有建/删都在 mkdtempSync 造的系统临时目录里，不触碰 node_modules/** 与 .upstream/**，不联网、不下载、不碰真机。preflight UNCLASSIFIED 报出后由本单登记。"
+    },
+    {
+      "path": "script/gate-drivers.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "mechanism「门必须有驱动」自身用例 —— R-fix#16 单新建（文件现已落盘）。Lead 登记。"
+    },
+    {
+      "path": "script/gates/computer-use-blender.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线验证 native computer-use 的窗口/输入/证据解析器与合成 Blender 头；不启动 Blender、不执行桌面输入、不验证几何或录屏。"
+    },
+    {
+      "path": "script/gates/g03-clock.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/gates/g07-fixed-config.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/gates/g08g09.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "GATE-C-20260927 真实检查后改判 include：子进程把 LYAPUNOV_ISAAC_PYTHON 指向不存在路径、LYAPUNOV_GRASPGENX_AUTOSTART=0，Isaac 走确定性的\"外部运行时缺失\"分支；只真跑 MuJoCo 行与纯判据（原标记 isaac 误标）。本机实跑：14 pass / 0 fail / 92 expect。"
+    },
+    {
+      "path": "script/gates/g12-exit.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/gates/g13-acp-exit.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/gates/g14-missing-report.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/gates/g17-legacy-residue.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/managed-provider-discovery.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "隔离临时树应用 managed-provider discovery 候选补丁并用 sentinel fetch 验证 endpoint/key 绑定；不访问真实网络、凭据或产品运行时。"
+    },
+    {
+      "path": "script/migrate-workspace-layout.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/outbound-projection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "隔离候选出站投影 harness 的原生 Cordis/Session 行为入口；运行时编译并执行候选副本，不注册产品补丁，也不构成产品 Host/Loader 或浏览器验收。"
+    },
+    {
+      "path": "script/package-linux.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/release-gate.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P9：release gate 自身的用例。gate 的判据要能回答'每条量了什么'而不是'跑了什么'；空的/哑的/没产出证据的'通过'必须被标出（UNPROVEN 而非 PASS）。由 P9 上报，Lead 登记。"
+    },
+    {
+      "path": "script/runtime-patch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线检查原生 Models 插件与产品 overlay；仅使用本地配置和虚构凭据，不启动 Host/UI、不联网、不读取秘密文件（2026-09-26 扩展：新增 5 条覆盖——{updated,removed} 纯函数口径 / 替身有改动 / 替身 0 改动 / 真链接 tmpdir 等价场景 / 源码守卫'不得再出现裸调用'）。2026-09-27 维护队实测 16 pass / 0 fail / 97 expect（原'3→8 条 52 expect'已过期：该文件后续单继续追加了覆盖）。"
+    },
+    {
+      "path": "script/terminal-options.test.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "include",
+      "reason": "W15 `default⇒none` 与钉子的护栏。原标 markers=[net_fetch] 属误标——全文件唯一像 URL 的是 http://127.0.0.1:9/x，是 --attach 的 argv 字符串（端口 9=discard，从不连接）。unshare -rn 下 30/30 EXIT=0。此前 CI 从不执行本护栏（W11 实测）。"
+    },
+    {
+      "path": "script/test-ci.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/unity-mcp.test.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "script/upstream-patches.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "只解析本地补丁并验证外发投影补丁注册/调用点；不启动 Host、不修改 upstream、不联网"
+    },
+    {
+      "path": "script/verify-asset-layout.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原生 runtimePaths/ensureWorkspaceMapping/SceneOperations 在唯一临时树验证布局与 fail-closed 检查；CLI --ci 不读取开发运行根，仅读取仓库素材/源码/构建物，不启动 Host、安装 provider 或联网。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/viewer-feedback-content.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-29: synthetic scene/window fixtures use native Inbox, attachment storage and pi-ai request conversion to check actual image bytes, pins, session/revision ownership, cancellation and size errors; no live model or desktop."
+    },
+    {
+      "path": "script/verify-packs-symlink.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "临时目录文件与 symlink 的遍历、路径约束及 checksum 回归，不改真实能力包。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-node-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：真实场景CAS下删除导入子树、显隐与素材回收/恢复；失败和会话变更不误报提交。"
+    },
+    {
+      "path": "packages/viewer/test/entity-visibility.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：Three对象真实父子显隐、灯可见性与资源不重加载。"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-package-import.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：自包含工程正规CAS导入、原始来源元数据、缺件一次拒绝和尺寸保留。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/collision-frame-request.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：实际碰撞首几何/后位姿的窄请求、session绑定和无选择/非法选项明确拒绝。"
+    },
+    {
+      "path": "packages/viewer/test/collision-topology.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：真实引擎已编译形状到Three几何与世界位姿、选择/代际/版本清理。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/collision-topology.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "A05：真实MuJoCo NDJSON RPC需本机SDK，单独明确运行并记录，默认离线CI不冒充已验。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/latest-control-queue.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：原生连续关节目标首末合并、停止清队列、错误和迟到结果不回填。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-test-space.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：物理任务卡只认明确测试kind、保留既有引擎装配合同和正确world options。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/web-fetch-failure.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线原生Tools/Web/PTC消费者，provider与ready均受控；覆盖可用/未知/不可用搜索建议，保原类别和地址/取消边界，不发起回退网络或真实收费。"
+    },
+    {
+      "path": "packages/policy-registry/test/load-state.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "策略四类状态与真实模型依赖预检，固定本地夹具，不联网不动作。"
+    },
+    {
+      "path": "packages/policy-registry/test/robot-download.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "统一下载清单、固定来源字节、本地复用和首错误回退，本地fetch夹具，不使用产品鉴权。"
+    },
+    {
+      "path": "packages/policy-registry/test/local-policy-file.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "明确本地权重格式的有界只读检查，不执行未知权重。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/policy-library-panel.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "策略VLA原生侧栏命令顺序、分类与失败展示，只验证声明范围内的静态和端口行为。"
+    },
+    {
+      "path": "packages/policy-registry/test/g1-23-75.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "固定75观测/23关节映射、真实IMU重力/驱动字段、重复地面拒绝及错误权重阻断；合成帧仅证契约，真实权重行走与停止另有原生独立验收。"
+    },
+    {
+      "path": "script/policy-cpu-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "独立CPU策略解释器解析、Host路径过滤和已有安装器离线路由/managed收尾；真实安装独立验收。"
+    },
+    {
+      "path": "packages/policy-registry/test/g1-local-reuse.smoke.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "exclude",
+      "reason": "普通脚本需固定299424B真实权重fixture，缺少时明确失败；主控独立运行并核实际六项幂等读回，默认六条纯契约仍include。"
+    },
+    {
+      "path": "packages/scene-kit/test/legacy-resource-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R006：真实临时 ResourceLibrary/SceneStore 旧引用来源恢复、原件缺失/字节变化拒绝、正常CAS历史与幂等；不读用户目录或网络。"
+    },
+    {
+      "path": "packages/asset-bake/test/pointcloud-bake.smoke.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R011 真实算法与MuJoCo外部SDK用例；明确指定既有Python单独运行，不跳过或用离线结果冒充。"
+    },
+    {
+      "path": "packages/asset-bake/test/pointcloud-bake.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R011 真实Node ToolRegistry/Jobs与既有Python、搬移dist外部验收；命令行指定输出/Python/plugin，不属于默认离线用例。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R005：生命周期单次初始化、首帧/代次、取消、失败不loop、状态渲染；固定隔离port夹具，不冒真实SDK。"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-ptc-input.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R008：真实run_code调度与ToolRegistry输入flat/nested严格边界；PTC程序执行器夹具不冒真实Node外部执行。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/domain-instance-projection.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R007：四域共用当前Scene真实资源实例根投影，核旧版本、显隐与未放置状态；SSR仅证明控件输出，最终桌面操作另验。"
+    },
+    {
+      "path": "packages/lyapunov-api-client/test/search-client.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实ToolRegistry/web_search与Peiri中央provider的隔离HTTP fixture；不读取供应商key、不联网或收费，覆盖一次请求/缺会话/未配置/错误响应。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/brand-welcome.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-019：仓内真实PNG字节/深浅欢迎组件、短句一次选择与稳定身份、Linux desktop名称配对；离线SSR与源码接线，不触碰登录、账号、联网或当前窗口。"
+    },
+    {
+      "path": "packages/robot-workflows/test/flight-controller.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R018：真实观察/映射/来源/世界绑定的无SDK合同；实际原生飞行与GUI另验。"
+    },
+    {
+      "path": "packages/robot-workflows/test/flight-native.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018明确已有MuJoCo/Python、官方模型外部夹具，主控单独运行，不skip。"
+    },
+    {
+      "path": "packages/robot-workflows/test/flight-tools.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018真实Tool/Command/Jobs与既有MuJoCo外部验收，需指定输出/Python与已构建插件。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/flight-panel.dom.fixture.tsx",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018实际Electron DOM夹具，明确display与build，命令为控件参数替身，不冒真实物理。"
+    },
+    {
+      "path": "packages/scene-kit/test/physics-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R009：真实GLB层级矩阵规范化、同版本碰撞绑定及已有配置/CAS拒绝，真实派生/引擎另验。"
+    },
+    {
+      "path": "packages/scene-kit/test/geometry-source-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R013/R014：OBJ/FBX分类与登记转换同源、真实临时OBJ/MTL路径和缺件拒绝、MAX明确转换要求；3 pass/13 expect，只使用仓内逻辑/临时文件，无Blender、网络或模型依赖。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/geometry-import.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014真实Blender转换OBJ/FBX/纹理副本、搬移原目录、warm缓存与MuJoCo碰撞；实际plain脚本，需要输出/原件夹具目录参数及既有Blender/MuJoCo Python，不计默认离线通过。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/geometry-workspace.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014真实Node24 transform-types、ToolRegistry/Commands、回环HTTP、Blender、副本闭包、跨会话/readOnly和保存重开；实际plain脚本需输出/原件夹具目录参数与已有SDK/Blender，单独验收。"
+    },
+    {
+      "path": "packages/viewer/test/material-render.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014实际浏览器DOM/WebGL材质像素、纹理UV和骨骼归属读取；plain浏览器entry需Bun构建及sandbox Electron/本地素材服务，裸bun无DOM不能冒充执行，通过需另收真实渲染回执。"
+    },
+    {
+      "path": "packages/scene-kit/test/physics-state.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06共同物理：真实临时Scene/CAS固定动态、质量与重力/碰撞开关保留、历史保存重开、不同几何替换与原字节不变；5 pass/27 expect，纯本地文件/逻辑，无SDK进程或GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06物理产品入口：同world/generation/revision/frame读回、机器人只读、固定/质量/用途、初始化重叠提示与单CAS同步/取消；16 pass/83 expect，SSR/回调与隔离port，不代签GUI或原生物理。"
+    },
+    {
+      "path": "packages/sim-isaac/test/scene-camera-mount.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：R015真实pxr USD装配、实际worker/adapter AST挂载与同帧标定/拒绝事务；bun:test声明，需明确LYAPUNOV_ISAAC_PY或已有Isaac Python中的pxr，缺环境明确失败，无skip。已独立3 pass/17 expect仅证明CPU USD/源码层，不代表Kit/PhysX/RTX/GUI；默认离线不计通过。"
+    },
+    {
+      "path": "packages/desktop/test/exit-coordinator.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯退出生命周期：取消/并发单次flush-stop-close、保存失败、update/system和有界错误回执；仅注入回调，不启动Electron或Host"
+    },
+    {
+      "path": "packages/desktop/test/guest-controller.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实账户控制器的游客/迟到验证生命周期，使用假store/fetcher/host，无账号/网络/收费请求"
+    },
+    {
+      "path": "packages/desktop/test/guest-credentials.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "同原生credentials seam的游客transport内存provider；仅Context与假grant，拒模型引用，不读凭据文件或环境"
+    },
+    {
+      "path": "script/guest-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客路径、装配与env隔离，临时目录/合成父env与真实纯配置函数，无GPU/Host/模型/外网"
+    },
+    {
+      "path": "packages/policy-registry/test/local-policy-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08登记包根与裸文件来源负例：未知目录不扫描，自声明哈希不能冒固定75来源；本地临时文件，不网络/推理/动作。"
+    },
+    {
+      "path": "packages/policy-registry/test/runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08有限managed/显式策略解释器与Sourcekind依赖选择负例；临时探针报文替身，不下载/真实SDK/推理/GPU或动作，真实Host/native另验。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/manual-events.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：真实SDK Commands追加原run/done、gesture投影稳定一节点、跨scope/Stop/late done及公共隐私/模型null、完整目标限位与SSR禁提交。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/manual-gesture.dom.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：现有私有SDK jsdom纯合成DOM，真实React pointer-up.final target/settle/gesture ID和scope取消；无桌面、浏览器、Kit/GPU或网络。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/import-purpose.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：实际React用途控件/显式导入选项与本地记录映射，纯离线，不烘焙原件/不出网。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/native-document-exit.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 C6/F6：实际FileDocument草稿/保存冲突与退出参与者，假fetch、临时文件，无Host/账户/外网。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/native-files-patch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 C6：固定基线补丁正向、二次精确幂等、本体/未知源码拒绝；临时目录与git，仅仅读已固定SDK。"
+    },
+    {
+      "path": "packages/scene-kit/test/collision-reference-lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Resource/Scene CAS迁移、版本/缓存身份/终态/旧unsafe拒绝；两个真实小GLB算法CPU用例需显式解释器，没有时单列skip不当通过。"
+    },
+    {
+      "path": "packages/viewer/test/observer-mode.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F3/F4：真实Viewer原型/Three/Orbit/FrameProjection与合成canvas/gizmo，统一退出、稳定编辑ACK和scope，无WebGL/GUI/GPU。"
+    },
+    {
+      "path": "packages/desktop/test/browser-root.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "E27 纯关闭分类、代次/操作UUID元信息与真实Browser结构mock释放负例；临时自有文件和mock，不启Chrome/GUI或网络"
+    },
+    {
+      "path": "script/browser-patch-composition.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "E27 精确三补丁postimage组合正负例；复制自己的只读源码至临时目录，不修改SDK或共享缓存，无网络/Host"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/reconcile-command-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Scope/Session/CommandRegistry与本机HTTP机器投影、跨会话/缺资源/隐私负例，无模型/供应商/GPU。"
+    },
+    {
+      "path": "packages/viewer/test/animation-reference.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 E26：静态同版本源参考、明确视觉试播与停止恢复、未知轴/单位/版本负例；Three与合成对象离线，无WebGL/Host/GPU。"
+    },
+    {
+      "path": "packages/lyapunov-api-client/test/search-readiness-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F7/G8：真实localhost已认证能力DTO、same-intent与只读恢复桥，无供应商、中央真实账务或凭据外传。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/execution-graph-native.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：原生Session/Agent/Tools/JobRegistry与同代观察/Stop/交接，合成Adapter离线无真实模型或GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/execution-graph.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：原生历史只读投影、图像ContentBlock、真实归属与unknown进展门，纯离线。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/model-diagnostic-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：真实localhost typed SSE/未知费用与原生retry负例，无外网或收费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/animation-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 E26：实际SSR控件与共用动画handler，默认静止/明确视觉试播/恢复，合成Viewer，无GPU或真实世界。"
+    },
+    {
+      "path": "script/prepare-viewer-test-assets.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 依赖供给：固定7件真实离线缓存复用、缺件/坏LICENSE/坏目标拒绝，临时自有目录无网络回退。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-binding-settings.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：实际SSR绑定参数、显式全域采样/精度预算、过限和策略限制，纯离线。"
+    },
+    {
+      "path": "packages/scene-kit/test/physicalization-budget-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Resource/Scope/HTTP参数、缓存身份与预算、算法公开进度及失败收尾，小件/临时根，无外网/Kit/GPU。"
+    },
+    {
+      "path": "script/guest-model-patch.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "固定227→d756 guest签定源码版本升级/幂等、改源码/缺文件/改完整patch/改增量/改manifest/混合态拒绝；仅读当前自有SDK源复制至mkdtemp，绝不修改真实SDK、无Host/模型/网络"
+    },
+    {
+      "path": "packages/desktop/test/guest-own-provider.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客真实原生settings/credentials/默认选择与adapter→自有localhost假模型、独立重开持久化及产品URL/route/discovery/redirect零请求负例；无真实模型/Billing/GUI"
+    },
+    {
+      "path": "packages/policy-registry/test/guest-services.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客owner拒packs/robot-download与产品metadata，保本地工具登记；mock fetch计数和Job计数均0，无网络"
+    },
+    {
+      "path": "script/guest-own-provider-patch.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "d756后继七源/二十文件完整Own/Root合法增量与二次幂等、源码改字/旧组合改字/缺件/签名/混合态拒；仅复制自有源至临时目录，无Host或网络"
+    }
+  ]
+}

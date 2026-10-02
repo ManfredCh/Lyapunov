@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lyapunov
+Exec=@LYAPUNOV_EXEC@
+Icon=@LYAPUNOV_ICON@
+StartupWMClass=lyapunov-desktop
+Terminal=false
+Categories=Development;Science;

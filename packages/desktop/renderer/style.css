@@ -1,0 +1,194 @@
+/* Lyapunov 桌面：登录先行的一体化欢迎页 + 已登录账户面板。
+   默认暖白灰黑；深色为真实生效的第二套变量，light/dark/system 三档会让文本/按钮/背景一起变化。
+   欢迎页背景按主题引用同目录 login-background-v1.png（浅）与 login-background-dark-v1.png（深），
+   system 由 prefers-color-scheme 两分支选择对应图；相对路径由 file CSP img-src 'self' 放行。 */
+:root{
+  --background-base:#f6f3ee;
+  --surface-raised-base:#fffefb;
+  --surface-inset-base:#efeae2;
+  --border-weak-base:#e3dcd1;
+  --border-strong-base:#cfc6b8;
+  --text-strong-base:#211e19;
+  --text-weak-base:#5f594f;
+  --text-weaker-base:#8b8377;
+  --primary-base:#1c1a17;
+  --primary-hover:#33302a;
+  --primary-active:#0e0d0b;
+  --text-on-primary:#fbf9f5;
+  --surface-critical-weak:rgba(176,58,58,.08);
+  --border-critical-weak:rgba(176,58,58,.28);
+  --text-critical:#9c3535;
+  --surface-warning-weak:rgba(150,110,30,.10);
+  --border-warning-weak:rgba(150,110,30,.30);
+  --text-warning:#6f5417;
+  --welcome-image:url("./login-background-v1.png");
+  --welcome-veil:linear-gradient(180deg,rgba(250,248,244,.38),rgba(250,248,244,.72));
+  color-scheme:light;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+  font-synthesis:none;
+  color:var(--text-strong-base);
+  background:var(--background-base);
+}
+:root[data-theme=dark]{
+  --background-base:#141210;
+  --surface-raised-base:#1e1b18;
+  --surface-inset-base:#100e0c;
+  --border-weak-base:#332e29;
+  --border-strong-base:#4a433b;
+  --text-strong-base:#efeae2;
+  --text-weak-base:#b3aa9d;
+  --text-weaker-base:#847b6e;
+  --primary-base:#f2ede5;
+  --primary-hover:#ffffff;
+  --primary-active:#dcd5c9;
+  --text-on-primary:#171410;
+  --surface-critical-weak:rgba(224,120,120,.12);
+  --border-critical-weak:rgba(224,120,120,.32);
+  --text-critical:#e8a3a3;
+  --surface-warning-weak:rgba(228,189,101,.10);
+  --border-warning-weak:rgba(228,189,101,.30);
+  --text-warning:#e4d4b0;
+  --welcome-image:url("./login-background-dark-v1.png");
+  --welcome-veil:linear-gradient(180deg,rgba(16,14,12,.40),rgba(16,14,12,.74));
+  color-scheme:dark;
+}
+@media(prefers-color-scheme:dark){
+  :root[data-theme=system]{
+    --background-base:#141210;
+    --surface-raised-base:#1e1b18;
+    --surface-inset-base:#100e0c;
+    --border-weak-base:#332e29;
+    --border-strong-base:#4a433b;
+    --text-strong-base:#efeae2;
+    --text-weak-base:#b3aa9d;
+    --text-weaker-base:#847b6e;
+    --primary-base:#f2ede5;
+    --primary-hover:#ffffff;
+    --primary-active:#dcd5c9;
+    --text-on-primary:#171410;
+    --surface-critical-weak:rgba(224,120,120,.12);
+    --border-critical-weak:rgba(224,120,120,.32);
+    --text-critical:#e8a3a3;
+    --surface-warning-weak:rgba(228,189,101,.10);
+    --border-warning-weak:rgba(228,189,101,.30);
+    --text-warning:#e4d4b0;
+    --welcome-image:url("./login-background-dark-v1.png");
+    --welcome-veil:linear-gradient(180deg,rgba(16,14,12,.40),rgba(16,14,12,.74));
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0}
+button,input,select{font:inherit}
+button{
+  border:1px solid var(--border-weak-base);
+  background:var(--surface-raised-base);
+  color:var(--text-strong-base);
+  border-radius:10px;
+  padding:10px 16px;
+  font-weight:500;
+  cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s;
+}
+button:hover:not(:disabled){background:var(--surface-inset-base);border-color:var(--border-strong-base)}
+button:disabled{opacity:.5;cursor:default}
+button.primary{
+  background:var(--primary-base);
+  border-color:transparent;
+  color:var(--text-on-primary);
+  font-weight:600;
+  border-radius:999px;
+  padding:13px 22px;
+}
+button.primary:hover:not(:disabled){background:var(--primary-hover);border-color:transparent}
+button.primary:active:not(:disabled){background:var(--primary-active)}
+button.quiet{background:transparent;border-color:transparent;color:var(--text-weak-base)}
+button.quiet:hover:not(:disabled){background:var(--surface-inset-base);color:var(--text-strong-base);border-color:transparent}
+select{
+  color:var(--text-strong-base);
+  background:var(--surface-raised-base);
+  border:1px solid var(--border-weak-base);
+  border-radius:999px;
+  padding:7px 14px;
+  font-size:13px;
+  cursor:pointer;
+}
+select option{color:#172338;background:#fff}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--text-strong-base);outline-offset:2px}
+h1{font-size:22px;font-weight:600;line-height:1.3;margin:0 0 10px}
+h2{font-size:13px;font-weight:650;color:var(--text-weak-base);margin:32px 0 12px;text-transform:uppercase;letter-spacing:.08em}
+p{line-height:1.65;color:var(--text-weak-base)}
+table{border-collapse:collapse;width:100%;font-size:13px;background:var(--surface-raised-base);border:1px solid var(--border-weak-base);border-radius:12px;overflow:hidden}
+td,th{text-align:left;border-bottom:1px solid var(--border-weak-base);padding:12px 14px}
+tr:last-child td{border-bottom:0}
+th{color:var(--text-weaker-base);font-weight:500;font-size:12px}
+
+.shell{position:relative;max-width:1080px;margin:0 auto;padding:22px 32px 24px;display:flex;flex-direction:column;min-height:100vh}
+.shell.account{max-width:960px}
+/* 一体化欢迎页：整窗铺满暖白极简背景，标题/按钮是真实 DOM 控件，不是截图假按钮。 */
+.shell.welcome-stage{
+  max-width:none;
+  width:100%;
+  padding:22px 40px 18px;
+  background-color:var(--background-base);
+  background-image:var(--welcome-veil),var(--welcome-image);
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+}
+.topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;z-index:1}
+.shell.account .topbar{margin-bottom:30px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:16px;letter-spacing:.01em;color:var(--text-strong-base)}
+.mark{width:24px;height:24px;border-radius:7px;background:var(--primary-base);color:var(--text-on-primary);display:grid;place-items:center;font-size:13px;font-weight:700;line-height:1;box-shadow:none}
+.mark img{display:block;width:100%;height:100%;object-fit:contain;border-radius:inherit}
+.preferences{display:flex;gap:8px}
+
+/* 未登录首屏：只有品牌、标题、一句说明与一个真实主按钮；等待/取消/重试按状态出现。 */
+.welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 8px;z-index:1}
+.welcome h1{font-size:clamp(26px,3.4vw,38px);font-weight:680;letter-spacing:-.02em;line-height:1.25;margin:0 0 12px;max-width:18em}
+.welcome .intro{margin:0;font-size:clamp(14px,1.4vw,16px);color:var(--text-weak-base);max-width:28em}
+.welcome .status{display:flex;align-items:center;justify-content:center;gap:9px;color:var(--text-weak-base);font-size:13px;margin:22px 0 0;max-width:32em}
+.welcome .actions{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 0;width:100%;max-width:320px}
+.welcome .actions button{width:100%}
+.spinner{width:14px;height:14px;border:2px solid var(--border-strong-base);border-top-color:var(--text-strong-base);border-radius:50%;display:inline-block;flex:none;animation:rotate 1s linear infinite}
+@keyframes rotate{to{transform:rotate(360deg)}}
+
+.message{border:1px solid var(--border-warning-weak);background:var(--surface-warning-weak);color:var(--text-warning);border-radius:10px;padding:12px 16px;margin:18px 0 0;font-size:13px;white-space:pre-wrap;z-index:1}
+
+/* 已登录账户面板：余额/套餐/订单仍从账户菜单进入，不塞进未登录首屏。 */
+.profile{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 22px}
+.profile h1{font-size:20px;margin:0 0 4px}
+.balance{background:var(--surface-raised-base);border:1px solid var(--border-weak-base);border-radius:16px;padding:24px}
+.balance strong{font-size:30px;font-weight:650;letter-spacing:-.01em}
+.balance small{display:block;color:var(--text-weaker-base);font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em}
+.balance .actions{display:flex;gap:4px;flex-wrap:wrap;margin:16px 0 0}
+.balance-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:12px}
+.balance-grid>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.balance-grid span{color:var(--text-weak-base);font-size:12px}
+.balance-grid strong{font-size:22px;line-height:1.25;overflow-wrap:anywhere}
+.usage-note{min-height:1.65em;margin:10px 0 0;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.plan{border:1px solid var(--border-weak-base);border-radius:14px;padding:20px;background:var(--surface-raised-base);display:flex;flex-direction:column}
+.plan h3{margin:0 0 6px;font-size:15px}
+.plan .price{font-size:24px;font-weight:650;letter-spacing:-.01em}
+.plan p{margin:4px 0 0;font-size:13px}
+.plan select{width:100%;background:var(--surface-inset-base);color:var(--text-strong-base);padding:9px 10px;border:1px solid var(--border-weak-base);border-radius:10px;margin:14px 0 10px}
+.plan select option{color:#172338;background:#fff}
+.plan button{margin-top:auto}
+.table-wrap{width:100%;overflow-x:auto}
+.muted{color:var(--text-weaker-base);font-size:12px}
+.footer{margin-top:auto;padding-top:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:1}
+.footer .muted{font-size:11px}
+
+@media(max-width:960px){
+  .shell.account{padding:20px 22px}
+}
+@media(max-width:600px){
+  .shell{padding:16px 18px}
+  .shell.welcome-stage{padding:16px 18px 14px}
+  .welcome{padding:28px 2px}
+  .welcome .actions{max-width:100%}
+  .balance-grid{grid-template-columns:1fr}
+  .balance{padding:18px}
+  td,th{padding:9px 10px}
+}

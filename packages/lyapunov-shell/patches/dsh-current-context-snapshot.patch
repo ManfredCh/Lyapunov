@@ -1,0 +1,68 @@
+--- a/packages/core/agent-loop/src/runtime-context.ts
++++ b/packages/core/agent-loop/src/runtime-context.ts
+@@ -21,6 +21,36 @@
+ function textOf(message: Message): string | undefined {
+   const [block] = message.content
+   return message.content.length === 1 && block?.type === 'text' ? block.text : undefined
++}
++
++/** Current-state owners may replace their own snapshots; user input and tool results stay intact. */
++function snapshotKey(message: Message): string | undefined {
++  if (message.role !== 'user') return
++  const source = message.source as { kind: string; plugin?: string; form?: string }
++  if (source.kind === 'user' || source.kind === 'tool' || source.kind === 'model') return
++  if (source.kind === 'plugin' && (source.plugin === SOURCE || source.form === 'snapshot')
++    || source.kind === 'skill-catalog' && source.form === 'catalog'
++    || source.kind === 'lyapunov-domain-pointer') return JSON.stringify([source.kind, source.plugin ?? null])
++}
++
++/** Replace one surviving node of the same current-state owner, retaining every raw event. */
++export function contextSnapshotIntent(session: Session, message: UserMessage): SurfaceIntent<'user/message'> {
++  const key = snapshotKey(message)
++  if (key === undefined) return { surfaceOp: 'append' }
++  for (const seq of session.surface.nodes.toReversed()) {
++    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session surface read.
++    const event = session.eventAt(seq)
++    if (event?.type !== 'user/message' || snapshotKey(event.data) !== key) continue
++    return { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] }
++  }
++  return { surfaceOp: 'append' }
++}
++
++/** Older resumed logs can contain append-only snapshots; publish only their latest complete value. */
++export function currentContextMessages(messages: readonly Message[]): Message[] {
++  const latest = new Map<string, number>()
++  messages.forEach((message, index) => { const key = snapshotKey(message); if (key !== undefined) latest.set(key, index) })
++  return messages.filter((message, index) => { const key = snapshotKey(message); return key === undefined || latest.get(key) === index })
+ }
+
+ /** One uncommitted system-prompt surface operation for request admission or reconciliation. */
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -33,7 +33,7 @@
+ import type {} from '@deepseek-ai/dsh-session-projection'
+ import type { Context } from '@deepseek-ai/cordis'
+ import { ReactLoopInbox } from './inbox.ts'
+-import { RuntimeContextProjection } from './runtime-context.ts'
++import { RuntimeContextProjection, contextSnapshotIntent, currentContextMessages } from './runtime-context.ts'
+ import { AssistantStreamAttempt } from './assistant-stream.ts'
+ import { SystemPromptProjection } from './runtime-context.ts'
+ import { executeToolCalls } from './tool-calls.ts'
+@@ -373,7 +373,7 @@
+       }
+       if (firstAttempt) {
+         for (const message of decision.messages) {
+-          this.session.append('user/message', message, { surfaceOp: 'append' })
++          this.session.append('user/message', message, contextSnapshotIntent(this.session, message))
+         }
+       }
+       firstAttempt = false
+@@ -601,7 +601,7 @@
+
+     // canonicalHeader is shallow; append logs a detached snapshot, not these local values.
+     deepFreeze(header)
+-    const boundaryMessages = session.deriveMessages()
++    const boundaryMessages = currentContextMessages(session.deriveMessages())
+     for (const message of boundaryMessages) {
+       if (this.frozenMessages.has(message)) continue
+       deepFreeze(message)

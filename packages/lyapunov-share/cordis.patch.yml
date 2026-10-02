@@ -1,0 +1,4 @@
+- insert:
+    - id: lyapunov-share
+      name: ./dist/plugin.js
+      disabled: true

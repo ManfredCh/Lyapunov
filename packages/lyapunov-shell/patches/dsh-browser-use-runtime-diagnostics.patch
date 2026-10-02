@@ -1,0 +1,330 @@
+diff --git a/packages/experimental/browser-use-runtime/src/index.ts b/packages/experimental/browser-use-runtime/src/index.ts
+--- a/packages/experimental/browser-use-runtime/src/index.ts
++++ b/packages/experimental/browser-use-runtime/src/index.ts
+@@ -72,6 +72,8 @@
+   failures: number
+   /** Message from the most recent reported failure or failed rebuild. */
+   lastReason?: string
++  /** A launch condition that a replacement connection cannot repair. */
++  blocked?: boolean
+ }
+
+ /** Stop a caller's wait while retaining handlers on the resource owner's work. */
+@@ -189,15 +191,17 @@
+    * failing stops instead of starting a process every round.
+    * @param agent - exact live resource owner.
+    * @param reason - provider message describing what failed.
++   * @param options - a permanent launch condition can suspend without rebuilding.
+    * @returns the health after this report, or undefined when the owner has no entry.
+    */
+-  reportFailure(agent: Agent, reason: string): SessionRebuildHealth | undefined {
++  reportFailure(agent: Agent, reason: string, options: { rebuild?: boolean } = {}): SessionRebuildHealth | undefined {
+     const entry = this.entries.get(agent)
+     if (entry === undefined) return undefined
+     entry.failures += 1
+     entry.lastReason = reason
++    if (options.rebuild === false) entry.blocked = true
+     const budget = this.options.rebuildBudget
+-    if (budget !== undefined && entry.failures >= budget) {
++    if (entry.blocked || (budget !== undefined && entry.failures >= budget)) {
+       this.ctx.logger.warn(`${this.options.label}: automatic browser rebuild stopped after ${entry.failures} consecutive failures: ${reason}; a new Session activation can probe again`)
+       return this.healthOf(entry)
+     }
+@@ -221,6 +225,7 @@
+     if (entry === undefined) return
+     entry.failures = 0
+     delete entry.lastReason
++    delete entry.blocked
+   }
+
+   /**
+@@ -231,6 +236,35 @@
+   health(agent: Agent): SessionRebuildHealth | undefined {
+     const entry = this.entries.get(agent)
+     return entry === undefined ? undefined : this.healthOf(entry)
++  }
++
++  /**
++   * Whether this live owner is releasing or rebuilding its connection.
++   * @param agent - exact live resource owner.
++   * @returns whether a following operation must wait for owner settlement.
++   */
++  recovering(agent: Agent): boolean {
++    return this.releasing.has(agent) || this.recycling.has(agent)
++  }
++
++  /**
++   * Await this owner's complete release/rebuild chain. Cancellation may first
++   * release a connection and enqueue its replacement only after that release;
++   * inspecting just the rebuild map can enter the gap between those states.
++   * A refused release or rebuild remains a failure and cannot admit an operation.
++   * @param agent - exact live resource owner.
++   * @param signal - cancellation of this wait, without canceling owner recovery.
++   * @returns settlement after the owner has no pending connection transition.
++   */
++  async waitForRecovery(agent: Agent, signal?: AbortSignal): Promise<void> {
++    for (;;) {
++      signal?.throwIfAborted()
++      const pending = [this.releasing.get(agent), this.recycling.get(agent)]
++        .filter((task): task is Promise<void> => task !== undefined)
++      if (pending.length === 0) return
++      const settled = Promise.all(pending).then(() => {})
++      await (signal === undefined ? settled : awaitOperation(settled, signal))
++    }
+   }
+
+   /**
+@@ -289,8 +323,7 @@
+     signal.addEventListener('abort', releaseOnAbort, { once: true })
+     const task = entry.tail.then(async () => {
+       combined.throwIfAborted()
+-      const pendingRecycle = this.recycling.get(agent)
+-      if (pendingRecycle !== undefined) await pendingRecycle.catch(() => undefined)
++      await this.waitForRecovery(agent, combined)
+       combined.throwIfAborted()
+       const resource = await awaitOperation(entry.ready, combined)
+       combined.throwIfAborted()
+@@ -372,7 +405,7 @@
+     return {
+       failures: entry.failures,
+       ...entry.lastReason === undefined ? {} : { lastReason: entry.lastReason },
+-      suspended: budget !== undefined && entry.failures >= budget,
++      suspended: entry.blocked === true || (budget !== undefined && entry.failures >= budget),
+     }
+   }
+
+diff --git a/packages/experimental/browser-use-runtime/src/mcp.ts b/packages/experimental/browser-use-runtime/src/mcp.ts
+--- a/packages/experimental/browser-use-runtime/src/mcp.ts
++++ b/packages/experimental/browser-use-runtime/src/mcp.ts
+@@ -39,13 +39,64 @@
+ /** Fixed launch or attachment choice for one MCP browser provider. */
+ export type BrowserMcpConfig = BrowserMcpLaunchConfig | BrowserMcpAttachConfig
+
+-/**
+- * A live Chrome DevTools MCP server reporting that its browser target is gone.
+- * MCP transport failures (a dead server process, a closed socket) are deliberately
+- * excluded: the provider must not silently replace a server that exited. Only a
+- * still-live server reporting a closed browser target is recyclable.
+- */
+-const BROWSER_TARGET_FAILURE = /Target closed|Target\.setDiscoverTargets|Protocol error \([^)]*Target|Target page, context or browser has been closed|Browser closed/u
++/** A provider-observed browser failure, distinct from model or other tool failures. */
++export interface BrowserRuntimeFailure {
++  /** The condition actually named by the provider; a closed connection alone is not crash proof. */
++  kind: 'page-closed' | 'browser-closed' | 'browser-crashed' | 'sandbox-unavailable' | 'display-unavailable' | 'profile-in-use' | 'executable-unavailable' | 'launch-failed' | 'transport-closed' | 'schema-unavailable' | 'release-unverified'
++  /** Preserve a live browser, rebuild this owner, or wait for the launch condition to be fixed. */
++  recovery: 'select-page' | 'rebuild' | 'blocked'
++  /** Provider message, retained for the existing error result. */
++  reason: string
++}
++
++/**
++ * Classify the failure's meaning, never a CDP method name alone. A selected page
++ * or execution context can close while its browser and other pages remain live.
++ * @param error - provider throw or tool-error message, including a nested launch cause.
++ * @returns a diagnosed browser condition, otherwise undefined.
++ */
++export function browserRuntimeFailure(error: unknown): BrowserRuntimeFailure | undefined {
++  const messages: string[] = []
++  const seen = new Set<unknown>()
++  for (let current = error; current !== undefined && !seen.has(current);) {
++    seen.add(current)
++    const detail = current as { message?: unknown; cause?: unknown } | null
++    messages.push(typeof detail?.message === 'string' ? detail.message : String(current))
++    current = typeof current === 'object' && current !== null ? detail?.cause : undefined
++  }
++  const reason = messages.join(': ')
++  const classified = (kind: BrowserRuntimeFailure['kind'], recovery: BrowserRuntimeFailure['recovery']): BrowserRuntimeFailure => ({ kind, recovery, reason })
++  if (/No usable sandbox|SUID sandbox helper|Failed to move to new namespace|Running as root without.*sandbox/iu.test(reason)) return classified('sandbox-unavailable', 'blocked')
++  if (/Missing X server|cannot open display|could not open display|failed to connect to.*Wayland|ozone.*(?:initializ|display)/iu.test(reason)) return classified('display-unavailable', 'blocked')
++  if (/SingletonLock|ProcessSingleton|profile.*(?:in use|locked)|browser is already running/iu.test(reason)) return classified('profile-in-use', 'blocked')
++  if (/Could not find (?:Chrome|Chromium)|Browser was not found|executable.*(?:does not exist|not found)|spawn .*ENOENT/iu.test(reason)) return classified('executable-unavailable', 'blocked')
++  if (/browser (?:process )?(?:has )?(?:crashed|exited)|browser.*SIG(?:ABRT|SEGV)/iu.test(reason)) return classified('browser-crashed', 'rebuild')
++  if (/Failed to launch (?:the )?browser|browser launch failed/iu.test(reason)) return classified('launch-failed', 'blocked')
++  if (/selected page.*closed|No page found|No target with given id|Cannot find (?:context|target)|Execution context was destroyed/iu.test(reason)) return classified('page-closed', 'select-page')
++  if (/Protocol error \(Target\.setDiscoverTargets\):\s*(?:Target closed|Session closed|Connection closed)|Target page, context or browser has been closed|Browser (?:has been )?closed|browser disconnected/iu.test(reason)) return classified('browser-closed', 'rebuild')
++  // An unqualified Target closed does not establish that the root browser died.
++  if (/Target closed/iu.test(reason)) return classified('page-closed', 'select-page')
++  if (/MCP_PROVIDER_UNAVAILABLE|Connection closed|transport.*closed|server.*exited|ECONNRESET/iu.test(reason)) return classified('transport-closed', 'blocked')
++  if (/UNKNOWN_TOOL|ToolNotFoundError|(?:tool|schema).*(?:not found|missing|not registered|unavailable)/iu.test(reason)) return classified('schema-unavailable', 'blocked')
++  return undefined
++}
++
++/** Task-facing action after one diagnosed failure; it grants no additional authority. */
++export function browserFailureAdvice(failure: BrowserRuntimeFailure): string {
++  switch (failure.kind) {
++    case 'page-closed': return '当前页面或页面句柄已关闭；保留本会话浏览器，先读取页面列表并选择仍存在的页面，再取得新的观察和句柄。'
++    case 'browser-closed':
++    case 'browser-crashed': return '仅恢复本会话自有的浏览器连接；恢复后先读取页面列表，旧 page/uid/context 句柄不能复用，失败操作没有自动重放。'
++    case 'sandbox-unavailable': return '本会话浏览器的 Chromium 沙箱不可用；桌面窗口的沙箱状态不能证明它已就绪，先修复配置的浏览器沙箱，再重新激活本会话。'
++    case 'display-unavailable': return '本会话浏览器无法使用显示环境；先在合法显示环境中重新激活本会话，不扩大桌面权限。'
++    case 'profile-in-use': return '浏览器配置目录已被占用；保留原目录与其 owner，核对隔离启动配置后重新激活本会话。'
++    case 'executable-unavailable': return '配置的浏览器可执行文件不可用；核对实际安装与可执行文件，再重新激活本会话。'
++    case 'launch-failed': return '浏览器启动失败，当前错误未证明是目标关闭；核对启动错误与运行环境后重新激活本会话。'
++    case 'transport-closed': return '本会话浏览器 MCP 连接不可用；未自动替换已经退出的 MCP 服务，核对服务状态后重新激活本会话。'
++    case 'schema-unavailable': return '该浏览器工具当前没有可用 schema；使用本次上下文中的工具目录，恢复期间等待本会话连接，不按历史工具名猜参数。'
++    case 'release-unverified': return '旧浏览器连接的释放未确认，仍保留原 owner；未启动替代连接，需先确认其释放状态再重新激活本会话。'
++  }
++}
+
+ /**
+  * Recognize one browser operation failure caused by a closed browser target.
+@@ -53,8 +104,8 @@
+  * @returns the provider's message when the browser target is gone, otherwise undefined.
+  */
+ export function browserTargetFailureReason(error: unknown): string | undefined {
+-  const message = error instanceof Error ? error.message : String(error)
+-  return BROWSER_TARGET_FAILURE.test(message) ? message : undefined
++  const failure = browserRuntimeFailure(error)
++  return failure?.recovery === 'rebuild' ? failure.reason : undefined
+ }
+
+ /**
+@@ -154,7 +205,7 @@
+   const clients = new Map<Agent, ClientState>()
+   // Whether each Session currently has a mounted client, so a rebuild that could
+   // not start is observed as a failure instead of a missing-tool mystery.
+-  const connections = new Map<Agent, { mounted: boolean }>()
++  const connections = new Map<Agent, { mounted: boolean; failure?: BrowserRuntimeFailure }>()
+   const toolPrefix = `mcp__${options.name}__`
+   const resourceTools = new Set(['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'])
+   let stopping = false
+@@ -187,7 +238,7 @@
+         let cancellation: Promise<void> | undefined
+         const cancel = (): void => { cancellation = scope.dispose() }
+         signal.addEventListener('abort', cancel, { once: true })
+-        const connection = { mounted: false }
++        const connection: { mounted: boolean; failure?: BrowserRuntimeFailure } = { mounted: false }
+         connections.set(agent, connection)
+         const clientConfig = McpClient.Config({
+           transport: 'stdio',
+@@ -221,6 +272,10 @@
+               client = undefined
+               connection.mounted = false
+             }
++          }).catch((error: unknown) => {
++            connection.mounted = false
++            connection.failure = { kind: 'release-unverified', recovery: 'blocked', reason: error instanceof Error ? error.message : String(error) }
++            throw error
+           }).finally(() => { releasing = undefined })
+           return releasing
+         }
+@@ -248,6 +303,7 @@
+               if (signal.aborted) return
+               mountClient()
+               await client
++              signal.throwIfAborted()
+               connection.mounted = true
+             },
+             close() {
+@@ -310,14 +366,23 @@
+     const lost = (reason: string, cause: unknown): BrowserConnectionError => new BrowserConnectionError(
+       `${options.name}: the browser connection for this Session was lost (${reason}). `
+       + `Recovery was requested and nothing else was stopped; `
+-      + `the next browser operation waits for the rebuild and then starts a fresh ${options.exclusive ? 'connection to the configured endpoint' : 'isolated browser'}.`,
++      + `the next browser operation waits for the rebuild and then starts a fresh ${options.exclusive ? 'connection to the configured endpoint' : 'isolated browser'}. `
++      + `先读取当前页面目录；旧页面句柄不能复用，失败操作未自动重放。`,
+       { cause },
+     )
+-    const loseConnection = (reason: string, cause: unknown): never => {
+-      const health = resources.reportFailure(agent, reason)
+-      if (health === undefined) throw new BrowserConnectionError(`${options.name}: the browser connection for this Session was lost (${reason}).`, { cause })
++    const failBrowser = (failure: BrowserRuntimeFailure, cause: unknown): never => {
++      const connection = connections.get(agent)
++      if (connection !== undefined) connection.failure = failure
++      if (failure.recovery === 'select-page' || failure.kind === 'schema-unavailable') {
++        throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} (${failure.reason})`, { cause })
++      }
++      const health = resources.reportFailure(agent, failure.reason, { rebuild: failure.recovery === 'rebuild' })
++      if (failure.recovery === 'blocked') {
++        throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} 仅本会话浏览器暂停，其他工具不受影响。 (${failure.reason})`, { cause })
++      }
++      if (health === undefined) throw new BrowserConnectionError(`${options.name}: the browser connection for this Session was lost (${failure.reason}).`, { cause })
+       if (health.suspended) throw suspended(health)
+-      throw lost(reason, cause)
++      throw lost(failure.reason, cause)
+     }
+     return resources.run(agent, exec.signal, async (_scope, combined) => {
+       const original = exec.signal
+@@ -325,7 +390,15 @@
+       try {
+         if (browserOperation) {
+           const health = resources.health(agent)
+-          if (health?.suspended === true) throw suspended(health)
++          const blocked = connections.get(agent)?.failure
++          if (blocked?.recovery === 'blocked') failBrowser(blocked, undefined)
++          if (health?.suspended === true) {
++            const failure = connections.get(agent)?.failure
++            if (failure?.recovery === 'blocked') {
++              throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} 仅本会话浏览器暂停，其他工具不受影响。`)
++            }
++            throw suspended(health)
++          }
+           if (!(connections.get(agent)?.mounted ?? false)) {
+             // A rebuild that could not start left no live connection; count it so
+             // repeated startup failures also stop at the budget.
+@@ -335,25 +408,30 @@
+               `${options.name}: the browser connection for this Session is not mounted (${observed?.lastReason ?? 'rebuild failed'}); a fresh connection is starting, retry the browser operation.`,
+             )
+           }
++          if (ctx.tools.get(exec.name, agent) === undefined) {
++            throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_SCHEMA_UNAVAILABLE] 该工具当前没有可用 schema；使用本次上下文的浏览器工具目录，不按历史名称猜参数，其他工具可继续。`)
++          }
+         }
+         const result = await next()
+         // The tool runtime materializes a tool body failure as an isError result,
+         // so a closed target is read from the result as well as from a throw.
+         if (browserOperation) {
+           if (result.isError) {
+-            const reason = browserTargetFailureReason(result.error.message)
+-            if (reason !== undefined) loseConnection(reason, result.error)
++            const failure = browserRuntimeFailure(result.error.message)
++            if (failure !== undefined) failBrowser(failure, result.error)
+           } else {
+             // Only a real browser operation proves the resource works: discovery
+             // and connection success deliberately do not reset the budget.
+             resources.reportSuccess(agent)
++            const connection = connections.get(agent)
++            if (connection !== undefined) delete connection.failure
+           }
+         }
+         return result
+       } catch (error) {
+         if (browserOperation && !(error instanceof BrowserConnectionError)) {
+-          const reason = browserTargetFailureReason(error)
+-          if (reason !== undefined) loseConnection(reason, error)
++          const failure = browserRuntimeFailure(error)
++          if (failure !== undefined) failBrowser(failure, error)
+         }
+         throw error
+       } finally {
+@@ -361,9 +439,28 @@
+       }
+     })
+   })
+-  ctx.on('system-prompt/assemble', async (_assembly, { agent }, next) => {
++  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
++    const { agent } = context
++    const recovering = agent !== undefined && clients.get(agent)?.status === 'ready' && resources.recovering(agent)
+     const assembly = await next()
+-    if (agent === undefined || clients.get(agent)?.status === 'ready') return assembly
++    if (agent !== undefined && clients.get(agent)?.status === 'ready') {
++      if (recovering) {
++        try {
++          await resources.waitForRecovery(agent, context.signal)
++        } catch (error) {
++          // A browser-only failure must not suppress the remaining tool catalog.
++          context.signal?.throwIfAborted()
++          return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: 本会话浏览器恢复未完成；该浏览器工具当前可能没有可用 schema，其他工具可继续。` }] }
++        }
++        // Assembly collected schemas before its waterfall. Recollect only after
++        // this owner settled, rather than sending the remount gap to the model.
++        return ctx.systemPrompt.assemble(context)
++      }
++      const failure = connections.get(agent)?.failure
++      if (failure === undefined) return assembly
++      return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: ${browserFailureAdvice(failure)} 连接挂载不等于页面操作已成功，按当前工具 schema 继续；Jobs、World 和其他工具不受本会话浏览器恢复影响。` }] }
++    }
++    if (agent === undefined) return assembly
+     return { ...assembly, sections: assembly.sections.filter(section => section.name !== `mcp:${options.name}`) }
+   })
+ }

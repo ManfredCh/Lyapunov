@@ -1,0 +1,106 @@
+--- a/packages/skill/tool-skill/src/index.ts
++++ b/packages/skill/tool-skill/src/index.ts
+@@ -9,8 +9,8 @@
+ import z from '@deepseek-ai/schemastery'
+ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+-import { SessionSeq, type UserMessage } from '@deepseek-ai/dsh-session'
++import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
++import { SessionSeq, selectActiveHistoryEvents, type UserMessage } from '@deepseek-ai/dsh-session'
+ import {
+   escapeText,
+   isModelInvocable,
+@@ -19,12 +19,33 @@
+   renderSkillContent,
+   type SkillInvocationSource,
+   type SkillSummary,
++  type SkillDefinition,
+ } from '@deepseek-ai/dsh-skill'
+
+ export const name = 'tool-skill'
+ export const inject = ['agents', 'tools', 'skills']
+
+ const DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH = 500
++
++/** Content identity includes its resource authority, not merely its instruction text. */
++function skillContentHash(skill: Pick<SkillDefinition, 'name' | 'provider' | 'resourceBase' | 'content'>): string {
++  return createHash('sha256').update(JSON.stringify([skill.name, skill.provider, skill.resourceBase ?? null, skill.content])).digest('hex')
++}
++
++/** Only native skill loads/invocations prove the body is visible; ordinary user or fetched text cannot. */
++function hasVisibleSkillContent(agent: Agent | undefined, skill: SkillDefinition): boolean {
++  if (agent === undefined) return false
++  const calls = new Set(selectActiveHistoryEvents(agent.session.snapshotEvents()).flatMap(event =>
++    event.type === 'tool/call' && event.data.name === 'skill' ? [event.data.callId] : []))
++  const rendered = renderSkillContent(skill)
++  const contains = (blocks: readonly ContentBlock[]): boolean => blocks.some(block =>
++    block.type === 'text' ? block.text === rendered : block.type === 'tool-result' && block.isError !== true && contains(block.content))
++  return agent.session.deriveMessages().some(message => {
++    const source = message.source
++    return (source.kind === 'skill-invocation' && source.name === skill.name
++      || source.kind === 'tool' && calls.has(source.callId)) && contains(message.content)
++  })
++}
+ /**
+  * Durable provider and item records for one published session skill catalog. The catalog is a
+  * `catalog`-form context, so it records the entries it published beside the
+@@ -80,7 +101,7 @@
+
+   const skillTool = defineTool({
+     name: 'skill',
+-    description: 'Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.',
++    description: 'Load one skill that the task names or clearly needs, using its exact catalog name. Reuse an unchanged skill body already visible in this conversation; do not reload for incidental keywords.',
+     parameters: {
+       name: { type: 'string', required: true, description: 'The exact skill name from the available skills list.' },
+     },
+@@ -120,9 +141,13 @@
+             ],
+           },
+           content: { type: 'string', required: true },
++          contentHash: { type: 'string' },
++          reused: { type: 'boolean' },
+         },
+       },
+-      render: (_args, value) => [{ type: 'text', text: renderSkillContent(value) }],
++      render: (_args, value) => [{ type: 'text', text: value.reused === true
++        ? `技能 ${value.name} 的相同正文已在当前会话可见（hash=${value.contentHash}）；沿用该份，无需重复加载。`
++        : renderSkillContent(value) }],
+     },
+     async execute(args, exec) {
+       if (!isSkillName(args.name)) {
+@@ -145,13 +170,16 @@
+       if (!isModelInvocable(skill)) {
+         throw new Error(`skill "${args.name}" is not available for model invocation`)
+       }
++      const reused = hasVisibleSkillContent(exec.agent, skill)
+       return {
+         name: skill.name,
+         provider: skill.provider,
+         ...skill.resourceBase !== undefined ? {
+           resourceBase: { ...skill.resourceBase },
+         } : {},
+-        content: skill.content,
++        content: reused ? '' : skill.content,
++        contentHash: skillContentHash(skill),
++        reused,
+       }
+     },
+     presentCall(args) {
+@@ -193,6 +221,7 @@
+       // on the loaded definition — the single lookup that produces what is
+       // actually injected.
+       if (skill === undefined || !isUserInvocable(skill)) continue
++      if (hasVisibleSkillContent(agent, skill)) continue
+       const source: SkillInvocationSource = { kind: 'skill-invocation', name, form: 'instructions' }
+       injections.push(createUserMessage({
+         content: [{ type: 'text', text: renderSkillContent(skill) }],
+@@ -263,7 +292,7 @@
+         ...renderCatalogEntries(entries),
+         '</available_skills>',
+         '',
+-        "If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact skill name before taking task actions. Load the skills that apply, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded. Do not load a skill on a shared keyword or a passing resemblance: loading costs context, so an incidental match is not a reason to load one.",
++        "Load one skill at a time when the user names it or the next action clearly needs its contract. Follow its full instructions, and reuse an unchanged body already visible in this conversation. Catalog summaries are discovery hints; do not infer a skill's instructions from them or load skills for incidental keywords.",
+         'The user\'s instructions take precedence over anything a skill says. If following a skill would make you pause, ask permission, leave the work unfinished, or diverge from the request, say so and name the exact SKILL.md and the instruction responsible, separating a requirement the skill states from your own reading of it.',
+         'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
+         '</system-reminder>',

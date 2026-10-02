@@ -1,0 +1,115 @@
+diff --git a/apps/cli/src/profile-boot.ts b/apps/cli/src/profile-boot.ts
+index 0715efe1b..cbb982f67 100644
+--- a/apps/cli/src/profile-boot.ts
++++ b/apps/cli/src/profile-boot.ts
+@@ -35,7 +35,7 @@ import {
+ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+ import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
+ import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+-import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
++import { provideCmdline, type AppInterrupt, type AppReady } from '@deepseek-ai/dsh-cmdline'
+ import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+
+ const NAME = 'dsh'
+@@ -64,6 +64,26 @@ function createAppReady(): { service: AppReady; commit(): void } {
+   }
+ }
+
++/** The launcher keeps SIGINT shutdown unless a live application activity explicitly consumes it. */
++function createAppInterrupt(): { service: AppInterrupt; consume(): boolean } {
++  const listeners = new Set<(signal: 'SIGINT') => boolean>()
++  return {
++    service: {
++      onInterrupt(listener) {
++        listeners.add(listener)
++        return () => { listeners.delete(listener) }
++      },
++    },
++    consume() {
++      for (const listener of [...listeners]) {
++        try { if (listener('SIGINT') === true) return true }
++        catch { /* A failed handler cannot prevent the launcher's native shutdown. */ }
++      }
++      return false
++    },
++  }
++}
++
+ /**
+  * The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
+  * over every profile's own layer. Resolved per call, not at module load:
+@@ -292,6 +312,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
+   const composed = await composeProfile(options.profile, options.patchFiles, options.fromDefaultProfile)
+   const app: { current?: Context } = {}
+   const appReady = createAppReady()
++  const appInterrupt = createAppInterrupt()
+   const shutdown = createProcessShutdown(async () => {
+     await app.current?.fiber.dispose()
+     await disposeProxy()
+@@ -307,7 +328,10 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
+   // surface — the launcher does not know whether the app considered its work
+   // complete; SIGINT is a user interrupt and reports 130.
+   process.on('SIGTERM', () => { interrupt(0) })
+-  process.on('SIGINT', () => { interrupt(130) })
++  process.on('SIGINT', () => {
++    if (!signalShutdown.signal.aborted && appInterrupt.consume()) return
++    interrupt(130)
++  })
+   installFailLoud(NAME, process, async () => {
+     await app.current?.fiber.dispose()
+   })
+@@ -344,6 +368,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
+       args: options.args,
+       exit: code => void shutdown.shutdown(code),
+       ready: appReady.service,
++      interrupt: appInterrupt.service,
+     })
+   })
+   app.current = ctx
+diff --git a/packages/boot/cmdline/src/index.ts b/packages/boot/cmdline/src/index.ts
+index 5e877f89e..8ba075adc 100644
+--- a/packages/boot/cmdline/src/index.ts
++++ b/packages/boot/cmdline/src/index.ts
+@@ -52,6 +52,16 @@ export interface AppReady {
+   onReady(listener: () => void): () => void
+ }
+
++/** Optional application consumption of a user interrupt; unhandled signals retain launcher shutdown. */
++export interface AppInterrupt {
++  /**
++   * Register a synchronous handler for a currently owned interactive activity.
++   * Return true only when that activity consumes SIGINT. Dispose the handler
++   * when the activity ends; SIGTERM is never routed through this interface.
++   */
++  onInterrupt(listener: (signal: 'SIGINT') => boolean): () => void
++}
++
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     /** The invocation's inner arguments; provided by a launcher before the tree mounts. */
+@@ -60,6 +70,8 @@ declare module '@deepseek-ai/cordis' {
+     appExit?: AppExit
+     /** Successful startup signal; provided by a launcher before the tree mounts. */
+     appReady?: AppReady
++    /** Optional SIGINT consumption; the launcher retains all process-exit ownership. */
++    appInterrupt?: AppInterrupt
+   }
+ }
+
+@@ -71,6 +83,8 @@ export interface CmdlineHost {
+   exit: AppExit
+   /** Successful startup signal for lifecycle work that must not mask boot failure. */
+   ready?: AppReady
++  /** Optional application user-interrupt seam. */
++  interrupt?: AppInterrupt
+ }
+
+ /**
+@@ -86,6 +100,7 @@ export function provideCmdline(ctx: Context, host: CmdlineHost): void {
+   ctx.provide('cmdlineArgs', { get: () => snapshot })
+   ctx.provide('appExit', host.exit)
+   if (host.ready !== undefined) ctx.provide('appReady', host.ready)
++  if (host.interrupt !== undefined) ctx.provide('appInterrupt', host.interrupt)
+ }
+
+ /** Process stdin operations used to bind a stdio application's lifetime. */

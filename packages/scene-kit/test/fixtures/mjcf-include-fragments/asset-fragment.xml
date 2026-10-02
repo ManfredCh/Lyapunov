@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<mujocoinclude>
+  <asset><mesh name="arm_link" file="a.stl"/></asset>
+</mujocoinclude>

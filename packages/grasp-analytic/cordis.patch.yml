@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-grasp-analytic
+      name: '@lyapunov/grasp-analytic'

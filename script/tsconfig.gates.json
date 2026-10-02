@@ -1,0 +1,21 @@
+{
+  "//": "门/驱动的类型检查配置。根 tsconfig.json 只包含 script/*.ts，script/gates/** 不在其中——",
+  "//2": "于是门作者的 WIP 不会把全树 typecheck 弄红（这是有意的），但反过来**门自己也从未被类型检查过**。",
+  "//3": "覆盖审计发现：`bunx tsc --noEmit script/gates/g01-live.ts` 会同时报 bun-types 的既有错与 import.meta 参数错，",
+  "//4": "那是**命令行没带项目配置**导致的，不是门的问题。此文件给门一个独立、可复跑的检查入口：",
+  "//5": "  bunx tsc --noEmit -p script/tsconfig.gates.json",
+  "//6": "门不得引入产品运行时依赖（合同 §6.4 保持薄），因此这里只做类型检查、不产出任何构建物。",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "types": ["bun"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "DOM.AsyncIterable"]
+  },
+  "include": ["gates/**/*.ts", "gates/**/*.mts"],
+  "exclude": ["../node_modules", "../.upstream", "../.runtime"]
+}

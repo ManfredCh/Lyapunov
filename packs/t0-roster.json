@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "scope": "documented-t0-priority",
+  "evidenceScope": "planning-only",
+  "note": "Authoritative machine-readable roster of unambiguous T0 membership in the cited repository docs. Priority is not availability or readiness. A known pack absent here is unclassified, not implicitly T1/T2. Conflicting tier claims remain explicit until a documented decision resolves them.",
+  "readinessSource": "packages/policy-registry/src/pack-contract.ts#inspectPack",
+  "sources": [
+    {
+      "id": "original-tier-table",
+      "path": "bugfixHistory/ROBOT-PACK-JEV-MIMO-DESIGN-20260922.md",
+      "section": "W1 主流机型调研（思考记录）",
+      "date": "2026-09-22",
+      "note": "The source labels this priority research UNVERIFIED, not a behavioral test. Model names are mapped only to exact registered pack identities."
+    },
+    {
+      "id": "expansion-tier-table",
+      "path": "docs/T0_T1_EXPANSION.md",
+      "section": "1. 逐形态扩面表",
+      "date": "2026-09-23",
+      "note": "Confirms A1 and generic quadrotor as T0; labels UR5e T1, conflicting with the original tier table. Historical build/availability wording does not establish present readiness."
+    }
+  ],
+  "packs": [
+    { "packId": "allegro_hand", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "crazyflie_2", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "forklift_c", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "franka_panda", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "generic_quadrotor", "tier": "T0", "sourceIds": ["original-tier-table", "expansion-tier-table"] },
+    { "packId": "leap_hand", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "shadow_hand", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "unitree_a1", "tier": "T0", "sourceIds": ["original-tier-table", "expansion-tier-table"] },
+    { "packId": "unitree_g1", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "unitree_go1", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "unitree_go2", "tier": "T0", "sourceIds": ["original-tier-table"] },
+    { "packId": "ur10e", "tier": "T0", "sourceIds": ["original-tier-table"] }
+  ],
+  "conflicts": [
+    {
+      "packId": "ur5e",
+      "claims": [
+        { "tier": "T0", "sourceId": "original-tier-table" },
+        { "tier": "T1", "sourceId": "expansion-tier-table" }
+      ],
+      "note": "Unresolved documentation conflict; neither silently downgrade the original T0 target nor count it as confirmed T0. No readiness or behavior conclusion follows."
+    }
+  ]
+}

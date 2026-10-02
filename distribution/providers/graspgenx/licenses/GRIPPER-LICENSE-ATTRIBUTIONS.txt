@@ -1,0 +1,55 @@
+Here are he license attributions for the difference assets used in this repo.
+
+- `assets/x_grippers/abb_yumi/` — ABB YuMi gripper URDF and meshes. BSD-2-Clause. Source: https://github.com/OrebroUniversity/yumi
+
+- `assets/x_grippers/arx_x5/` — ARX X5 gripper URDF and meshes. MIT. Source: https://github.com/real-stanford/arx5-sdk
+
+- `assets/x_grippers/barrett_hand/` — Barrett Hand URDF and meshes. BSD (via dex-urdf, MIT). Source: https://github.com/dexsuite/dex-urdf
+
+- `assets/x_grippers/bd_spot/` — Boston Dynamics Spot gripper URDF and meshes. MIT / BSD-3-Clause. Source: https://github.com/bdaiinstitute/spot_ros2/
+
+- `assets/x_grippers/dh_ag95/` — DH Robotics AG95 gripper URDF and meshes. MIT. Source: https://github.com/ian-chuang/dh_ag95_gripper_ros2
+
+- `assets/x_grippers/ezgripper/` — SAKE EZGripper URDF and meshes. BSD. Source: https://github.com/SAKErobotics/EZGripper
+
+- `assets/x_grippers/fetch_robot/` — Fetch Robotics gripper URDF and meshes. BSD. Source: https://github.com/ZebraDevs/fetch_ros
+
+- `assets/x_grippers/franka_panda/` — Franka Panda gripper URDF and meshes. Copyright 2017 Franka Emika GmbH, Apache-2.0. Source: https://github.com/frankaemika/franka_ros
+
+- `assets/x_grippers/franka_umi/` — Franka UMI gripper URDF and meshes. Copyright 2017 Franka Emika GmbH, Apache-2.0. Source: https://github.com/frankaemika/franka_ros
+
+- `assets/x_grippers/kinova_3f/` — Kinova 3-Finger gripper URDF and meshes. BSD-3-Clause. Source: https://github.com/Kinovarobotics/kinova-ros
+
+- `assets/x_grippers/koch_hand/` — Koch v1.1 robot hand URDF and meshes. Apache-2.0. Source: https://github.com/jess-moss/koch-v1-1
+
+- `assets/x_grippers/onrobot_2FG7/` — OnRobot 2FG7 gripper URDF and meshes. MIT. Source: https://github.com/juandpenan/onrobot_2FG7_gripper_description
+
+- `assets/x_grippers/onrobot_RG2/` — OnRobot RG2 gripper URDF and meshes. MIT. Source: https://github.com/Osaka-University-Harada-Laboratory/onrobot
+
+- `assets/x_grippers/onrobot_RG6/` — OnRobot RG6 gripper URDF and meshes. MIT. Source: https://github.com/Osaka-University-Harada-Laboratory/onrobot
+
+- `assets/x_grippers/piper_hand/` — Piper robot hand URDF and meshes. MIT. Source: https://github.com/agilexrobotics/piper_ros
+
+- `assets/x_grippers/robotiq_2f_140/` — Robotiq 2F-140 gripper URDF and meshes. BSD-2-Clause. Source: https://github.com/ros-industrial/robotiq
+
+- `assets/x_grippers/robotiq_2f_85/` — Robotiq 2F-85 gripper URDF and meshes. BSD-2-Clause. Source: https://github.com/ros-industrial/robotiq
+
+- `assets/x_grippers/robotiq_3f/` — Robotiq 3-Finger gripper URDF and meshes. BSD-2-Clause. Source: https://github.com/ros-industrial/robotiq
+
+- `assets/x_grippers/robotiq_hande/` — Robotiq Hand-E gripper URDF and meshes. BSD. Source: https://github.com/cambel/robotiq
+
+- `assets/x_grippers/sawyer_hand/` — Sawyer robot hand URDF and meshes. MIT. Source: https://github.com/real-stanford/adagrasp
+
+- `assets/x_grippers/schunk_wsg50/` — Schunk WSG-50 gripper URDF and meshes. BSD. Source: https://github.com/nalt/wsg50-ros-pkg/
+
+- `assets/x_grippers/surge_hand/` — Surge Hand URDF and meshes. Copyright 2025 Alt-Bionics Inc, Creative Commons Attribution 4.0 International (CC BY 4.0) Source: https://github.com/erwincoumans/pybullet_robots/blob/master/data/surge_hands/LICENSE
+
+- `assets/x_grippers/tesollo_delto2f/` — Tesollo Delto 2F gripper URDF and meshes. BSD-3-Clause. Source: https://github.com/Tesollo-Delto/DELTO_ROS
+
+- `assets/x_grippers/tesollo_delto3f/` — Tesollo Delto 3F gripper URDF and meshes. BSD-3-Clause. Source: https://github.com/Tesollo-Delto/DELTO_ROS
+
+- `assets/x_grippers/unitree_g1/` — Unitree G1 humanoid hand URDF and meshes. Copyright 2016-2022 Unitree Robotics, BSD-3-Clause. Source: https://github.com/unitreerobotics/unitree_ros/tree/master/robots/g1_description
+
+- `assets/x_grippers/wuji/` — Wuji Hand URDF and meshes. MIT. Source: https://github.com/wuji-technology/wuji-hand-description
+
+- `assets/x_grippers/xarm_hand/` — UFACTORY xArm gripper URDF and meshes. BSD-3-Clause. Source: https://github.com/xArm-Developer/xarm_ros

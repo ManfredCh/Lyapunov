@@ -1,0 +1,828 @@
+{
+  "kind": "camera-fit-blender-fixture",
+  "generator": "packages/blender/test/camera-fit-blender-fixture.py",
+  "blender": {
+    "version": "5.2.2 LTS",
+    "engine": "CYCLES",
+    "device": "CPU",
+    "samples": 16,
+    "viewTransform": "Standard",
+    "renderSeconds": 0.272
+  },
+  "scene": {
+    "description": "通用几何：长方体块角点 + 立柱顶 + 平面墙上阵列 + 一排共线点；标记是自发光小球，被投影的已知点就是球心",
+    "boxSizeM": [
+      4.0,
+      2.5,
+      1.8
+    ],
+    "posts": [
+      [
+        -3.5,
+        2.0,
+        1.2
+      ],
+      [
+        -3.5,
+        -2.0,
+        2.2
+      ],
+      [
+        6.0,
+        -2.0,
+        3.0
+      ],
+      [
+        6.0,
+        2.0,
+        4.0
+      ]
+    ],
+    "wall": {
+      "x0": 1.0,
+      "x1": 7.0,
+      "z0": 0.35,
+      "z1": 3.0,
+      "y": 3.2
+    },
+    "wallGrid": [
+      3,
+      3
+    ],
+    "line": {
+      "start": [
+        -3.0,
+        -3.0,
+        0.45
+      ],
+      "step": [
+        1.2,
+        0.0,
+        0.0
+      ],
+      "count": 5
+    },
+    "markerRadiusM": 0.09
+  },
+  "view": {
+    "name": "high-down",
+    "resolution": {
+      "width": 960,
+      "height": 540
+    },
+    "png": "high-down.png",
+    "pngSha256": "6045dea4054b698e226dfbf82279ac704ba2cc1b53dafd270676a42e82cef060",
+    "locationM": [
+      4.5,
+      -8.5,
+      13.0
+    ],
+    "targetM": [
+      2.0,
+      0.6,
+      0.5
+    ],
+    "rollDeg": 0.0,
+    "blenderParameters": {
+      "sensorFit": "AUTO",
+      "lensMm": 28,
+      "sensorWidthMm": 36.0,
+      "sensorHeightMm": 24.0,
+      "shiftX": 0.0,
+      "shiftY": 0.0,
+      "resolutionPx": {
+        "width": 960,
+        "height": 540
+      },
+      "pixelAspect": {
+        "x": 1.0,
+        "y": 1.0
+      }
+    },
+    "targetIntrinsics": null,
+    "purpose": null,
+    "planarFitGroup": null
+  },
+  "groundTruth": {
+    "positionM": [
+      4.5,
+      -8.5,
+      13.0
+    ],
+    "rotationMatrix": [
+      [
+        0.9642730951309204,
+        -0.21142247319221497,
+        0.15961827337741852
+      ],
+      [
+        0.2649102807044983,
+        0.7695775032043457,
+        -0.5810103416442871
+      ],
+      [
+        4.62501725806419e-09,
+        0.6025371551513672,
+        0.7980908751487732
+      ]
+    ],
+    "quaternionXyzw": [
+      0.3148828148841858,
+      0.04246644303202629,
+      0.1267283409833908,
+      0.9396730065345764
+    ],
+    "lensMm": 28.0,
+    "sensorWidthMm": 36.0,
+    "sensorHeightMm": 24.0,
+    "sensorFit": "AUTO",
+    "shiftX": 0.0,
+    "shiftY": 0.0,
+    "pixelAspect": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "fovXDeg": 65.4704516565372,
+    "fovYDeg": 39.760704105218096,
+    "blenderAngleXDeg": 65.47045044007706,
+    "blenderAngleYDeg": 46.397181333762305,
+    "blenderParameters": {
+      "sensorFit": "AUTO",
+      "lensMm": 28.0,
+      "sensorWidthMm": 36.0,
+      "sensorHeightMm": 24.0,
+      "shiftX": 0.0,
+      "shiftY": 0.0,
+      "resolutionPx": {
+        "width": 960,
+        "height": 540
+      },
+      "pixelAspect": {
+        "x": 1.0,
+        "y": 1.0
+      }
+    },
+    "modelDeltaPx": {
+      "fx": -1.2715657589978946e-05,
+      "fy": -1.2715657589978946e-05,
+      "cx": 0.0,
+      "cy": 0.0
+    },
+    "intrinsics": {
+      "fx": 746.6666793823242,
+      "fy": 746.6666793823242,
+      "cx": 479.5,
+      "cy": 269.5,
+      "width": 960,
+      "height": 540,
+      "distortion": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "points": [
+    {
+      "id": "box-c0",
+      "group": "box",
+      "world": [
+        -2.144,
+        -1.394,
+        0.144
+      ],
+      "pixelMeasured": [
+        260.8974358974359,
+        311.71794871794873
+      ],
+      "pixelProjected": [
+        260.8475786817918,
+        311.68747982298163
+      ],
+      "renderPixels": 39,
+      "projectionDeltaPx": 0.058430261956463045,
+      "depthM": 15.4494195869565,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.04985721564412415,
+        0.03046889496710037
+      ]
+    },
+    {
+      "id": "box-c1",
+      "group": "box",
+      "world": [
+        2.144,
+        -1.394,
+        0.144
+      ],
+      "pixelMeasured": [
+        459.9047619047619,
+        359.6190476190476
+      ],
+      "pixelProjected": [
+        459.8092573653217,
+        359.4889570949802
+      ],
+      "renderPixels": 42,
+      "projectionDeltaPx": 0.1613835849949411,
+      "depthM": 14.76497643071413,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.09550453944024184,
+        0.1300905240673842
+      ]
+    },
+    {
+      "id": "box-c2",
+      "group": "box",
+      "world": [
+        2.144,
+        1.394,
+        0.144
+      ],
+      "pixelMeasured": [
+        495.44117647058823,
+        252.6764705882353
+      ],
+      "pixelProjected": [
+        495.41301856476724,
+        252.81689976355364
+      ],
+      "renderPixels": 34,
+      "projectionDeltaPx": 0.1432243727192074,
+      "depthM": 16.384833263218404,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        0.02815790582098998,
+        -0.14042917531833154
+      ]
+    },
+    {
+      "id": "box-c4",
+      "group": "box",
+      "world": [
+        -2.144,
+        -1.394,
+        1.944
+      ],
+      "pixelMeasured": [
+        238.4313725490196,
+        258.3137254901961
+      ],
+      "pixelProjected": [
+        238.43187001884607,
+        258.22193697836565
+      ],
+      "renderPixels": 51,
+      "projectionDeltaPx": 0.09178985989897351,
+      "depthM": 14.01285601168871,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.0004974698264561539,
+        0.0917885118304298
+      ]
+    },
+    {
+      "id": "box-c5",
+      "group": "box",
+      "world": [
+        2.144,
+        -1.394,
+        1.944
+      ],
+      "pixelMeasured": [
+        457.7142857142857,
+        308.5
+      ],
+      "pixelProjected": [
+        457.68694935087797,
+        308.42998257519343
+      ],
+      "renderPixels": 56,
+      "projectionDeltaPx": 0.07516459632635474,
+      "depthM": 13.32841285544634,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.02733636340775547,
+        0.07001742480656503
+      ]
+    },
+    {
+      "id": "box-c6",
+      "group": "box",
+      "world": [
+        2.144,
+        1.394,
+        1.944
+      ],
+      "pixelMeasured": [
+        496.9047619047619,
+        196.92857142857144
+      ],
+      "pixelProjected": [
+        496.9422971726555,
+        197.0394551601343
+      ],
+      "renderPixels": 42,
+      "projectionDeltaPx": 0.11706450470210387,
+      "depthM": 14.948269687950612,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        -0.0375352678935883,
+        -0.1108837315628648
+      ]
+    },
+    {
+      "id": "box-c7",
+      "group": "box",
+      "world": [
+        -2.144,
+        1.394,
+        1.944
+      ],
+      "pixelMeasured": [
+        298.7692307692308,
+        157.0
+      ],
+      "pixelProjected": [
+        298.68765374875704,
+        156.91093519885248
+      ],
+      "renderPixels": 39,
+      "projectionDeltaPx": 0.12077809848154523,
+      "depthM": 15.632712844192982,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.0815770204737305,
+        0.08906480114751503
+      ]
+    },
+    {
+      "id": "post-0",
+      "group": "post",
+      "world": [
+        -3.5,
+        2.0,
+        1.2
+      ],
+      "pixelMeasured": [
+        260.38235294117646,
+        151.1470588235294
+      ],
+      "pixelProjected": [
+        260.2072235029734,
+        151.15362727740597
+      ],
+      "renderPixels": 34,
+      "projectionDeltaPx": 0.17525257405140302,
+      "depthM": 16.795027101039885,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.17512943820304372,
+        -0.006568453876582225
+      ]
+    },
+    {
+      "id": "post-1",
+      "group": "post",
+      "world": [
+        -3.5,
+        -2.0,
+        2.2
+      ],
+      "pixelMeasured": [
+        152.18965517241378,
+        259.3103448275862
+      ],
+      "pixelProjected": [
+        152.26667557052662,
+        259.32999283779037
+      ],
+      "renderPixels": 58,
+      "projectionDeltaPx": 0.07948701799943292,
+      "depthM": 13.672894859313965,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        -0.07702039811283612,
+        -0.019648010204150523
+      ]
+    },
+    {
+      "id": "post-2",
+      "group": "post",
+      "world": [
+        6.0,
+        -2.0,
+        3.0
+      ],
+      "pixelMeasured": [
+        684.8192771084338,
+        356.50602409638554
+      ],
+      "pixelProjected": [
+        684.8892858004317,
+        356.3828712201546
+      ],
+      "renderPixels": 83,
+      "projectionDeltaPx": 0.14166103161851165,
+      "depthM": 11.51804856210947,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.07000869199794124,
+        0.12315287623096083
+      ]
+    },
+    {
+      "id": "post-3",
+      "group": "post",
+      "world": [
+        6.0,
+        2.0,
+        4.0
+      ],
+      "pixelMeasured": [
+        721.625,
+        135.625
+      ],
+      "pixelProjected": [
+        721.5179944044803,
+        135.51924799911635
+      ],
+      "renderPixels": 64,
+      "projectionDeltaPx": 0.15044495060792526,
+      "depthM": 13.043999053537846,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.10700559551969491,
+        0.10575200088365477
+      ]
+    },
+    {
+      "id": "wall-00",
+      "group": "wall",
+      "world": [
+        1.0,
+        3.2,
+        0.35
+      ],
+      "pixelMeasured": [
+        467.6333333333333,
+        178.63333333333333
+      ],
+      "pixelProjected": [
+        467.7129891216174,
+        178.71660290092245
+      ],
+      "renderPixels": 30,
+      "projectionDeltaPx": 0.11523395981062648,
+      "depthM": 17.452334524691103,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        -0.0796557882840716,
+        -0.08326956758912729
+      ]
+    },
+    {
+      "id": "wall-02",
+      "group": "wall",
+      "world": [
+        1.0,
+        3.2,
+        3.0
+      ],
+      "pixelMeasured": [
+        466.0444444444444,
+        88.57777777777778
+      ],
+      "pixelProjected": [
+        466.08762683584615,
+        88.46517274076623
+      ],
+      "renderPixels": 45,
+      "projectionDeltaPx": 0.12060105010962449,
+      "depthM": 15.337393705546855,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.04318239140172864,
+        0.11260503701154789
+      ]
+    },
+    {
+      "id": "wall-10",
+      "group": "wall",
+      "world": [
+        4.0,
+        3.2,
+        0.35
+      ],
+      "pixelMeasured": [
+        594.516129032258,
+        204.0967741935484
+      ],
+      "pixelProjected": [
+        594.6361386703027,
+        204.05697436354555
+      ],
+      "renderPixels": 31,
+      "projectionDeltaPx": 0.12643709776745826,
+      "depthM": 16.973479704558848,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.12000963804462117,
+        0.039799830002863246
+      ]
+    },
+    {
+      "id": "wall-11",
+      "group": "wall",
+      "world": [
+        4.0,
+        3.2,
+        1.6749999999999998
+      ],
+      "pixelMeasured": [
+        602.2380952380952,
+        162.09523809523807
+      ],
+      "pixelProjected": [
+        602.2858617909263,
+        162.25540506892565
+      ],
+      "renderPixels": 42,
+      "projectionDeltaPx": 0.1671379760246279,
+      "depthM": 15.916009294986724,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        -0.047766552831149056,
+        -0.1601669736875806
+      ]
+    },
+    {
+      "id": "wall-12",
+      "group": "wall",
+      "world": [
+        4.0,
+        3.2,
+        3.0
+      ],
+      "pixelMeasured": [
+        611.1020408163265,
+        114.61224489795916
+      ],
+      "pixelProjected": [
+        611.0244343474013,
+        114.50386681118925
+      ],
+      "renderPixels": 49,
+      "projectionDeltaPx": 0.13329881361415044,
+      "depthM": 14.8585388854146,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.07760646892518253,
+        0.10837808676990335
+      ]
+    },
+    {
+      "id": "wall-20",
+      "group": "wall",
+      "world": [
+        7.0,
+        3.2,
+        0.35
+      ],
+      "pixelMeasured": [
+        729.027027027027,
+        230.7027027027027
+      ],
+      "pixelProjected": [
+        728.9286903573947,
+        230.8686565233007
+      ],
+      "renderPixels": 37,
+      "projectionDeltaPx": 0.19290093614455536,
+      "depthM": 16.494624884426592,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.09833666963231735,
+        -0.16595382059799135
+      ]
+    },
+    {
+      "id": "wall-21",
+      "group": "wall",
+      "world": [
+        7.0,
+        3.2,
+        1.6749999999999998
+      ],
+      "pixelMeasured": [
+        746.0243902439024,
+        189.58536585365852
+      ],
+      "pixelProjected": [
+        746.0149651858676,
+        189.60706223395465
+      ],
+      "renderPixels": 41,
+      "projectionDeltaPx": 0.02365511861974592,
+      "depthM": 15.437154474854468,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        0.009425058034821632,
+        -0.02169638029613452
+      ]
+    },
+    {
+      "id": "wall-22",
+      "group": "wall",
+      "world": [
+        7.0,
+        3.2,
+        3.0
+      ],
+      "pixelMeasured": [
+        765.6153846153846,
+        142.38461538461536
+      ],
+      "pixelProjected": [
+        765.614261852498,
+        142.2767789783332
+      ],
+      "renderPixels": 52,
+      "projectionDeltaPx": 0.10784225107234588,
+      "depthM": 14.379684065282344,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.0011227628866663508,
+        0.10783640628216062
+      ]
+    },
+    {
+      "id": "line-0",
+      "group": "line",
+      "world": [
+        -3.0,
+        -3.0,
+        0.45
+      ],
+      "pixelMeasured": [
+        180.24489795918367,
+        359.8775510204082
+      ],
+      "pixelProjected": [
+        180.23490796378252,
+        359.8487211579081
+      ],
+      "renderPixels": 49,
+      "projectionDeltaPx": 0.03051165318187144,
+      "depthM": 14.408734412491322,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        0.009989995401156193,
+        0.028829862500117542
+      ]
+    },
+    {
+      "id": "line-1",
+      "group": "line",
+      "world": [
+        -1.8,
+        -3.0,
+        0.45
+      ],
+      "pixelMeasured": [
+        237.0,
+        374.5
+      ],
+      "pixelProjected": [
+        236.97373991716182,
+        374.3902776347065
+      ],
+      "renderPixels": 60,
+      "projectionDeltaPx": 0.11282105032427632,
+      "depthM": 14.21719248443842,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        0.026260082838177823,
+        0.1097223652935213
+      ]
+    },
+    {
+      "id": "line-2",
+      "group": "line",
+      "world": [
+        -0.6000000000000001,
+        -3.0,
+        0.45
+      ],
+      "pixelMeasured": [
+        295.1864406779661,
+        389.45762711864404
+      ],
+      "pixelProjected": [
+        295.26228469478826,
+        389.329008952452
+      ],
+      "renderPixels": 59,
+      "projectionDeltaPx": 0.14931492745978664,
+      "depthM": 14.025650556385518,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.07584401682214548,
+        0.12861816619204092
+      ]
+    },
+    {
+      "id": "line-3",
+      "group": "line",
+      "world": [
+        0.5999999999999996,
+        -3.0,
+        0.45
+      ],
+      "pixelMeasured": [
+        355.0980392156863,
+        404.62745098039215
+      ],
+      "pixelProjected": [
+        355.16491254058406,
+        404.68141251698114
+      ],
+      "renderPixels": 51,
+      "projectionDeltaPx": 0.08592955844134945,
+      "depthM": 13.834108628332615,
+      "role": "fit",
+      "pixelMeasureBiasPx": [
+        -0.06687332489775599,
+        -0.05396153658898584
+      ]
+    },
+    {
+      "id": "line-4",
+      "group": "line",
+      "world": [
+        1.7999999999999998,
+        -3.0,
+        0.45
+      ],
+      "pixelMeasured": [
+        416.8135593220339,
+        420.4406779661017
+      ],
+      "pixelProjected": [
+        416.7496087368736,
+        420.46491222985253
+      ],
+      "renderPixels": 59,
+      "projectionDeltaPx": 0.06838842652004434,
+      "depthM": 13.642566700279712,
+      "role": "check",
+      "pixelMeasureBiasPx": [
+        0.06395058516028485,
+        -0.024234263750827267
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "id": "box-c3",
+      "group": "box",
+      "reason": "被场景实体挡住（相机射线在标记之前就打到别的物体）",
+      "projectedPx": [
+        313.9049610313949,
+        213.82906552296748
+      ]
+    },
+    {
+      "id": "wall-01",
+      "group": "wall",
+      "reason": "量出的质心与解析投影差 6.47 px（超过 0.6）",
+      "projectedPx": [
+        466.9527259954341,
+        136.50150105148154
+      ],
+      "measuredPx": [
+        461.9761904761905,
+        140.64285714285717
+      ]
+    }
+  ],
+  "selfCheck": {
+    "visibleMarkers": 24,
+    "fitPoints": 16,
+    "checkPoints": 8,
+    "maxProjectionDeltaPx": 0.19290093614455536,
+    "meanProjectionDeltaPx": 0.11453140301863853,
+    "maxModelDeltaPx": 1.2715657589978946e-05,
+    "modelDeltaPx": {
+      "fx": -1.2715657589978946e-05,
+      "fy": -1.2715657589978946e-05,
+      "cx": 0.0,
+      "cy": 0.0
+    },
+    "note": "pixelMeasured 是渲染图里量出的质心，pixelProjected 是 Blender 相机矩阵的解析投影；两者之差是本次测量的自检差，不是拟合精度。modelDeltaPx 是「求解器按这组 Blender 参数反推的 K − 真实 Blender view_frame 给的 K」，它才是「这组参数复现不复现内参」的证据（夹具里应到 1e-3 px 量级以下）。"
+  }
+}

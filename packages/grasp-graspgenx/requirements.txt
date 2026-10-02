@@ -1,0 +1,4 @@
+numpy>=1.25,<3
+pyzmq==27.2.0
+msgpack==1.1.2
+msgpack-numpy==0.4.8

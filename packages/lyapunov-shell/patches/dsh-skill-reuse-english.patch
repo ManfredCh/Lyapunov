@@ -1,0 +1,11 @@
+--- a/packages/skill/tool-skill/src/index.ts
++++ b/packages/skill/tool-skill/src/index.ts
+@@ -146,7 +146,7 @@
+         },
+       },
+       render: (_args, value) => [{ type: 'text', text: value.reused === true
+-        ? `技能 ${value.name} 的相同正文已在当前会话可见（hash=${value.contentHash}）；沿用该份，无需重复加载。`
++        ? `The same content of skill ${value.name} is already visible in this session (hash=${value.contentHash}). Reuse it without loading it again.`
+         : renderSkillContent(value) }],
+     },
+     async execute(args, exec) {

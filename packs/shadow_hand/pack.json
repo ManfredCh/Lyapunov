@@ -1,0 +1,27 @@
+{
+  "packId": "shadow_hand",
+  "version": "2026.09.22",
+  "family": "hand",
+  "asset": { "modelEntry": "asset/scene_left.xml", "model": "asset/left_hand.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#shadow_hand" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "tendon", "gripper", "control"],
+    "directControl": "suitable"
+  },
+  "status": "BLOCKED:grasp-hold",
+  "provenance": {
+    "source": "Shadow Dexterous Hand 模型（ASSET_STAGING_MANIFEST.json#shadow_hand 落账）",
+    "commit": null,
+    "author": "Shadow Robot Company（手型模型族）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#shadow_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控（fixed tendon／关节联动；停止保持）；包内容为 LyapunovDev 自有"
+  },
+  "tests": "tests/acceptance.md"
+}

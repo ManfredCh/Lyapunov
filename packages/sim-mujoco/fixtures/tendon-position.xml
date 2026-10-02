@@ -1,0 +1,29 @@
+<mujoco model="tendon-position">
+  <!-- 小回归夹具（不依赖 Shadow 大模型）：单个竖直铰链上一条 coef=1 的 fixed tendon
+       （长度=关节角，速度=关节角速度）和一条两 site 的 spatial tendon（几何距离），
+       前者由 gear=2 的标准 position 执行器驱动（ctrl=gear×坐标，服务肌腱坐标通道），
+       后者由零力 motor 只读挂载（ctrl 初值 0，不扰动动力学），供真实 worker 在
+       manual/realtime 下的肌腱观测与取消保持回归测试使用。 -->
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="arm" pos="0 0 0">
+      <joint name="j" type="hinge" axis="0 0 1" damping="0.3" range="-2.5 2.5"/>
+      <geom name="g" type="sphere" size="0.02" pos="0.05 0 0" mass="1"/>
+      <site name="tip" pos="0.1 0.08 0" size="0.001"/>
+    </body>
+    <body name="anchor_body" pos="0.1 0 0">
+      <site name="anchor" pos="0 0 0" size="0.001"/>
+    </body>
+  </worldbody>
+  <tendon>
+    <fixed name="t"><joint joint="j" coef="1"/></fixed>
+    <spatial name="s" width="0.001">
+      <site site="anchor"/>
+      <site site="tip"/>
+    </spatial>
+  </tendon>
+  <actuator>
+    <position name="a" tendon="t" kp="1" gear="2" ctrlrange="0 3"/>
+    <motor name="sensor_motor" tendon="s" gear="1" ctrlrange="-1 1"/>
+  </actuator>
+</mujoco>

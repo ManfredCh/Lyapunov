@@ -1,0 +1,80 @@
+node_modules/
+.runtime/
+.baseline/
+.upstream/
+*.pem
+*.key
+*.token
+.env*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+.venv/
+dist/
+coverage/
+packages/desktop/renderer/account.js
+data/
+*.sqlite*
+*.db
+session-secrets/
+credentials*.json
+model-auth*.json
+.workbench/
+.aliyun/
+deployment/private/
+config/developer.local.yaml
+developer-account*.json
+*receipt*
+*回执*
+REPORT.md
+result.json
+claude-stream.jsonl
+terminal.log
+!docs/development-receipts.md
+
+# 产品根下的工作文件夹映射（软链，指向活动 runtime workspace，不入库）
+/workspace
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 脏树收敛（round 118）
+# 下面这些排除口径此前只写在 docs/handoffs/*.json 的散文里，没有落成 ignore 规则，
+# 于是每次 `git status` 都要重新人工分类约 3.7k 条路径，且任何人一次 `git add -A`
+# 就会把 9.4 GB 产物（含活的浏览器凭据）塞进索引。这里把口径固化成规则。
+# 注意：ignore 只影响「新增」，已入库文件不受影响。
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 临时分析目录：outbound/host worktree 的全量副本，可从 HEAD 重建
+/.analysis-tmp/
+/.tmp-*/
+
+# lane 工作树与浏览器 profile。chrome-profile 内含 Cookies / Login Data /
+# Trust Tokens / Local State（活凭据），任何情况下都不入 Git。
+/lane-isaac*/
+/lane-*/
+**/chrome-profile/
+
+# 运行时与候选证据产物
+/.lyapunov/
+/.candidate-evidence/
+/.runtime-packs-round*.json
+/MUJOCO_LOG.TXT
+/driver.fifo
+
+# 产品根的一次性环境面板截图（env 系列）
+/env*.png
+
+# pack 资产字节：许可证 UNVERIFIED ≠ 可再分发，由 OM 走私有内容分发。
+# 例外保留已入库的会话内生成演示件。
+packs/_staging/
+packs/_staging2/
+packs/*/asset/**
+!packs/lyaup_demo_arm/asset/Lyaup演示机械臂.mjcf
+
+# 新 vendor 机器人资产投放，待逐包许可复核后再决定入库
+/materials/robots/unitree_go1/
+
+# 历史运行材料仅保留在本地；仓库保留顶层开发摘要。
+/bugfixHistory/refactor-execution/*
+!/bugfixHistory/refactor-execution/*.md
+/bugfixHistory/negative-controls/

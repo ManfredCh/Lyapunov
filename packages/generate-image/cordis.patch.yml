@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-generate-image
+      name: '@lyapunov/generate-image'

@@ -1,0 +1,33 @@
+{
+ "packId": "shadow_dexee",
+ "version": "2026.09.23",
+ "family": "dexterous-hand",
+ "asset": { "modelEntry": "asset/scene.xml", "model": "asset/shadow_dexee.xml" },
+ "pieces": {
+  "asset": {
+   "ref": "ASSET_STAGING_MANIFEST_T1.json#shadow_dexee"
+  },
+  "context": "ready",
+  "policy": "ready",
+  "vla": "ready"
+ },
+ "capabilities": {
+  "channels": [
+   "joint",
+   "gripper"
+  ],
+  "directControl": "suitable"
+ },
+ "status": "USABLE",
+ "provenance": {
+  "source": "ASSET_STAGING_MANIFEST_T1.json",
+  "commit": null,
+  "author": "模型原件随台账；context/policy/vla/tests 为 LyapunovDev 自有"
+ },
+ "license": {
+  "model": "Apache-2.0（asset/LICENSE 全文含附录，判读 2026-09-23）",
+  "policy": "无基础 policy；tendon/关节直控内容为 LyapunovDev 自有"
+ },
+ "tests": "tests/acceptance.md",
+ "notes": "Shadow Dexee 灵巧手（menagerie shadow_dexee，冒烟 PASS nq=12/nu=12/geoms=101）。实读（2026-09-23 二次核验）：12 hinge=F0/F1/F2×J0–J3、12 个 mujoco.pid 位置插件执行器 + 12 jointactuatorfrc 传感器，**无 <tendon> 块（README：仅位置执行器）**——不属 tendon 族。限位实读：J0 ±0.8727、J1 [-1.3963,0.7854]、J2 [0,1.3963]、J3 [-0.5236,1.4835]（三指同值）。"
+}

@@ -1,0 +1,68 @@
+--- a/packages/experimental/browser-use-runtime/src/mcp.ts
++++ b/packages/experimental/browser-use-runtime/src/mcp.ts
+@@ -91,18 +91,18 @@
+ /** Task-facing action after one diagnosed failure; it grants no additional authority. */
+ export function browserFailureAdvice(failure: BrowserRuntimeFailure): string {
+   switch (failure.kind) {
+-    case 'page-closed': return '当前页面或页面句柄已关闭；保留本会话浏览器，先读取页面列表并选择仍存在的页面，再取得新的观察和句柄。'
+-    case 'closure-unverified': return '已观察到关闭错误，但浏览器根连接/页面/归属尚未确认；保留当前 owner，先读取当前页面目录取得新事实。未宣称页面刷新成功，也未重建浏览器或重放失败动作；外部连接需由其原 owner 核对后重新激活。'
++    case 'page-closed': return 'The current page or page handle is closed. Preserve this session\'s browser, read the page list and select an existing page, then obtain a fresh observation and handles.'
++    case 'closure-unverified': return 'A closure error was observed, but the browser root connection, page, and ownership remain unverified. Preserve the current owner and read the page catalog for new facts. No successful refresh, browser rebuild, or replay of the failed operation is established. An external connection must be checked and reactivated by its original owner.'
+     case 'browser-closed':
+-    case 'browser-crashed': return '仅恢复本会话自有的浏览器连接；恢复后先读取页面列表，旧 page/uid/context 句柄不能复用，失败操作没有自动重放。'
+-    case 'sandbox-unavailable': return '本会话浏览器的 Chromium 沙箱不可用；桌面窗口的沙箱状态不能证明它已就绪，先修复配置的浏览器沙箱，再重新激活本会话。'
+-    case 'display-unavailable': return '本会话浏览器无法使用显示环境；先在合法显示环境中重新激活本会话，不扩大桌面权限。'
+-    case 'profile-in-use': return '浏览器配置目录已被占用；保留原目录与其 owner，核对隔离启动配置后重新激活本会话。'
+-    case 'executable-unavailable': return '配置的浏览器可执行文件不可用；核对实际安装与可执行文件，再重新激活本会话。'
+-    case 'launch-failed': return '浏览器启动失败，当前错误未证明是目标关闭；核对启动错误与运行环境后重新激活本会话。'
+-    case 'transport-closed': return '本会话浏览器 MCP 连接不可用；未自动替换已经退出的 MCP 服务，核对服务状态后重新激活本会话。'
+-    case 'schema-unavailable': return '该浏览器工具当前没有可用 schema；使用本次上下文中的工具目录，恢复期间等待本会话连接，不按历史工具名猜参数。'
+-    case 'release-unverified': return '旧浏览器连接的释放未确认，仍保留原 owner；未启动替代连接，需先确认其释放状态再重新激活本会话。'
++    case 'browser-crashed': return 'Recover only the browser connection owned by this session. Read the page list after recovery; old page/uid/context handles cannot be reused, and the failed operation is not automatically replayed.'
++    case 'sandbox-unavailable': return 'The Chromium sandbox for this session\'s browser is unavailable. A desktop window\'s sandbox state does not establish readiness. Fix the configured browser sandbox before reactivating this session.'
++    case 'display-unavailable': return 'The display environment is unavailable to this session\'s browser. Reactivate the session in a valid display environment without expanding desktop permissions.'
++    case 'profile-in-use': return 'The browser profile is in use. Preserve its directory and owner, check the isolated launch configuration, then reactivate this session.'
++    case 'executable-unavailable': return 'The configured browser executable is unavailable. Check the actual installation and executable before reactivating this session.'
++    case 'launch-failed': return 'Browser launch failed; this error does not establish target closure. Check the launch error and runtime environment before reactivating this session.'
++    case 'transport-closed': return 'This session\'s browser MCP connection is unavailable. An exited MCP service was not automatically replaced. Check its status before reactivating this session.'
++    case 'schema-unavailable': return 'The browser tool currently has no available schema. Use the tool catalog in this context and wait for this session\'s connection during recovery; do not guess parameters from historical tool names.'
++    case 'release-unverified': return 'Release of the previous browser connection is unverified. Preserve its owner; no replacement connection was started. Confirm release before reactivating this session.'
+   }
+ }
+ 
+@@ -401,7 +401,7 @@
+       }
+       const health = resources.reportFailure(agent, failure.reason, { rebuild: failure.recovery === 'rebuild' })
+       if (failure.recovery === 'blocked') {
+-        throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} 仅本会话浏览器暂停，其他工具不受影响。 (${failure.reason})`, { cause })
++        throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} Only this session's browser is suspended; other tools are unaffected. (${failure.reason})`, { cause })
+       }
+       if (health === undefined) throw new BrowserConnectionError(`${options.name}: the browser connection for this Session was lost (${failure.reason}).`, { cause })
+       if (health.suspended) throw suspended(health)
+@@ -425,7 +425,7 @@
+           if (health?.suspended === true) {
+             const failure = connections.get(agent)?.failure
+             if (failure?.recovery === 'blocked') {
+-              throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} 仅本会话浏览器暂停，其他工具不受影响。`)
++              throw new BrowserConnectionError(`${options.name}: [BROWSER_RUNTIME_${failure.kind.toUpperCase().replaceAll('-', '_')}] ${browserFailureAdvice(failure)} Only this session's browser is suspended; other tools are unaffected.`)
+             }
+             throw suspended(health)
+           }
+@@ -480,7 +480,7 @@
+         } catch (error) {
+           // A browser-only failure must not suppress the remaining tool catalog.
+           context.signal?.throwIfAborted()
+-          return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: 本会话浏览器恢复未完成；该浏览器工具当前可能没有可用 schema，其他工具可继续。` }] }
++          return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: Browser recovery for this session is incomplete. Its browser tool may have no available schema; other tools may continue.` }] }
+         }
+         // Assembly collected schemas before its waterfall. Recollect only after
+         // this owner settled, rather than sending the remount gap to the model.
+@@ -488,7 +488,7 @@
+       }
+       const failure = connections.get(agent)?.failure
+       if (failure === undefined) return assembly
+-      return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: ${browserFailureAdvice(failure)} 连接挂载不等于页面操作已成功，按当前工具 schema 继续；Jobs、World 和其他工具不受本会话浏览器恢复影响。` }] }
++      return { ...assembly, sections: [...assembly.sections, { name: `browser-runtime:${options.name}`, text: `${options.name}: ${browserFailureAdvice(failure)} A mounted connection does not establish successful page operations. Continue using the current tool schema; Jobs, World, and other tools are unaffected by this session's browser recovery.` }] }
+     }
+     if (agent === undefined) return assembly
+     return { ...assembly, sections: assembly.sections.filter(section => section.name !== `mcp:${options.name}`) }

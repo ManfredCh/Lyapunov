@@ -1,0 +1,9 @@
+<mujoco model="scene">
+  <compiler meshdir="meshes"/>
+  <include file="kid/robot.xml"/>
+  <asset><mesh name="table_top" file="table.stl"/></asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="0 0 0.05"/>
+    <body name="table"><geom name="table_geom" type="mesh" mesh="table_top"/></body>
+  </worldbody>
+</mujoco>

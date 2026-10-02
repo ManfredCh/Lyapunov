@@ -1,0 +1,34 @@
+{
+  "packId": "aloha",
+  "version": "2026.09.23",
+  "family": "dual-arm",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/aloha.xml" },
+  "pieces": {
+    "asset": {
+      "ref": "ASSET_STAGING_MANIFEST_T1.json#aloha"
+    },
+    "context": "ready",
+    "policy": "blocked:no-client-inference-adapter",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": [
+      "joint",
+      "trajectory",
+      "gripper",
+      "batch"
+    ],
+    "directControl": "suitable"
+  },
+  "status": "PARTIAL:policy-no-client-inference-adapter",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie aloha（ASSET_STAGING_MANIFEST_T1.json#aloha 落账，mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7/aloha）；policy：openpi pi05_base（trossen embodiment，PI05_POLICY_MAPPING）",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "ALOHA 2 Team / Trossen Robotics（双臂 Vx300s 平台）；Google DeepMind MuJoCo Menagerie（MJCF 模型）；Physical Intelligence（π0.5/openpi 权重与归一化统计）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Trossen Robotics；ASSET_STAGING_MANIFEST_T1.json#aloha license=BSD-3-Clause 落账）",
+    "policy": "π0.5 pi05_base 权重不随包分发（服务端优先执行，PI05_POLICY_MAPPING §3）；policy/norm_stats.json 为官方 trossen norm_stats 复制件（sha256=417c7dc8ee9598b28dc2f0b545e371338be9f4611b255975ba7ea07eb21e46c1）；openpi/π0.5 许可以其发布页随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）"
+  },
+  "tests": "tests/acceptance.md"
+}

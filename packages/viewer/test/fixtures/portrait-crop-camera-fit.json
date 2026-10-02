@@ -1,0 +1,620 @@
+{
+ "kind": "camera-fit-applied-block-fixture",
+ "provenance": {
+  "why": "把 camera_fit 真解出来的相机块**原样**喂进 Viewer 的归一化，再核对它是否复现 40 夹具里那些已知世界点/已知像素——不是手造的旧形状。",
+  "fixture": "packages/blender/test/fixtures/camera-fit/portrait-crop.json（任务 40）",
+  "fixtureGenerator": "packages/blender/test/camera-fit-blender-fixture.py",
+  "fixtureSha256": "33edf3ea3f8e31aa907aa45c641b3279f466e943a5760653173fc104b3ce7f23",
+  "fixturePngSha256": "4831853ea1cfc2b8a34f1148b1877dd088a54181cae88527958a2c866c362261",
+  "blender": {
+   "version": "5.2.2 LTS",
+   "engine": "CYCLES",
+   "device": "CPU",
+   "samples": 16,
+   "viewTransform": "Standard",
+   "renderSeconds": 0.233
+  },
+  "solverOutput": "任务 55 的 evidence/portrait-result.json（opencv 5.0.0 solvePnP EPNP+RANSAC+refineLM，输入=夹具渲染图里量出的质心 + 夹具的世界点）",
+  "pixelConvention": "原点左上、u 向右、v 向下；主点按像素中心口径 (width-1)/2,(height-1)/2 —— 即列 i 的像素中心在 u=i（与投影到 NDC 后 u=(ndc+1)/2*width-0.5 同一条换算）。"
+ },
+ "scene": {
+  "description": "通用几何：长方体块角点 + 立柱顶 + 平面墙上阵列 + 一排共线点；标记是自发光小球，被投影的已知点就是球心",
+  "boxSizeM": [
+   4.0,
+   2.5,
+   1.8
+  ],
+  "posts": [
+   [
+    -3.5,
+    2.0,
+    1.2
+   ],
+   [
+    -3.5,
+    -2.0,
+    2.2
+   ],
+   [
+    6.0,
+    -2.0,
+    3.0
+   ],
+   [
+    6.0,
+    2.0,
+    4.0
+   ]
+  ],
+  "wall": {
+   "x0": 1.0,
+   "x1": 7.0,
+   "z0": 0.35,
+   "z1": 3.0,
+   "y": 3.2
+  },
+  "wallGrid": [
+   3,
+   3
+  ],
+  "line": {
+   "start": [
+    -3.0,
+    -3.0,
+    0.45
+   ],
+   "step": [
+    1.2,
+    0.0,
+    0.0
+   ],
+   "count": 5
+  },
+  "markerRadiusM": 0.09
+ },
+ "view": {
+  "name": "portrait-crop",
+  "resolution": {
+   "width": 540,
+   "height": 960
+  },
+  "locationM": [
+   9.5,
+   -11.0,
+   5.2
+  ],
+  "targetM": [
+   2.0,
+   1.0,
+   1.3
+  ],
+  "rollDeg": 7.5,
+  "targetIntrinsics": {
+   "fx": 780.0,
+   "fy": 1050.0,
+   "cx": 300.0,
+   "cy": 402.5,
+   "width": 540,
+   "height": 960
+  },
+  "purpose": "竖幅+非居中主点+fx≠fy+roll：验证 camera.blender 的那组参数**真的**复现这个 K（而非只复现 fx），并且拟合位姿在留出的 check 点上仍然对得住",
+  "groundTruthQuaternionXyzw": [
+   0.5921292901039124,
+   0.12859304249286652,
+   0.2688536047935486,
+   0.7487085461616516
+  ]
+ },
+ "cameraFitBlock": {
+  "model": "pinhole",
+  "worldFromCamera": {
+   "positionM": [
+    9.503769363909,
+    -10.996794655062,
+    5.203165065366
+   ],
+   "rotationMatrix": [
+    [
+     0.822219510901,
+     -0.250213927075,
+     0.511222130381
+    ],
+    [
+     0.555161806464,
+     0.154512454288,
+     -0.817264504376
+    ],
+    [
+     0.125500775048,
+     0.955781822472,
+     0.26595237035
+    ]
+   ],
+   "quaternionXyzw": [
+    0.591978607355,
+    0.128783319025,
+    0.268896078979,
+    0.748779729884
+   ]
+  },
+  "fov": {
+   "verticalDeg": 49.134340853214,
+   "horizontalDeg": 38.186984650606,
+   "focalPx": {
+    "x": 779.999985694885,
+    "y": 1050.000043327994
+   }
+  },
+  "positionUnits": "m",
+  "metric": true,
+  "blender": {
+   "locationM": [
+    9.503769363909,
+    -10.996794655062,
+    5.203165065366
+   ],
+   "rotationQuaternionXyzw": [
+    0.591978607355,
+    0.128783319025,
+    0.268896078979,
+    0.748779729884
+   ],
+   "rotationMode": "QUATERNION",
+   "note": "Blender 相机局部轴（+X 右／+Y 上／-Z 朝前）与合同 camera x 右／y 上／看 -z 同构：位置与四元数可直接写进相机对象，不需要再乘任何翻转矩阵。但内参不是一个 lens 就装完的：resolutionPx + pixelAspect + shiftX/shiftY + sensorFit + lensMm/sensorWidthMm 要**一起**装（见 requires），否则主点会回到画面正中、像素会变方形。",
+   "sensorFit": "HORIZONTAL",
+   "lensMm": 51.999999046,
+   "sensorWidthMm": 36.0,
+   "sensorHeightMm": 24.0,
+   "sensorHeightNote": "sensorFit=HORIZONTAL 时 Blender 只用 sensor_width：sensor_height 是 Blender 的默认值，改它不影响画面；垂直视场由 resolutionPx + pixelAspect 决定。",
+   "shiftX": -0.056481480598,
+   "shiftY": -0.105925917625,
+   "resolutionPx": {
+    "width": 540,
+    "height": 960
+   },
+   "pixelAspect": {
+    "x": 1.346153926391,
+    "y": 1.0
+   },
+   "pixelAspectClamped": false,
+   "angleDeg": 38.186984650606,
+   "fovXDeg": 38.186984650606,
+   "fovYDeg": 49.134340853214,
+   "squarePixels": false,
+   "resolvesIntrinsics": {
+    "fx": 779.999985694885,
+    "fy": 1050.000043327994,
+    "cx": 299.999999523163,
+    "cy": 402.500001444267
+   },
+   "intrinsicsReproductionErrorPx": {
+    "fx": 0.0,
+    "fy": 0.0,
+    "cx": 0.0,
+    "cy": 0.0,
+    "max": 0.0
+   },
+   "requires": [
+    "scene.render.resolution_x/resolution_y = resolutionPx",
+    "scene.render.pixel_aspect_x/pixel_aspect_y = pixelAspect",
+    "camera.data.sensor_fit = sensorFit",
+    "camera.data.lens = lensMm",
+    "camera.data.sensor_width = sensorWidthMm",
+    "camera.data.shift_x/shift_y = shiftX/shiftY"
+   ],
+   "noteSquarePixels": "fx≠fy：用 render.pixel_aspect=1.34615/1 **真实表达**非方形像素（fy = fx·pax/pay），不是忽略差异；回灌脚本会用真实 Blender 重渲染核对。"
+  },
+  "viewer": {
+   "quaternion": [
+    0.591978607355,
+    0.128783319025,
+    0.268896078979,
+    0.748779729884
+   ],
+   "units": {
+    "metric": true,
+    "name": "m",
+    "note": "位置数值按调用方声明的 worldUnit 换算成米。"
+   },
+   "fov_y_deg": 49.134340853214,
+   "fov_x_deg": 38.186984650606,
+   "aspect": 0.5625,
+   "up": [
+    -0.250213927075,
+    0.154512454288,
+    0.955781822472
+   ],
+   "upNote": "相机真实上向量（由 R 的第二列给出，含 roll）；**不是**世界 up [0,0,1]。",
+   "forward": [
+    -0.511222130381,
+    0.817264504376,
+    -0.26595237035
+   ],
+   "target": [
+    1.960269519287,
+    1.062610240374,
+    1.278820743817
+   ],
+   "focusDistance": 14.755816300428,
+   "rollDeg": -7.480536786,
+   "rollNote": "OrbitControls.update() 用 camera.up + target 重算朝向：用默认的 worldUp 调它，roll 会被抹成 rollDeg 这个角度。要保住拟合的真实 roll，就把 camera.up 设成 up 再 update，或者装完直接用 position/quaternion（worldFromCamera 的完整矩阵）不要再调 lookAt/update。",
+   "sceneUp": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "projection": "perspective",
+   "intrinsics": {
+    "model": "pinhole",
+    "fx": 779.999985694885,
+    "fy": 1050.000043327994,
+    "cx": 299.999999523,
+    "cy": 402.500001444,
+    "width": 540,
+    "height": 960,
+    "principalPointOffsetPx": {
+     "x": 30.499999523,
+     "y": -76.999998556
+    },
+    "principalPointCentred": false,
+    "reproducibleByFovAlone": false,
+    "note": "fx/fy/主点都以像素给出：只给一条 fov（=fov_y_deg）复现不了非中心主点，也复现不了 fx≠fy。主点用 setViewOffset 精确表达（见 squarePixelModel），fx≠fy 用 three.js 的相机模型表达不了，残余误差见 squarePixelModel.options。"
+   },
+   "squarePixelModel": {
+    "note": "three.js PerspectiveCamera 固定 fx=fy（方形像素），主点用 setViewOffset 表达；非方形 K 在这套模型里必然有残差，下面是两种守法的上界（都假定已按 viewOffsetPx 补上主点）。",
+    "viewOffsetPx": {
+     "x": -30.499999523,
+     "y": 76.999998556,
+     "apply": "camera.setViewOffset(width, height, x, y, width, height)"
+    },
+    "exact": false,
+    "options": [
+     {
+      "keeps": "fy",
+      "fovYDeg": 49.134340853214,
+      "aspect": 0.5625,
+      "maxPixelErrorPx": 103.846177752,
+      "pays": "竖向完全正确（fov_y 就是按 fy 给的），残余全在横向：随 |u−cx| 线性增长"
+     },
+     {
+      "keeps": "fx",
+      "fovYDeg": 63.21500543055,
+      "aspect": 0.5625,
+      "maxPixelErrorPx": 143.100024269,
+      "pays": "横向完全正确，残余全在竖向：随 |v−cy| 线性增长"
+     }
+    ]
+   },
+   "matrixWorldFromCamera": [
+    [
+     0.822219510901,
+     -0.250213927075,
+     0.511222130381,
+     9.503769363909
+    ],
+    [
+     0.555161806464,
+     0.154512454288,
+     -0.817264504376,
+     -10.996794655062
+    ],
+    [
+     0.125500775048,
+     0.955781822472,
+     0.26595237035,
+     5.203165065366
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "positionM": [
+    9.503769363909,
+    -10.996794655062,
+    5.203165065366
+   ]
+  }
+ },
+ "reprojection": {
+  "fitRmsPx": 0.062616292,
+  "checkRmsPx": 0.129709035,
+  "maxCheckPx": 0.176691675,
+  "scale": {
+   "determined": true,
+   "worldUnit": "m",
+   "metresPerInputUnit": 1.0,
+   "source": "caller-declared-unit",
+   "note": "位置按调用方声明的单位换算成米；单位声明错了位姿就等比例错。"
+  }
+ },
+ "points": [
+  {
+   "id": "box-c0",
+   "group": "box",
+   "role": "fit",
+   "worldM": [
+    -2.144,
+    -1.394,
+    0.144
+   ],
+   "pixelProjected": [
+    48.597272067282404,
+    432.7842340654261
+   ],
+   "pixelMeasured": [
+    48.6,
+    432.84285714285716
+   ]
+  },
+  {
+   "id": "box-c1",
+   "group": "box",
+   "role": "fit",
+   "worldM": [
+    2.144,
+    -1.394,
+    0.144
+   ],
+   "pixelProjected": [
+    218.39276986461846,
+    524.8951776068278
+   ],
+   "pixelMeasured": [
+    218.35106382978722,
+    524.8829787234042
+   ]
+  },
+  {
+   "id": "box-c2",
+   "group": "box",
+   "role": "check",
+   "worldM": [
+    2.144,
+    1.394,
+    0.144
+   ],
+   "pixelProjected": [
+    309.8088167197094,
+    476.95198635134665
+   ],
+   "pixelMeasured": [
+    309.953125,
+    477.046875
+   ]
+  },
+  {
+   "id": "box-c4",
+   "group": "box",
+   "role": "fit",
+   "worldM": [
+    -2.144,
+    -1.394,
+    1.944
+   ],
+   "pixelProjected": [
+    52.44512402491537,
+    310.61106719914665
+   ],
+   "pixelMeasured": [
+    52.52,
+    310.67999999999995
+   ]
+  },
+  {
+   "id": "box-c5",
+   "group": "box",
+   "role": "fit",
+   "worldM": [
+    2.144,
+    -1.394,
+    1.944
+   ],
+   "pixelProjected": [
+    229.42478301782947,
+    384.79875626217864
+   ],
+   "pixelMeasured": [
+    229.42307692307693,
+    384.74038461538464
+   ]
+  },
+  {
+   "id": "box-c6",
+   "group": "box",
+   "role": "check",
+   "worldM": [
+    2.144,
+    1.394,
+    1.944
+   ],
+   "pixelProjected": [
+    322.09963649379944,
+    356.9413324809452
+   ],
+   "pixelMeasured": [
+    322.02985074626866,
+    356.80597014925377
+   ]
+  },
+  {
+   "id": "box-c7",
+   "group": "box",
+   "role": "fit",
+   "worldM": [
+    -2.144,
+    1.394,
+    1.944
+   ],
+   "pixelProjected": [
+    156.94120948051392,
+    296.33286455409575
+   ],
+   "pixelMeasured": [
+    156.9814814814815,
+    296.3888888888889
+   ]
+  },
+  {
+   "id": "post-2",
+   "group": "post",
+   "role": "fit",
+   "worldM": [
+    6.0,
+    -2.0,
+    3.0
+   ],
+   "pixelProjected": [
+    447.3946810540327,
+    385.11874138962975
+   ],
+   "pixelMeasured": [
+    447.28333333333336,
+    385.16111111111115
+   ]
+  },
+  {
+   "id": "wall-00",
+   "group": "wall",
+   "role": "check",
+   "worldM": [
+    1.0,
+    3.2,
+    0.35
+   ],
+   "pixelProjected": [
+    312.6143261985497,
+    421.8965844993451
+   ],
+   "pixelMeasured": [
+    312.60869565217394,
+    421.8478260869565
+   ]
+  },
+  {
+   "id": "wall-02",
+   "group": "wall",
+   "role": "fit",
+   "worldM": [
+    1.0,
+    3.2,
+    3.0
+   ],
+   "pixelProjected": [
+    328.8804129940818,
+    261.89264061401497
+   ],
+   "pixelMeasured": [
+    328.91803278688525,
+    261.72131147540983
+   ]
+  },
+  {
+   "id": "wall-10",
+   "group": "wall",
+   "role": "fit",
+   "worldM": [
+    4.0,
+    3.2,
+    0.35
+   ],
+   "pixelProjected": [
+    436.35472012377204,
+    473.9842382738084
+   ],
+   "pixelMeasured": [
+    436.4516129032258,
+    473.9193548387097
+   ]
+  },
+  {
+   "id": "wall-12",
+   "group": "wall",
+   "role": "check",
+   "worldM": [
+    4.0,
+    3.2,
+    3.0
+   ],
+   "pixelProjected": [
+    460.08955665883946,
+    300.07771790829815
+   ],
+   "pixelMeasured": [
+    460.24675324675326,
+    300.06493506493507
+   ]
+  },
+  {
+   "id": "line-2",
+   "group": "line",
+   "role": "fit",
+   "worldM": [
+    -0.6000000000000001,
+    -3.0,
+    0.45
+   ],
+   "pixelProjected": [
+    31.355261738828972,
+    465.5570271642271
+   ],
+   "pixelMeasured": [
+    31.445454545454545,
+    465.59090909090907
+   ]
+  },
+  {
+   "id": "line-3",
+   "group": "line",
+   "role": "fit",
+   "worldM": [
+    0.5999999999999996,
+    -3.0,
+    0.45
+   ],
+   "pixelProjected": [
+    80.34573924645636,
+    494.2249619527212
+   ],
+   "pixelMeasured": [
+    80.40366972477064,
+    494.25688073394497
+   ]
+  },
+  {
+   "id": "line-4",
+   "group": "line",
+   "role": "check",
+   "worldM": [
+    1.7999999999999998,
+    -3.0,
+    0.45
+   ],
+   "pixelProjected": [
+    134.4549447849895,
+    525.8882413235823
+   ],
+   "pixelMeasured": [
+    134.52713178294573,
+    525.9457364341085
+   ]
+  }
+ ],
+ "selfCheck": {
+  "visibleMarkers": 15,
+  "fitPoints": 10,
+  "checkPoints": 5,
+  "maxProjectionDeltaPx": 0.17541072528711604,
+  "meanProjectionDeltaPx": 0.1019360835144614,
+  "maxModelDeltaPx": 3.6175436889607226e-05,
+  "modelDeltaPx": {
+   "fx": 1.430511474609375e-05,
+   "fy": -3.6175436889607226e-05,
+   "cx": 0.0,
+   "cy": -1.3509622931451304e-06
+  },
+  "note": "pixelMeasured 是渲染图里量出的质心，pixelProjected 是 Blender 相机矩阵的解析投影；两者之差是本次测量的自检差，不是拟合精度。modelDeltaPx 是「求解器按这组 Blender 参数反推的 K − 真实 Blender view_frame 给的 K」，它才是「这组参数复现不复现内参」的证据（夹具里应到 1e-3 px 量级以下）。"
+ }
+}

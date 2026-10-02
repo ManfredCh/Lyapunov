@@ -1,0 +1,18 @@
+{
+  "package": "micromamba",
+  "binary": "micromamba",
+  "version": "2.9.0",
+  "licenseFile": "micromamba-2.9.0-LICENSE",
+  "spdx": "BSD-3-Clause",
+  "copyright": "Copyright 2019 QuantStack and the Mamba contributors.",
+  "source": "https://raw.githubusercontent.com/mamba-org/mamba/2.9.0/LICENSE",
+  "sourceRepository": "https://github.com/mamba-org/mamba",
+  "tag": "2.9.0",
+  "commit": "2676ec2050f7dd5b8a524287526f50a8a4fb9652",
+  "sha256": "41fd98a468e39d319911bd94f4e65d6ad6a7ea66559dd5aa4112f138ff9b629a",
+  "bytes": 1483,
+  "retrievedAt": "2026-09-26T13:07:00+08:00",
+  "retrievedBy": "W16 lane: curl -sS -o distribution/licenses/micromamba-2.9.0-LICENSE.partial --max-time 30 --retry 2 --retry-all-errors https://raw.githubusercontent.com/mamba-org/mamba/2.9.0/LICENSE",
+  "commitResolution": "curl -H 'Accept: application/vnd.github+json' https://api.github.com/repos/mamba-org/mamba/git/ref/tags/2.9.0 -> object.type=commit, object.sha=2676ec2050f7dd5b8a524287526f50a8a4fb9652（轻量 tag，sha 即提交）",
+  "note": "打包链唯一的联网点（script/package-linux.ts 取 runtime/micromamba/LICENSE）。此文件入库后，离线 CI 打包走本地路径；sha256 由 distribution/licenses/mamba-license.ts 在取件时校验，不匹配即 fail-closed。版本必须与本机 .runtime/bin/micromamba --version 一致（本机实测 2.9.0）。"
+}

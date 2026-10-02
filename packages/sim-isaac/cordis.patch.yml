@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-sim-isaac
+      name: '@lyapunov/sim-isaac/plugin'

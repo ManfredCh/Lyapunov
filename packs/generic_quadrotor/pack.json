@@ -1,0 +1,35 @@
+{
+ "packId": "generic_quadrotor",
+ "version": "2026.09.23",
+ "family": "quadrotor",
+ "asset": {
+  "modelEntry": "asset/cf2p.urdf"
+ },
+ "pieces": {
+  "asset": {
+   "ref": "ASSET_STAGING_MANIFEST_EXTRA.json#generic_quadrotor"
+  },
+  "context": "ready",
+  "policy": "blocked:bridge-not-integrated",
+  "vla": "ready"
+ },
+ "capabilities": {
+  "channels": [
+   "thrust",
+   "control"
+  ],
+  "directControl": "requiresExternalController"
+ },
+ "status": "PARTIAL:fc-bridge-not-integrated",
+ "provenance": {
+  "source": "utiasDSL/gym-pybullet-drones@main（cf2x.urdf/cf2p.urdf/cf2.dae）",
+  "commit": null,
+  "author": "gym-pybullet-drones 原件（MIT，LICENSE 已核对 2026-09-23）；context/policy/vla/tests 为 LyapunovDev 自有"
+ },
+ "license": {
+  "model": "MIT（LICENSE 正文判读 2026-09-23：permission+disclaimer 全文）",
+  "policy": "无学习策略；PX4/ArduPilot SITL 外接飞控（服务端/旁路运行），内容为 LyapunovDev 自有"
+ },
+ "tests": "tests/acceptance.md",
+ "notes": "通用四旋翼（CrazyFlie 形态 cf2x/cf2p 两构型 + cf2.dae 网格）：PX4/ArduPilot 生态 SITL 对接位。产品不内置飞控，悬停/航点由外部控制器闭环。 【2026-09-26 实测更正 · 导入可用性】Isaac Sim 6.0.1.0 实测：cf2x/cf2p 两构型均 importError=None、40 个 mesh prim / 9966 顶点（cf2.dae 已解析）⇒ 就导入而言无缺件。MuJoCo 3.8 侧实测为「能加载但编译成空模型」（nbody=1 njnt=0 nu=0 mass=0），**不是**编译失败——.dae 只是被跳过，**不需要**先转 OBJ/STL；原先按 MODEL_ENTRY_INVALID 推断的格式转换步骤已撤销。 【2026-09-26 实测更正 · 该源件不足以构成 thrust 通道】三条理由，建无人机包的人必须知道：(1) joints=0——四个 prop*_joint 是 fixed，被 URDF 导入器合并，四个旋翼 link 及其 ±0.028 m 偏置在导入产物里不存在；(2) nu=0——URDF 里没有任何 actuator/site，Isaac 的 thrust 通道需要「自由根刚体 + site 执行器 + gear/gain/ctrlrange」，这份源件一样都没有；(3) <properties> 里的 kf/km/arm/thrust2weight 是 gym-pybullet-drones 的自定义标签，URDF 导入器不消费。要在 Isaac 里得到 thrust 通道，必须在源侧补旋翼定义（4 个 rotor site + body_thrust/三轴力矩执行器），或用承载模型承接（W19 回执 .runtime/w19/fixtures/cf2x-isaac.xml 是这种组合模型的样例，每个数字都点名出处）。"
+}

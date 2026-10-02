@@ -1,0 +1,17 @@
+<mujoco model="dup scene">
+  <include file="robot.xml"/>
+
+  <asset>
+    <mesh name="table_top" file="c.stl"/>
+    <texture type="2d" name="groundplane" builtin="checker" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" directional="true"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
+    <body name="table">
+      <geom name="table_geom" type="mesh" mesh="table_top"/>
+    </body>
+  </worldbody>
+</mujoco>

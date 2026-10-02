@@ -1,0 +1,45 @@
+Lyapunov Modified MIT License
+
+Copyright (c) 2026 Lyapunov contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Additional commercial attribution condition:
+If you use the Software or any derivative work of it in a commercial product
+or service, and that product or service has either:
+  (a) at least 10,000 monthly active users; or
+  (b) monthly operating revenue of at least CNY 1,000,000, or the equivalent
+      amount in another currency,
+you must prominently display "Lyapunov" in the user interface of that product
+or service. If the product or service has no user interface, you must prominently
+display "Lyapunov" in its official documentation or on its official website.
+
+This condition continues to apply when the Software or its derivative work is
+forked, renamed, modified, embedded in another framework, or used in a backend
+service. A change of name, framework, or deployment form does not remove the
+attribution obligation while the product or service still uses the Software or
+its derivative work.
+
+The thresholds apply to the commercial product or service using the Software
+or its derivative work, not to unrelated products, services, or the user's total
+enterprise revenue. This additional condition does not apply to independently
+developed software that does not use the Software or its derivative work, or
+to the mere use of outputs produced by the Software.
+
+This condition requires attribution only. It does not require a license fee.

@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "note": "Viewer 两条离线回归（packages/viewer/test/robot-glb-mesh.test.ts、robot-glb-ktx2-texture.test.ts）要真实 Go1 资产，但 materials/robots/unitree_go1/ 被 .gitignore 忽略、干净 checkout 里没有。本清单把固定上游 commit 与逐文件 size/sha256 写死；script/prepare-viewer-test-assets.ts 据此取件、校验、复用。注意上游无 menagerie/ 前缀（上游是 unitree_go1/go1.xml 与 unitree_go1/assets/*.stl），本仓落点是 materials/robots/unitree_go1/menagerie/…，故逐件给出 sourcePath→destinationPath 映射。模型字节继续不入 Git、不进软件发行包；只做测试依赖准备，不改动 packs/ASSET_STAGING_MANIFEST.json 的整体 license/readiness（仅这 6 件已核，URDF 不在本次范围）。",
+  "repository": "google-deepmind/mujoco_menagerie",
+  "commit": "c96a32d28fb5da84da38c1da4d749e7a13212855",
+  "upstreamPath": "unitree_go1",
+  "destination": "materials/robots/unitree_go1",
+  "license": {
+    "spdx": "BSD-3-Clause",
+    "copyright": "Copyright (c) 2016-2022 HangZhou YuShu TECHNOLOGY CO.,LTD. (\"Unitree Robotics\")",
+    "sourcePath": "LICENSE",
+    "destinationPath": "LICENSE",
+    "bytes": 1559,
+    "sha256": "2b794acf1e250f5545ae5a47d81e5685ea5488ce077d1087ed8be5f81e9ba5c0"
+  },
+  "files": [
+    {
+      "sourcePath": "go1.xml",
+      "destinationPath": "menagerie/go1.xml",
+      "bytes": 10875,
+      "sha256": "d5a7466784c8e72fd174cc7fa5a92754a1a0a6d458a1dec79e7ca0abc9525c4a"
+    },
+    {
+      "sourcePath": "assets/calf.stl",
+      "destinationPath": "menagerie/assets/calf.stl",
+      "bytes": 1447984,
+      "sha256": "ad3685e132454fd64e4ca3e5089f0d812fb53958e95c14913a22e3193e9e9ed8"
+    },
+    {
+      "sourcePath": "assets/hip.stl",
+      "destinationPath": "menagerie/assets/hip.stl",
+      "bytes": 1505284,
+      "sha256": "b6599b9dd2751ebd87449203223f5683a6c235268b76fcc443e00e0d974a06c0"
+    },
+    {
+      "sourcePath": "assets/thigh.stl",
+      "destinationPath": "menagerie/assets/thigh.stl",
+      "bytes": 793584,
+      "sha256": "bbf7c0a441323088c59276dbec8a32e708a1c61f42d30a6f6775176366ea23f8"
+    },
+    {
+      "sourcePath": "assets/thigh_mirror.stl",
+      "destinationPath": "menagerie/assets/thigh_mirror.stl",
+      "bytes": 950834,
+      "sha256": "1a90b89de47a57cb12a2d703f6b008a6ace8a1890a381c27723296fd0d00b9d8"
+    },
+    {
+      "sourcePath": "assets/trunk.stl",
+      "destinationPath": "menagerie/assets/trunk.stl",
+      "bytes": 5619284,
+      "sha256": "051a57995dc6f892fc9bc53cd94e9a894f3dc209fd646e94d55d764150013970"
+    }
+  ]
+}

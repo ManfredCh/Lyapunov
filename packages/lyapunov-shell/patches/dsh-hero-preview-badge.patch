@@ -1,0 +1,12 @@
+diff --git a/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx b/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
+index 9ac7ae573b..fe287d413f 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
+@@ -152,7 +152,6 @@ export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
+           <span className={css.titleGroup}>
+             {/* Own element: keeps the headline text addressable apart from the badge. */}
+             <span>{t('hero.headline')}</span>
+-            <span className={css.previewBadge}>{t('hero.preview')}</span>
+           </span>
+         </div>
+         <div className={css.body}>

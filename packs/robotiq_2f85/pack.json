@@ -1,0 +1,27 @@
+{
+  "packId": "robotiq_2f85",
+  "version": "2026.09.22",
+  "family": "gripper",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/2f85.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#robotiq_2f85" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["gripper", "joint", "control"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "Robotiq 2F-85 自适应二指夹爪模型（ASSET_STAGING_MANIFEST.json#robotiq_2f85 落账）",
+    "commit": null,
+    "author": "Robotiq（夹爪型号）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#robotiq_2f85 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控（gripper 通道）；包内容为 LyapunovDev 自有"
+  },
+  "tests": "tests/acceptance.md"
+}

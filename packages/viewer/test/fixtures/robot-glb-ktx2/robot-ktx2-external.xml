@@ -1,0 +1,17 @@
+<mujoco model="robot-glb-ktx2-external-image">
+  <!-- 机器人文档 + 一个**贴图是外部文件**的 `.glb`（`cube-ktx2-etc1s-external-image.glb`：几何内嵌，
+       `images[0].uri = "checker8.ktx2"` 指向同目录的 477 B 真 KTX2 字节）。
+       这一份量的是**依赖闭包的边界**：机器人文档的依赖闭包只收 `.glb` 本身（`robotDependencies`），
+       所以那个伴生文件"登记不上 ⇒ 字节取不到"。判据是：取不到时**必须明确报错**，不许静默无贴图。 -->
+  <compiler angle="radian" meshdir="." />
+  <asset>
+    <mesh name="shell" file="cube-ktx2-etc1s-external-image.glb" />
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 0.1">
+      <joint name="yaw" type="hinge" axis="0 0 1" />
+      <geom name="shell_visual" type="mesh" mesh="shell" contype="0" conaffinity="0" group="1" />
+      <geom name="base_collision" type="box" size="0.05 0.05 0.05" />
+    </body>
+  </worldbody>
+</mujoco>

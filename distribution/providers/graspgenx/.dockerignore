@@ -1,0 +1,6 @@
+**
+!Dockerfile.worker
+!Dockerfile.assets
+!requirements.adapter.txt
+!graspgenx_adapter.py
+!download-assets.py

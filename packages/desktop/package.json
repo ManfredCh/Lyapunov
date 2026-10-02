@@ -1,0 +1,33 @@
+{
+  "name": "@lyapunov/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "bun run ../../script/build-desktop.ts"
+  },
+  "dependencies": {
+    "electron-store": "10.1.0",
+    "electron-window-state": "5.0.3",
+    "electron-updater": "6.8.3"
+  },
+  "devDependencies": {
+    "electron": "43.5.1"
+  },
+  "exports": {
+    ".": "./dist/plugin.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json",
+    "./guest-credentials": "./dist/guest-credentials.js"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  }
+}

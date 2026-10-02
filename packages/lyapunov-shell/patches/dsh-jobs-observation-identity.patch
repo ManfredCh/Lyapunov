@@ -1,0 +1,437 @@
+diff --git a/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.i18n.yaml b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.i18n.yaml
+new file mode 100644
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.i18n.yaml
+@@ -0,0 +1,3 @@
++# 两份文档的兼容性与范围逐段一致；正文按用户要求使用中文。
++2026-10-01-job-execution-instance-receipts.md: 1fb12dcdd1e68caae2492bcb95b42758ced9c24e
++2026-10-01-job-execution-instance-receipts.zh.md: e271e0ae4317d1c3d23fc7dcdc2fa5f8d3617e81
+diff --git a/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.md b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.md
+new file mode 100644
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.md
+@@ -0,0 +1,25 @@
++# Agent Note: 后台Job执行实例与通知认领
++
++Status: implemented
++
++## Problem
++
++可预测的bash-1只在当前原生JobsRegistry里有效。Host重启后，新Registry可以创建同名Job；仅凭旧Session文本读取或停止新Job，会混淆执行身份。多个有效controller观察同一完成也可能重复追加终态通知。
++
++## Decision
++
++JobSnapshot增加可选registryId，每个本地Registry实例创建一个代次。Bash受理canonical值、公开Job工具、SessionController和完成notice保留同一registryId及startedAt；展示文本继续使用原started background job格式。onJobDone给现有Job.reported提供原子claimReport回调，只有成功认领的controller追加通知，状态仍由原Registry持有。job_output/job_kill可接受当前registry_id，不匹配时不读输出、不请求取消。
++
++## Alternatives considered
++
++**从bash-1或运行目录推执行归属。** 否决：进程重启与不同Registry会复用同名编号，路径不是执行回执。
++
++**在图中创建持久Job/通知状态库。** 否决：已有Registry拥有终态和reported，新增owner会使清理与恢复无法一致。
++
++## Consequences
++
++registryId是可选公开快照字段，旧记录缺失时保持未知，不能映射成新进程成功或失败。本地Job没有跨进程存活承诺；恢复先核原执行owner，不自动重放提交。非消耗list/get不改变输出游标或reported。状态、输出、模型结束、物理停止分别归原owner。
++
++## Testing
++
++实际原生Loop/Tools/Jobs与Loader配置测试覆盖旧句柄拒绝、明确当前代次读回、双controller六条终态各一次；原208项Job/Bash/controller测试继续运行。生产下载与真实Host重启未在本次隔离夹具重放。
+diff --git a/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.zh.md b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.zh.md
+new file mode 100644
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.zh.md
+@@ -0,0 +1,25 @@
++# Agent Note: 后台Job执行实例与通知认领
++
++Status: implemented
++
++## 问题
++
++可预测的bash-1只在当前原生JobsRegistry里有效。Host重启后，新Registry可以创建同名Job；仅凭旧Session文本读取或停止新Job，会混淆执行身份。多个有效controller观察同一完成也可能重复追加终态通知。
++
++## 决策
++
++JobSnapshot增加可选registryId，每个本地Registry实例创建一个代次。Bash受理canonical值、公开Job工具、SessionController和完成notice保留同一registryId及startedAt；展示文本继续使用原started background job格式。onJobDone给现有Job.reported提供原子claimReport回调，只有成功认领的controller追加通知，状态仍由原Registry持有。job_output/job_kill可接受当前registry_id，不匹配时不读输出、不请求取消。
++
++## 考虑过的替代方案
++
++**从bash-1或运行目录推执行归属。** 否决：进程重启与不同Registry会复用同名编号，路径不是执行回执。
++
++**在图中创建持久Job/通知状态库。** 否决：已有Registry拥有终态和reported，新增owner会使清理与恢复无法一致。
++
++## 后果
++
++registryId是可选公开快照字段，旧记录缺失时保持未知，不能映射成新进程成功或失败。本地Job没有跨进程存活承诺；恢复先核原执行owner，不自动重放提交。非消耗list/get不改变输出游标或reported。状态、输出、模型结束、物理停止分别归原owner。
++
++## 验证
++
++实际原生Loop/Tools/Jobs与Loader配置测试覆盖旧句柄拒绝、明确当前代次读回、双controller六条终态各一次；原208项Job/Bash/controller测试继续运行。生产下载与真实Host重启未在本次隔离夹具重放。
+diff --git a/docs/subsystems/jobs.i18n.yaml b/docs/subsystems/jobs.i18n.yaml
+--- a/docs/subsystems/jobs.i18n.yaml
++++ b/docs/subsystems/jobs.i18n.yaml
+@@ -1,6 +1,3 @@
+-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+-# side as of the last confirmed-consistent state. Both languages carry equal authority;
+-# after editing either side, bring the other along and re-record with:
+-#   pnpm run verify-translation-pairing --write docs/subsystems/jobs.md
+-jobs.md: 4be335207b7dd94f08015ecda595a6b1cc301a7f
+-jobs.zh.md: 9dc390eb30901664edb47c6727a54ddd83839fa7
++# 配对结构保留；本次新增契约说明按用户要求使用中文。
++jobs.md: 857cfd52ebca3888ea71092176a8bbf8647ddcf3
++jobs.zh.md: ccdc854e455a0252bb0d6085092f190da14a977f
+diff --git a/docs/subsystems/jobs.md b/docs/subsystems/jobs.md
+--- a/docs/subsystems/jobs.md
++++ b/docs/subsystems/jobs.md
+@@ -107,6 +107,8 @@
+ interface JobSnapshot {
+   /** The registry-issued id (`<kind>-N`). */
+   id: JobId
++  /** provider生命周期身份；缺失的旧记录不能证明重启后的同名执行。 */
++  registryId?: JobRegistryId
+   /** The producer kind the job was registered with. */
+   kind: JobKind
+   /** The producer-supplied one-line label. */
+diff --git a/docs/subsystems/jobs.zh.md b/docs/subsystems/jobs.zh.md
+--- a/docs/subsystems/jobs.zh.md
++++ b/docs/subsystems/jobs.zh.md
+@@ -107,6 +107,8 @@
+ interface JobSnapshot {
+   /** The registry-issued id (`<kind>-N`). */
+   id: JobId
++  /** provider生命周期身份；缺失的旧记录不能证明重启后的同名执行。 */
++  registryId?: JobRegistryId
+   /** The producer kind the job was registered with. */
+   kind: JobKind
+   /** The producer-supplied one-line label. */
+diff --git a/packages/api/session-controller/src/control.ts b/packages/api/session-controller/src/control.ts
+--- a/packages/api/session-controller/src/control.ts
++++ b/packages/api/session-controller/src/control.ts
+@@ -200,6 +200,7 @@
+ function jobView(job: JobSnapshot): SessionJob {
+   return {
+     id: job.id,
++    ...(job.registryId === undefined ? {} : { registryId: job.registryId }),
+     kind: job.kind,
+     label: job.label,
+     status: job.status,
+diff --git a/packages/api/session-controller/src/types.ts b/packages/api/session-controller/src/types.ts
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -541,6 +541,8 @@
+ /** Browser-safe background-job row. */
+ export interface SessionJob {
+   readonly id: JobId
++  /** 当前Jobs provider代次；历史同名ID不能代替当前身份。 */
++  readonly registryId?: string
+   readonly kind: string
+   readonly label: string
+   readonly status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
+diff --git a/packages/api/session-controller/tests/control-jobs.host.spec.ts b/packages/api/session-controller/tests/control-jobs.host.spec.ts
+--- a/packages/api/session-controller/tests/control-jobs.host.spec.ts
++++ b/packages/api/session-controller/tests/control-jobs.host.spec.ts
+@@ -106,6 +106,7 @@
+     expect(job?.startedAt).toBeTypeOf('number')
+     expect({ ...job, startedAt: 0 }).toEqual({
+       id: 'bash-1',
++      registryId: expect.any(String),
+       kind: 'bash',
+       label: 'pnpm run build',
+       status: 'running',
+@@ -166,6 +167,7 @@
+       'id',
+       'kind',
+       'label',
++      'registryId',
+       'startedAt',
+       'status',
+     ])
+diff --git a/packages/jobs/jobs-local/src/index.ts b/packages/jobs/jobs-local/src/index.ts
+--- a/packages/jobs/jobs-local/src/index.ts
++++ b/packages/jobs/jobs-local/src/index.ts
+@@ -10,12 +10,13 @@
+  */
+ 
+ import { Context } from '@deepseek-ai/cordis'
++import { randomUUID } from 'node:crypto'
+ import z from '@deepseek-ai/schemastery'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import { AnonymousEntries, ScopedLayers, scopeOf } from '@deepseek-ai/dsh-scope'
+ import type { ScopeLayer } from '@deepseek-ai/dsh-scope'
+ import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+-import { JobRegistry, JobId } from '@deepseek-ai/dsh-jobs'
++import { JobRegistry, JobId, JobRegistryId } from '@deepseek-ai/dsh-jobs'
+ import type {
+   JobDoneListener, JobKind, JobOutcome, JobRead, JobSnapshot, JobStart, JobStatus,
+   JobsChangedListener,
+@@ -100,6 +101,7 @@
+   /** Schemastery-defaulted active-job limit. */
+   private readonly maxConcurrentJobsPerOwner: number
+   private store = new Map<JobId, TrackedJob>()
++  private readonly registryId = JobRegistryId(randomUUID())
+   private counters = new Map<string, number>()
+   /**
+    * Surfaces and listeners layered by the scope that registered them, in the
+@@ -364,6 +366,7 @@
+     const ownerSession = job.owner?.id
+     return {
+       id: job.id,
++      registryId: this.registryId,
+       kind: job.kind,
+       label: job.label,
+       ...job.outputLimitBytes !== undefined ? { outputLimitBytes: job.outputLimitBytes } : {},
+@@ -429,7 +432,12 @@
+     if (this.listenersClosed) return
+     for (const listener of this.listenersFor(job.owner)) {
+       try {
+-        const returned = listener(snapshot, job.owner)
++        const returned = listener(snapshot, job.owner, () => {
++          // 终态与reported同一owner、同一同步提交点；HMR或重复controller不能再唤醒一次。
++          if (job.reported || this.listenersClosed) return false
++          job.reported = true
++          return true
++        })
+         void Promise.resolve(returned).catch((error: unknown) => {
+           this.selfCtx.logger.warn(`jobs: onJobDone listener rejected for ${job.id}: ${String(error)}`)
+         })
+diff --git a/packages/jobs/jobs/src/brand.ts b/packages/jobs/jobs/src/brand.ts
+--- a/packages/jobs/jobs/src/brand.ts
++++ b/packages/jobs/jobs/src/brand.ts
+@@ -18,6 +18,14 @@
+  */
+ export type JobId = Branded<'JobId'>
+ 
++/** 标识一个Jobs provider生命周期；同名Job不得跨该代次恢复。 */
++export type JobRegistryId = Branded<'JobRegistryId'>
++
++/** @param id - provider生成的不透明代次。 @returns 同一字符串的品牌类型。 */
++export function JobRegistryId(id: string): JobRegistryId {
++  return id as JobRegistryId
++}
++
+ /**
+  * Brand a string as a {@link JobId}.
+  * @param id - the raw job-id string (the registry generates `<kind>-N`).
+diff --git a/packages/jobs/jobs/src/index.ts b/packages/jobs/jobs/src/index.ts
+--- a/packages/jobs/jobs/src/index.ts
++++ b/packages/jobs/jobs/src/index.ts
+@@ -12,7 +12,7 @@
+   JobDoneListener, JobId, JobRead, JobSnapshot, JobStart, JobsChangedListener,
+ } from './types.ts'
+ 
+-export { JobId } from './types.ts'
++export { JobId, JobRegistryId } from './types.ts'
+ export type {
+   JobDoneListener,
+   JobHooks,
+diff --git a/packages/jobs/jobs/src/types.ts b/packages/jobs/jobs/src/types.ts
+--- a/packages/jobs/jobs/src/types.ts
++++ b/packages/jobs/jobs/src/types.ts
+@@ -6,9 +6,9 @@
+ 
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import type { SessionId } from '@deepseek-ai/dsh-session'
+-import type { JobId } from './brand.ts'
++import type { JobId, JobRegistryId } from './brand.ts'
+ 
+-export { JobId } from './brand.ts'
++export { JobId, JobRegistryId } from './brand.ts'
+ 
+ /**
+  * Task lifecycle: `running`, optionally `stopping`, then exactly one terminal
+@@ -97,6 +97,8 @@
+ export interface JobSnapshot {
+   /** The registry-issued id (`<kind>-N`). */
+   id: JobId
++  /** provider生命周期身份；缺失的旧记录不能证明重启后的同名执行。 */
++  registryId?: JobRegistryId
+   /** The producer kind the job was registered with. */
+   kind: JobKind
+   /** The producer-supplied one-line label. */
+@@ -146,6 +148,8 @@
+ export type JobDoneListener = (
+   snapshot: JobSnapshot,
+   owner: Agent | undefined,
++  /** 原子认领本条终态通知，不读输出游标；其他只读listener不调用它。 */
++  claimReport?: () => boolean,
+ ) => void | PromiseLike<void>
+ 
+ /**
+diff --git a/packages/jobs/tool-jobs/src/index.ts b/packages/jobs/tool-jobs/src/index.ts
+--- a/packages/jobs/tool-jobs/src/index.ts
++++ b/packages/jobs/tool-jobs/src/index.ts
+@@ -9,7 +9,7 @@
+ 
+ import type { Context } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+-import { boundContextSummary, createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
++import { boundContextSummary, createUserMessage, HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
+ import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+ import type { GenericCallView, ToolDefinition, ToolExecution } from '@deepseek-ai/dsh-tools'
+@@ -54,6 +54,7 @@
+ /** Task state safe for model-authored programs; ownership/bookkeeping fields are omitted. */
+ export interface PublicJobSnapshot {
+   id: string
++  registryId?: string
+   kind: string
+   label: string
+   status: JobSnapshot['status']
+@@ -68,6 +69,7 @@
+   additionalProperties: false,
+   properties: {
+     id: { type: 'string', required: true },
++    registryId: { type: 'string' },
+     kind: { type: 'string', required: true },
+     label: { type: 'string', required: true },
+     status: {
+@@ -85,6 +87,7 @@
+ function publicJob(snapshot: JobSnapshot): PublicJobSnapshot {
+   return {
+     id: snapshot.id,
++    ...snapshot.registryId !== undefined ? { registryId: snapshot.registryId } : {},
+     kind: snapshot.kind,
+     label: snapshot.label,
+     status: snapshot.status,
+@@ -275,19 +278,19 @@
+   // The registry routes each settlement to the listeners its owner's scope
+   // chain reaches, so a mount under one preset never sees another preset's
+   // agents; this listener owns delivery, not the choice of whom to deliver to.
+-  ctx.jobs.onJobDone((snapshot, owner) => {
+-    if (snapshot.reported || owner === undefined) return
++  ctx.jobs.onJobDone((snapshot, owner, claimReport) => {
++    if (snapshot.reported || owner === undefined || (claimReport !== undefined && !claimReport())) return
++    const source = {
++      kind: 'plugin' as const, plugin: 'tool-jobs', form: 'notice' as const,
++      summary: completionSummary(snapshot),
++      job: { id: snapshot.id, registryId: snapshot.registryId ?? null, startedAt: snapshot.startedAt, finishedAt: snapshot.finishedAt ?? null, status: snapshot.status },
++    }
+     const message = createUserMessage({
+       content: [{
+         type: 'text',
+         text: fitCompletionNotice(snapshot),
+       }],
+-      source: {
+-        kind: 'plugin',
+-        plugin: 'tool-jobs',
+-        form: 'notice',
+-        summary: completionSummary(snapshot),
+-      },
++      source,
+     })
+     const spent = spentWakes.get(owner) ?? 0
+     if (delivery === 'wakeup' && owner.status === 'idle' && spent < wakeBudget) {
+@@ -307,6 +310,7 @@
+     // this tool owns its deadline instead of using ToolDefinition.timeoutMs.
+     parameters: {
+       job_id: { type: 'string', required: true, description: 'Job id returned by the tool that started the background work.' },
++      registry_id: { type: 'string', description: 'Execution instance from the current job snapshot. A different instance is rejected without consuming output.' },
+       wait: { type: 'boolean', description: 'Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive.' },
+       timeout_ms: { type: 'number', description: 'Max wait in milliseconds (only meaningful with wait: true). Defaults to the configured wait timeout; capped by the configured maximum.' },
+     },
+@@ -328,6 +332,7 @@
+     },
+     async execute(args, exec) {
+       const id = validateJobId(args.job_id)
++      if (args.registry_id !== undefined && ctx.jobs.get(id, exec.agent).registryId !== args.registry_id) throw new HarnessError('The job belongs to another execution instance; read the current snapshot first.', 'JOB_INSTANCE_MISMATCH')
+       if (args.wait === true) {
+         const timeout = Math.min(args.timeout_ms ?? waitDefault, waitCap)
+         await ctx.jobs.wait(id, timeout, exec.agent, exec.signal)
+@@ -363,6 +368,7 @@
+     description: 'Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.',
+     parameters: {
+       job_id: { type: 'string', required: true, description: 'Job id returned by the tool that started the background work.' },
++      registry_id: { type: 'string', description: 'Execution instance from the current job snapshot. A different instance is rejected before cancellation.' },
+       reason: { type: 'string', description: 'Optional short reason, recorded in the log and forwarded to the job.' },
+     },
+     finalizeContent: finalizeJobContent,
+@@ -388,6 +394,7 @@
+     },
+     execute(args, exec) {
+       const id = validateJobId(args.job_id)
++      if (args.registry_id !== undefined && ctx.jobs.get(id, exec.agent).registryId !== args.registry_id) throw new HarnessError('The job belongs to another execution instance; read the current snapshot first.', 'JOB_INSTANCE_MISMATCH')
+       const result = ctx.jobs.kill(id, exec.agent, args.reason)
+       // A snapshot describes current state without consuming pending output.
+       const snapshot = publicJob(ctx.jobs.get(id, exec.agent))
+diff --git a/packages/jobs/tool-jobs/tests/tool-jobs.spec.ts b/packages/jobs/tool-jobs/tests/tool-jobs.spec.ts
+--- a/packages/jobs/tool-jobs/tests/tool-jobs.spec.ts
++++ b/packages/jobs/tool-jobs/tests/tool-jobs.spec.ts
+@@ -177,6 +177,28 @@
+ })
+ 
+ describe('job_output', () => {
++  it('拒绝旧registry_id而不消费输出或取消，当前执行实例才可读回', async () => {
++    const { ctx } = await setup()
++    let reads = 0
++    const p = producer({ readOutput: () => { reads += 1; return 'current output' } })
++    const id = ctx.jobs.start(p.spec)
++    try {
++      for (const tool of ['job_output', 'job_kill']) {
++        const result = await call(ctx, tool, { job_id: id, registry_id: 'old-registry' })
++        expect(result.isError).toBe(true)
++        if (result.isError) expect(result.error.info?.code).toBe('JOB_INSTANCE_MISMATCH')
++      }
++      expect(reads).toBe(0)
++      expect(p.cancels).toHaveLength(0)
++      expect(ctx.jobs.get(id).status).toBe('running')
++      expect((await call(ctx, 'job_output', { job_id: id, registry_id: ctx.jobs.get(id).registryId })).isError).toBe(false)
++      expect(reads).toBe(1)
++    } finally {
++      p.settle({ status: 'killed' })
++      await tick()
++      await ctx.fiber.dispose()
++    }
++  })
+   it('reads a consuming delta with a trailing status line', async () => {
+     const { ctx } = await setup()
+     const chunks = ['line one\n', '']
+@@ -701,6 +723,7 @@
+         plugin: 'tool-jobs',
+         form: 'notice',
+         summary: 'bash pnpm test [status: completed, exit code: 0]',
++        job: { id: 'bash-1', registryId: expect.any(String), startedAt: expect.any(Number), finishedAt: expect.any(Number), status: 'completed' },
+       },
+     })
+   })
+@@ -732,6 +755,7 @@
+           plugin: 'tool-jobs',
+           form: 'notice',
+           summary: `subagent ${'x'.repeat(110)}…`,
++          job: { id: 'subagent-1', registryId: expect.any(String), startedAt: expect.any(Number), finishedAt: expect.any(Number), status: 'completed' },
+         },
+       },
+     )
+diff --git a/packages/shell/tool-bash/src/index.ts b/packages/shell/tool-bash/src/index.ts
+--- a/packages/shell/tool-bash/src/index.ts
++++ b/packages/shell/tool-bash/src/index.ts
+@@ -184,6 +184,8 @@
+ const BACKGROUND_OUTPUT_PROPERTIES = {
+   kind: { type: 'string', required: true, const: 'background' },
+   jobId: { type: 'string', required: true },
++  registryId: { type: 'string' },
++  startedAt: { type: 'integer', required: true },
+ } as const
+ 
+ export function apply(ctx: Context, config: Config = {}): void {
+@@ -378,7 +380,9 @@
+             proc => renderProcessRead(proc.readOutput(), proc.sandbox, escalationModes),
+           ),
+         })
+-        return { kind: 'background' as const, jobId: id }
++        const snapshot = jobs.get(id, exec.agent)
++        return { kind: 'background' as const, jobId: id, startedAt: snapshot.startedAt,
++          ...(snapshot.registryId === undefined ? {} : { registryId: snapshot.registryId }) }
+       }
+       const result = await ctx.shell.run(ctx.shell.resolve({
+         ...request,
+diff --git a/packages/shell/tool-bash/tests/tools.spec.ts b/packages/shell/tool-bash/tests/tools.spec.ts
+--- a/packages/shell/tool-bash/tests/tools.spec.ts
++++ b/packages/shell/tool-bash/tests/tools.spec.ts
+@@ -460,7 +460,7 @@
+     const started = await call(ctx, 'bash', { command: 'echo bg-ok', description: 'test command', run_in_background: true })
+     expect(started.isError).toBe(false)
+     if (started.isError) throw new Error('expected background bash success')
+-    expect(started.value).toEqual({ kind: 'background', jobId: 'bash-1' })
++    expect(started.value).toEqual({ kind: 'background', jobId: 'bash-1', registryId: expect.any(String), startedAt: expect.any(Number) })
+     expect(text(started)).toBe('started background job bash-1')
+ 
+     const read = await callUntilText(ctx, 'job_output', { job_id: 'bash-1' }, 'bg-ok')

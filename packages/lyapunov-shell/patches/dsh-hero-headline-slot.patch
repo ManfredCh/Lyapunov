@@ -1,0 +1,158 @@
+--- a/packages/client/ui-conversation/src/client/apply.ts
++++ b/packages/client/ui-conversation/src/client/apply.ts
+@@ -249,6 +249,7 @@
+       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
+       'conversation.input.dock': { kind: 'list', scope: 'session' },
+       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
++      'conversation.hero.headline': { kind: 'single', scope: 'root' },
+       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
+       'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
+     },
+--- a/packages/client/ui-conversation/src/client/contract/slots.ts
++++ b/packages/client/ui-conversation/src/client/contract/slots.ts
+@@ -159,6 +159,8 @@
+     'conversation.hero.workspace': { kind: 'single'; scope: 'root'; owner: EmptyWorkspaceOwnerProps }
+     /** Brand mark shown before the blank-session headline. */
+     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
++    /** Deployment headline, independent of the composer/workspace controls. */
++    'conversation.hero.headline': { kind: 'single'; scope: 'root'; owner: HeroHeadlineOwnerProps }
+     /** Agent-preset control staged for a New Session. */
+     'conversation.hero.agentPreset': { kind: 'single'; scope: 'root'; owner: HeroAgentPresetOwnerProps }
+     /** Full-width entries above the composer card. */
+@@ -364,6 +366,9 @@
+   className?: string | undefined
+ }
+ 
++/** Identity for one welcome entry; no message or account data crosses this slot. */
++export interface HeroHeadlineOwnerProps { sessionId?: SessionId | undefined }
++
+ /** Full props of the resident optional-Session Conversation shell. */
+ export type ConversationSlotProps =
+   PropsRuntime<'main.conversation'>
+@@ -372,6 +377,7 @@
+     | 'conversation.composer' | 'conversation.composer.bar'
+     | 'conversation.input.dock'
+     | 'conversation.hero.brand.mark'
++    | 'conversation.hero.headline'
+     | 'conversation.hero.workspace'
+     | 'conversation.hero.agentPreset'
+   >
+--- a/packages/client/ui-conversation/src/client/index.ts
++++ b/packages/client/ui-conversation/src/client/index.ts
+@@ -57,7 +57,7 @@
+   ConversationInjected, ConversationSessionHeaderInjected, ConversationSessionHeaderSlotProps,
+   ConversationSessionInjected, ConversationSessionSlotProps, ConversationSlotProps,
+   ConversationStore, ConvViewOwnerProps, ConvViewProps, EmptyWorkspaceOwnerProps,
+-  HeroAgentPresetOwnerProps, HeroBrandMarkOwnerProps, InputControlOwnerProps, InputZone,
++  HeroAgentPresetOwnerProps, HeroBrandMarkOwnerProps, HeroHeadlineOwnerProps, InputControlOwnerProps, InputZone,
+   MessageImageLoader, MessageImageSource, MessageImagesOwnerProps, RenderMessageImages, UseConversation,
+   UseConversationViews,
+ } from './contract/slots.ts'
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
+@@ -239,7 +239,7 @@
+ 
+   const composerBar = (
+     <div className={clsx(css.composerStack, hero && css.composerHero)}>
+-      {hero && <HeroShell t={t} renderSlot={renderSlot} />}
++      {hero && <HeroShell key={sessionId ?? "new-session-welcome"} sessionId={sessionId} t={t} renderSlot={renderSlot} />}
+       {hero && heroWorkspaceRow}
+       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
+       {inputBar}
+--- a/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
+@@ -7,7 +7,7 @@
+   FISH_LOGO_PATH, FISH_LOGO_VIEWBOX, IconChevronDownOutline14, IconFolderClose16, IconFolderOpen16,
+ } from '@deepseek-ai/dsh-client-ui-primitives'
+ import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
+-import type { ConversationSlotProps } from '../contract/slots.ts'
++import type { ConversationSlotProps, HeroHeadlineOwnerProps } from '../contract/slots.ts'
+ import css from './HeroShell.module.css'
+ 
+ /** The owner's locale seat type, passed to hero chrome as a plain prop. */
+@@ -63,6 +63,8 @@
+ 
+ /** Hero chrome props. The workspace row rides the InputBar accessory hole, not here. */
+ export interface HeroShellProps {
++  /** Current welcome identity, without touching the resident composer. */
++  sessionId?: HeroHeadlineOwnerProps['sessionId']
+   /** The owner's locale seat, passed down as a plain prop. */
+   t: HeroTranslate
+   /** Authorized renderer for the hero brand-mark slot. */
+@@ -129,7 +131,7 @@
+  * @param props - see {@link HeroShellProps}.
+  * @returns the centered hero element tree.
+  */
+-export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
++export function HeroShell({ t, renderSlot, children, sessionId }: HeroShellProps) {
+   const [hovering, setHovering] = useState(false)
+   return (
+     <div className={css.root}>
+@@ -151,7 +153,7 @@
+           </span>
+           <span className={css.titleGroup}>
+             {/* Own element: keeps the headline text addressable apart from the badge. */}
+-            <span>{t('hero.headline')}</span>
++            {renderSlot('conversation.hero.headline', { sessionId }, { fallback: <span>{t('hero.headline')}</span> })}
+           </span>
+         </div>
+         <div className={css.body}>
+--- a/packages/client/ui-conversation/tests/skeleton.client.spec.tsx
++++ b/packages/client/ui-conversation/tests/skeleton.client.spec.tsx
+@@ -282,6 +282,7 @@
+         />
+       )
+     }
++    if (key === 'conversation.hero.headline') return opts?.fallback ?? null
+     return <div data-testid={`view-${opts?.only ?? key}`} />
+   }) as ConversationRootProps['renderSlot']
+   const renderSlotChain = ((_key, _owner, opts) => (
+@@ -324,12 +325,13 @@
+ }
+ 
+ describe('Hero chrome', () => {
+-  it('renders the English preview badge through the hero locale seat', () => {
+-    const renderSlot = vi.fn<HeroShellProps['renderSlot']>(() => null)
++  it('renders the locale headline fallback through the declared deployment slot', () => {
++    const renderSlot = vi.fn<HeroShellProps['renderSlot']>((_name, _owner, options) => options?.fallback ?? null)
+     const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} />)
+     expect(view.getByText('Into the Unknown')).toBeTruthy()
+-    expect(view.getByText('Preview')).toBeTruthy()
+-    expect(renderSlot).toHaveBeenCalledOnce()
++    expect(view.queryByText('Preview')).toBeNull()
++    expect(renderSlot).toHaveBeenCalledTimes(2)
++    expect(renderSlot.mock.calls[1]?.[0]).toBe('conversation.hero.headline')
+     expect(renderSlot.mock.calls[0]?.[0]).toBe('conversation.hero.brand.mark')
+     const brandMarkOwner = renderSlot.mock.calls[0]?.[1]
+     if (brandMarkOwner === undefined || !('size' in brandMarkOwner) || !('className' in brandMarkOwner)) {
+@@ -475,7 +477,7 @@
+     expect(host).not.toBeNull()
+     expect(header?.getAttribute('aria-hidden')).toBe('true')
+     expect(b.view.getByText('探索未至之境')).toBeTruthy()
+-    expect(b.view.getByText('预览版')).toBeTruthy()
++    expect(b.view.queryByText('预览版')).toBeNull()
+     expect(b.view.queryByTestId('view-chat')).toBeNull()
+     // The same machine-backed textarea is live in the hero, and the
+     // persistence mirror stays bound (ConversationSession mounts chrome-hidden
+--- a/packages/client/ui-conversation/README.zh.md
++++ b/packages/client/ui-conversation/README.zh.md
+@@ -135,3 +135,7 @@
+ </details>
+ 
+ **运行时不变式：** 不发布伴生入口。Conversation Definition、target builder 与 View 已由其所属注册表和 Slot ledger 校验。
++
++## 欢迎标题扩展
++
++`conversation.hero.headline` 是主对话声明的根级单占位。占用方接收当前可选 SessionId，无消息/账号内容；未占用时保留原 locale 欢迎标题。欢迎区按会话身份重挂载，常驻输入框与工作区选择不受影响。
+--- /dev/null
++++ b/.agents/notes/2026-09-30-product-welcome-headline-slot.md
+@@ -0,0 +1,9 @@
++# 产品欢迎标题占位
++
++需求：Lyapunov替换空会话欢迎标题为已核短句，同时保留原生输入框、工作区与会话功能。
++
++现有品牌mark仅拥有图标，locale标题不可注入组件。新增根级单占位conversation.hero.headline，owner仅带可选SessionId；无占用方时回原locale文本。产品通过既有slots.inject/register填入，不导出跨包组件，不读取或改写Session内容。
++
++HeroShell按当前会话身份独立重挂载；Composer树与textarea保持常驻。产品每个apply拥有短句选择store，同欢迎键复用、下一新键排除上一句，不启动网络。
++
++验证：独占SDK类型/浏览器bundle，原生Hero fallback用例，产品原图字节/稳定短句/桌面身份和隔离深浅宽窄截图。正式发行Host与原生应用栏由主控签收，不用静态画面替代。

@@ -1,0 +1,11 @@
+# 中央服务状态与原请求读回
+
+PeiriSearchProvider.available只读当前认证owner已确认的version1 /me缓存，初始/旧schema/身份切换均为false。显式refreshReadiness只GET中央/me；正式web_search调用前刷新一次，未知配置不自动换词循环，不需要用户供应商key。
+
+服务搜索能力保provider、protocol、reason、pricing与sourceCapability。OpenAI协议的points为预留上限，settlement:actual_usage按实际usage结算；source_unverified或缺少有效source回执不可ready。配置就绪与实际供应商结果不是同一事实。
+
+搜索意图复用原生callId+query index，直接调用同一request对象也保同一Idempotency-Key。不同输入意图不按query全局缓存。未知传输、usage或费用保原ID；409身份冲突不新预留，不自动重搜。服务错误只保存公开diagnostic，非法枚举不coerce，URL/凭据/供应商正文不进入公开诊断。
+
+原生Command central_service_status只在当前正式认证closure执行GET。action为me、quote、lookup；quote只用于四个已有generation产品，lookup的domain为generation（默认）、model或search，必须给原requestId。返回白名单身份布尔、路径模板、HTTP/publicCode、产品报价或原operationStatus/diagnostic；不返回token、accountId、route对象、usage、账本或charged/reserved数。reservationCreated:false仅说明此读口不执行预留/submit，不推断原请求费用。旧生成规范404/报价与恢复门保持。
+
+游客/本地模式在网络前拒绝。读口每次15秒有界并遵循caller signal；不会替用户提交生成、模型或搜索。生产SSO与同账号请求读回由独立包QA负责，本地测试使用真实localhost HTTP。
