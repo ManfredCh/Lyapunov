@@ -11,6 +11,12 @@ import type {SceneWorldState} from "./scene-world-lifecycle.ts"
 import type {Translate} from "./entity-editor.tsx"
 import {workbenchAPI} from "./workbench-api.ts"
 
+/** 出口只消费Viewer-owned mode；原生读回或清单刷新不决定用户能否返回主视图。 */
+export function CameraReturnControl({mode,returnView,tr}:{mode?:'free'|'pilot'|'camera-edit';returnView:()=>void;tr:Translate}){
+ if(mode!=='pilot')return null
+ return <div className="lya-row"><button type="button" aria-label={tr('返回主视图','Return to main view')} onClick={returnView}>{tr('返回主视图','Return to main view')}</button></div>
+}
+
 /** 现有 camera_list 的当前作用域投影，两个相机面板共享；不会创建或保存第二份相机。 */
 export function useNativeCameraList({api,scene,world,active}:{api:ReturnType<typeof workbenchAPI>;scene?:SceneSnapshot;world?:WorldHandle;active:boolean}){
  const identity:CameraWorldIdentity={sceneId:scene?.sceneId,sceneRevision:scene?.revision,worldId:world?.worldId,worldGeneration:world?.worldGeneration}

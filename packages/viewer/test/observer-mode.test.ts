@@ -8,6 +8,10 @@ import { frustumFromReceipt, type FrustumSpec } from '../src/camera-frustum.ts'
 import { composeViewerCameraComponent, normalizeIntrinsics, quaternionAngleDeg } from '../src/camera-view.ts'
 import type { Frame, SceneSnapshot, WorldHandle } from '../../lyapunov-contracts/src/types.ts'
 import { enterSavedCameraView, settleSceneCameraLoad } from '../../lyapunov-shell/src/camera-navigation-actions.ts'
+import { applyCameraNavigation } from '../../lyapunov-shell/src/camera-navigation-actions.ts'
+import { CameraReturnControl } from '../../lyapunov-shell/src/scene-camera-panel.tsx'
+import { projectSceneCameraRigs } from '../src/scene-camera-rigs.ts'
+import { createRequire } from 'node:module'
 
 // 真Viewer原型、真Three/OrbitControls；只替换WebGL画布与TransformControls事件表面。
 // 不量浏览器像素、原生仿真或GUI手感，避免把本地行为证明当成最终包验收。
@@ -152,12 +156,44 @@ describe('A08统一观察模式与全部出口',()=>{
     for(let i=0;i<12;i++)viewer.renderFrame()
     const after=viewer.cameraView();expect(after.position).toEqual(before.position);expect(quaternionAngleDeg(after.quaternion,poseQuaternion)).toBeLessThan(1e-5);expect(after.intrinsics).toEqual(before.intrinsics);expect(Math.abs(after.rollDeg)).toBeCloseTo(90)
   })
-  test('订阅读同一稳定快照，只在模式或dirty变化时通知，取消订阅生效',()=>{
+  test('订阅读同一稳定快照，只在模式或dirty变化时通知，取消订阅生效',async()=>{
     const {viewer}=harness();viewer.setCameraRigs([spec()]);let updates=0
     const initial=viewer.observerState(),unsubscribe=viewer.subscribeObserverState(()=>updates++)
     expect(viewer.observerState()).toBe(initial);viewer.setCameraRigs([spec()]);expect(updates).toBe(0)
     viewer.pilotCameraRig('camera-a');expect(updates).toBe(1);viewer.setCameraRigs([spec('camera-a',[4,5,6])]);expect(updates).toBe(1)
     viewer.returnFromCameraRig();expect(updates).toBe(2);unsubscribe();viewer.pilotCameraRig('camera-a');expect(updates).toBe(2)
+    // 冷包反例：同key的原生Frame优先于保存元数据，真正订阅/渲染的侧栏仍必须给pilot出口。
+    const {viewer:live}=harness(),main=live.getViewState()
+    live.applyCameraView({position:[1,2,3],quaternion:poseQuaternion,intrinsics:K,near:.07,far:140});const saved=live.getViewState();live.setViewState(main,{focus:false})
+    live.snapshot=scene();live.snapshot.entities=[{entityId:'views',name:'保存机位',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{viewerCamera:composeViewerCameraComponent([{name:'View 1',savedAt:'2026-10-02T00:00:00Z',state:saved}])}}]
+    live.setWorld(world());const native={cameraName:'views/View 1',worldFromCamera:{positionM:[1,2,3] as [number,number,number],quaternionXyzw:poseQuaternion},intrinsics:K,nearM:.07,farM:140,available:true as const}
+    const next={...frame(10),cameras:[{...native,frameId:'world-a:7:10',stepIndex:10,generation:7,sceneRevision:3}]};live.pushFrame(next);live.renderFrame()
+    let projected=projectSceneCameraRigs(live.snapshot,live.world,live.displayedFrame)
+    expect(projected.find(row=>row.key==='views/View 1')?.source).toBe('engine')
+    const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<aside id="camera-panel"></aside>',{url:'http://camera-exit.fixture.invalid'})
+    const previous=new Map<string,PropertyDescriptor|undefined>()
+    for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
+    const React=await import('react'),{createRoot}=await import('react-dom/client'),{act,Simulate}=await import('react-dom/test-utils'),host=document.getElementById('camera-panel')!,root=createRoot(host)
+    const exit=()=>applyCameraNavigation({action:'exitCameraView'},{clientId:'fixture',ownsSurface:()=>true,viewerVisible:()=>true,scene:()=>live.snapshot,viewer:()=>live,ui:{showCentre(){},openTool(){throw Error('返回不应打开其它面板')}},selectEntity(){throw Error('返回不应切换机器人')}})
+    function Panel({owner}:{owner?:typeof live}){
+      const subscribe=React.useCallback((listener:()=>void)=>owner?.subscribeObserverState(listener)??(()=>{}),[owner]),snapshot=React.useCallback(()=>owner?.observerState(),[owner])
+      const observer=React.useSyncExternalStore(subscribe,snapshot,()=>undefined),props={mode:observer?.mode,cameraId:observer?.cameraId,cameraSpecs:projected,returnView:exit,tr:(cn:string)=>cn}
+      return React.createElement(CameraReturnControl,props)
+    }
+    const draw=(owner:typeof live|undefined=live)=>root.render(React.createElement(Panel,{owner})),button=()=>host.querySelector<HTMLButtonElement>('button[aria-label="返回主视图"]')
+    try{
+      await act(async()=>draw());expect(button()).toBeNull()
+      for(const rows of [projected,[],[{...projected[0]!,key:'wrong-key',source:'scene' as const}]]){
+        projected=rows;await act(async()=>{draw();enterSavedCameraView(live,live.snapshot,'View 1')})
+        expect(live.observerState().mode).toBe('pilot');expect(button()).not.toBeNull();expect(button()!.disabled).toBe(false)
+        act(()=>Simulate.click(button()!));expect(live.observerState().mode).toBe('free');expectSameView(live.getViewState(),main);expect(button()).toBeNull()
+      }
+      await act(async()=>{enterSavedCameraView(live,live.snapshot,'View 1');live.setWorld({...world(),worldGeneration:8})});expect(button()).toBeNull();expectSameView(live.getViewState(),main)
+      const synced={...frame(11),generation:8,frameId:'world-a:8:11',cameras:[{...native,frameId:'world-a:8:11',stepIndex:11,generation:8,sceneRevision:3}]}
+      await act(async()=>{live.pushFrame(synced);live.renderFrame();enterSavedCameraView(live,live.snapshot,'View 1')});expect(button()).not.toBeNull()
+      await act(async()=>{live.snapshot={...scene(),sceneId:'other-scene'};live.setCameraRigs([])});expect(live.observerState().mode).toBe('free');expect(button()).toBeNull()
+      await act(async()=>root.render(React.createElement(Panel,{})));expect(button()).toBeNull();expect(live.observerListeners?.size??0).toBe(0)
+    }finally{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete (globalThis as any)[key]}}
   })
 })
 

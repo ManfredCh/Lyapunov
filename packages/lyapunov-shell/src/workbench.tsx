@@ -44,7 +44,7 @@ import type {RobotSetBaseInput,RobotSetTcpInput} from "../../lyapunov-contracts/
 import {FlightControlPanel} from "./flight-control-panel.tsx"
 import {RecordingPanel} from "./recording-panel.tsx"
 import {CapturePanel,cameraRigSpecs} from "./capture-panel.tsx"
-import {SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
+import {CameraReturnControl,SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
 import {AnnotationPanel,type AnnotatedCapture} from "./annotation-panel.tsx"
 import {annotationPromptText,annotationRows,createAnnotation,readAnnotations,writeAnnotations} from "./annotation-store.ts"
 import {ToolRail} from "./tool-rail.tsx"
@@ -1797,7 +1797,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    {cameraNames.length
     ?<div className="lya-row">{cameraNames.map(name=><span className="lya-row" key={name}><button aria-label={tr(`进入保存视角 ${name}`,`Enter saved view ${name}`)} disabled={replayActive||!viewerVisible} onClick={()=>restoreCameraView(name)}>{name}</button><button aria-label={tr(`删除相机 ${name}`,`Delete camera ${name}`)} onClick={()=>deleteCameraView(name)}>×</button></span>)}</div>
     :<p className="lya-help">{tr("在这个场景里保存几个机位：点名字进入已保存视角，再点返回主视图回到进入前的画面。滚转、视场和内参随机位保存。","Save camera views per scene: click a name to enter a saved view, then return to the main view to restore the previous camera. Roll, field of view and intrinsics stay with each view.")}</p>}
-   {observerState?.mode==='pilot'&&cameraSpecs.some(spec=>spec.key===observerState.cameraId&&spec.source==='named-view')&&<div className="lya-row"><span role="status">{tr("正在查看已保存视角","Viewing saved view")}</span><button aria-label={tr("从保存视角返回主视图","Return to main view from saved view")} disabled={!viewerVisible} onClick={()=>exitCameraView()}>{tr("返回主视图","Return to main view")}</button></div>}
+   <CameraReturnControl mode={observerState?.mode} tr={tr} returnView={()=>exitCameraView()}/>
   </fieldset>
   <fieldset className="lya-property-editor"><legend>{tr("显示","Display")}</legend>
    <label className="lya-field-label">{tr("点云画质","Point cloud quality")}<select aria-label={tr("点云画质","Point cloud quality")} value={display.splatQuality??'auto'} onChange={event=>setDisplay(old=>({...old,splatQuality:event.target.value as 'auto'|'fast'|'balanced'|'quality'}))}><option value="auto">{tr("自动","Auto")}</option><option value="fast">{tr("流畅","Fast")}</option><option value="balanced">{tr("均衡","Balanced")}</option><option value="quality">{tr("高画质","High quality")}</option></select></label>
