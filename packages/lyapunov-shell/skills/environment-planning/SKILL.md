@@ -1,6 +1,6 @@
 ---
 name: environment-planning
-description: Planning-stage contract for environment tasks. Turn photo reconstruction, CAD rebuilding, text-driven creation, existing-scene edits, and mixed inputs into a plan proportionate to complexity, covering goals and unknowns, methods, dependencies, budget, and acceptance. Use native plan mode and implementation Todo; simple operations do not require a complete plan. Continuations retain the current plan and jobId, plan-only requests do not execute production, and stopping does not wait for planning. Use for photo reconstruction, creating or substantially rebuilding an environment, continuing an environment task, proposal-only requests, or instructions to hold off on execution.
+description: "Plan environment tasks from photos, CAD, text, existing scenes, or mixed inputs. Use for reconstruction, substantial scene creation or restructuring, continuations, plan-only proposals, or requests to defer execution. Cover goals, unknowns, methods, dependencies, budget, and acceptance with detail proportionate to complexity; simple operations do not require a full plan."
 ---
 
 # Environment task planning

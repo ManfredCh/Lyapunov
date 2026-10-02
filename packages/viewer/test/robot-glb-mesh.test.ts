@@ -60,7 +60,8 @@ const sha256 = (path: string): string => createHash("sha256").update(readFileSyn
 
 /** 真机器人文档（仓库内已入库的真件），用来量"既有三种格式不受影响"。 */
 const GO1_MJCF = join(ROOT, "materials", "robots", "unitree_go1", "menagerie", "go1.xml")
-const FORKLIFT_MJCF = join(ROOT, "materials", "robots", "forklift_c", "forklift_c.xml")
+/** 已批准公开的原版 Menagerie Panda 闭包；Apache-2.0，59 OBJ + 8 STL，见原目录 LICENSE。 */
+const PANDA_MJCF = join(ROOT, "materials", "robots", "franka_panda", "franka_emika_panda", "panda.xml")
 /** 真 Go2 URDF（`../dae/*.dae`）：在 `.runtime`（gitignore）里 ⇒ 不在的机器上跳过，不假装跑过。 */
 const GO2_URDF = join(ROOT, ".runtime", "g1-archive", "extract", "resources", "robots", "go2", "urdf", "go2.urdf")
 
@@ -162,11 +163,19 @@ describe("既有三种格式（真机器人文档 + 真字节）不受影响", (
     expect(visual.warnings).toEqual([])
   })
 
-  test("obj：forklift_c MJCF（真件 + 8 个真 OBJ）", async () => {
+  test("obj：许可 Panda 原版 MJCF（59 个真实 OBJ，保原生 STL 碰撞依赖）", async () => {
+    const parsed = await parseAsset(PANDA_MJCF)
+    const objDependencies = parsed.dependencies.filter(item => item.path.endsWith('.obj'))
+    expect(objDependencies.length).toBe(59)
     const requested: string[] = []
-    const visual = await buildRobotVisual(await robotVisual(FORKLIFT_MJCF) as any, serveRealBytes(requested))
-    expect(requested.length).toBe(8)
-    expect(meshFacts(visual).length).toBe(28)
+    const visual = await buildRobotVisual(await robotVisual(PANDA_MJCF) as any, serveRealBytes(requested))
+    // 原XML的worldbody声明81个geom，其中71个mesh实例（含两指复用），其余为原生图元。
+    expect(requested.length).toBe(71)
+    expect(meshFacts(visual).length).toBe(81)
+    const dependencyUris=parsed.dependencies.map(item=>pathToFileURL(item.path).href)
+    for(const uri of requested)expect(dependencyUris).toContain(uri)
+    expect(requested.filter(uri=>uri.endsWith('.obj')).length).toBeGreaterThan(0)
+    expect(meshFacts(visual).every(facts=>facts.positions>0)).toBe(true)
     expect(loadFailures(visual)).toEqual([])
     expect(visual.warnings).toEqual([])
   })

@@ -1,6 +1,6 @@
 ---
 name: benchmark-evaluation
-description: Contract for official evaluation environments: preparing, cataloging, loading, stepping, judging official success, and recording LIBERO and Gymnasium benchmarks. Use for running LIBERO, loading a benchmark task, or evaluating a policy. Available only in the benchmark workbench with engine=benchmark. Scene and action semantics are covered by scene-construction / action-execution.
+description: "Contract for official evaluation environments: preparing, cataloging, loading, stepping, judging official success, and recording LIBERO and Gymnasium benchmarks. Use for running LIBERO, loading a benchmark task, or evaluating a policy. Available only in the benchmark workbench with engine=benchmark. Scene and action semantics are covered by scene-construction / action-execution."
 ---
 
 # Official evaluation environment contract

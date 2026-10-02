@@ -54,9 +54,12 @@
  *      从那一层传类别的）。本文件在 `script/**` 下会被类型检查，因此用显式交叉类型标注 category，
  *      调用路径与落点判定完全不变，也不改产品源码。
  */
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, rmSync, statSync } from "node:fs"
+import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { extname, join, relative, resolve, sep } from "node:path"
+import { dirname, extname, join, relative, resolve, sep } from "node:path"
+import { gzipSync } from "node:zlib"
+import { createHash } from "node:crypto"
+import { parseAsset } from "../packages/scene-kit/src/formats.ts"
 
 // 唯一的产品源码依赖：验收直接用产品实现真建库，不复制产品逻辑。
 import { SceneOperations } from "../packages/scene-kit/src/operations.ts"
@@ -243,7 +246,36 @@ export function verifyRuntimeLayout(productRoot: string, runRoot: string, requir
 }
 
 /** 原生路径解析 + 映射 + 场景写入全部在唯一临时树内，绝不认领真实产品 workspace。 */
-export async function createCiLayoutFixture() {
+/** 保原始引用路径复制真实依赖闭包；不把含assets引用的原XML变成缺依赖的单文件。 */
+async function copyFixtureAsset(source: string, target: string): Promise<void> {
+  const parsed = await parseAsset(source)
+  for (const dependency of parsed.dependencies) {
+    const path = relative(dirname(source), dependency.path)
+    if (path.startsWith("..") || path.startsWith(sep)) throw new Error(`CI 夹具依赖越出源目录：${dependency.path}`)
+    const destination = dependency.path === source ? target : join(dirname(target), path)
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(dependency.path, destination)
+  }
+}
+
+/** 原创128个道路高斯+32个路沿高斯，完整SPZ v2各数据块；不是只有位置头的占位件。 */
+function ciStreetSpz(): { bytes: Buffer; minY: number } {
+  const points: Array<[number, number, number]> = []
+  for (let x = 0; x < 16; x++) for (let z = 0; z < 8; z++) points.push([x * .4 - 3, -2.5 + x * .002, z * .4 - 1.4])
+  for (let x = 0; x < 16; x++) for (const z of [-1.8, 1.8]) points.push([x * .4 - 3, -2.3 + x * .002, z])
+  const count = points.length, data = Buffer.alloc(16 + count * 19)
+  data.writeUInt32LE(0x5053474e, 0); data.writeUInt32LE(2, 4); data.writeUInt32LE(count, 8); data[13] = 12
+  points.forEach((point, index) => {
+    point.forEach((value, axis) => data.writeUIntLE(Math.round(value * 4096) & 0xffffff, 16 + index * 9 + axis * 3, 3))
+    data[16 + count * 9 + index] = 240 // opacity
+    data.fill(index < 128 ? 104 : 160, 16 + count * 10 + index * 3, 16 + count * 10 + index * 3 + 3) // RGB DC
+    data.set([66, 44, 66], 16 + count * 13 + index * 3) // finite anisotropic scales
+    data.set([128, 128, 128], 16 + count * 16 + index * 3) // identity quaternion xyz, positive w
+  })
+  return { bytes: gzipSync(data), minY: Math.min(...points.map(point => point[1])) }
+}
+
+export async function createCiLayoutFixture(sourceRoot = resolve(import.meta.dirname, "..")) {
   const directory = mkdtempSync(join(tmpdir(), "lyapunov-asset-layout-ci-"))
   try {
     const productRoot = join(directory, "product")
@@ -253,17 +285,32 @@ export async function createCiLayoutFixture() {
     await ensureWorkspaceMapping({ productRoot, workspaceRoot: paths.workspaceRoot, paths })
     const operations = new SceneOperations(paths.catalogRoot, { productRoot, layout: sceneLayout(paths), defaultStorage: "materialized" })
     await operations.create({ sceneId: "asset-layout-ci" })
-    return { directory, productRoot, paths }
+    // 只复制批准公开的真实模型，材料库是本次CI原生夹具自己的清单，不读已有workspace库。
+    const robot = join(productRoot, "materials/robots/ci-arm/arm.xml")
+    const object = join(productRoot, "materials/assets/objects/ci-object.glb")
+    const world = join(productRoot, "materials/worlds/background/ci-road.spz")
+    await copyFixtureAsset(join(sourceRoot, "packages/sim-mujoco/fixtures/arm.xml"), robot)
+    await copyFixtureAsset(join(sourceRoot, "materials/mcp-env/assets/kenney-props/visual/prop_13_construction-cone.glb"), object)
+    const road = ciStreetSpz()
+    mkdirSync(dirname(world), { recursive: true }); writeFileSync(world, road.bytes)
+    const sources = { robot, object, world }
+    const resources = Object.entries(sources).map(([kind, path]) => ({ kind, path: relative(join(productRoot, "materials"), path).split(sep).join("/"), sha256: createHash("sha256").update(readFileSync(path)).digest("hex"), license: kind === "object" ? "CC0-1.0" : "original-ci-fixture", bytesOrigin: kind === "world" ? "generated complete SPZ v2 road/curb Gaussian model; not the manual street asset" : "unchanged approved public source bytes" }))
+    writeFileSync(join(productRoot, "materials/library.json"), JSON.stringify({ schema_version: "2.0", scope: "ci-fixture", resources }, null, 2))
+    // 期望取作者原始几何坐标，不取受测decoder；真正parseAsset/assetBounds须独立读回Y→Z。
+    return { directory, productRoot, paths, sources, splatCheck: { path: world, expectedLocalMinZ: road.minY } }
   } catch (error) { rmSync(directory, { recursive: true, force: true }); throw error }
 }
 
-function runStaticChecks(productRoot: string, runRoot: string, runtimeProductRoot = productRoot, requireRunRoot = false): void {
+export function verifyMaterialLibrary(productRoot: string, ciFixture = false): Result[] {
+  const found: Result[] = []
+  const check = (name: string, ok: boolean, evidence: string, failure = evidence) => found.push({ name, status: ok ? "PASS" : "FAIL", evidence: ok ? evidence : failure })
+  const skip = (name: string, evidence: string) => found.push({ name, status: ciFixture ? "FAIL" : "SKIP", evidence })
+  const fail = (name: string, evidence: string) => found.push({ name, status: "FAIL", evidence })
   const short = (path: string): string => {
     const rel = relative(productRoot, path)
     return rel && !rel.startsWith("..") ? rel.split(sep).join("/") : path
   }
 
-  section("L0 策展库分域")
   const libraryPath = join(productRoot, "materials/library.json")
   check("materials/library.json 存在", isFile(libraryPath), short(libraryPath), `缺文件 ${libraryPath}`)
   for (const directory of ["materials/robots", "materials/worlds", "materials/assets/objects"]) {
@@ -275,7 +322,7 @@ function runStaticChecks(productRoot: string, runRoot: string, runtimeProductRoo
   if (!isFile(libraryPath)) skip("library 条目全部可解析且原件存在", `缺 ${libraryPath}`)
   else {
     try {
-      const parsed = JSON.parse(readFileSync(libraryPath, "utf8")) as { resources?: unknown }
+      const parsed = JSON.parse(readFileSync(libraryPath, "utf8")) as { resources?: unknown; scope?: unknown }
       const materials = join(productRoot, "materials")
       const entries = Array.isArray(parsed.resources) ? parsed.resources as { path?: unknown }[] : []
       const missing: string[] = []
@@ -286,13 +333,19 @@ function runStaticChecks(productRoot: string, runRoot: string, runtimeProductRoo
         if (!declared || !(absolute === materials || absolute.startsWith(materials + sep))) { outside.push(declared || "(空)"); continue }
         if (!existsSync(absolute)) missing.push(declared)
       }
-      check("library 条目全部可解析且原件存在", entries.length > 0 && missing.length === 0 && outside.length === 0,
+      check("library 条目全部可解析且原件存在", entries.length > 0 && missing.length === 0 && outside.length === 0 && (!ciFixture || parsed.scope === "ci-fixture"),
         `条目 ${entries.length}，缺失 0（path 均相对 materials/ 且原件存在）`,
-        `条目 ${entries.length}，缺失 ${missing.length}${missing.length ? `（例：${missing.slice(0, 3).join("、")}）` : ""}${outside.length ? `；越界路径 ${outside.length}：${outside.slice(0, 3).join("、")}` : ""}`)
+        `条目 ${entries.length}，缺失 ${missing.length}${missing.length ? `（例：${missing.slice(0, 3).join("、")}）` : ""}${outside.length ? `；越界路径 ${outside.length}：${outside.slice(0, 3).join("、")}` : ""}${ciFixture && parsed.scope !== "ci-fixture" ? `；CI材料scope必须为ci-fixture，实际${String(parsed.scope)}` : ""}`)
     } catch (error) {
       fail("library 条目全部可解析且原件存在", `读取/解析 ${short(libraryPath)} 失败：${message(error)}（期望路径 ${libraryPath}）`)
     }
   }
+  return found
+}
+
+function runStaticChecks(productRoot: string, runRoot: string, runtimeProductRoot = productRoot, requireRunRoot = false): void {
+  section("L0 策展库分域")
+  for (const result of verifyMaterialLibrary(requireRunRoot ? runtimeProductRoot : productRoot, requireRunRoot)) emit(result.status, result.name, result.evidence)
 
   section("运行根五域、引用与工作文件夹映射")
   for (const result of verifyRuntimeLayout(runtimeProductRoot, runRoot, requireRunRoot)) {
@@ -351,7 +404,7 @@ function pickFixture(productRoot: string, canonicalRelative: string, searchRelat
   return undefined
 }
 
-async function runIntegrationChecks(productRoot: string, keep: boolean): Promise<void> {
+async function runIntegrationChecks(productRoot: string, keep: boolean, fixtureSources?: { robot: string; object: string; world: string }): Promise<void> {
   section("集成检查（scene-kit 真建库，临时根）")
   const workDirectory = mkdtempSync(join(tmpdir(), "lyapunov-verify-asset-layout-"))
   console.log(`[INFO] 集成临时根：${workDirectory}${keep ? "（--keep 保留）" : "（跑完删除）"}`)
@@ -372,11 +425,12 @@ async function runIntegrationChecks(productRoot: string, keep: boolean): Promise
   const step = async <T>(name: string, run: () => Promise<T>): Promise<T | undefined> => {
     try { return await run() } catch (error) { fail(`集成步骤「${name}」`, message(error)); return undefined }
   }
-  const stage = (targetName: string, source: string | undefined): string | undefined => {
+  const stage = async (targetName: string, source: string | undefined): Promise<string | undefined> => {
     if (!source) return undefined
     try {
       const target = join(staging, targetName)
-      copyFileSync(source, target)
+      if (fixtureSources) await copyFixtureAsset(source, target)
+      else copyFileSync(source, target) // 手工audit保原暂存行为与原件判据。
       return target
     } catch (error) { fail(`集成夹具暂存 ${targetName}`, `${message(error)}（源 ${source}）`); return undefined }
   }
@@ -386,12 +440,12 @@ async function runIntegrationChecks(productRoot: string, keep: boolean): Promise
     mkdirSync(externalDirectory, { recursive: true })
 
     // 夹具都来自产品内置库 materials/：机器人 MJCF、小物件 GLB、环境 SPZ。
-    const robotSource = pickFixture(productRoot, "materials/robots/lyaup-demo-arm/Lyaup演示机械臂.mjcf", "materials/robots", [".mjcf", ".xml"], 4 << 20)
-    const objectSource = pickFixture(productRoot, "materials/assets/objects/obj_0689184dc001623LtClbHUMinc/raw/source.glb", "materials/assets/objects", [".glb"], 64 << 20)
-    const worldSource = pickFixture(productRoot, "materials/worlds/background/industrial-warehouse-forklift-training.spz", "materials/worlds", [".spz"], 64 << 20)
-    const robotFile = stage("robot.mjcf", robotSource)
-    const objectFile = stage("object.glb", objectSource)
-    const worldFile = stage("world.spz", worldSource)
+    const robotSource = fixtureSources?.robot ?? pickFixture(productRoot, "materials/robots/lyaup-demo-arm/Lyaup演示机械臂.mjcf", "materials/robots", [".mjcf", ".xml"], 4 << 20)
+    const objectSource = fixtureSources?.object ?? pickFixture(productRoot, "materials/assets/objects/obj_0689184dc001623LtClbHUMinc/raw/source.glb", "materials/assets/objects", [".glb"], 64 << 20)
+    const worldSource = fixtureSources?.world ?? pickFixture(productRoot, "materials/worlds/background/industrial-warehouse-forklift-training.spz", "materials/worlds", [".spz"], 64 << 20)
+    const robotFile = await stage("robot.mjcf", robotSource)
+    const objectFile = await stage("object.glb", objectSource)
+    const worldFile = await stage("world.spz", worldSource)
 
     // 按产品实际传参建库：layout 五域 + 新导入默认 materialized（script/runtime-patch.ts 的同一组参数）。
     const operations = new SceneOperations(layout.catalog, { productRoot, layout, defaultStorage: "materialized" })
@@ -549,7 +603,7 @@ export function assetGenerationSkillDeclaresAutomaticRouting(skill: string): boo
   return automatic && !extraUiConfirmation
 }
 
-async function runSplatAndRouterChecks(productRoot: string): Promise<void> {
+async function runSplatAndRouterChecks(productRoot: string, fixtureWorld?: { path: string; expectedLocalMinZ: number }): Promise<void> {
   section("泼溅件朝向与落地（用户反馈：上下颠倒/沉到地下）")
   const formats = join(productRoot, "packages/scene-kit/src/formats.ts")
   const splatBranch = readText(formats)
@@ -563,7 +617,7 @@ async function runSplatAndRouterChecks(productRoot: string): Promise<void> {
     /kind==="mesh"\?assetBounds/.test(operations) ? "仍限定 kind===\"mesh\"" : "collisionBounds ?? assetBounds(...)")
 
   // 行为检查：真解码内置街道件，断言换算到实体本地后的底面与抬升量。
-  const fixture = join(productRoot, "materials/worlds/background/clean-outdoor-street-sweeper-test.spz")
+  const fixture = fixtureWorld?.path ?? join(productRoot, "materials/worlds/background/clean-outdoor-street-sweeper-test.spz")
   if (!isFile(fixture)) {
     skip("内置街道件解码包围盒", `${fixture} 不存在`)
   } else {
@@ -573,7 +627,11 @@ async function runSplatAndRouterChecks(productRoot: string): Promise<void> {
       const local = assetBounds(parsed, parsed.source)
       const minZ = local ? Number(local.min[2].toFixed(3)) : NaN
       const lift = local ? Number((-local.min[2]).toFixed(3)) : NaN
-      check("内置街道件解出包围盒且底面/抬升符合实测", Math.abs(minZ + 33.776) < 0.05 && Math.abs(lift - 33.776) < 0.05,
+      if (fixtureWorld) {
+        const expected = fixtureWorld.expectedLocalMinZ
+        check("CI 道路高斯原件解出包围盒及Y到Z抬升", Math.abs(minZ - expected) < 0.05 && Math.abs(lift + expected) < 0.05,
+          `CI 道路几何原坐标Y.min=${expected}；实际SPZ读回localZ.min=${minZ}、lift=${lift}，非手工街道原件`)
+      } else check("内置街道件解出包围盒且底面/抬升符合实测", Math.abs(minZ + 33.776) < 0.05 && Math.abs(lift - 33.776) < 0.05,
         `localZ.min=${minZ}（期望 ≈ −33.776）、lift=${lift}（期望 ≈ 33.776）`)
     } catch (error) {
       fail("内置街道件解码包围盒", message(error))
@@ -595,18 +653,19 @@ async function runSplatAndRouterChecks(productRoot: string): Promise<void> {
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
   if (!isDir(options.productRoot)) throw new Error(`产品根不是目录：${options.productRoot}`)
-  const fixture = options.ci ? await createCiLayoutFixture() : undefined
+  const fixture = options.ci ? await createCiLayoutFixture(options.productRoot) : undefined
   try {
     const { runRoot, how } = fixture
       ? { runRoot: fixture.paths.root, how: "--ci：原生操作建立的临时布局夹具；非已有用户运行状态" }
       : resolveRunRoot(options.rootParent)
     console.log("存储分治验收（worlds/assets/robots/cache/catalog）")
     console.log(`产品根：${options.productRoot}`)
+    if (fixture) console.log(`CI 材料根：${fixture.productRoot}（scope=ci-fixture；源码和构建检查仍取产品根）`)
     console.log(`运行根：${runRoot}（${how}）`)
     console.log("说明：这不是产品运行路径，只是验收；静态检查只读，集成检查在临时根建库后删除。")
     runStaticChecks(options.productRoot, runRoot, fixture?.productRoot, options.ci)
-    await runSplatAndRouterChecks(options.productRoot)
-    await runIntegrationChecks(options.productRoot, options.keep)
+    await runSplatAndRouterChecks(options.productRoot, fixture?.splatCheck)
+    await runIntegrationChecks(fixture?.productRoot ?? options.productRoot, options.keep, fixture?.sources)
     const skipped = results.filter(result => result.status === "SKIP")
     if (options.ci && skipped.length) fail("CI 检查必须全部执行", `${skipped.length} 项未执行：${skipped.map(result => result.name).join("、")}`)
   } finally {

@@ -1,6 +1,6 @@
 ---
 name: scene-construction
-description: Build and modify scenes in the Lyapunov 3D workbench: create/open/save Scenes, obtain environments through Blender, generative reconstruction, environment downloads or the asset library, and place/adjust objects. Use for requests such as build a scene, build a room, download an environment or place a table. Consult environment-planning as needed for complex creation or whole-environment restructuring; simple operations do not require a complete plan.
+description: "Build and modify scenes in the Lyapunov 3D workbench: create/open/save Scenes, obtain environments through Blender, generative reconstruction, environment downloads or the asset library, and place/adjust objects. Use for requests such as build a scene, build a room, download an environment or place a table. Consult environment-planning as needed for complex creation or whole-environment restructuring; simple operations do not require a complete plan."
 ---
 
 # Scene construction workflow

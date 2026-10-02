@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { assetGenerationSkillDeclaresAutomaticRouting, createCiLayoutFixture, verifyRuntimeLayout } from "./verify-asset-layout.ts"
+import { assetGenerationSkillDeclaresAutomaticRouting, createCiLayoutFixture, verifyMaterialLibrary, verifyRuntimeLayout } from "./verify-asset-layout.ts"
+import { gunzipSync } from "node:zlib"
+import { parseAsset } from "../packages/scene-kit/src/formats.ts"
 
 const productRoot = resolve(import.meta.dirname, "..")
 const script = join(productRoot, "script/verify-asset-layout.ts")
@@ -40,7 +42,7 @@ describe("asset layout CI isolation", () => {
   })
 
   test("native path/mapping/scene fixture passes all thirteen runtime checks", async () => {
-    await withFixture(({ productRoot, paths }) => {
+    await withFixture(async ({ productRoot, paths, sources, splatCheck }) => {
       const results = verifyRuntimeLayout(productRoot, paths.root, true)
       expect(results).toHaveLength(13)
       expect(results.filter(result => result.status !== "PASS")).toEqual([])
@@ -48,6 +50,25 @@ describe("asset layout CI isolation", () => {
       expect(snapshot.sceneId).toBe("asset-layout-ci")
       expect(snapshot.revision).toBe(0)
       expect(existsSync(paths.sceneRoot)).toBe(false)
+      expect(verifyMaterialLibrary(productRoot,true).filter(result=>result.status!=="PASS")).toEqual([])
+      expect((await parseAsset(sources.robot)).kind).toBe('robot')
+      expect((await parseAsset(sources.object)).kind).toBe('mesh')
+      const splat=await parseAsset(sources.world)
+      expect(splat.kind).toBe('splat');expect((splat.metadata.aabb as {min:number[]}).min[1]).toBe(splatCheck.expectedLocalMinZ)
+      const spz=gunzipSync(readFileSync(sources.world)),count=spz.readUInt32LE(8)
+      expect(spz.readUInt32LE(0)).toBe(0x5053474e);expect(count).toBe(160)
+      expect(spz.length).toBe(16+count*19) // 完整opacity/RGB/scale/rotation块，而非仅位置占位
+      const libraryPath=join(productRoot,'materials/library.json'),original=readFileSync(libraryPath,'utf8'),library=JSON.parse(original)
+      expect(library.scope).toBe('ci-fixture');expect(library.resources).toHaveLength(3)
+      // CI材料不能认领workspace或builtin来源，正常手工库scope语义仍保留。
+      for(const scope of ['workspace','builtin']){
+        writeFileSync(libraryPath,JSON.stringify({...library,scope}))
+        expect(verifyMaterialLibrary(productRoot,true).filter(result=>result.status==='FAIL').map(result=>result.name)).toEqual(['library 条目全部可解析且原件存在'])
+        expect(verifyMaterialLibrary(productRoot).filter(result=>result.status!=='PASS')).toEqual([])
+      }
+      writeFileSync(libraryPath,original)
+      rmSync(sources.object)
+      expect(verifyMaterialLibrary(productRoot,true).filter(result=>result.status==='FAIL').map(result=>result.name)).toEqual(['library 条目全部可解析且原件存在'])
     })
   })
 
