@@ -5,13 +5,11 @@
 | 应用发布名称 | 0.1.0α · Linux x64 |
 | 技术版本 / releaseId | `0.1.0-alpha.1` |
 | 文档日期 | 2026-10-03 |
-| 作者团队 | Lyapunov contributors |
-| 版权 | © 2026 Lyapunov contributors |
+| 作者团队 | Vorynel Co., Ltd. |
+| 版权 | © 2026 Vorynel Co., Ltd. |
 | 项目许可 | Lyapunov Modified MIT License；根 LICENSE 为项目自定义全文，根 NOTICE 保留原 OpenCode MIT 声明。 |
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
-
-项目自定义许可保留 MIT 通用授权条款；使用本软件或衍生作品的商业产品或服务，月活用户达到 10,000，或月营业收入达到人民币 1,000,000 元（或其他货币等值），任一条件满足时须在界面显著展示“Lyapunov”。没有界面的产品或服务，可在其官方文档或官方网站显著署名。fork、改名、修改、嵌入其他框架或用于后端服务，都不解除仍使用本软件或衍生作品时的义务；门槛针对该产品或服务，不扩及不相关产品或企业全部收入，不涵盖未使用本软件／衍生作品的完全独立重写或单纯使用软件产出。该条件只要求署名，不是自动收费。许可文本模板来源于 MoonshotAI/Kimi-K2 的 LICENSE，名称、版权人与品牌展示名按本项目改写，完整条件以根 LICENSE 为准。各独立包、DSH、Node.js、MuJoCo／Python 运行环境、机器人资产、模型权重与外部工具保留原许可与随附声明。版本下载身份继续以官网 manifest 为准。
 
 本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.1`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.1.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
@@ -23,7 +21,7 @@
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-安装完成后，由使用者单独启动：
+安装成功并报告就绪后，由用户单独启动：
 
 ```sh
 "$HOME/.local/bin/lyapunov"
@@ -31,7 +29,7 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 需要 Linux `x86_64`、glibc、图形会话、Electron 所需共享库和可用的渲染后端。安装脚本使用系统的 `curl`、`sha256sum`、`tar`、`mktemp`、`getconf` 及常规 shell 工具；应用自带 Node.js 和 Electron，默认 MuJoCo 伴随包自带 Python。无需预先安装系统 Conda、Python、Bun 或配置模型 Key。版本目录使用随包 Node、固定 DSH 及其依赖，MuJoCo 只使用该版本的独立 `.runtime/sim-python`；默认安装不改系统 Python、不依赖 PATH 中的 dsh／python，也不复用宿主开发 venv。用户会话、凭据和数据继续使用产品的稳定数据根。运行时目录与依赖的私有归属、Host 的权限与 bwrap、Chromium 的桌面沙盒各有自己的检查，目录隔离本身不代替内核沙盒验证。
 
-最低 glibc 由主包与默认 MuJoCo 伴随包分别声明，默认安装必须同时满足两者。CPU 可执行 MuJoCo 物理；相机成像和大场景仍需要相应图形能力与内存。当前只提供 Linux x64 路径，Intel、AMD、NVIDIA 与各发行版的实际运行结果分别验收，不从某一台机器推断全硬件覆盖；本次不提供 macOS／Windows 安装包。
+macOS 版本将尽快提供；Windows 用户建议通过 WSL2 + WSLg 安装和使用 Linux 包。
 
 默认安装落点：
 
