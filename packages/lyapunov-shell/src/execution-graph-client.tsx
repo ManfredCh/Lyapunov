@@ -6,7 +6,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {ExecutionGraph,GraphNode} from './execution-graph.ts'
 import type {ModelProgress} from './execution-graph-host.ts'
 
-const KIND='lyapunov.graph',ID='@lyapunov/shell/execution-graph'
+export const EXECUTION_GRAPH_KIND='lyapunov.graph'
+const ID='@lyapunov/shell/execution-graph'
 const zh={title:'执行图',refresh:'刷新状态',hint:'图从原生日志与当前任务状态重建，关闭此页不改变执行。',loading:'正在读回状态…',error:'无法读回执行状态',model:'模型运输',jobs:'后台任务',contexts:'当前有效输入',empty:'当前没有已提交执行事件。',unknown:'未知，先读原任务结果',accepted:'已受理',images:'图像内容块',owner:'来源',bytes:'UTF-8字节',hash:'内容hash',basis:'模型适配前的原生请求；不是线上body/token或计费值',stop:'停止结果',physical:'物理停止由Sim另行确认',running:'运行',success:'成功回执',failed:'失败',cancelled:'已取消',waiting:'等待',unknownStatus:'未知',phase:'阶段',argumentChars:'工具参数字符',silent:'距语义进展毫秒',cropped:'图已裁剪，原生日志保留。',handoff:'恢复已交接，等待新事实或用户继续。',retries:'重试',tools:'工具目录',effects:'尚未确认的副作用',effect:'结果与费用影响',requestId:'原请求身份'}
 const en:typeof zh={title:'Execution graph',refresh:'Refresh state',hint:'Rebuilt from native events and current job state. Closing this page does not change execution.',loading:'Reading state…',error:'Execution state unavailable',model:'Model transport',jobs:'Background jobs',contexts:'Effective input',empty:'No committed execution events.',unknown:'Unknown; read the original operation first',accepted:'Accepted',images:'Image blocks',owner:'Owner',bytes:'UTF-8 bytes',hash:'Content hash',basis:'Native request before adapter conversion; not wire bytes, tokens or billing',stop:'Stop state',physical:'Physical stop requires Sim confirmation',running:'Running',success:'Success receipt',failed:'Failed',cancelled:'Cancelled',waiting:'Waiting',unknownStatus:'Unknown',phase:'Phase',argumentChars:'Tool argument characters',silent:'Milliseconds since semantic progress',cropped:'Graph cropped; native history retained.',handoff:'Recovery handed off; waiting for new facts or user input.',retries:'Retries',tools:'Tools',effects:'Unknown effects',effect:'Outcome and billing effect',requestId:'Original request ID'}
 declare module '@deepseek-ai/dsh-client-ui-slots' {interface LocaleNamespaceMap {lyapunovGraph:keyof typeof zh}}
@@ -41,13 +42,10 @@ function GraphPane({sessionId,t,useTabInfo}:Props){
  },[sessionId,tab.visible,revision])
  return <div><button disabled={loading} onClick={refresh}>{t('refresh')}</button>{loading?<p>{t('loading')}</p>:error?<p role='alert'>{t('error')}</p>:value?<ExecutionGraphView value={value} t={t}/>:null}</div>
 }
-function GraphAction({t,open}:{t:(key:keyof typeof zh)=>string;open:()=>void}){return <button onClick={open}>{t('title')}</button>}
-
 /** @param ctx - 原生sidebarRight和locale owner。 */
 export function applyExecutionGraphClient(ctx:Context){
  ctx.effect(()=>ctx.locale.register('lyapunovGraph',{zh,en}))
  const t=ctx.locale.bind('lyapunovGraph')
- ctx.effect(()=>ctx.sidebarRightTabs.register({id:ID,kind:KIND,priority:'builtin',title:()=>t('title')}))
+ ctx.effect(()=>ctx.sidebarRightTabs.register({id:ID,kind:EXECUTION_GRAPH_KIND,priority:'builtin',title:()=>t('title')}))
  ctx.effect(()=>ctx.slots.inject('sidebar.right.pane.tab',()=>ctx.slots.register({name:'sidebar.right.pane.tab',key:ID,locale:'lyapunovGraph'},GraphPane)))
- ctx.effect(()=>ctx.slots.inject('sidebar.right.surface.actions',()=>ctx.slots.register({name:'sidebar.right.surface.actions',id:ID,order:40,locale:'lyapunovGraph',inject:()=>({open:()=>ctx.sidebarRight.openTab(KIND)})},GraphAction)))
 }

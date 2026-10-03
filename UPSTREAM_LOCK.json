@@ -434,7 +434,7 @@
   },
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity.json",
-    "sha256": "442741c8ab75fab9335071aa34de96809e17308eaf75749c7c2f663da516e969",
+    "sha256": "7db656f98483521a97e648eb0162f69b0e9633bf353047bb4f8f85c628361266",
     "baseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
     "scope": "固定7c全部tracked未覆本体＋已签完整registry合法stage/final；unknown新增源码拒绝，标准ignoreddeps/cache/build按实际Git约束保留"
   },
@@ -444,5 +444,15 @@
     "patch": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.patch",
     "patchSha256": "e88cd737592a99d1d66e2e65ea6603959419f907d73207eeb6fe50ad85f313d6",
     "scope": "只认旧正式完整post→English两文件字面量；fresh仍消费完整正式patch，未知/混合失败保留"
+  },
+  "desktopDirectoryNavigationPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-files-directory-flow.patch",
+    "sha256": "3c8369e6c2d4b8204afb998c6bc4222139efaf9d28d2e6b247169e4dbcc68b44",
+    "manifest": "packages/lyapunov-shell/patches/dsh-files-directory-flow.patch.json",
+    "manifestSha256": "7cc5f0fa5bd0e28c747f43bb6fa7ef96243bf3e2c591d87dfe31aafae080f33b",
+    "packages": [
+      "@deepseek-ai/dsh-client-ui-directory-picker-browse"
+    ],
+    "scope": "原生目录选择器的 scoped 文件页入口、当前绝对路径与完整祖先导航；浏览不改 Session.cwd 或 Agent/fs/sandbox 权限；确认后由原生工作区与会话导航处理。"
   }
 }

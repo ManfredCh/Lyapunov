@@ -1,0 +1,266 @@
+diff --git a/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.module.css b/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.module.css
+--- a/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.module.css
++++ b/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.module.css
+@@ -420,3 +420,9 @@
+   gap: 8px;
+   margin-top: 8px;
+ }
++.absolutePath {
++  display: block;
++  overflow-wrap: anywhere;
++  color: var(--dsw-alias-label-secondary);
++  font-size: var(--dsh-content-font-size-secondary, 13px);
++}
+diff --git a/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx b/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx
+--- a/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx
++++ b/packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx
+@@ -48,6 +48,10 @@
+ export interface DirectoryBrowserProps {
+   /** Dialog visibility (owner-local; closed unmounts nothing but resets on reopen). */
+   open: boolean
++  /** Optional absolute opening path supplied by a file surface. */
++  initialPath?: string
++  /** Show the filesystem ancestors and the selected absolute path. */
++  fullAncestry?: boolean
+   /**
+    * List one directory level (absent path = the Host home directory); the
+    * signal aborts a superseded scan on the wire. A rejection may carry
+@@ -113,7 +117,8 @@
+  * localized Home crumb; outside it the full ancestry shows, the root labeled
+  * by its own path.
+  */
+-function displayCrumbs(listing: DirectoryListing, homeLabel: string): DirectoryEntry[] {
++function displayCrumbs(listing: DirectoryListing, homeLabel: string, fullAncestry = false): DirectoryEntry[] {
++  if (fullAncestry) return listing.crumbs
+   const homeIndex = listing.crumbs.findIndex(crumb => crumb.path === listing.home)
+   if (homeIndex === -1) return listing.crumbs
+   const tail = listing.crumbs.slice(homeIndex + 1)
+@@ -270,7 +275,7 @@
+  * @param props - owner-controlled browser props.
+  * @returns the dialog element (null while closed, via Modal).
+  */
+-export function DirectoryBrowser({ open, listDirectory, createDirectory, onOpen, onClose, busy, t }: DirectoryBrowserProps) {
++export function DirectoryBrowser({ open, listDirectory, createDirectory, onOpen, onClose, busy, t, initialPath, fullAncestry = false }: DirectoryBrowserProps) {
+   // Miller state: the listed level, the selected row in it, and the selected
+   // folder's own listing (the right column; null while nothing is selected).
+   const [parent, setParent] = useState<DirectoryListing | null>(null)
+@@ -443,7 +448,7 @@
+         settle()
+       }
+       // Arity is label-independent: only the collapsed chain's depth decides.
+-      if (displayCrumbs(target, '').length < 2) { landSingle(); return }
++      if (displayCrumbs(target, '', fullAncestry).length < 2) { landSingle(); return }
+       const parentCrumb = target.crumbs.at(-2)
+       /* v8 ignore next -- narrowing: a two-deep display chain implies a parent crumb (root-to-target inclusive). */
+       if (parentCrumb === undefined) { landSingle(); return }
+@@ -477,7 +482,7 @@
+       setLoading(false)
+       if (options.announce) setError(failureText(reason))
+     })
+-  }, [launchListing, continueScan])
++  }, [launchListing, continueScan, fullAncestry])
+ 
+   /** Commit a submitted path (Enter, a crumb, the initial home listing): the editor closes, failures surface. */
+   const navigate = useCallback((path?: string) => {
+@@ -559,8 +564,8 @@
+     // With no level listed yet (the editor superseded the initial home
+     // listing), plain cancellation would leave a permanently blank picker:
+     // restart the home listing.
+-    if (parent === null) navigate()
+-  }, [supersede, child, parent, navigate])
++    if (parent === null) navigate(initialPath)
++  }, [supersede, child, parent, navigate, initialPath])
+ 
+   /** A right-column pick advances the view one level: child becomes the level. */
+   const advance = useCallback((entry: DirectoryEntry) => {
+@@ -580,7 +585,7 @@
+       setChild(null)
+       setCreatingFolder(false)
+       setShowHidden(false)
+-      navigate()
++      navigate(initialPath)
+       return
+     }
+     supersede()
+@@ -597,7 +602,7 @@
+     // flags armed; retire them so a later render cannot consume them.
+     refocusPick.current = false
+     refocusEditZone.current = false
+-  }, [open, navigate, supersede])
++  }, [open, navigate, supersede, initialPath])
+ 
+   /** The folder a create or Open acts on: the selection, else the listed level. */
+   const targetPath = selected?.path ?? parent?.path ?? null
+@@ -695,7 +700,7 @@
+   const typedPrefix = crumbSource === null || pathDraft === null
+     ? null
+     : readDraft(crumbSource, pathDraft, scanned.current).tail
+-  const crumbs = crumbSource === null ? [] : displayCrumbs(crumbSource, t('browser.home'))
++  const crumbs = crumbSource === null ? [] : displayCrumbs(crumbSource, t('browser.home'), fullAncestry)
+   const crumbTail = crumbs.at(-1)?.path
+   useEffect(() => {
+     const trail = crumbTrailRef.current
+@@ -817,6 +822,7 @@
+       >
+         <div className={css.header}>
+           <h2 className={css.title}>{t('browser.title')}</h2>
++          {fullAncestry && crumbSource !== null && <code className={css.absolutePath}>{crumbSource.path}</code>}
+           <div className={css.crumbBar}>
+             {pathDraft === null
+               ? (
+diff --git a/packages/client/ui-directory-picker-browse/src/client/flow.ts b/packages/client/ui-directory-picker-browse/src/client/flow.ts
+--- a/packages/client/ui-directory-picker-browse/src/client/flow.ts
++++ b/packages/client/ui-directory-picker-browse/src/client/flow.ts
+@@ -41,3 +41,22 @@
+     onClose: props.onCancel,
+   })
+ }
++
++/**
++ * Show the existing browser at a file surface's current path with visible ancestry.
++ * @param props - the file surface's picking owner and the native browse calls.
++ * @returns the native directory browser; only confirmation reports a picked path.
++ */
++export function FilesDirectoryFlow(props: DirectoryFlowOwnerProps & BrowseFlowInjected & { initialPath: string }): ReactElement {
++  return createElement(DirectoryBrowser, {
++    open: props.open,
++    busy: props.busy,
++    listDirectory: props.listDirectory,
++    createDirectory: props.createDirectory,
++    initialPath: props.initialPath,
++    fullAncestry: true,
++    t: (key, params) => props.t(key === 'browser.title' ? 'browser.computerTitle' : key === 'browser.open' ? 'browser.workspaceOpen' : key, params),
++    onOpen: props.onPicked,
++    onClose: props.onCancel,
++  })
++}
+diff --git a/packages/client/ui-directory-picker-browse/src/client/index.ts b/packages/client/ui-directory-picker-browse/src/client/index.ts
+--- a/packages/client/ui-directory-picker-browse/src/client/index.ts
++++ b/packages/client/ui-directory-picker-browse/src/client/index.ts
+@@ -14,7 +14,17 @@
+ // Type-only: pulls the SlotRegistry service merge (ctx.slots).
+ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+ import type { BrowseFlowInjected } from './flow.ts'
+-import { BrowseDirectoryFlow } from './flow.ts'
++import { BrowseDirectoryFlow, FilesDirectoryFlow } from './flow.ts'
++import type { DirectoryFlowOwnerProps } from '@deepseek-ai/dsh-client-ui-workspace/client'
++
++declare module '@deepseek-ai/dsh-client-ui-slots' {
++  interface SlotMap {
++    /** Reuse the Host browser from a file surface without adopting a directory during browsing. */
++    'sidebar.right.tab.files.directoryFlow': {
++      kind: 'single'; scope: 'scoped'; owner: DirectoryFlowOwnerProps & { initialPath: string }
++    }
++  }
++}
+ 
+ /** Locale namespace owning the browser dialog's copy. */
+ const LOCALE_NS = 'directory-browser'
+@@ -49,6 +59,8 @@
+         'browser.loading': '加载中…',
+         'browser.truncated': '文件夹过多，仅显示开头部分。',
+         'browser.showHidden': '显示隐藏文件',
++        'browser.computerTitle': '浏览电脑目录',
++        'browser.workspaceOpen': '作为工作区打开',
+       }],
+       ['en', {
+         'browser.title': 'Select Workspace Directory',
+@@ -64,6 +76,8 @@
+         'browser.loading': 'Loading…',
+         'browser.truncated': 'Too many folders to list; only the beginning is shown.',
+         'browser.showHidden': 'Show hidden files',
++        'browser.computerTitle': 'Browse computer directories',
++        'browser.workspaceOpen': 'Open as workspace',
+       }],
+     ]
+     try {
+@@ -92,4 +106,7 @@
+         name: 'sidebar.workspaces.directoryFlow', inject: injected,
+       }, BrowseDirectoryFlow)
+     }))
++  ctx.slots.inject('sidebar.right.tab.files.directoryFlow', () => ctx.slots.register({
++    name: 'sidebar.right.tab.files.directoryFlow', inject: injected,
++  }, FilesDirectoryFlow))
+ }
+diff --git a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
+--- a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
++++ b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
+@@ -8,7 +8,7 @@
+ import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+ import type { DirectoryFlowOwnerProps } from '@deepseek-ai/dsh-client-ui-workspace/client'
+ import { apply, inject } from '../src/client/index.ts'
+-import { BrowseDirectoryFlow } from '../src/client/flow.ts'
++import { BrowseDirectoryFlow, FilesDirectoryFlow } from '../src/client/flow.ts'
+ import { apply as nodeApply } from '../src/index.ts'
+ 
+ // The service reads its initial locale from the browser; these specs assert
+@@ -17,7 +17,7 @@
+ 
+ afterEach(cleanup)
+ 
+-const HOLES = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow'] as const
++const HOLES = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow', 'sidebar.right.tab.files.directoryFlow'] as const
+ 
+ const HOME = '/home/u'
+ const homeListing: DirectoryListing = {
+@@ -38,7 +38,7 @@
+   const slots = ctx.get('slots') as SlotRegistry
+   const declare = () => slots.register({
+     name: 'root',
+-    children: Object.fromEntries(HOLES.map(name => [name, { kind: 'single', scope: 'root' }])),
++    children: Object.fromEntries(HOLES.map(name => [name, { kind: 'single', scope: name === 'sidebar.right.tab.files.directoryFlow' ? 'scoped' : 'root' }])),
+   } as never, () => null)
+   return { ctx, slots, listDirectory, createDirectory, declare }
+ }
+@@ -56,7 +56,7 @@
+     expect(inject).toEqual(['slots', 'uiWorkspace', 'locale'])
+   })
+ 
+-  it('fills both directory-flow holes for declarations before or after apply, and leaves with its fiber', async () => {
++  it('fills workspace and file directory-flow holes before or after apply, and leaves with its fiber', async () => {
+     const before = await bench()
+     before.declare()
+     const fiber = before.ctx.plugin({ inject: [...inject], apply })
+@@ -221,6 +221,21 @@
+     )
+     expect(view.container.innerHTML).toBe('')
+   })
++
++  it('browses from the Files path and adopts only on an explicit workspace confirmation', async () => {
++    const props = owner()
++    const listDirectory = vi.fn(async () => homeListing)
++    render(<FilesDirectoryFlow {...props} initialPath={HOME} listDirectory={listDirectory}
++      createDirectory={vi.fn(async () => '')} t={key => key} />)
++    const openButton = screen.getByRole<HTMLButtonElement>('button', { name: 'browser.workspaceOpen' })
++    await waitFor(() => { expect(openButton.disabled).toBe(false) })
++    expect(listDirectory).toHaveBeenCalledWith(HOME, expect.any(AbortSignal))
++    expect(screen.getByRole('dialog', { name: 'browser.computerTitle' })).toBeTruthy()
++    expect(screen.getByRole('button', { name: '/' })).toBeTruthy()
++    expect(props.onPicked).not.toHaveBeenCalled()
++    fireEvent.click(openButton)
++    expect(props.onPicked).toHaveBeenCalledWith(HOME)
++  })
+ })
+ 
+ describe('directory-picker-browse node half', () => {
+diff --git a/packages/client/ui-directory-picker-browse/tests/directory-browser.client.spec.tsx b/packages/client/ui-directory-picker-browse/tests/directory-browser.client.spec.tsx
+--- a/packages/client/ui-directory-picker-browse/tests/directory-browser.client.spec.tsx
++++ b/packages/client/ui-directory-picker-browse/tests/directory-browser.client.spec.tsx
+@@ -132,6 +132,17 @@
+     expect(screen.queryByRole('button', { name: '/' })).toBeNull()
+   })
+ 
++  it('starts a file-surface browse at its absolute path and can navigate above the home without picking', async () => {
++    const b = mount({ initialPath: HOME, fullAncestry: true })
++    await waitFor(() => { expect(screen.getByRole('button', { name: '/' })).toBeTruthy() })
++    expect(b.listDirectory).toHaveBeenCalledWith(HOME, expect.any(AbortSignal))
++    expect(screen.getByText(HOME)).toBeTruthy()
++    fireEvent.click(screen.getByRole('button', { name: '/' }))
++    await waitFor(() => { expect(b.listDirectory).toHaveBeenCalledWith('/', expect.any(AbortSignal)) })
++    await waitFor(() => { expect(screen.getByRole('listitem').textContent).toBe('home') })
++    expect(b.onOpen).not.toHaveBeenCalled()
++  })
++
+   it('shows hidden entries when the toggle is on and hides them again on close', async () => {
+     const b = mount()
+     await waitFor(() => { expect(screen.getByRole('listitem')).toBeTruthy() })

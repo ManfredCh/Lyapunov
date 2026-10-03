@@ -9,12 +9,38 @@ import {verifiedComposedPatch} from './upstream-patches.mjs'
 import {applyUpstreamPatches,upstreamPatches} from './upstream-patches.mjs'
 import {applyPublicModelDiagnosticsPatch} from './public-model-patch.mjs'
 import {verifySDKSourceIntegrity} from './sdk-source-integrity.mjs'
+import {applySignedFilesPatch} from './native-files-patch.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const candidate = join(root, 'packages/lyapunov-shell/patches/dsh-session-outbound-projection.patch')
 const upstream = join(root, '.upstream/deepseek-harness-20260911-candidate')
 const native = 'packages/api/session-controller/src'
 const isolatedTestTimeoutMs = 120_000
+
+test('电脑目录flow精确补丁真实消费、幂等及未知或缺件保留',()=>{
+ const file=join(root,'packages/lyapunov-shell/patches/dsh-files-directory-flow.patch')
+ const patch={file,package:'@deepseek-ai/dsh-client-ui-directory-picker-browse'}
+ const manifest=JSON.parse(readFileSync(file+'.json','utf8'))
+ const scratch=mkdtempSync(join(root,'.tmp-directory-flow-'))
+ try{
+  run('git',['init','--quiet',scratch])
+  for(const row of manifest.files){const target=join(scratch,row.path);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,readFileSync(join(upstream,row.path)))}
+  run('git',['apply','--reverse',file],{cwd:scratch})
+  assert.equal(applySignedFilesPatch(root,scratch,patch).status,'applied')
+  assert.equal(applySignedFilesPatch(root,scratch,patch).status,'already-applied')
+  const changed=join(scratch,manifest.files[0].path),original=readFileSync(changed)
+  writeFileSync(changed,Buffer.concat([original,Buffer.from('\n/* unknown */\n')]))
+  const changedBytes=readFileSync(changed)
+  assert.throws(()=>applySignedFilesPatch(root,scratch,patch),/pre\/postimage/)
+  assert.deepEqual(readFileSync(changed),changedBytes)
+  writeFileSync(changed,original)
+  const missing=join(scratch,manifest.files.at(-1).path)
+  rmSync(missing)
+  assert.throws(()=>applySignedFilesPatch(root,scratch,patch),/pre\/postimage/)
+  assert.equal(existsSync(missing),false)
+  assert.deepEqual(readFileSync(changed),original)
+ }finally{rmSync(scratch,{recursive:true,force:true})}
+})
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: isolatedTestTimeoutMs, ...options})
