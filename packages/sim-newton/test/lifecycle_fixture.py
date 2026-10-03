@@ -37,6 +37,22 @@ class NativeHandle:
         raise RuntimeError('injected tick failure')
 
 
+class NativeArray(list):
+    """Empty offline model readback surface; never imports NumPy or Warp."""
+    def numpy(self):
+        return self
+
+    def tolist(self):
+        return list(self)
+
+
+class NativeModel(NativeHandle):
+    def __init__(self):
+        self.shape_flags = NativeArray()
+        self.shape_label = []
+        self.gravity = NativeArray([NativeArray([0.0, 0.0, -9.81])])
+
+
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.refs = []
@@ -46,15 +62,15 @@ class LifecycleTests(unittest.TestCase):
         self.addCleanup(self.compile_patch.stop)
 
     def fake_compile(self, scene):
-        def handle():
-            obj = NativeHandle()
+        def handle(model=False):
+            obj = NativeModel() if model else NativeHandle()
             self.refs.append(weakref.ref(obj))
             return obj
         return {
-            'builder': handle(), 'model': handle(), 'states': (handle(), handle()),
+            'builder': handle(), 'model': handle(model=True), 'states': (handle(), handle()),
             'control': handle(), 'solver': handle(), 'solverName': 'offline',
             'pipeline': handle(), 'contacts': handle(), 'ik_q': handle(), 'ik_qd': handle(),
-            'entities': {}, 'ground': [], 'warnings': [],
+            'entities': {}, 'ground': [], 'nativeGround': [], 'replacedGround': set(), 'warnings': [],
         }
 
     def make_world(self):
@@ -98,6 +114,8 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(handle['worldGeneration'], old_generation + 1)
         self.assertEqual(handle['appliedSceneRevision'], 1)
         self.assertIsNotNone(world.model)
+        self.assertEqual(handle['worldPhysics']['gravityWorldMps2'], [0.0, 0.0, -9.81])
+        self.assertEqual(handle['worldPhysics']['groundSources'], [])
         world.require_ready()
         world.close()
 
@@ -127,11 +145,17 @@ class LifecycleTests(unittest.TestCase):
                 for rid, method in ((2, 'list_worlds'), (3, 'observe'), (4, 'close'),
                                     (5, 'list_worlds'), (6, 'shutdown')):
                     worker.requests.put({'id': rid, 'method': method, 'args': {'worldId': 'world'}})
+            elif event.get('id') == 1 and 'error' in event:
+                # A fixture-contract regression must fail with the actual open error,
+                # not leave the otherwise healthy idle worker waiting for a request.
+                worker.requests.put({'id': 6, 'method': 'shutdown', 'args': {}})
 
         with patch.object(worker.threading, 'Thread'), \
                 patch.object(worker, 'resolve_device', return_value=('cpu', 'cpu', False, 'offline')), \
                 patch.object(worker, 'emit', side_effect=emit):
             worker.main()
+        opened = next(event for event in events if event.get('id') == 1)
+        self.assertNotIn('error', opened, opened.get('error'))
         errors = [event for event in events if event.get('event') == 'world-error']
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0]['error'], 'injected tick failure')

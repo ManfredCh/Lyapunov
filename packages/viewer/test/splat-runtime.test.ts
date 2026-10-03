@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import * as THREE from "three"
+import {TransformControls} from "three/addons/controls/TransformControls.js"
 import { PackedSplats, SparkRenderer, SplatMesh } from "@sparkjsdev/spark"
 import { SceneViewer } from "../src/index.ts"
 import { objectWorldBounds } from "../src/framing.ts"
@@ -119,6 +120,7 @@ describe("泼溅 LOD 数据源与真实中心边界（无 GUI/GPU）", () => {
     viewer.options = { onError: (error: Error) => { throw error } }; viewer.scene = new THREE.Scene(); viewer.scene.add(group)
     // Object.create不运行构造字段；setScene继续执行真实相机投影。
     viewer.cameraRigs = new Map(); viewer.cameraRigRoot = new THREE.Group(); viewer.scene.add(viewer.cameraRigRoot)
+    viewer.camera=new THREE.PerspectiveCamera();viewer.transformControls=new TransformControls(viewer.camera)
     viewer.objects = new Map([["same-id", loaded]]); viewer.mixers = new Map(); viewer.splatRuntime = new Map()
     viewer.visualWarnings = new Map(); viewer.loadingErrors = new Map(); viewer.projection = new FrameProjection()
     viewer.sun = new THREE.DirectionalLight()

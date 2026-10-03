@@ -23,7 +23,7 @@ import type {CameraAuthoringViewer} from '../src/camera-authoring.ts'
 import type {SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
 
 /** 会改页面级工作面的动作（与 `workbench-ui.ts` 的 SURFACE_ACTIONS 同一份口径）。 */
-const SURFACE = ["openTool", "showCanvas", "selectEntity", "focus", "enterSceneCenter", "openFiles", "openTerminal", "openResource", "exitCameraView", "locateTcp", "locateBase"]
+const SURFACE = ["openTool", "showCanvas", "selectEntity", "focus", "enterSceneCenter", "openFiles", "openTerminal", "openResource", "exitCameraView", "aimCameraView", "locateTcp", "locateBase"]
 /** 只落在本会话自己的场景/选中/窗口上的动作。 */
 const SESSION_PRIVATE = ["selectScene", "captureViewer", "applyCameraViewer", "renderCameraViewer", "sampleCameraViewer"]
 
