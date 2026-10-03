@@ -2,34 +2,42 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-<img src="packages/desktop/icons/lyapunov.png" width="72" height="72" alt="Lyapunov application icon" />
+<p align="center">
+  <img src="packages/desktop/icons/lyapunov.png" width="72" height="72" alt="Lyapunov 应用图标" />
+</p>
 
-![Alpha](docs/assets/badge-alpha.svg) ![Linux x64](docs/assets/badge-linux-x64.svg) [![Lyapunov Modified MIT](docs/assets/badge-lyapunov-license.svg)](LICENSE)
+<p align="center">
+  <img src="docs/assets/badge-alpha.svg" alt="Alpha" />
+  <img src="docs/assets/badge-linux-x64.svg" alt="Linux x64" />
+  <a href="LICENSE"><img src="docs/assets/badge-lyapunov-license.svg" alt="许可证：Lyapunov Modified MIT" /></a>
+</p>
 
+<p align="center">
+  纸上得来终觉浅，绝知此事要躬行。<br />
+  ——陆游《冬夜读书示子聿》
+</p>
 
 **Linux x64 · 0.1.0α** · **Lyapunov Modified MIT**
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 应用发布名称 | 0.1.0α |
 | 技术版本 / releaseId | `0.1.0-alpha.1` |
 | 文档版本日期 | 2026-10-03 |
-| 作者团队 | Lyapunov contributors |
+| 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | 杭州奇异宇宙人工智能有限公司 |
-| 版权 | © 2026 Lyapunov contributors |
+| 版权 | © 2026 Vorynel Co., Ltd. |
 | 项目许可 | [Lyapunov Modified MIT License](LICENSE) · [保留的版权与许可声明](NOTICE) |
 | 源码仓库 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
-| 图片与概念来源 | 既有软件图标、获准的原始Source界面截图、本地版本/许可SVG标记；截图标为Source开发预览。 |
 
 **杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
+
+Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
 
 **发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.1.md)记录本 Alpha 的变化与已知范围。
 
 [安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.1.md)
 
-![Source开发预览](docs/assets/workbench-source-preview.png)
-
-*原始获准Source开发界面截图；最终发行包UI与任务运行验收分别确认。*
+<!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
 **推荐工作流：** 让Agent使用原生产品工具，或使用工作台控件；本Alpha暂不建议用CUA自动点击替代场景、机器人与仿真工具。
 
@@ -41,15 +49,13 @@
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-安装完成后，由使用者单独启动 Lyapunov：
+安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 
 ```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-默认安装准备 **MuJoCo 及其 Python 运行环境**，验证原生物理，并创建当前用户的启动器和桌面入口。**Node.js、Electron 和固定版本的 DSH 随主归档提供**；默认安装将 MuJoCo／Python 下载到该版本目录内的专用环境。默认安装器与发行启动器不依赖 PATH 中的 Node、DSH、Python，也不依赖开发者的源码检出目录。用户会话与凭据使用产品的数据目录，升级时继续保留。消费者不需要预装系统 Node.js、DSH、Python、pip、Conda、Bun，也不需要模型 Key 才能安装。
-
-安装器要求 `sh`、`curl`、`tar`、`sha256sum`，以及 `mktemp`、`getconf` 等常规 Linux 工具。当前打包目标为 **使用 glibc 的 Linux x86_64**，需要图形桌面、Electron 所需共享库和可用的渲染后端。版本清单分别声明主包和 MuJoCo 伴随包的最低 glibc。CPU 可以执行物理仿真；相机渲染和较大三维场景仍需要相应图形能力与内存。Intel、AMD、NVIDIA 配置分别验收，本 Alpha 没有覆盖所有 GPU 或 Linux 发行版。本次不提供原生 macOS／Windows 安装包；Windows 用户可按 WSL2 + WSLg 路线使用 Linux 包，当前未完成 WSLg 实机验收，也不承诺离线安装。
+默认安装准备 **MuJoCo 及其 Python 运行环境**，验证原生物理，并创建当前用户的启动器和桌面入口。其他物理引擎可按需选择安装 **Isaac Sim 或 Newton**，它们不会随默认安装自动准备，见[物理引擎与可选运行环境](#物理引擎与可选运行环境)。**Node.js、Electron 和固定版本的 DSH 随主归档提供**；默认安装将 MuJoCo／Python 下载到该版本目录内的专用环境。默认安装器与发行启动器不依赖 PATH 中的 Node、DSH、Python，也不依赖开发者的源码检出目录。用户会话与凭据使用产品的数据目录，升级时继续保留。消费者不需要预装系统 Node.js、DSH、Python、pip、Conda、Bun，也不需要模型 Key 才能安装。
 
 安装器将不同版本保存在 `~/.local/share/lyapunov/versions/`，检查通过后才切换 `current` 链接，并保留旧版本及用户数据。如果 `~/.local/bin` 已在 PATH 中，可以用 `lyapunov` 启动；否则使用上面的用户启动器路径。下载大小和实际发布批次标识见[官网安装页](https://vorynel.com/lyapunov/)。
 
@@ -67,7 +73,7 @@ sh lyapunov-install.sh
 ## 首次运行
 
 1. 打开 Lyapunov，在欢迎页选择语言与主题。
-2. 点击 **Sign in／登录**，在浏览器完成官网授权后返回同一个应用窗口；账号验证成功后进入工作台。登录用户的模型调用使用 **Peiri** 和该账号的中央 Credits。
+2. 点击 **Sign in／登录**，在浏览器完成官网授权后返回同一个应用窗口；账号验证成功后进入工作台。使用官网模型服务需先注册账号并充值 Credits；登录用户的模型调用使用 **Peiri** 和该账号的中央 Credits。
 3. 希望在本地使用时，点击 **Try as guest／游客体验**。Guest 打开独立本地工作台，不连接产品服务器，包括产品账号和计费后端。文件、场景编辑、视口及已安装本地工具可用。游客初始**没有默认模型**；需要 Agent 时在模型设置显式配置自己的 provider。游客不使用 Peiri、产品计费或中央 Credits。
 4. 创建或打开工程，从自己的文件或本地资源库添加资产。游客工程与登录工程分开保存；需要迁移时，先导出游客工程，再登录并显式导入。
 
@@ -83,8 +89,6 @@ sh lyapunov-install.sh
 | 控制机器人 | 按当前能力执行关节、夹爪、车辆、升降、步态或 body-wrench 控制；停止执行并查看真实世界反馈。 |
 | 观察与采集 | 在引擎支持范围内使用场景相机、命名引擎相机、RGB-D、标定、标注、录制和数据集导出。 |
 | 添加外部工具 | 按需配置 Blender、可选引擎、policy 运行环境、重建或生成工具；它们的软件、模型、许可及服务访问要求分别保留。 |
-
-来源发现从官方项目和注册表根开始。服务提供的来源地址与 metadata 为 Agent 提供上下文；浏览器访问、网页获取和终端操作由客户端执行。客户端取得并检查具体文件后，来源链接才成为可用的本地资源。来源入口不自动代表所有模型或 policy 都能运行。
 
 ## 机器人与相机
 
@@ -104,6 +108,7 @@ sh lyapunov-install.sh
 
 ### 环境方法
 
+- **世界场景生成**：可以用一句话向 Agent 请求世界场景生成，使用世界模型建立 3DGS 环境，并配合准备与其配准的 GLB 碰撞几何。当前服务器算力有限，供给时段与生成量有限；后续将根据需求评估提升速度与容量。
 - **几何与程序化脚本**：用Blender或参数化脚本建立尺寸明确的地面、墙、门洞与装配；保留可编辑源件和派生件。
 - **已有环境与Gaussian表示**：检查比例、轴、方向和依赖；Gaussian负责视觉，真实接触需要另行配准的物理几何。
 - **照片、多视角与图纸重建**：可选外部方法路线，依赖各自工具、数据与输出检查。本Alpha说明不签署外部服务连接或重建结果成功。
@@ -140,8 +145,6 @@ sh lyapunov-install.sh
 | 工程打开/完整包导入导出 | scene.json / .scene-package.json / portable project directory | scene_open读scene.json；scene_package_import导入自包含测试项目；scene_save portable:true复制原件和闭包，保存完整快照，迁移完整目录；不声称任意ZIP都可作为工程打开。 |
 
 ## 机器人来源、兼容与有界控制
-
-从 [Franka](https://github.com/frankarobotics/franka_ros)、[Unitree](https://github.com/unitreerobotics/unitree_ros)、[Universal Robots](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description)或 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)官方根开始，阅读选定模型许可，由客户端获取真实文件。来源根不代表其中每个型号都已兼容。
 
 在支持范围内优先使用原生MJCF/URDF，保留include、mesh、纹理与actuator闭包；匹配轴、单位、关节顺序/限位、执行器映射、dt/控制频率、观测语义和实际引擎。下载、PREPARED、MATCHED是准备事实；就绪后显式执行用户要求的有界动作，再检查状态与停止确认。
 
@@ -201,9 +204,15 @@ SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 当前
 
 安装在桌面／沙盒检查处停止时，会打印实际版本路径和处理方式。已校验文件保留，该版本不会被激活。输出要求时才运行 `sudo /the/reported/version/path/lyapunov setup-sandbox`，然后重跑安装器。`CONTEXT_ONLY` 表示当前终端的安全上下文未能确认桌面就绪，应在图形桌面的普通终端复查。`PROVIDER_UNAVAILABLE` 会点名缺失或不兼容的 SDK；核对选定引擎和已保存的外部 Python 路径。日志位置与恢复步骤见[安装手册](https://vorynel.com/lyapunov/guide.html)。
 
-## 路线图与Windows评估路线
+## TODO
 
-原生macOS（Apple Silicon/x64）、微信小程序的已认证远程任务/相机/停止、Genesis、VR/XR输入与坐标、固定DSH伴随升级均为 **TODO**。见[路线图](docs/ROADMAP.md)；不是本Linux Alpha已实现或已验收的功能。
+- [ ] 原生 macOS（Apple Silicon/x64）。
+- [ ] 微信小程序／手机：已认证的远程任务、相机与停止控制。
+- [ ] Genesis。
+- [ ] VR/XR 输入与坐标。
+- [ ] DSH 伴随升级（固定上游版本）。
+
+## Windows 评估路线
 
 Windows计划评估的是 **WSL2 + WSLg下的Linux包**，不是原生Windows exe。[微软GUI应用前置条件](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps)要求Windows 10 build 19044+或Windows 11、WSL2/WSLg与适用GPU驱动。在管理员PowerShell中：
 
@@ -218,7 +227,7 @@ wsl --update
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-安装完成后，由使用者单独启动 Lyapunov：
+安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 
 ```sh
 "$HOME/.local/bin/lyapunov"
@@ -249,6 +258,6 @@ node script/bootstrap.mjs
 
 ## 许可与版权
 
-Lyapunov 项目主许可为 [Lyapunov Modified MIT License](LICENSE)，版权 **© 2026 Lyapunov contributors**。自定义许可保留 MIT 通用授权：使用本软件或衍生作品的商业产品／服务，月活达到 **10,000**，或月营业收入达到 **人民币 1,000,000 元（或其他货币等值）**，任一条件满足须显著署名“Lyapunov”。没有 UI 时，在该产品或服务的官方文档／网站署名。门槛针对该产品或服务，署名不要求支付许可费。
+Lyapunov 项目主许可为 [Lyapunov Modified MIT License](LICENSE)，版权 **© 2026 Vorynel Co., Ltd.**。自定义许可保留 MIT 通用授权：使用本软件或衍生作品的商业产品／服务，月活达到 **10,000**，或月营业收入达到 **人民币 1,000,000 元（或其他货币等值）**，任一条件满足须显著署名“Lyapunov”。没有 UI 时，在该产品或服务的官方文档／网站署名。门槛针对该产品或服务，署名不要求支付许可费。
 
 原 OpenCode MIT 版权与授权通知完整保留在 [NOTICE](NOTICE)。各独立包、随附 DSH／Node／MuJoCo 组件、机器人资产、模型权重和外部服务保留自己的许可。
