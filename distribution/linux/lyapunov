@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+root=$script_dir
+# 源码检出保留入口在 distribution/linux；发行包入口位于包根，两种布局都按实际包根解析。
+if [ "$(basename -- "$script_dir")" = linux ] && [ "$(basename -- "$(dirname -- "$script_dir")")" = distribution ] && [ -f "$script_dir/../../package.json" ]; then
+  root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+fi
+export LYAPUNOV_PRODUCT_ROOT="$root"
+export PATH="$root/runtime/node/bin:$PATH"
+export HF_ENDPOINT=https://hf-mirror.com
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP NODE_PATH NODE_OPTIONS
+unset ELECTRON_RUN_AS_NODE
+require_file() {
+  [ -f "$root/$1" ] || { printf '%s\n' "RELEASE_PAYLOAD_MISSING: 缺少 $root/$1；请重新完整解包，保留目录结构。" >&2; exit 2; }
+}
+require_executable() {
+  require_file "$1"
+  [ -x "$root/$1" ] || { printf '%s\n' "RELEASE_EXECUTABLE_UNAVAILABLE: $root/$1 没有执行权限；请检查解包权限。" >&2; exit 2; }
+}
+run_node() {
+  module=$1; shift
+  require_executable runtime/node/bin/node
+  require_file "$module"
+  exec "$root/runtime/node/bin/node" "$root/$module" "$@"
+}
+configure_desktop_fonts() {
+  # 用户显式选择的 fontconfig 文件或搜索根优先；网页仍使用随包字体。
+  if [ -n "${FONTCONFIG_FILE:-}" ] || [ -n "${FONTCONFIG_PATH:-}" ]; then return; fi
+  require_file packages/desktop/renderer/fonts/fonts.conf
+  require_file packages/desktop/renderer/fonts/NotoSansSC-Regular.otf
+  export FONTCONFIG_FILE="$root/packages/desktop/renderer/fonts/fonts.conf"
+}
+# GitHub、建筑、终端与 benchmark 开发入口使用调用方明确提供的模型凭据；桌面/管理员仍隔离父环境。
+if [ "${1:-desktop}" != github ] && [ "${1:-desktop}" != architecture ] && [ "${1:-desktop}" != terminal ] && [ "${1:-desktop}" != benchmark ]; then
+  unset DEEPSEEK_API_KEY LYAPUNOV_DEVELOPER_AUTH_FILE LYAPUNOV_DEVELOPER_MODEL
+fi
+case "${1:-desktop}" in
+  --help|help)
+    printf '%s\n' 'LyapunovDSH Linux 便携包' './lyapunov [desktop] [Electron 参数]' './lyapunov administrator --credentials-file <管理员凭据.json> --auth-file <模型凭据.json> [--port 4181]' './lyapunov administrator --help' './lyapunov architecture --blender <Blender> --addon <addon.py> --mcp-command <blender-mcp> [--engine none|mujoco|isaac]' './lyapunov terminal [--cwd <目录>] [--resume <会话ID>] [--runtime-root <私有根>]（开发原型）' './lyapunov benchmark [--provider libero|gymnasium] [--mode formal|developer] [--check] [--host-id <私有ID>] [--port 0-65535]' './lyapunov github install|inspect|run [参数]' './lyapunov fastgs download|install|doctor|train [参数]' './lyapunov doctor [desktop|mujoco|isaac|newton|policy-cpu] [--managed-sdk]' 'sudo ./lyapunov setup-sandbox（当前系统需要时执行一次）' './lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula]' './lyapunov benchmark --help' './lyapunov physics-check [--managed-sdk]' './lyapunov --version'
+    ;;
+  --version) require_file distribution/linux/sandbox.mjs; run_node distribution/linux/doctor.mjs version ;;
+  doctor) shift; if [ "${1:-}" = policy-cpu ]; then shift; run_node distribution/linux/policy-cpu.mjs doctor "$@"; else require_file distribution/linux/sandbox.mjs; run_node distribution/linux/doctor.mjs "$@"; fi ;;
+  setup-sandbox) shift; run_node distribution/linux/sandbox.mjs setup "$@" ;;
+  install-provider) shift; require_executable distribution/linux/install-provider; exec "$root/distribution/linux/install-provider" "$@" ;;
+  physics-check) shift; run_node distribution/linux/physics-check.js "$@" ;;
+  administrator) shift; run_node distribution/linux/administrator.js "$@" ;;
+  architecture) shift; run_node distribution/linux/architecture.js "$@" ;;
+  terminal) shift; run_node distribution/linux/terminal.js "$@" ;;
+  benchmark) shift; run_node distribution/linux/benchmark.js "$@" ;;
+  github) shift; run_node packages/lyapunov-product-bundle/dist/cli.js github "$@" ;;
+  fastgs) shift; run_node packages/lyapunov-product-bundle/dist/cli.js fastgs "$@" ;;
+  desktop)
+    if [ "$#" -gt 0 ]; then shift; fi
+    require_executable runtime/node/bin/node
+    require_executable runtime/electron/lyapunov-desktop
+    require_file distribution/linux/sandbox.mjs
+    "$root/runtime/node/bin/node" "$root/distribution/linux/sandbox.mjs" check
+    configure_desktop_fonts
+    export NODE_ENV=production
+    exec "$root/runtime/electron/lyapunov-desktop" "$@"
+    ;;
+  *) printf '%s\n' '未知入口，请运行 ./lyapunov --help' >&2; exit 2 ;;
+esac

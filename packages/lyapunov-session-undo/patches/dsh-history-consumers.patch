@@ -1,0 +1,623 @@
+diff --git a/packages/api/session-controller/src/client/transport.ts b/packages/api/session-controller/src/client/transport.ts
+--- a/packages/api/session-controller/src/client/transport.ts
++++ b/packages/api/session-controller/src/client/transport.ts
+@@ -151,6 +151,7 @@
+     private readonly address: SessionAddress,
+     options: SessionEventStreamOptions,
+   ) {
++    let checkoutRefreshScheduled = false
+     super(remote, {
+       name: 'session event stream',
+       emptyCursor: -1,
+@@ -160,7 +161,18 @@
+       last: historyRecordLastSeq,
+       compare: (left, right) => left - right,
+       follows: (left, right) => right === left + 1,
+-      publish: (change) => { options.publish(toSessionJournalChange(change)) },
++      publish: (change) => {
++        const publication = toSessionJournalChange(change)
++        options.publish(publication)
++        if (publication.type === 'append'
++          && publication.entry.event.type === 'session/history-checkout'
++          && !checkoutRefreshScheduled) {
++          checkoutRefreshScheduled = true
++          // A checkout can select content before the currently loaded window.
++          // Reuse the native stream lifecycle for a fresh active-history cut.
++          queueMicrotask(() => { checkoutRefreshScheduled = false; this.restart() })
++        }
++      },
+       ...(options.carrierFailed === undefined
+         ? {}
+         : { carrierFailed: options.carrierFailed }),
+diff --git a/packages/api/session-controller/src/history.ts b/packages/api/session-controller/src/history.ts
+--- a/packages/api/session-controller/src/history.ts
++++ b/packages/api/session-controller/src/history.ts
+@@ -5,6 +5,7 @@
+ import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
+ import {
+   isAppendSurfaceEvent,
++  selectActiveHistoryEvents,
+   SessionLogOffset,
+   SessionSeq,
+ } from '@deepseek-ai/dsh-session'
+@@ -389,8 +390,13 @@
+   const end = SessionLogOffset(Math.min(throughSeq + 1, beforeSeq ?? throughSeq + 1))
+   let count = 0
+   let cut = SessionLogOffset(0)
+-  for (let index = end - 1; index >= 0; index--) {
+-    const event = events[index] as SessionEvent
++  // Count the active conversation at the caller's fixed observation cursor.
++  // Keep the returned records contiguous and raw: the later checkout marker
++  // remains available to Clients when older pages join their current window.
++  const active = selectActiveHistoryEvents(events.slice(0, throughSeq + 1))
++  for (let index = active.length - 1; index >= 0; index--) {
++    const event = active[index] as SessionEvent
++    if (event.seq >= end) continue
+     if (!MESSAGE_TYPES.has(event.type) || !isAppendSurfaceEvent(event)) continue
+     count++
+     const sources = event.sourceEventSeqs
+diff --git a/packages/api/session-controller/tests/session-history-journal.host.spec.ts b/packages/api/session-controller/tests/session-history-journal.host.spec.ts
+--- a/packages/api/session-controller/tests/session-history-journal.host.spec.ts
++++ b/packages/api/session-controller/tests/session-history-journal.host.spec.ts
+@@ -3,7 +3,7 @@
+ import { describe, expect, it, vi } from 'vitest'
+ import { Context } from '@deepseek-ai/cordis'
+ import AgentRegistry, { type Agent, type AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
+-import SessionStore from '@deepseek-ai/dsh-session'
++import SessionStore, { selectActiveHistoryEvents, SessionSeq } from '@deepseek-ai/dsh-session'
+ import { LlmAttemptId, ToolCallId, createMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+ import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+ import { SessionHistoryController } from '@deepseek-ai/dsh-api-session-controller/src/history.ts'
+@@ -95,6 +95,30 @@
+ }
+ 
+ describe('Session history raw journal', () => {
++  it('counts active messages while preserving contiguous raw records around a checkout', async () => {
++    const { ctx } = await harness()
++    try {
++      const session = ctx.sessions.create(undefined, { meta: { cwd: '/workspace' } })
++      const ends: number[] = []
++      for (let index = 0; index < 8; index++) {
++        session.append('turn/start', { turn: index + 1 })
++        session.append('step/start', { turn: index + 1, step: 1 })
++        appendUserText(session, `human-${index}`)
++        session.append('assistant/message', { turn: index + 1, step: 1, message: createMessage({ role: 'assistant', content: [{ type: 'text', text: `answer-${index}` }], source: { kind: 'model', provider: 'p', model: 'm' } }), stream: [] }, { surfaceOp: 'append' })
++        session.append('step/end', { turn: index + 1, step: 1 })
++        ends.push(session.append('turn/end', { turn: index + 1, reason: { kind: 'completed' } }).seq)
++      }
++      session.append('session/history-checkout', { throughSeq: SessionSeq(ends[1]!) })
++      const history = new SessionHistoryController(ctx, () => {})
++      const page = await history.page({ address: { kind: 'session', sessionId: session.id }, throughSeq: SessionSeq(session.seq - 1), maxMessages: 2 }, new AbortController().signal)
++      const records = pageEvents(page)
++      expect(records.map(event => event.seq)).toEqual(Array.from({ length: records.length }, (_, index) => records[0]!.seq + index))
++      expect(records.some(event => event.type === 'session/history-checkout')).toBe(true)
++      const active = selectActiveHistoryEvents(records)
++      expect(active.filter(event => event.type === 'user/message').map(event => event.data)).toEqual([session.snapshotEvents().find(event => event.type === 'user/message' && event.data.content.some(block => block.type === 'text' && block.text === 'human-1'))!.data])
++      expect(records.some(event => event.type === 'user/message' && JSON.stringify(event.data).includes('human-7'))).toBe(true)
++    } finally { await ctx.fiber.dispose() }
++  })
+   it('opens an empty opted-in Assistant baseline before any live attempt exists', async () => {
+     const { ctx } = await harness()
+     const session = ctx.sessions.create(undefined, { meta: { cwd: '/workspace' } })
+diff --git a/packages/api/session-controller/tests/transport.client.spec.ts b/packages/api/session-controller/tests/transport.client.spec.ts
+--- a/packages/api/session-controller/tests/transport.client.spec.ts
++++ b/packages/api/session-controller/tests/transport.client.spec.ts
+@@ -234,6 +234,25 @@
+ })
+ 
+ describe('Session Client stream adapters', () => {
++  it('reopens a native snapshot after checkout so history before the old window can return', async () => {
++    const checkout: SessionEventEntry = { type: 'event', event: { type: 'session/history-checkout', seq: 11, time: 11, data: { throughSeq: 0 } } }
++    const remote = new ScriptedSessionRemote([
++      { frames: [snapshot(10, [entry(10)], true), checkout], hold: true },
++      { frames: [snapshot(11, [entry(0), ...Array.from({ length: 10 }, (_, index) => entry(index + 1)), checkout])], hold: true },
++    ], [])
++    const changes: SessionJournalChange[] = [], failed = vi.fn()
++    const stream = new SessionEventStream(sessionClient(remote), ADDRESS, { publish: change => changes.push(change), failed })
++    try {
++      await stream.open({ maxMessages: 1 })
++      await vi.waitFor(() => expect(remote.followRequests).toHaveLength(2))
++      await vi.waitFor(() => expect(changes.filter(change => change.type === 'replace')).toHaveLength(2))
++      const last = changes.filter(change => change.type === 'replace').at(-1)
++      if (last?.type !== 'replace') throw new Error('expected the last journal change to be a replace')
++      expect(last.entries[0]?.event.seq).toBe(0)
++      expect(remote.pageRequests).toEqual([])
++      expect(failed).not.toHaveBeenCalled()
++    } finally { await stream.dispose() }
++  })
+   it('preserves current envelopes and payloads without normalization across every journal path', async () => {
+     const events: SessionWireEvent[] = [
+       surfaceEvent(),
+diff --git a/packages/client/ui-commands/src/client/service.ts b/packages/client/ui-commands/src/client/service.ts
+--- a/packages/client/ui-commands/src/client/service.ts
++++ b/packages/client/ui-commands/src/client/service.ts
+@@ -380,7 +380,7 @@
+     if (attachments.length > 0 && result.value.result.kind === 'error') {
+       return { kind: 'error', text: result.value.result.text }
+     }
+-    return { kind: 'success' }
++    return { kind: 'success', commandResult: result.value.result }
+   }
+ 
+   /** Publish the local acknowledgment without letting an observer change command admission. */
+diff --git a/packages/client/ui-commands/tests/service.client.spec.ts b/packages/client/ui-commands/tests/service.client.spec.ts
+--- a/packages/client/ui-commands/tests/service.client.spec.ts
++++ b/packages/client/ui-commands/tests/service.client.spec.ts
+@@ -609,7 +609,7 @@
+       .resolves.toEqual({ kind: 'error', text: 'handler refused' })
+     expect(executeCalls).toEqual([{ sessionId: sid('s1'), line: '/vision x', images: [png] }])
+     result = { kind: 'success', text: 'described' }
+-    await expect(outcome.claim.submit('x', new Context(), [png])).resolves.toEqual({ kind: 'success' })
++    await expect(outcome.claim.submit('x', new Context(), [png])).resolves.toEqual({ kind: 'success', commandResult: result })
+   })
+ 
+   it('an imageless submission keeps the always-success admission mapping over a handler error', async () => {
+@@ -619,7 +619,7 @@
+     await warm(proj('s1'))
+     const outcome = source.matchSpace!(proj('s1'), '/goal')
+     if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected claim')
+-    await expect(outcome.claim.submit('x', new Context(), [])).resolves.toEqual({ kind: 'success' })
++    await expect(outcome.claim.submit('x', new Context(), [])).resolves.toEqual({ kind: 'success', commandResult: { kind: 'error', text: 'late failure' } })
+   })
+ })
+ 
+@@ -635,7 +635,8 @@
+     expect(executeCalls).toEqual([{ sessionId: sid('s1'), line: '/goal ship it', images: [] }])
+     // Pure admission: no outcome text ever rides the submit result — the
+     // durable command lifecycle events render the outcome in the flow.
+-    expect(settled).toEqual({ kind: 'success' })
++    expect(settled).toEqual({ kind: 'success', commandResult: { kind: 'success' } })
++    expect(settled.text).toBeUndefined()
+     expect(executions).toEqual([{
+       sessionId: sid('s1'),
+       name: 'goal',
+@@ -657,7 +658,7 @@
+     b.ctx.on('command/executed', rejectingListener)
+     b.ctx.on('command/executed', after)
+ 
+-    await expect(outcome.claim.submit('ship it', new Context(), [])).resolves.toEqual({ kind: 'success' })
++    await expect(outcome.claim.submit('ship it', new Context(), [])).resolves.toEqual({ kind: 'success', commandResult: { kind: 'success' } })
+     expect(after).toHaveBeenCalledOnce()
+     await Promise.resolve()
+     await Promise.resolve()
+@@ -678,7 +679,7 @@
+     const bad = await first.submit('x', new Context(), [])
+     expect(bad.kind).toBe('error')
+     const second = await claimOf({ execute: () => Promise.resolve({ matched: true }) })
+-    await expect(second.submit('', new Context(), [])).resolves.toEqual({ kind: 'success' })
++    await expect(second.submit('', new Context(), [])).resolves.toEqual({ kind: 'success', commandResult: { kind: 'success' } })
+   })
+ })
+ 
+diff --git a/packages/client/ui-conversation/src/client/contract/input.ts b/packages/client/ui-conversation/src/client/contract/input.ts
+--- a/packages/client/ui-conversation/src/client/contract/input.ts
++++ b/packages/client/ui-conversation/src/client/contract/input.ts
+@@ -7,6 +7,8 @@
+  * here is the submit plane (phase, claim, attempt) alone.
+  */
+ import type { Context } from '@deepseek-ai/cordis'
++import type { CommandResult } from '@deepseek-ai/dsh-commands'
++import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
+ import type { Branded } from '@deepseek-ai/dsh-brand'
+ import type { LexicalEditor } from 'lexical'
+@@ -39,6 +41,16 @@
+ export interface SubmitOutcome {
+   readonly kind: 'success' | 'error'
+   readonly text?: string
++  /** 原生命令结果仅供提交完成后的客户端效果使用，不作为输入框提示回显。 */
++  readonly commandResult?: CommandResult
++}
++
++/** Local initiating-composer effect after a successful claimed command commits its draft. */
++export interface ConversationCommandSettled {
++  readonly sessionId: SessionId
++  readonly token: string
++  readonly outcome: SubmitOutcome
++  readonly signal: AbortSignal
+ }
+ 
+ /** Command-mode credential supplied by one input-trigger source. */
+@@ -144,6 +156,13 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Events {
+     /**
++     * Apply client-only effects of this composer's own settled command.
++     * Remote journal observations never emit this event.
++     * @param request - initiating Session identity and command result.
++     * @mode parallel
++     */
++    'conversation/command-settled'(request: ConversationCommandSettled): void | Promise<void>
++    /**
+      * Claim a command token for the scoped input machine.
+      * @param request - command claim and span.
+      * @mode bail
+diff --git a/packages/client/ui-conversation/src/client/conversation/assembler.ts b/packages/client/ui-conversation/src/client/conversation/assembler.ts
+--- a/packages/client/ui-conversation/src/client/conversation/assembler.ts
++++ b/packages/client/ui-conversation/src/client/conversation/assembler.ts
+@@ -157,6 +157,7 @@
+  * contiguous Event window and materializes registered view snapshots.
+  */
+ export class ConversationNodeAssembler implements ConversationViewSnapshotStore {
++  private historyClosures: readonly SessionEventLikeEntry[] = []
+   private readonly contexts = new Map<string, InternalContext>()
+   private readonly contextsByKind = new Map<string, InternalContext[]>()
+   private readonly contextsBySeq = new Map<number, Set<InternalContext>>()
+@@ -188,9 +189,11 @@
+    * Replace the complete loaded window after open, resync, or gap repair.
+    * @param entries - complete contiguous window.
+    * @param hasMore - whether older history remains outside the window.
++   * @param historyClosures - original hidden end events used only to close selected Locations.
+    * @returns immediate publication request.
+    */
+-  replaceWindow(entries: readonly SessionEventLikeEntry[], hasMore: boolean): ConversationPublication {
++  replaceWindow(entries: readonly SessionEventLikeEntry[], hasMore: boolean, historyClosures: readonly SessionEventLikeEntry[] = []): ConversationPublication {
++    this.historyClosures = historyClosures
+     this.contexts.clear()
+     this.contextsByKind.clear()
+     this.contextsBySeq.clear()
+@@ -203,7 +206,7 @@
+     this.hasMore = hasMore
+     const sorted = [...entries].sort((left, right) => left.event.seq - right.event.seq)
+     for (const entry of sorted) this.inputs.set(entry.event.seq, entry)
+-    this.locationIndex.rebuild(sorted)
++    this.locationIndex.rebuild([...sorted, ...historyClosures].sort((left, right) => left.event.seq - right.event.seq))
+     this.timelineDirty = true
+     for (const entry of sorted) this.matchInput(entry)
+     this.replayDependencies()
+@@ -299,7 +302,7 @@
+     for (const entry of fresh) this.inputs.set(entry.event.seq, entry)
+     this.hasMore = hasMore
+     const previousTimeline = this.locationIndex.snapshot()
+-    const changedLocations = this.locationIndex.rebuild(this.sortedInputs())
++    const changedLocations = this.locationIndex.rebuild([...this.sortedInputs(), ...this.historyClosures].sort((left, right) => left.event.seq - right.event.seq))
+     if (this.locationIndex.snapshot() !== previousTimeline) this.timelineDirty = true
+     const affected = this.refreshMatchLocations(changedLocations)
+     const pending = new Map<string, PendingMatch[]>()
+@@ -322,7 +325,7 @@
+    */
+   rebuildRegistry(): ConversationPublication {
+     this.resetViewBuilders()
+-    return this.replaceWindow(this.sortedInputs(), this.hasMore)
++    return this.replaceWindow(this.sortedInputs(), this.hasMore, this.historyClosures)
+   }
+ 
+   /**
+diff --git a/packages/client/ui-conversation/src/client/conversation/assembly.ts b/packages/client/ui-conversation/src/client/conversation/assembly.ts
+--- a/packages/client/ui-conversation/src/client/conversation/assembly.ts
++++ b/packages/client/ui-conversation/src/client/conversation/assembly.ts
+@@ -22,6 +22,7 @@
+ import { ConversationEventRegistry } from './event-registry.ts'
+ import { HistoricalImageCache } from './historical-images.ts'
+ import { ConversationViewRegistry } from './view-registry.ts'
++import { activeHistoryWindow, historyClosureEvents } from './history-checkout.ts'
+ 
+ /** Observable faces published for one Session's Conversation assembly. */
+ export interface ConversationBinding {
+@@ -50,6 +51,9 @@
+   private revision = -1
+   private frame: number | undefined
+   private disposeFeed: () => void = () => {}
++  private hasCheckout = false
++  private activeDurableSeqs = new Set<number>()
++  private activeCommandRuns = new Set<string>()
+ 
+   constructor(
+     feed: SessionEventSource,
+@@ -95,12 +99,23 @@
+ 
+   private replace(window: SessionEventWindow): void {
+     this.revision = window.revision
+-    this.publish(this.assembler.replaceWindow(window.entries, window.hasMore))
++    this.hasCheckout = window.entries.some(entry => entry.event.type === 'session/history-checkout')
++    const active = activeHistoryWindow(window.entries)
++    this.activeDurableSeqs = new Set(active.flatMap(entry => entry.type === 'event' ? [Number(entry.event.seq)] : []))
++    this.activeCommandRuns = new Set(active.flatMap(entry => entry.event.type === 'command/run' ? [String(entry.event.data.commandId)] : []))
++    this.publish(this.assembler.replaceWindow(active, window.hasMore, historyClosureEvents(window.entries, active)))
+   }
+ 
+   private accept(window: SessionEventWindow): void {
+     if (window.revision === this.revision) return
+     if (window.revision !== this.revision + 1 || window.change.kind === 'replace') {
++      this.replace(window)
++      return
++    }
++    if ((window.change.kind === 'prepend' && (this.hasCheckout || window.change.entries.some(entry => entry.event.type === 'session/history-checkout')))
++      || (window.change.kind === 'append' && window.change.entries.some(entry => entry.event.type === 'session/history-checkout'))) {
++      // Prepending joins the already-loaded checkout tail before selecting;
++      // selecting each page separately would resurrect an abandoned branch.
+       this.replace(window)
+       return
+     }
+@@ -112,6 +127,10 @@
+       case 'append': {
+         let publication: ConversationPublication = 'none'
+         for (const event of window.change.entries) {
++          if (this.hasCheckout && event.type === 'transient' && !this.activeDurableSeqs.has(Math.floor(event.event.seq))) continue
++          if (this.hasCheckout && event.event.type === 'command/done' && !this.activeCommandRuns.has(String(event.event.data.commandId))) continue
++          if (event.event.type === 'command/run') this.activeCommandRuns.add(String(event.event.data.commandId))
++          if (event.type === 'event') this.activeDurableSeqs.add(event.event.seq)
+           const next = this.assembler.append(event)
+           if (next === 'immediate' || publication === 'none') publication = next
+         }
+@@ -119,6 +138,7 @@
+         return
+       }
+       case 'settle-assistant':
++        if (window.change.entry) this.activeDurableSeqs.add(window.change.entry.event.seq)
+         this.publish(this.assembler.settleAssistant(
+           window.change.attemptId,
+           window.change.entry,
+diff --git a/packages/client/ui-conversation/src/client/conversation/history-checkout.ts b/packages/client/ui-conversation/src/client/conversation/history-checkout.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/client/ui-conversation/src/client/conversation/history-checkout.ts
+@@ -0,0 +1,44 @@
++import { selectActiveHistoryEvents } from '@deepseek-ai/dsh-session/surface'
++import type { SessionEventLikeEntry, SessionLiveEventEntry } from '@deepseek-ai/dsh-api-session-controller/client'
++
++/** Select the active conversation from the complete loaded raw Client window. */
++export function activeHistoryWindow(entries: readonly SessionEventLikeEntry[]): readonly SessionEventLikeEntry[] {
++  const durable = entries.filter((entry): entry is SessionLiveEventEntry => entry.type === 'event')
++  if (!durable.some(entry => entry.event.type === 'session/history-checkout')) return entries
++  const active = new Set(selectActiveHistoryEvents(durable.map(entry => entry.event)).map(event => Number(event.seq)))
++  const runs = new Map(durable.flatMap(({ event }) => event.type === 'command/run' ? [[event.data.commandId, event.seq] as const] : []))
++  const done = new Map(durable.flatMap(({ event }) => event.type === 'command/done' ? [[event.data.commandId, event.seq] as const] : []))
++  // Client Assistant chunks live in the gap after their durable cursor, using
++  // cursor + 1 - 1/(ordinal + 1). They are not valid native checkout targets.
++  return entries.filter(entry => {
++    if (!active.has(entry.type === 'event' ? entry.event.seq : Math.floor(entry.event.seq))) return false
++    const event = entry.event
++    if (event.type === 'command/run') {
++      const completion = done.get(event.data.commandId)
++      return completion === undefined || active.has(completion)
++    }
++    if (event.type === 'command/done') {
++      const start = runs.get(event.data.commandId)
++      return start !== undefined && active.has(start)
++    }
++    return true
++  })
++}
++
++/** Real closed activity facts retained only for Location state, never renderer inputs. */
++export function historyClosureEvents(raw: readonly SessionEventLikeEntry[], active: readonly SessionEventLikeEntry[]): readonly SessionLiveEventEntry[] {
++  if (!raw.some(entry => entry.event.type === 'session/history-checkout')) return []
++  const turns = new Set<number>(), steps = new Set<string>(), visible = new Set(active.map(entry => entry.event.seq))
++  for (const entry of active) {
++    const data = entry.event.data as { turn?: unknown; step?: unknown }
++    if (typeof data.turn !== 'number') continue
++    turns.add(data.turn)
++    if (typeof data.step === 'number') steps.add(`${data.turn}:${data.step}`)
++  }
++  return raw.filter((entry): entry is SessionLiveEventEntry => {
++    if (entry.type !== 'event' || visible.has(entry.event.seq)) return false
++    const event = entry.event
++    return (event.type === 'turn/end' && turns.has(event.data.turn))
++      || (event.type === 'step/end' && steps.has(`${event.data.turn}:${event.data.step}`))
++  })
++}
+diff --git a/packages/client/ui-conversation/src/client/index.ts b/packages/client/ui-conversation/src/client/index.ts
+--- a/packages/client/ui-conversation/src/client/index.ts
++++ b/packages/client/ui-conversation/src/client/index.ts
+@@ -62,7 +62,7 @@
+   UseConversationViews,
+ } from './contract/slots.ts'
+ export type {
+-  ArbitrateKey, ArbitrateOutcome, BeginCommandRequest, CommandClaim, ConsumeTokenRequest,
++  ArbitrateKey, ArbitrateOutcome, BeginCommandRequest, CommandClaim, ConsumeTokenRequest, ConversationCommandSettled,
+   DraftAttachmentId, InputActions, InputState, InsertReferenceRequest, InsertTextRequest,
+   PickOutcome, ReferenceInsert, SessionInput, SessionInputResolver, SubmitAttachment,
+   SubmitOutcome, TokenSpan,
+diff --git a/packages/client/ui-conversation/src/client/input/facade.ts b/packages/client/ui-conversation/src/client/input/facade.ts
+--- a/packages/client/ui-conversation/src/client/input/facade.ts
++++ b/packages/client/ui-conversation/src/client/input/facade.ts
+@@ -67,6 +67,8 @@
+     mode: InputSubmitMode,
+     signal: AbortSignal,
+   ): Promise<SubmitOutcome>
++  /** Local effects after a successful command has consumed its submitted draft. */
++  commandSettled?(token: string, outcome: SubmitOutcome, signal: AbortSignal): Promise<void>
+   /** Command-plane attachment plumbing (the hub owns the conversation face and the copy). */
+   commandAttachments: {
+     /** Resolve ordered draft ids to wire payloads without sending them; rejects when an id no longer resolves. */
+@@ -871,7 +873,7 @@
+         return claim.submit(args, this.deps.actx, attachments)
+       })
+       .then(
+-        (outcome) => {
++        async (outcome) => {
+           if (outcome === undefined || this.dead(attempt)) return
+           if (outcome.kind === 'success' && attachmentIds.length > 0) {
+             const submitted = new Set(attachmentIds)
+@@ -883,6 +885,10 @@
+             draft: this.projection.clipboardText, outcome,
+             ...(outcome.kind === 'error' && outcome.text === undefined ? { message: 'command failed' } : {}),
+           }))
++          if (outcome.kind === 'success') {
++            try { await this.deps.commandSettled?.(claim.token, outcome, attempt.signal) }
++            catch (error) { if (!this.dead(attempt)) this.notify('error', error instanceof Error ? error.message : String(error)) }
++          }
+         },
+         (error: unknown) => {
+           if (this.dead(attempt)) return
+diff --git a/packages/client/ui-conversation/src/client/input/hub.ts b/packages/client/ui-conversation/src/client/input/hub.ts
+--- a/packages/client/ui-conversation/src/client/input/hub.ts
++++ b/packages/client/ui-conversation/src/client/input/hub.ts
+@@ -83,12 +83,16 @@
+     const existing = this.shells.get(binding.sessionId)
+     if (existing !== undefined) return existing
+     const { sessionId: id, session, ctx: actx } = binding
++    const lifetime = new AbortController()
+     const shell = new SessionInputShell({
+       actx,
+       inputTriggers: () => this.controller(actx),
+       popup: () => this.popup(actx),
+       queue: queueReadFaceOf(session),
+       defaultSink: (text, attachmentIds, mode, signal) => this.sink(session, text, attachmentIds, mode, signal),
++      commandSettled: (token, outcome, signal) => actx.parallel(actx, 'conversation/command-settled', {
++        sessionId: id, token, outcome, signal: AbortSignal.any([signal, lifetime.signal]),
++      }),
+       steerQueue: () => { void this.steerQueue(session, shell) },
+       commandAttachments: {
+         serialize: async (ids) => {
+@@ -123,6 +127,7 @@
+           shell.insertText(req.text, req.span, req.continue === true) ? true : undefined),
+       ]
+       return () => {
++        lifetime.abort()
+         for (const off of offs) off()
+         const drafts = shell.dispose()
+         this.shells.delete(id)
+diff --git a/packages/client/ui-conversation/tests/conversation-registry.client.spec.ts b/packages/client/ui-conversation/tests/conversation-registry.client.spec.ts
+--- a/packages/client/ui-conversation/tests/conversation-registry.client.spec.ts
++++ b/packages/client/ui-conversation/tests/conversation-registry.client.spec.ts
+@@ -2,7 +2,7 @@
+ import { afterEach, describe, expect, it, vi } from 'vitest'
+ import { SessionSeq } from '@deepseek-ai/dsh-session/types'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+-import { createAssistantMessage, LlmAttemptId } from '@deepseek-ai/dsh-llm'
++import { createAssistantMessage, createUserMessage, LlmAttemptId } from '@deepseek-ai/dsh-llm'
+ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+ import {
+   createScope, MutableSessionEventSource,
+@@ -140,6 +140,42 @@
+ }
+ 
+ describe('Conversation registries', () => {
++  it('rebuilds the existing conversation on checkout, prepend and redo without retaining hidden nodes', async () => {
++    const { ctx, uiConversation, binding, events, views } = await bootRegistries()
++    await ctx.plugin({ name: 'checkout-test-ready', apply() {} })
++    try {
++      events.register({
++        kind: 'checkout-visible-user', target: 'chat',
++        match: event => event.type === 'user/message' && event.surfaceOp === 'append' ? { id: String(event.seq), role: 'start' } : null,
++        start: (_context, match) => match.event.type === 'user/message' ? match.event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('') : '',
++        update: context => context.state,
++        buildViewNode: context => ({ key: context.key, kind: 'user', id: context.id, target: 'chat', data: context.state }),
++      })
++      views.register({ target: 'chat', create: () => {
++        let current: readonly string[] = []
++        return { empty: current, replace: ({ nodes }) => current = nodes.map(node => String(node.data)), apply: ({ upserts }) => current = [...current, ...upserts.map(node => String(node.data))] }
++      } })
++      const conversation = uiConversation.binding(binding)
++      conversation.activate('chat')
++      const source = binding.eventSource as MutableSessionEventSource
++      const user = (seq: number, text: string) => ({ type: 'event' as const, event: { seq: SessionSeq(seq), time: seq, type: 'user/message' as const, data: createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }), surfaceOp: 'append' as const } })
++      const first = user(0, 'A'), second = user(1, 'B'), branch = user(3, 'C')
++      const checkout = { type: 'event' as const, event: { seq: SessionSeq(2), time: 2, type: 'session/history-checkout' as const, data: { throughSeq: SessionSeq(0) } } }
++      const values = () => conversation.snapshot.getSnapshot().views.get('chat')
++      source.replace([first, second], false)
++      expect(values()).toEqual(['A', 'B'])
++      source.append(checkout)
++      expect(values()).toEqual(['A'])
++      source.append(branch)
++      expect(values()).toEqual(['A', 'C'])
++      source.replace([second, checkout, branch], true)
++      expect(values()).toEqual(['C'])
++      source.prepend([first], false)
++      expect(values()).toEqual(['A', 'C'])
++      source.append({ type: 'event', event: { seq: SessionSeq(4), time: 4, type: 'session/history-checkout', data: { throughSeq: SessionSeq(1) } } })
++      expect(values()).toEqual(['A', 'B'])
++    } finally { await ctx.fiber.dispose() }
++  })
+   it('publishes frame-paced updates after three animation frames and lets immediate updates preempt them', async () => {
+     let nextFrame = 0
+     const frames = new Map<number, FrameRequestCallback>()
+diff --git a/packages/client/ui-conversation/tests/history-checkout.client.spec.ts b/packages/client/ui-conversation/tests/history-checkout.client.spec.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/client/ui-conversation/tests/history-checkout.client.spec.ts
+@@ -0,0 +1,55 @@
++import { describe, expect, it } from 'vitest'
++import type { SessionEventLikeEntry } from '@deepseek-ai/dsh-api-session-controller/client'
++import { activeHistoryWindow, historyClosureEvents } from '../src/client/conversation/history-checkout.ts'
++import { ConversationLocationIndex } from '../src/client/conversation/location-index.ts'
++
++function row(seq: number, type: string, data: unknown, surfaceOp?: unknown): SessionEventLikeEntry {
++  return { type: 'event', event: { seq, time: seq, type, data, ...(surfaceOp === undefined ? {} : { surfaceOp }) } } as SessionEventLikeEntry
++}
++const user = (seq: number, text: string) => row(seq, 'user/message', { id: text, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] }, 'append')
++const selectedText = (entries: readonly SessionEventLikeEntry[]) => activeHistoryWindow(entries).flatMap(entry => entry.event.type === 'user/message' && entry.event.surfaceOp === 'append' ? entry.event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
++
++describe('active human history windows', () => {
++  it('uses original closed activity facts without returning hidden endings as renderer inputs', () => {
++    const raw = [row(0, 'turn/start', { turn: 1 }), row(1, 'step/start', { turn: 1, step: 1 }), user(2, 'A'), user(3, 'withdrawn steering'), row(4, 'step/end', { turn: 1, step: 1 }), row(5, 'turn/end', { turn: 1, reason: { kind: 'completed' } }), row(6, 'session/history-checkout', { throughSeq: 2 })]
++    const active = activeHistoryWindow(raw), closures = historyClosureEvents(raw, active)
++    expect(active.map(entry => entry.event.seq)).toEqual([0, 1, 2, 6])
++    expect(closures.map(entry => entry.event.seq)).toEqual([4, 5])
++    expect(closures[0]).toBe(raw[4])
++    const locations = new ConversationLocationIndex()
++    locations.rebuild([...active, ...closures].sort((left, right) => left.event.seq - right.event.seq))
++    expect(locations.snapshot().turns.get(1)?.status).toBe('closed')
++    expect(locations.snapshot().turns.get(1)?.steps[0]?.status).toBe('closed')
++  })
++  it('keeps compaction origins but removes checked-out messages across prepend and redo', () => {
++    const events = [user(0, 'A'), user(1, 'B'), row(2, 'user/message', { source: { kind: 'plugin', plugin: 'compact' }, content: [{ type: 'text', text: 'model summary' }] }, { op: 'replace', startSeq: 0, endSeq: 1 })]
++    expect(selectedText(events)).toEqual(['A', 'B'])
++    events.push(row(3, 'session/history-checkout', { throughSeq: 0 }))
++    expect(selectedText(events)).toEqual(['A'])
++    expect(selectedText(events.slice(1))).toEqual([])
++    expect(selectedText([events[0]!, ...events.slice(1)])).toEqual(['A'])
++    events.push(row(4, 'session/history-checkout', { throughSeq: 2 }))
++    expect(selectedText(events)).toEqual(['A', 'B'])
++    events.push(row(5, 'session/history-checkout', { throughSeq: 0 }), user(6, 'C'))
++    expect(selectedText(events)).toEqual(['A', 'C'])
++  })
++
++  it('does not show orphan undo/redo command halves or retired Assistant chunks', () => {
++    const events = [user(0, 'A'), row(1, 'command/run', { commandId: 'undo', name: 'undo' }), row(2, 'session/history-checkout', { throughSeq: 0 }), row(3, 'command/done', { commandId: 'undo', kind: 'success' })]
++    const commands = () => activeHistoryWindow(events).filter(entry => entry.event.type.startsWith('command/'))
++    expect(commands()).toEqual([])
++    events.push(row(4, 'command/run', { commandId: 'redo', name: 'redo' }), row(5, 'session/history-checkout', { throughSeq: 1 }), row(6, 'command/done', { commandId: 'redo', kind: 'success' }))
++    expect(commands()).toEqual([])
++    events.push(row(7, 'command/run', { commandId: 'normal', name: 'normal' }))
++    expect(commands().map(entry => entry.event.seq)).toEqual([7])
++    const chunks = [
++      { type: 'transient', event: { type: 'assistant/live-chunk', seq: 1.5, time: 1, data: { turn: 1, step: 1 } } },
++      { type: 'transient', event: { type: 'assistant/live-chunk', seq: 7.5, time: 1, data: { turn: 2, step: 1 } } },
++    ] as SessionEventLikeEntry[]
++    // Anchor 1 is retained by redo's raw checkout but its closed Command is
++    // absent from the selected display. Model chunks use durable branch scope.
++    expect(activeHistoryWindow([...events, ...chunks]).filter(entry => entry.type === 'transient').map(entry => entry.event.seq)).toEqual([1.5, 7.5])
++    events.push(row(8, 'session/history-checkout', { throughSeq: 0 }))
++    expect(activeHistoryWindow([...events, ...chunks]).some(entry => entry.type === 'transient')).toBe(false)
++  })
++})
+diff --git a/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts b/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
+--- a/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
++++ b/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
+@@ -33,6 +33,33 @@
+ }
+ 
+ describe('reference submission', () => {
++  it('publishes its own command effect after submitted text and attachments are consumed', async () => {
++    let settled = false
++    const released: readonly DraftAttachmentId[][] = []
++    const shell = new SessionInputShell({
++      actx: {} as Context, defaultSink: vi.fn(),
++      commandAttachments: { ...commandAttachments, release: ids => { (released as DraftAttachmentId[][]).push([...ids]) } },
++      commandSettled: async (token, outcome, signal) => {
++        expect(token).toBe('/control')
++        expect(outcome.text).toBe('opaque-result')
++        expect(signal.aborted).toBe(false)
++        expect(shell.snapshot.draft).toBe('')
++        expect(shell.snapshot.attachmentIds).toEqual([])
++        shell.setDraft('restored text')
++        expect(shell.addAttachments(['restored-file' as DraftAttachmentId])).toBe(true)
++        settled = true
++      },
++    })
++    shell.setDraft('/control')
++    shell.addAttachments(['submitted-file' as DraftAttachmentId])
++    expect(shell.beginCommand({ token: '/control', attachments: true, submit: async () => ({ kind: 'success', text: 'opaque-result' }) }, { start: 0, end: 8, draftRev: shell.snapshot.draftRev })).toBe(true)
++    shell.submit()
++    await vi.waitFor(() => expect(settled).toBe(true))
++    expect(shell.snapshot.draft).toBe('restored text')
++    expect(shell.snapshot.attachmentIds).toEqual(['restored-file'])
++    expect(released).toEqual([['submitted-file']])
++    shell.dispose()
++  })
+   it('mirrors canonical reference text so a persisted draft remains resolvable after remount', async () => {
+     const mirror = vi.fn()
+     const first = new SessionInputShell({

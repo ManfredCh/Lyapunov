@@ -1,0 +1,471 @@
+diff --git a/packages/client/ui-dockkit/src/components/TabPanel.tsx b/packages/client/ui-dockkit/src/components/TabPanel.tsx
+index 47f025d..25eb395 100644
+--- a/packages/client/ui-dockkit/src/components/TabPanel.tsx
++++ b/packages/client/ui-dockkit/src/components/TabPanel.tsx
+@@ -295,7 +295,7 @@ export function TabPanel({ state, pane, callbacks }: TabPanelProps): ReactNode {
+                   onPointerDown={(event) => {
+                     // A secondary press is the menu, never a drag.
+                     if (event.button === 2) return
+-                    callbacks.onTabPressed(tabId, event)
++                    !tab.pinned && callbacks.onTabPressed(tabId, event)
+                   }}
+                   onClick={(event) => {
+                     event.stopPropagation()
+@@ -407,9 +407,12 @@ export function TabPanel({ state, pane, callbacks }: TabPanelProps): ReactNode {
+         )}
+       </div>
+       <div className={css.paneBody}>
+-        {active === undefined
+-          ? <p className={css.empty}>{callbacks.labels.emptyPane}</p>
+-          : callbacks.renderTab(active)}
++        {active === undefined && <p className={css.empty}>{callbacks.labels.emptyPane}</p>}
++        {pane.tabs.map(id=>getTab(state,id)).filter(tab=>tab.keepMounted||tab.id===pane.activeTabId).map(tab=>
++          <div key={tab.id} data-dockkit-tab-body={tab.id} hidden={tab.id!==pane.activeTabId}
++            style={{display:tab.id===pane.activeTabId?'flex':'none',flexDirection:'column',height:'100%',minHeight:0,minWidth:0}}>
++            {callbacks.renderTab(tab)}
++          </div>)}
+         {zone !== undefined && (
+           <>
+             <div className={css.dockScrim} data-dockkit-dock-scrim />
+diff --git a/packages/client/ui-dockkit/src/contract/types.ts b/packages/client/ui-dockkit/src/contract/types.ts
+index e5f9a66..4685909 100644
+--- a/packages/client/ui-dockkit/src/contract/types.ts
++++ b/packages/client/ui-dockkit/src/contract/types.ts
+@@ -91,6 +91,10 @@ export type LayoutNode = SplitNode | PaneNode
+  * sharing it are deliberate copies of one thing.
+  */
+ export interface TabRecord {
++  /** 固定工作页：首位、不可关闭或移动。 */
++  readonly pinned?: boolean
++  /** 隐藏时保留正文实例。 */
++  readonly keepMounted?: boolean
+   readonly id: TabId
+   readonly kind: string
+   readonly contentId: string
+diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
+index 5a4f131..0b6f21a 100644
+--- a/packages/client/ui-layout/src/client/AppFrame.module.css
++++ b/packages/client/ui-layout/src/client/AppFrame.module.css
+@@ -97,3 +97,9 @@
+ .overlayLayer > * {
+   pointer-events: auto;
+ }
++
++/* 固定工作区在窄窗与对话上下共显，不自动隐藏任何一列。 */
++.frame[data-workspace-stacked] { grid-template-rows:minmax(0,1fr) minmax(200px,34%); }
++.frame[data-workspace-stacked] .sidebarCol { grid-column:1;grid-row:1 / 3; }
++.frame[data-workspace-stacked] .rightbarCol { grid-column:2;grid-row:1;min-height:0; }
++.frame[data-workspace-stacked] .centerCol { grid-column:2;grid-row:2;min-height:0;border-top:1px solid var(--dsw-alias-border-l3); }
+diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
+index 42dd6b0..7d9749b 100644
+--- a/packages/client/ui-layout/src/client/AppFrame.tsx
++++ b/packages/client/ui-layout/src/client/AppFrame.tsx
+@@ -174,8 +174,10 @@ export function AppFrame({
+   const rightbarPreference = layoutInfo.rightbar ?? viewport * RIGHTBAR_DEFAULT_RATIO
+   // Opening on a narrow frame collapses the left sidebar. Eligibility must
+   // include that space before the occupant's first shown report arrives.
+-  const normal = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference)
+-  const cols = computeColumns(viewport, sidebarPreference, layoutInfo.rightbarTrack ? rightbarPreference : 0)
++  const measured = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference)
++  const stacked = Boolean(layoutInfo.rightbarAlongside && layoutInfo.rightbarTrack && !layoutInfo.rightbarFullscreen && viewport-measured.sidebar<900)
++  const normal = stacked ? {...measured,center:Math.max(0,viewport-measured.sidebar),rightbar:Math.max(0,viewport-measured.sidebar)} : measured
++  const cols = stacked ? normal : computeColumns(viewport, sidebarPreference, layoutInfo.rightbarTrack ? rightbarPreference : 0)
+   const colsRef = useRef(cols)
+   colsRef.current = cols
+   const rightbarWidth = useRef(normal.rightbar)
+@@ -220,8 +222,9 @@ export function AppFrame({
+       className={css.frame}
+       style={{
+         gridTemplateColumns:
+-          `${cols.sidebar}px minmax(0, 1fr) ${cols.rightbar}px`,
++          stacked ? `${cols.sidebar}px minmax(0,1fr)` : `${cols.sidebar}px minmax(0, 1fr) ${cols.rightbar}px`,
+       }}
++      data-workspace-stacked={stacked || undefined}
+       data-sidebar-collapsed={sidebarCollapsed || undefined}
+       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
+       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
+@@ -247,7 +250,7 @@ export function AppFrame({
+       </div>
+       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
+       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
++      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && !stacked && normal.rightbar > 0 && (
+         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
+       )}
+     </div>
+diff --git a/packages/client/ui-layout/src/client/service.ts b/packages/client/ui-layout/src/client/service.ts
+index 14a3924..1c569d3 100644
+--- a/packages/client/ui-layout/src/client/service.ts
++++ b/packages/client/ui-layout/src/client/service.ts
+@@ -46,7 +46,7 @@ export interface ILayout {
+    * @param fullscreen - whether the panel covers the frame and hides its outer
+    *   resize handle; independent of the underlying grid track.
+    */
+-  openRightbar(track: boolean, fullscreen: boolean): void
++  openRightbar(track: boolean, fullscreen: boolean, alongside?: boolean): void
+   /** Report the right panel as hidden: no track, no handle. */
+   closeRightbar(): void
+ }
+@@ -91,8 +91,8 @@ export class LayoutController implements ILayout {
+   }
+ 
+   /** Report the right panel's track and fullscreen presentation. */
+-  openRightbar(track: boolean, fullscreen: boolean): void {
+-    this.panels.openRightbar(track, fullscreen)
++  openRightbar(track: boolean, fullscreen: boolean, alongside?: boolean): void {
++    this.panels.openRightbar(track, fullscreen, alongside)
+   }
+ 
+   /** Report the right panel as hidden: no track, no handle. */
+diff --git a/packages/client/ui-layout/src/client/stores.ts b/packages/client/ui-layout/src/client/stores.ts
+index 3a53caf..4871f4e 100644
+--- a/packages/client/ui-layout/src/client/stores.ts
++++ b/packages/client/ui-layout/src/client/stores.ts
+@@ -6,7 +6,7 @@ import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-sto
+ import type { MainPanelId } from './service.ts'
+ import {
+   clampWidth, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN,
+-  SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
++  SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
+ } from './columns.ts'
+ 
+ /**
+@@ -40,6 +40,8 @@ type LayoutInfo = {
+    * else writes it.
+    */
+   rightbarShown: boolean
++  /** 工作区与对话共同可见；窄窗改为上下排列。 */
++  rightbarAlongside?: boolean
+   /**
+    * Whether the normal panel width reserves a grid track, including beneath
+    * fullscreen. Reported by the occupant; always false while hidden.
+@@ -62,7 +64,7 @@ type LayoutActions = {
+   toggleSidebar: (draft: LayoutState) => void
+   setViewportWidth: (draft: LayoutState, width: number) => void
+   setRightbar: (draft: LayoutState, px: number) => void
+-  openRightbar: (draft: LayoutState, track: boolean, fullscreen: boolean) => void
++  openRightbar: (draft: LayoutState, track: boolean, fullscreen: boolean, alongside?: boolean) => void
+   closeRightbar: (draft: LayoutState) => void
+ }
+ 
+@@ -124,17 +126,22 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
+         d.layoutInfo.rightbarInstant = false
+         d.layoutInfo.rightbar = clampWidth(px, RIGHTBAR_MIN, Math.max(RIGHTBAR_MIN, d.layoutInfo.viewportWidth * RIGHTBAR_MAX_RATIO))
+       },
+-      openRightbar: (d, track: boolean, fullscreen: boolean) => {
++      openRightbar: (d, track: boolean, fullscreen: boolean, alongside = false) => {
++        if (alongside) d.layoutInfo.rightbarAlongside = true
++        else delete d.layoutInfo.rightbarAlongside
+         if (!d.layoutInfo.rightbarShown || d.layoutInfo.rightbarTrack !== track || d.layoutInfo.rightbarFullscreen !== fullscreen) {
+           d.layoutInfo.rightbarInstant = d.layoutInfo.rightbarFullscreen && !fullscreen
+         }
+         if (!d.layoutInfo.rightbarShown && d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) d.layoutInfo.narrowExpanded = false
+-        d.layoutInfo.rightbar ??= Math.max(RIGHTBAR_MIN, Math.round(d.layoutInfo.viewportWidth * RIGHTBAR_DEFAULT_RATIO))
++        d.layoutInfo.rightbar ??= alongside
++          ? Math.max(RIGHTBAR_MIN,d.layoutInfo.viewportWidth-(d.layoutInfo.viewportWidth<SIDEBAR_AUTO_COLLAPSE?SIDEBAR_COLLAPSED:(d.layoutInfo.sidebar||SIDEBAR_COLLAPSED))-400)
++          : Math.max(RIGHTBAR_MIN, Math.round(d.layoutInfo.viewportWidth * RIGHTBAR_DEFAULT_RATIO))
+         d.layoutInfo.rightbarShown = true
+         d.layoutInfo.rightbarTrack = track
+         d.layoutInfo.rightbarFullscreen = fullscreen
+       },
+       closeRightbar: (d) => {
++        delete d.layoutInfo.rightbarAlongside
+         if (d.layoutInfo.rightbarShown) d.layoutInfo.rightbarInstant = d.layoutInfo.rightbarFullscreen
+         d.layoutInfo.rightbarShown = false
+         d.layoutInfo.rightbarTrack = false
+diff --git a/packages/client/ui-sidebar-right/src/client/contract/slots.ts b/packages/client/ui-sidebar-right/src/client/contract/slots.ts
+index f5ee3de..085596e 100644
+--- a/packages/client/ui-sidebar-right/src/client/contract/slots.ts
++++ b/packages/client/ui-sidebar-right/src/client/contract/slots.ts
+@@ -38,6 +38,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+   }
+ 
+   interface SlotMap {
++    /** 整个原生标签工作区的工具列，不随active正文切换。 */
++    'sidebar.right.surface.actions': {kind:'list';scope:'session';owner:{activeTab?:TabRecord;expanded:boolean}}
+     /** Session content selected by the root-scoped right Sidebar controller. */
+     'rightbar.session': { kind: 'single'; scope: 'session'; owner: RightbarOwnerProps }
+     /**
+diff --git a/packages/client/ui-sidebar-right/src/client/index.ts b/packages/client/ui-sidebar-right/src/client/index.ts
+index 6e2df4f..ee9c336 100644
+--- a/packages/client/ui-sidebar-right/src/client/index.ts
++++ b/packages/client/ui-sidebar-right/src/client/index.ts
+@@ -136,8 +136,8 @@ export function apply(ctx: ClientContext): void {
+     }
+     const layout: ILayout = ctx.layout
+     const injected: Omit<SidebarRightInjected, 'keyedHooks' | 'occurrence'> = {
+-      syncPresentation({ shown, track, fullscreen }) {
+-        if (shown) layout.openRightbar(track, fullscreen)
++      syncPresentation({ shown, track, fullscreen, alongside }) {
++        if (shown) layout.openRightbar(track, fullscreen, alongside)
+         else layout.closeRightbar()
+       },
+       bindService: binding => controller.bind(binding),
+@@ -158,6 +158,7 @@ export function apply(ctx: ClientContext): void {
+           'sidebar.right.pane.tab': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
+           'sidebar.right.pane.tab.title': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
+           'sidebar.right.tab.menu.item': { kind: 'list', scope: 'session' },
++          'sidebar.right.surface.actions': {kind:'list',scope:'session'},
+         },
+         store,
+         inject: (sessionId): SidebarRightInjected => ({
+diff --git a/packages/client/ui-sidebar-right/src/client/service.ts b/packages/client/ui-sidebar-right/src/client/service.ts
+index e80a291..bfe21cf 100644
+--- a/packages/client/ui-sidebar-right/src/client/service.ts
++++ b/packages/client/ui-sidebar-right/src/client/service.ts
+@@ -336,6 +336,8 @@ export class SidebarRightController implements ISidebarRight {
+       kind: claim.kind,
+       contentId: claim.contentId,
+       title: claim.title,
++      ...this.tabs.get(claim.kind)?.pinned?{pinned:true}:{},
++      ...this.tabs.get(claim.kind)?.keepMounted?{keepMounted:true}:{},
+       ...placement.paneId === undefined ? {} : { paneId: placement.paneId },
+       ...placement.replaceTab === undefined ? {} : { replaceTab: placement.replaceTab },
+       ...placement.revealIfOpened === undefined ? {} : { revealIfOpened: placement.revealIfOpened },
+diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+index 355eedc..5ce70f1 100644
+--- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
++++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+@@ -36,7 +36,7 @@ import type {
+ } from '@deepseek-ai/dsh-client-ui-slots'
+ import type {} from '../contract/slots.ts'
+ import type { DockIntents, DockMode, FloatRect, TabId, TabRecord, TabRenderer } from '@deepseek-ai/dsh-client-ui-dockkit'
+-import { canSplit, dockPaneIds, DockSurface, findPaneContentTab, FloatLayer } from '@deepseek-ai/dsh-client-ui-dockkit'
++import { activeDockPaneId, getPane, canSplit, dockPaneIds, DockSurface, findPaneContentTab, FloatLayer } from '@deepseek-ai/dsh-client-ui-dockkit'
+ import type { HalvesFit, LayoutState, PaneId } from '@deepseek-ai/dsh-client-ui-dockkit'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import { GUIDE_KIND, pageAddress } from '../contract/seed.ts'
+@@ -54,7 +54,7 @@ import css from './SidebarRight.module.css'
+ type Store = PropsStore<ReturnType<typeof createSidebarRightStore>>
+ 
+ /** The child seats this component renders. */
+-type Children = PropsRenderSlots<'sidebar.right.pane.tab' | 'sidebar.right.pane.tab.title' | 'sidebar.right.tab.menu.item'>
++type Children = PropsRenderSlots<'sidebar.right.pane.tab' | 'sidebar.right.pane.tab.title' | 'sidebar.right.tab.menu.item' | 'sidebar.right.surface.actions'>
+ 
+ /** What the panel reports to the frame: drawn or not, and whether it wants a track. */
+ export interface SidebarRightPresentation {
+@@ -64,6 +64,8 @@ export interface SidebarRightPresentation {
+   readonly track: boolean
+   /** Whether the panel fills the viewport, independently of its retained track. */
+   readonly fullscreen: boolean
++  /** 固定工作页要求与对话同时可见。 */
++  readonly alongside?: boolean
+ }
+ 
+ /** What this package needs from its host beyond the framework shares. */
+@@ -290,6 +292,8 @@ function PanelChrome({ sessionId, fullscreen, autoFullscreen, actions, t }: Pick
+ function SidebarPanel(panel: PanelProps & { width: number; panelRef: RefObject<HTMLDivElement> }): ReactNode {
+   const { sessionId, surface, actions, t, renderSlot, openTab, width, reportRoom, fullscreen, autoFullscreen, panelRef } = panel
+   const { expanded } = surface.layout
++  const activeId = getPane(surface.layout,activeDockPaneId(surface.layout)).activeTabId
++  const activeTab = activeId === undefined ? undefined : surface.layout.tabs[activeId]
+   return (
+     <div
+       ref={panelRef}
+@@ -320,6 +324,7 @@ function SidebarPanel(panel: PanelProps & { width: number; panelRef: RefObject<H
+           chrome={<PanelChrome sessionId={sessionId} fullscreen={fullscreen} autoFullscreen={autoFullscreen} actions={actions} t={t} />}
+           onRoom={reportRoom}
+         />
++        {renderSlot('sidebar.right.surface.actions',{expanded,...activeTab===undefined?{}:{activeTab}})}
+       </div>
+     </div>
+   )
+@@ -360,8 +365,14 @@ export function RightbarSeat({
+   // adopted stores instead.
+   const surfaces = useStore(state => state.bySession)
+   const surface = surfaces[sessionId]
++  const tabTypes = useTabTypes(types=>types)
++  useEffect(() => {
++    const pinned = tabTypes.filter(type=>type.pinned).map(type=>({kind:type.kind,contentId:pageAddress(type.kind),title:type.title(pageAddress(type.kind)),pinned:true,...type.keepMounted?{keepMounted:true}:{}}))
++    if (pinned.length) actions.ensurePinned(sessionId,pinned)
++  }, [actions,sessionId,tabTypes])
+   const shown = surface !== undefined && surface.layout.expanded
+-  const autoFullscreen = viewportWidth < 768
++  const alongside = surface !== undefined && Object.values(surface.layout.tabs).some(tab=>tab.pinned)
++  const autoFullscreen = !alongside && viewportWidth < 768
+   const fullscreen = autoFullscreen || surface?.layout.mode === 'fullscreen'
+   const panelRef = useRef<HTMLDivElement | null>(null)
+   // The kit's room-rule readings, kept in a ref: the service reads them at
+@@ -375,8 +386,8 @@ export function RightbarSeat({
+   }, [actions, sessionId, surface])
+ 
+   useLayoutEffect(() => {
+-    if (shown && !fullscreen && !canShow) actions.setExpanded(sessionId, false)
+-  }, [actions, sessionId, shown, fullscreen, canShow])
++    if (shown && !fullscreen && !canShow && !alongside) actions.setExpanded(sessionId, false)
++  }, [actions, sessionId, shown, fullscreen, canShow, alongside])
+ 
+   // Fullscreen leaves the previous column report in force until its own slide
+   // completes. Normal presentation and zero-duration transitions report before paint.
+@@ -391,7 +402,7 @@ export function RightbarSeat({
+           && animation.playState !== 'finished' && animation.playState !== 'idle')
+         : []
+       if (entering.length === 0) {
+-        syncPresentation({ shown, track, fullscreen })
++        syncPresentation({ shown, track, fullscreen, alongside })
+         return
+       }
+       // Cancellation can replace the transition or remove it for reduced motion.
+@@ -399,7 +410,7 @@ export function RightbarSeat({
+     }
+     reportWhenCovered()
+     return () => { disposed = true }
+-  }, [sessionId, shown, track, fullscreen, syncPresentation])
++  }, [sessionId, shown, track, fullscreen, alongside, syncPresentation])
+   // Leaving is part of that report: a seat that unmounts with its session must
+   // hand the track back rather than leave one sized for a surface nobody draws.
+   useLayoutEffect(() => () => { syncPresentation({ shown: false, track: false, fullscreen: false }) }, [syncPresentation])
+diff --git a/packages/client/ui-sidebar-right/src/client/stores.ts b/packages/client/ui-sidebar-right/src/client/stores.ts
+index 88cb40a..b69f2ba 100644
+--- a/packages/client/ui-sidebar-right/src/client/stores.ts
++++ b/packages/client/ui-sidebar-right/src/client/stores.ts
+@@ -31,7 +31,7 @@ import type {
+   DockMode, DockZone, FloatRect, History, LayoutOp, LayoutState, Mint, PaneId, SplitId, TabId, TabRecord,
+ } from '@deepseek-ai/dsh-client-ui-dockkit'
+ import {
+-  activeDockPaneId, createInitialState, dockPaneIds, EMPTY_HISTORY, findPaneContentTab, findTabPane, getPane,
++  activeDockPaneId, createInitialState, dockPaneIds, EMPTY_HISTORY, findContentTab, findPaneContentTab, findTabPane, getPane,
+   planDropTab, planDuplicateTab, planFloatTab, planOpenContent, planPlaceTab, planResizeSplit, planSetExpanded,
+   planSetMode, planSettle, planSplitPane, planUnfloatPane, record, replay, stepBack, stepForward,
+ } from '@deepseek-ai/dsh-client-ui-dockkit'
+@@ -67,7 +67,7 @@ type SurfacePlan = (state: LayoutState, mint: Mint, makeTab: (id: TabId) => TabR
+  */
+ export function canCloseTab(surface: SurfaceState, tabId: TabId): boolean {
+   const tab = surface.layout.tabs[tabId]
+-  return tab !== undefined && !(tab.kind === GUIDE_KIND && soleDockedTab(surface.layout, tabId))
++  return tab !== undefined && !tab.pinned && !(tab.kind === GUIDE_KIND && soleDockedTab(surface.layout, tabId))
+ }
+ 
+ /** Build the currently selected default tab. */
+@@ -81,6 +81,8 @@ function seedRecord(id: TabId, seed: () => SidebarRightSeed): TabRecord {
+  * claimed. Placement is by `replaceTab` first, then `paneId`, then the active pane.
+  */
+ export interface OpenContentIntent {
++  readonly pinned?: boolean
++  readonly keepMounted?: boolean
+   readonly kind: string
+   readonly contentId: string
+   readonly title: string
+@@ -216,6 +218,7 @@ function seat(
+ 
+ /** Declared write set; each entry is one settled intent. */
+ type SidebarRightActions = {
++  ensurePinned: (draft: SidebarRightState, sessionId: string, pages: readonly OpenContentIntent[]) => void
+   open: (draft: SidebarRightState, sessionId: string) => void
+   setExpanded: (draft: SidebarRightState, sessionId: string, expanded: boolean) => void
+   toggleExpanded: (draft: SidebarRightState, sessionId: string) => void
+@@ -249,6 +252,7 @@ type HistoryStepper =
+ /** Step a surface through the history in one direction. */
+ function stepped(surface: SurfaceState, step: HistoryStepper): SurfaceState {
+   const moved = step(surface.history, surface.layout)
++  if (moved && Object.values(surface.layout.tabs).some(tab=>tab.pinned && !moved.state.tabs[tab.id])) return surface
+   return moved === undefined ? surface : { ...surface, layout: moved.state, history: moved.history }
+ }
+ 
+@@ -267,6 +271,22 @@ export function createSidebarRightStore(
+   return defineStore({
+     init: (): SidebarRightState => ({ bySession: {} }),
+     actions: {
++      // 固定页在原生surface内建一次；后续分栏仍使用原来的guide播种。
++      ensurePinned: (d, sessionId: string, pages: readonly OpenContentIntent[]) => {
++        d.bySession = seat(d, sessionId, s => advance(s, (state, mint) => {
++          const ops: LayoutOp[] = []
++          let current = state
++          for (const page of pages) {
++            if (findContentTab(current, page.contentId, page.kind) !== undefined) continue
++            const planned = planOpenContent(current, mint, {kind:page.kind,contentId:page.contentId,title:page.title,index:0})
++            const added = planned.ops.map(op => op.type === 'openTab' ? {...op,tab:{...op.tab,pinned:true,...page.keepMounted?{keepMounted:true}:{}}} : op)
++            ops.push(...added)
++            current = replay(current, added)
++          }
++          if (ops.length > 0) ops.push(...planSetExpanded(current, true))
++          return ops
++        }, seed))
++      },
+       // Materialize a session's surface without changing it, so the first read
+       // after a session switch sees the collapsed empty column rather than nothing.
+       open: (d, sessionId: string) => { d.bySession = seat(d, sessionId, surface => surface) },
+@@ -304,20 +324,21 @@ export function createSidebarRightStore(
+       // landed on, synchronously, because actions return nothing.
+       openContent: (d, sessionId: string, intent, settled) => {
+         d.bySession = seat(d, sessionId, s => advance(s, (state, mint) => {
+-          const { kind, contentId, title, replaceTab: replace } = intent
++          const { kind, contentId, title } = intent
++          const replace = intent.replaceTab !== undefined && !state.tabs[intent.replaceTab]?.pinned ? intent.replaceTab : undefined
+           const ops: LayoutOp[] = [...planSetExpanded(state, true)]
+           // A replaced tab lends its pane and slot; one that floats cannot (a
+           // floating pane holds one tab), so the new tab lands as if unplaced.
+           const replaced = replace === undefined ? undefined : findTabPane(state, replace)
+           const lent = replace !== undefined && replaced !== undefined && replaced.host === 'dock' ? replaced : undefined
+           const paneId = lent?.id ?? intent.paneId
+-          const index = lent === undefined || replace === undefined ? undefined : lent.tabs.indexOf(replace)
++          const index = intent.pinned ? 0 : lent === undefined || replace === undefined ? undefined : Math.max(lent.tabs.filter(id=>state.tabs[id]?.pinned).length,lent.tabs.indexOf(replace))
+           // A page is unique per pane, not per surface: the pane it would land
+           // in may already show it, which is then the tab this open settles on.
+           // The same page in another pane never draws the open away — the kit's
+           // cross-pane reveal is for resources only.
+           const page = contentId === pageAddress(kind)
+-          const held = page ? panePage(state, paneId ?? activeDockPaneId(state), kind) : undefined
++          const held = intent.pinned ? findContentTab(state,contentId,kind) : page ? panePage(state, paneId ?? activeDockPaneId(state), kind) : undefined
+           const planned = held !== undefined
+             ? { ops: [{ type: 'focusTab' as const, tabId: held }], tabId: held }
+             : planOpenContent(state, mint, {
+@@ -330,7 +351,7 @@ export function createSidebarRightStore(
+                 ? { revealIfOpened: false }
+                 : intent.revealIfOpened === undefined ? {} : { revealIfOpened: intent.revealIfOpened },
+             })
+-          ops.push(...planned.ops)
++          ops.push(...planned.ops.map(op=>op.type==='openTab'?{...op,tab:{...op.tab,...intent.pinned?{pinned:true}:{},...intent.keepMounted?{keepMounted:true}:{}}}:op))
+           if (replace !== undefined && replace !== planned.tabId) ops.push({ type: 'closeTab', tabId: replace })
+           settled(planned.tabId)
+           return ops
+@@ -339,7 +360,7 @@ export function createSidebarRightStore(
+       // A page is never copied: the copy would sit beside it in the same pane.
+       duplicateTab: (d, sessionId: string, tabId: TabId) => {
+         d.bySession = seat(d, sessionId, s =>
+-          advance(s, (state, mint) => pageKind(state, tabId) !== undefined ? [] : planDuplicateTab(state, mint, tabId).ops, seed))
++          advance(s, (state, mint) => state.tabs[tabId]?.pinned || pageKind(state, tabId) !== undefined ? [] : planDuplicateTab(state, mint, tabId).ops, seed))
+       },
+       // A tab already gone — closed twice by a racing callback and the user — is
+       // left alone rather than handed to the kit, which refuses an unknown tab.
+@@ -365,14 +386,14 @@ export function createSidebarRightStore(
+       },
+       placeTab: (d, sessionId: string, tabId: TabId, toPaneId: PaneId, index: number) => {
+         d.bySession = seat(d, sessionId, s =>
+-          advance(s, state => arriving(state, tabId, toPaneId, () => planPlaceTab(state, tabId, toPaneId, index)), seed))
++          advance(s, state => state.tabs[tabId]?.pinned ? [] : arriving(state, tabId, toPaneId, () => planPlaceTab(state, tabId, toPaneId, Math.max(index,getPane(state,toPaneId).tabs.filter(id=>state.tabs[id]?.pinned).length))), seed))
+       },
+       // Only a centre release lands in the target pane; an edge release makes a
+       // new pane, where nothing can already be — and when the release drags a
+       // pane's only tab to that pane's own edge, the default page backfills it.
+       dropTab: (d, sessionId: string, tabId: TabId, paneId: PaneId, zone: DockZone) => {
+         d.bySession = seat(d, sessionId, s => advance(s, (state, mint, makeTab) => {
+-          if (zone === 'top' || zone === 'bottom') return []
++          if (state.tabs[tabId]?.pinned || zone === 'top' || zone === 'bottom') return []
+           if (zone !== 'center' && dockPaneIds(state).length >= 2) return []
+           const plan = (): readonly LayoutOp[] => planDropTab(state, mint, tabId, paneId, zone, makeTab)
+           return zone === 'center' ? arriving(state, tabId, paneId, plan) : plan()
+@@ -380,7 +401,7 @@ export function createSidebarRightStore(
+       },
+       floatTab: (d, sessionId: string, tabId: TabId, rect?: FloatRect) => {
+         d.bySession = seat(d, sessionId, s =>
+-          advance(s, (state, mint) => planFloatTab(state, mint, tabId, rect).ops, seed))
++          advance(s, (state, mint) => state.tabs[tabId]?.pinned ? [] : planFloatTab(state, mint, tabId, rect).ops, seed))
+       },
+       // A floating pane holds one tab; docking it back lands in the active
+       // docked pane, and only a page is subject to the merge rule there.
+diff --git a/packages/client/ui-sidebar-right/src/client/tab-registry.ts b/packages/client/ui-sidebar-right/src/client/tab-registry.ts
+index 1b93096..77bbf7a 100644
+--- a/packages/client/ui-sidebar-right/src/client/tab-registry.ts
++++ b/packages/client/ui-sidebar-right/src/client/tab-registry.ts
+@@ -85,6 +85,10 @@ export interface SidebarRightGuideBox extends SidebarRightGuideEntry {
+ 
+ /** One registered tab type: its static face, and nothing else. */
+ export interface SidebarRightTabDefinition {
++  /** 此页面在每个会话中自动打开并固定在首位。 */
++  readonly pinned?: boolean
++  /** 切换标签时保留正文。 */
++  readonly keepMounted?: boolean
+   /**
+    * This implementation's identity in the tab system, unique across every
+    * registration (a package name is the natural value). A kind is not unique —

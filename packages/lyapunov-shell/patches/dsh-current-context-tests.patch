@@ -1,0 +1,43 @@
+--- a/packages/core/agent-loop/tests/loop.spec.ts
++++ b/packages/core/agent-loop/tests/loop.spec.ts
+@@ -669,7 +669,7 @@
+     }
+   })
+
+-  it('materializes changed runtime context at the history tail without rewriting the system header', async () => {
++  it('materializes changed runtime context as one current snapshot while preserving the stable system and canonical header', async () => {
+     const adapter = new MockAdapter([
+       textResponse('one'),
+       textResponse('two'),
+@@ -723,8 +723,29 @@
+     expect(contextEvents()).toHaveLength(3)
+     expect(adapter.requests.map(systemOf)).toEqual(Array(5).fill(systemOf(adapter.requests[0])))
+     expect(agent.session.snapshotEvents().filter(event => event.type === 'system/message')).toHaveLength(1)
+-    expect(agent.session.snapshotEvents().flatMap(event =>
+-      event.type === 'request/header' ? [event.data.reason] : [])).toEqual(['initial'])
++    // 替换早先的当前事实改变surface generation，需要原生series重启；config/tools头仍逐字一致。
++    const headers = agent.session.snapshotEvents().flatMap(event => event.type === 'request/header' ? [event.data] : [])
++    expect(headers.map(data => data.reason)).toEqual(['initial', 'series', 'series'])
++    expect(headers.map(data => data.header)).toEqual(Array(3).fill(headers[0]?.header))
++    const snapshots = adapter.requests.map(request => request.messages.filter(message => message.role === 'user'
++      && message.source.kind === 'plugin' && message.source.plugin === '@deepseek-ai/dsh-system-prompt'))
++    expect(snapshots.map(messages => messages.length)).toEqual([1, 1, 1, 1, 1])
++    expect(JSON.stringify(snapshots[0])).toContain('Mode: read-only.')
++    expect(JSON.stringify(snapshots[1])).toBe(JSON.stringify(snapshots[0]))
++    expect(JSON.stringify(snapshots[2])).toContain('Mode: danger-full-access.')
++    expect(JSON.stringify(snapshots[2])).not.toContain('Mode: read-only.')
++    expect(JSON.stringify(snapshots[3])).toContain('Current runtime context: none.')
++    expect(JSON.stringify(snapshots[4])).toBe(JSON.stringify(snapshots[3]))
++    const raw = contextEvents()
++    expect(raw[1]?.surfaceOp).toEqual({ op: 'replace', startSeq: raw[0]?.seq, endSeq: raw[0]?.seq })
++    expect(raw[1]?.sourceEventSeqs).toEqual([raw[0]?.seq])
++    expect(raw[2]?.sourceEventSeqs).toEqual([raw[1]?.seq])
++    expect(agent.session.surface.nodes).not.toContain(raw[0]?.seq)
++    expect(agent.session.surface.nodes).not.toContain(raw[1]?.seq)
++    expect(agent.session.surface.nodes).toContain(raw[2]?.seq)
++    // 用户原始输入均保留，不能用删历史换取单份当前事实。
++    expect(adapter.requests[4]?.messages.filter(message => message.source.kind === 'user')
++      .map(message => message.content)).toEqual(['first', 'unchanged', 'changed', 'cleared', 'still clear'].map(text => [{ type: 'text', text }]))
+   })
+
+   it('re-emits unchanged runtime context when a surface replacement removed the retained snapshot', async () => {

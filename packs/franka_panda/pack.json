@@ -1,0 +1,27 @@
+{
+  "packId": "franka_panda",
+  "version": "2026.09.22",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/franka_emika_panda/scene.xml", "model": "asset/franka_emika_panda/panda.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#franka_panda" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "control", "ik"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "https://github.com/google-deepmind/mujoco_menagerie@da76818e269b82289eba39808e2fb91d679d6994#franka_emika_panda/panda.xml",
+    "commit": "da76818e269b82289eba39808e2fb91d679d6994",
+    "author": "Google DeepMind MuJoCo Menagerie（模型原件）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "Apache-2.0（franka_emika_panda/LICENSE 已核对 2026-09-22；全文随 asset/ 由 staging 提供）",
+    "policy": "无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

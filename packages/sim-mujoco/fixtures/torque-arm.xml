@@ -1,0 +1,36 @@
+<mujoco model="torque-arm">
+  <!-- 官方力矩模型（unitree h1 / BHL 同形）的最小夹具：执行器是 <motor>（biastype=none），
+       不是 <position>。用于回归三件通用能力：
+         ① control 动作可以直接驱动力矩执行器（参考=关节位置目标，由逐关节 PD 折成力矩）；
+         ② controller.jointKp/jointKd 逐关节增益（缺该关节回落标量 kp/kd）；
+         ③ 源声明地面 geom（floor）进入 world handle 的 groundGeomNames。
+       shoulder 挂整条链（负载大），elbow 只挂下段（负载小）：同一位置目标下两关节的
+       稳态误差可分别检验增益映射是否按关节生效。wrist 是 velocity 执行器，用于验证
+       control 对 velocity 通道仍然明确拒绝。 -->
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002"/>
+  <default><geom friction="1 .005 .0001"/></default>
+  <worldbody>
+    <geom name="floor" type="plane" size="3 3 0.05"/>
+    <body name="base" pos="0 0 0.6">
+      <geom name="base_box" type="box" size="0.04 0.04 0.04"/>
+      <body name="upper" pos="0 0 -0.05">
+        <joint name="shoulder" type="hinge" axis="0 1 0" damping="0" range="-1.5 1.5"/>
+        <geom name="upper_link" type="capsule" fromto="0 0 0 0 0 -0.2" size="0.03" density="600"/>
+        <body name="lower" pos="0 0 -0.2">
+          <joint name="elbow" type="hinge" axis="0 1 0" damping="0" range="-1.5 1.5"/>
+          <geom name="lower_link" type="capsule" fromto="0 0 0 0 0 -0.2" size="0.03" density="600"/>
+          <body name="wrist" pos="0 0 -0.2">
+            <joint name="wrist_joint" type="hinge" axis="0 1 0" damping="0.1"/>
+            <geom name="wrist_link" type="capsule" fromto="0 0 0 0 0 -0.1" size="0.025" density="600"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="shoulder_motor" joint="shoulder" forcerange="-30 30"/>
+    <motor name="elbow_motor" joint="elbow" forcerange="-30 30"/>
+    <velocity name="wrist_velocity" joint="wrist_joint" kv="5"/>
+  </actuator>
+</mujoco>

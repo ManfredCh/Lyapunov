@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-policy-registry
+      name: '@lyapunov/policy-registry'

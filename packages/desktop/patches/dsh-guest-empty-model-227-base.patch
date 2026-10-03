@@ -1,0 +1,208 @@
+--- a/packages/api/session-controller/src/agent.ts
++++ b/packages/api/session-controller/src/agent.ts
+@@ -274,6 +274,9 @@
+    * @returns the installed mutable selection reference.
+    */
+   selectionFor(agent: Agent): InstalledSelection {
++    if (this.ctx.agentDefaultModel.optionalSelection() === undefined) {
++      throw new Error('MODEL_NOT_CONFIGURED: this composition permits manual Sessions only')
++    }
+     const installed = this.selections.get(agent)
+     if (installed !== undefined) return installed
+     const projectionState = this.ctx.sessionProjections.stateOf(agent.session, 'modelSelection')
+@@ -488,11 +491,12 @@
+   }
+ 
+   private agentOptions(): AgentOptions {
+-    const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
+-    return { provider, model }
++    const selected = this.ctx.agentDefaultModel.optionalSelection()
++    return selected === undefined ? {} : { provider: selected.provider, model: selected.model }
+   }
+ 
+   private installSelection(agent: Agent): void {
++    if (this.ctx.agentDefaultModel.optionalSelection() === undefined) return
+     this.selectionFor(agent)
+   }
+ 
+--- a/packages/api/session-controller/src/catalog.ts
++++ b/packages/api/session-controller/src/catalog.ts
+@@ -15,7 +15,7 @@
+  */
+ export async function buildModelCatalog(
+   ctx: Context,
+-  defaultSelection: ModelSelection = ctx.agentDefaultModel.currentSelection(),
++  defaultSelection: ModelSelection | undefined = ctx.agentDefaultModel.optionalSelection(),
+ ): Promise<ModelCatalog> {
+   const providers = ctx.llm.listProviders()
+   const catalog = await Promise.all(providers.map(async (provider) => {
+@@ -58,7 +58,7 @@
+     }
+   }))
+   return {
+-    default: { ...defaultSelection },
++    default: defaultSelection === undefined ? null : { ...defaultSelection },
+     routableProviders: providers.map(provider => provider.id),
+     groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : [])
+       .filter(group => group.models.length > 0),
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -254,7 +254,7 @@
+     const childId = brandString<SessionId>(`session-${randomUUID()}`)
+     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
+     try {
+-      const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
++      const selected = this.ctx.agentDefaultModel.optionalSelection()
+       await this.ctx.agents.create({
+         sessionId: childId,
+         seed: source.events.slice(0, cut),
+@@ -267,7 +267,7 @@
+             ? {}
+             : { agentPreset: composition.agentPreset }),
+         },
+-        agentOptions: { provider, model },
++        agentOptions: selected === undefined ? {} : { provider: selected.provider, model: selected.model },
+         setup: composition.setup,
+       })
+     } catch (error) {
+@@ -319,6 +319,9 @@
+     const agent = await this.resolveAgent(request.sessionId)
+     signal?.throwIfAborted()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
++    if (this.ctx.agentDefaultModel.optionalSelection() === undefined) {
++      throw new RemoteError('session/model-not-configured', '尚未配置模型，请登录后启用对话；本地手动操作仍可使用。', {})
++    }
+     const selection = this.agents.selectionFor(agent).current
+     if (!routeServed(this.ctx, selection.provider)) {
+       throw new RemoteError(
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -142,7 +142,7 @@
+ 
+ /** Host-generation model catalog and the default used by unconfigured Sessions. */
+ export interface ModelCatalog {
+-  readonly default: ModelSelection
++  readonly default: ModelSelection | null
+   /** Provider routes currently able to serve a request, including empty catalogs. */
+   readonly routableProviders: readonly string[]
+   readonly groups: readonly ModelProviderGroup[]
+@@ -185,6 +185,7 @@
+ 
+ declare module '@deepseek-ai/dsh-typert-protocol' {
+   interface RemoteErrorDetailsMap {
++    'session/model-not-configured': Record<string, never>
+     'session/model-unavailable': { readonly provider: string; readonly model: string }
+     'session/conflict': {
+       readonly sessionId: SessionId
+--- a/packages/api/session-controller/tests/test-remote.ts
++++ b/packages/api/session-controller/tests/test-remote.ts
+@@ -238,6 +238,7 @@
+   if (ctx.get('agentDefaultModel') === undefined) {
+     ctx.provide('agentDefaultModel', {
+       currentSelection: defaults.defaultModelSelection,
++      optionalSelection: defaults.defaultModelSelection,
+       saveSelection: async (selection: AgentModelSelection) => {
+         await defaults.saveDefaultModelSelection?.(selection)
+       },
+--- a/packages/boot/app-boot/src/index.ts
++++ b/packages/boot/app-boot/src/index.ts
+@@ -208,6 +208,11 @@
+ ): LaunchEnvironmentSnapshot {
+   const home = resolveDshHome()
+   const inherited = { ...process.env } as Record<string, string>
++  // The launching composition may require a credential-free local application.
++  // Check before opening either file so project/home .env cannot undo that boundary.
++  if (process.env.DSH_ENV_FILES === 'disabled') {
++    return createLaunchEnvironmentSnapshot([{ source: 'process', values: inherited }])
++  }
+   // Parse both layers first: a rejection must not leave one file applied.
+   const project = readEnvLayer(binName, cwd, warn, home)
+   const user = home === resolve(cwd) ? undefined : readEnvLayer(binName, home, warn, home)
+--- a/packages/client/ui-model-selection/src/client/directory.ts
++++ b/packages/client/ui-model-selection/src/client/directory.ts
+@@ -159,11 +159,11 @@
+       })
+       return
+     }
+-    const current = projected.next ?? catalog.value.default
++    const current = catalog.value.default === null ? null : projected.next ?? catalog.value.default
+     this.resolved = true
+     this.store.set({
+       current,
+-      routable: catalog.value.routableProviders.includes(current.provider),
++      routable: current !== null && catalog.value.routableProviders.includes(current.provider),
+       groups: catalog.value.groups,
+       failures: catalog.value.failures,
+       status: this.store.getSnapshot().status === 'selecting'
+--- a/packages/core/agent-default-model/src/index.ts
++++ b/packages/core/agent-default-model/src/index.ts
+@@ -38,11 +38,17 @@
+ })
+ 
+ /** Composition entry for the default model selection. */
+-export interface Config {
++export type Config = {
+   /** Registered provider route. */
+   provider: string
+   /** Provider-owned model id. */
+   model: string
++  manualOnly?: never
++} | {
++  /** Explicit manual-only composition; saved settings cannot restore a model. */
++  manualOnly: true
++  provider?: never
++  model?: never
+ }
+ 
+ /** Project stored settings onto the Agent-facing selection type. */
+@@ -62,15 +68,22 @@
+  * is mounted, its user layer is read live.
+  */
+ export class AgentDefaultModelConfig extends Service {
+-  static Config: z<Config> = z.object({
++  static Config: z<Config> = z.union([z.object({
+     provider: z.string().required(),
+     model: z.string().required(),
+-  })
++  }), z.object({ manualOnly: z.const(true).required() })])
+ 
+-  private source: () => AgentDefaultModelSettings
++  private source: () => AgentDefaultModelSettings | undefined
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentDefaultModel')
++    if (config.manualOnly === true) {
++      this.source = () => undefined
++      // Manual commands keep their Agent/Session scope, while queued plugin
++      // notices must not accidentally enter a model request without a route.
++      ctx.on('agent/pre-step', async (_payload, next) => { await next(); return { kind: 'reject' } })
++      return
++    }
+     const entry: AgentDefaultModelSettings = { provider: config.provider, model: config.model }
+     this.source = () => entry
+     ctx.inject(['settings'], (settingsCtx) => {
+@@ -88,7 +101,15 @@
+    * @returns a detached provider, model, and optional reasoning selection.
+    */
+   currentSelection(): ModelSelection {
+-    return selection(this.source())
++    const selected = this.optionalSelection()
++    if (selected === undefined) throw new Error('MODEL_NOT_CONFIGURED: this composition has no model selection')
++    return selected
++  }
++
++  /** Read a legal empty selection without inventing a provider for manual Sessions. */
++  optionalSelection(): ModelSelection | undefined {
++    const current = this.source()
++    return current === undefined ? undefined : selection(current)
+   }
+ 
+   /**
+@@ -98,6 +119,7 @@
+    * @returns fulfillment after the optional settings write settles.
+    */
+   async saveSelection(next: ModelSelection): Promise<void> {
++    if (this.optionalSelection() === undefined) throw new Error('MODEL_NOT_CONFIGURED: model selection is disabled by this composition')
+     await this.ctx.get('settings')?.replace(AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, {
+       provider: next.provider,
+       model: next.model,

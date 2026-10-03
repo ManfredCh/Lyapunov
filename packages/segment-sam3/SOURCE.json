@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/facebookresearch/sam3",
+  "commit": "660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7",
+  "modelRepository": "facebook/sam3",
+  "checkpointFilename": "sam3.pt",
+  "hfEndpoint": "https://hf-mirror.com",
+  "runtime": "Conda Python 3.12, PyTorch 2.10.0 CUDA 12.8",
+  "imageApi": [
+    "build_sam3_image_model",
+    "Sam3Processor.set_image",
+    "set_text_prompt",
+    "add_geometric_prompt"
+  ],
+  "status": "SDK_READY_CHECKPOINT_BLOCKED",
+  "installed": {
+    "python": "3.12.14",
+    "torch": "2.10.0+cu128",
+    "torchvision": "0.25.0+cu128",
+    "sam3": "0.1.0",
+    "setuptools": "80.9.0"
+  }
+}

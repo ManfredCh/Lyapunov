@@ -1,0 +1,16 @@
+{
+  "//": "本配置只覆盖产品源码：packages/*/src、packages/*/test 与 script/*.ts 顶层。",
+  "//2": "script/gates/** 不在其内，另有独立配置：script/tsconfig.gates.json。（服务端账户 API 已于 2026-09-26 移出本仓库，归 LyapunovOM backend/dev-server/。）",
+  "//3": "注意：include 之外被这些文件 import 的模块仍会进入编译闭包——例如 script/refactor-verify.ts import 了 script/gates/g08g09.ts，该门的错误会显现在本项里。",
+  "compilerOptions": {
+    "target": "ES2023", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noEmit": true, "skipLibCheck": true, "allowImportingTsExtensions": true,
+    "types": ["bun"], "lib": ["ES2023", "DOM", "DOM.Iterable", "DOM.AsyncIterable"], "jsx": "react-jsx"
+  },
+  "include": [
+    "packages/*/src/**/*.ts", "packages/*/src/**/*.tsx",
+    "packages/*/test/*.ts", "packages/*/test/*.tsx",
+    "script/*.ts"
+  ],
+  "exclude": ["node_modules", ".upstream", ".runtime"]
+}

@@ -1,0 +1,140 @@
+# LyapunovDSH: 构建上下文已独立；仅新增固定HF镜像/离线运行环境，保留原算法依赖与校验。
+
+# NVIDIA's 25.03 PyTorch image contains CUDA 12.8.1 and a Blackwell-capable
+# PyTorch 2.7 development build.  Pin the linux/amd64 manifest, not only the
+# mutable NGC tag.
+FROM nvcr.io/nvidia/pytorch:25.03-py3@sha256:54fd644e268346657619a987596e522e813d7abaaf92faafbe815b2b43cff16d
+
+ARG GRASPGENX_COMMIT=b9429097728cb1c430dd78b92edf17ba318aad03
+
+LABEL org.opencontainers.image.title="Lyapunov GraspGenX Blackwell candidate worker" \
+      org.opencontainers.image.description="Pinned GraspGenX GPU worker behind a truth-preserving Lyapunov ZMQ adapter" \
+      org.opencontainers.image.source="https://github.com/NVlabs/GraspGenX" \
+      org.opencontainers.image.revision="b9429097728cb1c430dd78b92edf17ba318aad03" \
+      io.lyapunov.grasp-provider="graspgenx" \
+      io.lyapunov.graspgenx-model-repository="adithyamurali/GraspGenXModel" \
+      io.lyapunov.graspgenx-model-revision="7c834043c11a11417e31d6d5ea9355801e40a2c1" \
+      io.lyapunov.graspgenx-gripper-repository="adithyamurali/gripper_descriptions" \
+      io.lyapunov.graspgenx-gripper-revision="19a03c00d19aeaf052d0f6801f0041982d676e8a" \
+      io.lyapunov.blackwell-status="candidate-not-yet-inference-validated"
+
+ENV HF_ENDPOINT=https://hf-mirror.com \
+    HF_HUB_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    GRASPGENX_SOURCE_DIR=/opt/graspgenx \
+    GRASPGENX_CHECKPOINT_DIR=/models/7c834043c11a11417e31d6d5ea9355801e40a2c1 \
+    GRASPGENX_GRIPPER_CFG_DIR=/grippers/19a03c00d19aeaf052d0f6801f0041982d676e8a \
+    GRASPGENX_UPSTREAM_ENDPOINT=tcp://127.0.0.1:5557 \
+    GRASPGENX_ADAPTER_HOST=0.0.0.0 \
+    GRASPGENX_ADAPTER_PORT=5556 \
+    GRASPGENX_STARTUP_TIMEOUT_SECONDS=600 \
+    HOME=/home/lyapunov \
+    XDG_CACHE_HOME=/tmp/lyapunov-cache \
+    MPLCONFIGDIR=/tmp/lyapunov-matplotlib \
+    LYAPUNOV_GRASPGEN_RUNTIME_COMPAT=sm120-candidate
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      git \
+      git-lfs \
+      libosmesa6-dev \
+      tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fetch code only.  Checkpoints and gripper assets are intentionally not baked
+# into the image; immutable installer-managed volumes provide them at runtime.
+RUN GIT_LFS_SKIP_SMUDGE=1 git clone --filter=blob:none --no-checkout \
+      https://github.com/NVlabs/GraspGenX.git /opt/graspgenx \
+    && git -C /opt/graspgenx fetch --depth=1 origin "${GRASPGENX_COMMIT}" \
+    && git -C /opt/graspgenx checkout --detach "${GRASPGENX_COMMIT}" \
+    && test "$(git -C /opt/graspgenx rev-parse HEAD)" = \
+      "b9429097728cb1c430dd78b92edf17ba318aad03" \
+    && git config --system --add safe.directory /opt/graspgenx
+
+COPY requirements.adapter.txt /opt/lyapunov/requirements.adapter.txt
+
+# Mirror the pinned upstream Dockerfile's inference dependency set while
+# preserving the CUDA 12.8 / PyTorch build from the NGC base.  In particular,
+# do not install GraspGenX with dependencies: its broad torch constraint could
+# replace the Blackwell-capable base wheel.
+RUN python -m pip install --upgrade pip \
+    && python -m pip install "setuptools>=45,<78" \
+    && python -m pip install numpy==1.26.4 \
+    && python -m pip install \
+      h5py \
+      hydra-core \
+      matplotlib \
+      scikit-learn \
+      scipy \
+      "scene-synthesizer[recommend]" \
+      tensorboard \
+      trimesh==4.5.3 \
+      webdataset \
+      imageio \
+      python-fcl \
+      pyrender \
+      PyOpenGL==3.1.5 \
+      diffusers==0.11.1 \
+      timm==1.0.15 \
+      huggingface-hub==0.25.2 \
+      transformers==4.48.3 \
+      tensordict \
+      yourdfpy==0.0.56 \
+      addict \
+      yapf==0.40.1 \
+      tensorboardx \
+      sharedarray \
+      torch-geometric \
+      tqdm \
+      pyyaml \
+    && python -m pip install --requirement /opt/lyapunov/requirements.adapter.txt \
+    && python -m pip install --no-deps --editable /opt/graspgenx \
+    && python -m pip install --no-deps \
+      huggingface-hub==0.25.2 \
+      diffusers==0.11.1 \
+    && mkdir -p /tmp/graspgenx-build-checkpoints /tmp/graspgenx-build-grippers \
+    && GRASPGENX_CHECKPOINT_DIR=/tmp/graspgenx-build-checkpoints \
+      GRASPGENX_GRIPPER_CFG_DIR=/tmp/graspgenx-build-grippers \
+      python -c "import graspgenx.serving.zmq_server" \
+    && rm -rf /tmp/graspgenx-build-checkpoints /tmp/graspgenx-build-grippers \
+    && python - <<'PY'
+import torch
+import numpy as np
+import networkx
+from importlib.metadata import version
+
+assert np.__version__ == "1.26.4", np.__version__
+assert networkx.__version__ == version("networkx"), networkx.__version__
+assert version("msgpack") == "1.1.0", version("msgpack")
+assert version("pyzmq") == "26.2.1", version("pyzmq")
+assert torch.version.cuda == "12.8", torch.version.cuda
+assert tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >= (2, 7)
+assert tuple(int(part) for part in version("networkx").split(".")[:2]) >= (2, 5)
+PY
+
+RUN groupadd --gid 10001 lyapunov \
+    && useradd --uid 10001 --gid lyapunov --create-home --home-dir /home/lyapunov lyapunov \
+    && install -d -o lyapunov -g lyapunov /opt/lyapunov/bin
+
+COPY --chown=lyapunov:lyapunov graspgenx_adapter.py /opt/lyapunov/bin/graspgenx_adapter.py
+
+USER lyapunov:lyapunov
+WORKDIR /opt/graspgenx
+
+EXPOSE 5556
+
+# Metadata traverses adapter -> live GraspGenX and requires all runtime pins to
+# have passed before the container can become healthy.
+HEALTHCHECK --interval=15s --timeout=12s --start-period=180s --retries=20 \
+  CMD ["python", "/opt/lyapunov/bin/graspgenx_adapter.py", "healthcheck"]
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "/opt/lyapunov/bin/graspgenx_adapter.py", "serve", "--verify-pins", "--launch-upstream"]

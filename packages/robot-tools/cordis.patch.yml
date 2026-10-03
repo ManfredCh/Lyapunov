@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-robot-tools
+      name: '@lyapunov/robot-tools/plugin'

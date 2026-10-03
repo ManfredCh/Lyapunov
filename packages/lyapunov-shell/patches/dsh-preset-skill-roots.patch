@@ -1,0 +1,13 @@
+diff --git a/packages/preset/agent-presets/presets/standard/agent.cordis.yml b/packages/preset/agent-presets/presets/standard/agent.cordis.yml
+index 86d371a2d0..d58e6fce67 100644
+--- a/packages/preset/agent-presets/presets/standard/agent.cordis.yml
++++ b/packages/preset/agent-presets/presets/standard/agent.cordis.yml
+@@ -83,6 +83,8 @@
+ # carries whatever the deployment registered globally (repository plugins).
+ - id: skill-filesystem
+   name: '@deepseek-ai/dsh-skill-filesystem'
++  config:
++    includeDefaultRoots: false
+ 
+ - id: tool-skill
+   name: '@deepseek-ai/dsh-tool-skill'

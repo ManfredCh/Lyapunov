@@ -1,0 +1,24 @@
+# 开发者通道的公开默认配置。账号文件和模型 key 必须放在包外。
+# 生成类 provider（图像/3D）的凭据**不写进本文件**（普通可读的明文 YAML）：开发直连时它们从
+# **启动本入口的那个进程环境**读（`IMAGE_API_KEY` / `IMAGE_MODEL` 等，清单见 config/keys.example.md
+# 的「千问图像」两节）。隔离启动的开发 Host（终端 `script/terminal.ts`、管理员 Web）按那份声明清单
+# 把这几个键搬进 Host，正式模式永不搬运（走中央账户网关，供应商 key 只在服务端）。
+mode: developer
+surface: web
+# 引擎：省略＝跟随默认解析（Isaac 优先，未就绪回退 MuJoCo 并打印理由）；
+# 需要固定引擎时显式写一行，可选 none|mujoco|isaac|newton|benchmark。
+# 此处原为 engine: mujoco，会让开发者入口跳过产品默认，故删除。
+grasp: analytic
+# 首选端口。多实例并行时被占用会自动 +1 递增探测（至多 +100）；0 表示交给操作系统随机分配。
+port: 4180
+# 运行根目录。多实例并行时被其他实例认领会自动改用 -2 … -16 后缀目录。
+runtime_root: .runtime/developer
+
+auth:
+  required: true
+  account_file: ~/.config/lyapunov/developer-account.json
+
+route:
+  provider: deepseek-official
+  model: deepseek-v4-flash-vision-exp
+  reasoning_effort: max

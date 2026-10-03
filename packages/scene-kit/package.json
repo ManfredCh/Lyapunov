@@ -1,0 +1,18 @@
+{
+  "name": "@lyapunov/scene-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plugin": "./src/plugin.ts"
+  },
+  "dependencies": {
+    "@lyapunov/contracts": "workspace:*",
+    "fast-xml-parser": "5.2.5",
+    "fflate": "0.8.3",
+    "three": "0.180.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-http-proxy": "0.1.5-rc.2"
+  }
+}

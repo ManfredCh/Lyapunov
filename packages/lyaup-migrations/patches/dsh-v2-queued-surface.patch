@@ -1,0 +1,1966 @@
+diff --git a/docs/persistence-catalog.md b/docs/persistence-catalog.md
+index 46e91f23a..4f2c671ee 100644
+--- a/docs/persistence-catalog.md
++++ b/docs/persistence-catalog.md
+@@ -83,7 +83,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
+ }[T]
+ ```
+
+-Sources: [`packages/core/session/src/types.ts:404`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:412`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:434`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:465`](../packages/core/session/src/types.ts)
++Sources: [`packages/core/session/src/types.ts:406`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:414`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:436`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:467`](../packages/core/session/src/types.ts)
+
+ ## Events
+
+@@ -210,7 +210,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:33`](../packages/inter
+ 'assistant/attempt': { turn: number; step: number; stream: AssistantStreamRecord[] }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:335`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:337`](../packages/core/session/src/types.ts)
+
+ <a id="assistantmessage--surface"></a>
+
+@@ -240,7 +240,7 @@ Source: [`packages/core/session/src/types.ts:335`](../packages/core/session/src/
+
+ Types: [TokenUsage](subsystems/llm-streaming.md)
+
+-Source: [`packages/core/session/src/types.ts:321`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:323`](../packages/core/session/src/types.ts)
+
+ ### `command/*`
+
+@@ -605,7 +605,7 @@ Source: [`packages/plan/plan-mode/src/index.ts:46`](../packages/plan/plan-mode/s
+ 'request/context': RequestContext
+ ```
+
+-Source: [`packages/core/session/src/types.ts:377`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:379`](../packages/core/session/src/types.ts)
+
+ <a id="requestheader--log-only"></a>
+
+@@ -624,7 +624,7 @@ Source: [`packages/core/session/src/types.ts:377`](../packages/core/session/src/
+ }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:365`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:367`](../packages/core/session/src/types.ts)
+
+ ### `sandbox/*`
+
+@@ -699,7 +699,18 @@ Source: [`packages/schedule/schedule/src/types.ts:219`](../packages/schedule/sch
+ 'session/end-seed': { inherited?: true }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:400`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:402`](../packages/core/session/src/types.ts)
++
++<a id="sessionhistory-checkout--log-only"></a>
++
++#### `session/history-checkout` — log-only
++
++```ts persistence-catalog
++/** Required history branch switch; original events, identities and execution counters remain unchanged. */
++'session/history-checkout': { throughSeq: SessionSeqCursor; operationId?: string }
++```
++
++Source: [`packages/core/session/src/types.ts:271`](../packages/core/session/src/types.ts)
+
+ <a id="sessiontitle--log-only"></a>
+
+@@ -761,7 +772,7 @@ Source: [`packages/session/session-log-deepseek/src/types.ts:81`](../packages/se
+ 'step/end': { turn: number; step: number }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:289`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/types.ts)
+
+ <a id="stepstart--log-only"></a>
+
+@@ -772,7 +783,7 @@ Source: [`packages/core/session/src/types.ts:289`](../packages/core/session/src/
+ 'step/start': { turn: number; step: number }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:287`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:289`](../packages/core/session/src/types.ts)
+
+ ### `subagent/*`
+
+@@ -848,7 +859,7 @@ Source: [`packages/subagent/tool-subagent/src/model-selection-state.ts:17`](../p
+ 'system/message': { turn: number; step: number; message: SystemMessage }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:310`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:312`](../packages/core/session/src/types.ts)
+
+ ### `team/*`
+
+@@ -941,7 +952,7 @@ Source: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/s
+
+ Types: [ToolCallId](subsystems/core.md)
+
+-Source: [`packages/core/session/src/types.ts:341`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:343`](../packages/core/session/src/types.ts)
+
+ <a id="toolptc-dispatch--log-only"></a>
+
+@@ -1017,7 +1028,7 @@ Source: [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types
+ }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:353`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:355`](../packages/core/session/src/types.ts)
+
+ ### `tool-workflow/*`
+
+@@ -1097,7 +1108,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow
+
+ Types: [TurnEndReason](subsystems/session.md)
+
+-Source: [`packages/core/session/src/types.ts:285`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:287`](../packages/core/session/src/types.ts)
+
+ <a id="turnstart--log-only"></a>
+
+@@ -1113,7 +1124,7 @@ Source: [`packages/core/session/src/types.ts:285`](../packages/core/session/src/
+ 'turn/start': { turn: number }
+ ```
+
+-Source: [`packages/core/session/src/types.ts:276`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:278`](../packages/core/session/src/types.ts)
+
+ ### `user/*`
+
+@@ -1132,7 +1143,7 @@ Source: [`packages/core/session/src/types.ts:276`](../packages/core/session/src/
+ 'user/message': UserMessage
+ ```
+
+-Source: [`packages/core/session/src/types.ts:297`](../packages/core/session/src/types.ts)
++Source: [`packages/core/session/src/types.ts:299`](../packages/core/session/src/types.ts)
+
+ ### `web/*`
+
+diff --git a/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts b/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts
+index bd6a48af6..0c3f33dfb 100644
+--- a/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts
++++ b/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts
+@@ -23,7 +23,7 @@ import type {
+   StreamChunk,
+   TokenUsage,
+ } from '@deepseek-ai/dsh-llm'
+-import SessionStore, { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
++import SessionStore, { Session, SessionId, SessionSeq, isAppendSurfaceEvent, selectActiveHistoryEvents } from '@deepseek-ai/dsh-session'
+ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+ import TokenMeter from '@deepseek-ai/dsh-token-meter'
+ import { agentEvents, type Agent, type RequestErrorAction } from '@deepseek-ai/dsh-agent'
+@@ -664,6 +664,46 @@ describe('pressure measurement and retention', () => {
+     expect(compact.calls[0]!.input.messages.filter(message => message.role === 'system')).toHaveLength(1)
+   })
+
++  it('compacts the checked-out surface while retaining selected append-origin human history', async () => {
++    const ctx = createContext(), compact = service(compactConfig, ctx)
++    const session = conversation(5, undefined, 'CHECKOUT HEAD')
++    session.append('turn/end', { turn: 6, reason: { kind: 'completed' } })
++    const original = session.snapshotEvents(), target = original.find(event => event.type === 'turn/end' && event.data.turn === 3)!
++    const expectedHuman = original.filter(event => event.seq <= target.seq && isAppendSurfaceEvent(event)).map(event => event.seq)
++    ctx.tokenMeter.measure(session)
++    session.checkout(target.seq)
++    session.append('turn/start', { turn: 7 })
++    const before = session.snapshotEvents(), head = session.surface.nodes[0]
++    const result = await compactIfNeeded(compact, session)
++    expect(result).not.toBeNull()
++    expect(result?.shadowedSeqs.every(seq => seq <= target.seq)).toBe(true)
++    expect(result?.shadowedSeqs).not.toContain(head)
++    expect(ctx.tokenMeter.measure(session).nodes.map(node => node.seq)).toEqual(session.surface.nodes)
++    expect(selectActiveHistoryEvents(session.snapshotEvents()).filter(isAppendSurfaceEvent).map(event => event.seq)).toEqual(expectedHuman)
++    expect(session.snapshotEvents().slice(0, before.length)).toEqual(before)
++  })
++
++  it('compacts queued history after a late first system without shadowing the protected head', async () => {
++    const ctx = createContext()
++    const compact = service(compactConfig, ctx)
++    const session = conversation(4)
++    const firstUser = session.surface.nodes[0]!
++    ctx.tokenMeter.measure(session)
++    const head = session.append('system/message', { turn: 5, step: 1, message: createSystemMessage('LATE SYSTEM HEAD', SYSTEM_PROMPT_PLUGIN) }, { surfaceOp: 'append' }).seq
++    const before = session.snapshotEvents()
++    const measured = ctx.tokenMeter.measure(session)
++    expect(measured.nodes.map(node => node.seq)).toEqual(session.surface.nodes)
++    expect(selectCompactableRange(session, measured, compactConfig.retainTokens!)?.start).toBe(firstUser)
++    const result = await compactIfNeeded(compact, session)
++    expect(result).not.toBeNull()
++    expect(result?.shadowedSeqs).not.toContain(head)
++    expect(session.surface.nodes[0]).toBe(head)
++    expect(compact.calls[0]!.input.messages[0]).toEqual(session.deriveEventMessage(session.eventAt(head)!))
++    expect(compact.calls[0]!.input.messages.filter(message => message.role === 'system')).toHaveLength(1)
++    expect(ctx.tokenMeter.measure(session).nodes.map(node => node.seq)).toEqual(session.surface.nodes)
++    expect(session.snapshotEvents().slice(0, before.length)).toEqual(before)
++  })
++
+   it('declines when only the system head precedes the retained tail', () => {
+     const ctx = createContext()
+     const session = conversation(1, undefined, 'SYSTEM HEAD')
+diff --git a/packages/compaction/compaction/src/tool-pairing.ts b/packages/compaction/compaction/src/tool-pairing.ts
+index 56ec6a236..e6c4cf8db 100644
+--- a/packages/compaction/compaction/src/tool-pairing.ts
++++ b/packages/compaction/compaction/src/tool-pairing.ts
+@@ -6,6 +6,7 @@
+  */
+
+ import type { Session, SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
++import { surfaceToolPairingDelta } from '@deepseek-ai/dsh-session/surface'
+
+ /** Incremental balance state for one session surface generation. */
+ interface BalanceCache {
+@@ -27,14 +28,7 @@ const balanceCacheBySession = new WeakMap<Session, BalanceCache>()
+
+ /** Return how one surface event changes the in-progress tool-call count. */
+ function eventDelta(event: SessionEvent): number {
+-  switch (event.type) {
+-    case 'assistant/message':
+-      return event.data.message.content.filter(block => block.type === 'tool-call').length
+-    case 'tool/result':
+-      return -1
+-    default:
+-      return 0
+-  }
++  return surfaceToolPairingDelta(event)
+ }
+
+ /** Fold surface sequences not yet in the cache into its balance state. */
+diff --git a/packages/core/agent-loop/src/runtime-context.ts b/packages/core/agent-loop/src/runtime-context.ts
+index daabf5bc1..f70dc9263 100644
+--- a/packages/core/agent-loop/src/runtime-context.ts
++++ b/packages/core/agent-loop/src/runtime-context.ts
+@@ -8,7 +8,7 @@
+ import { createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+ import type { ContextSnapshotSection, Message } from '@deepseek-ai/dsh-llm'
+ import type { Session, SessionEvent, SessionSeq, SurfaceIntent, SystemMessage, UserMessage } from '@deepseek-ai/dsh-session'
+-import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session'
++import { isReplacementSurfaceEvent, selectActiveHistoryEvents } from '@deepseek-ai/dsh-session'
+ import type { Context } from '@deepseek-ai/cordis'
+
+ const SOURCE = '@deepseek-ai/dsh-system-prompt'
+@@ -45,7 +45,7 @@ export interface SystemPromptDecisionInput {
+
+ /** Committed events from the newest backward; the restore scans stop at the first match. */
+ function eventsNewestFirst(session: Session): readonly SessionEvent[] {
+-  return session.snapshotEvents().toReversed()
++  return selectActiveHistoryEvents(session.snapshotEvents()).toReversed()
+ }
+
+ /**
+@@ -114,18 +114,23 @@ export class RuntimeContextProjection {
+    * @param session - session receiving projected messages.
+    */
+   constructor(ctx: Context, session: Session) {
+-    const surface = new Set(session.surface.nodes)
+-    for (const event of eventsNewestFirst(session)) {
+-      if (event.type !== 'user/message' || !isOwned(event.data)) continue
+-      this.retained ??= null
+-      if (surface.has(event.seq)) {
+-        this.retained = { seq: event.seq, text: textOf(event.data) }
+-        break
++    const restore = () => {
++      this.retained = undefined
++      const surface = new Set(session.surface.nodes)
++      for (const event of eventsNewestFirst(session)) {
++        if (event.type !== 'user/message' || !isOwned(event.data)) continue
++        this.retained ??= null
++        if (surface.has(event.seq)) {
++          this.retained = { seq: event.seq, text: textOf(event.data) }
++          break
++        }
+       }
+     }
++    restore()
+
+     ctx.on('session/event', (subject, event) => {
+       if (subject !== session) return
++      if (event.type === 'session/history-checkout') { restore(); return }
+       if (event.type === 'user/message' && isOwned(event.data)) {
+         this.retained = { seq: event.seq, text: textOf(event.data) }
+       } else if (this.retained
+diff --git a/packages/core/agent-loop/tests/request-reconstruction.spec.ts b/packages/core/agent-loop/tests/request-reconstruction.spec.ts
+index 2450a2199..71b79ddef 100644
+--- a/packages/core/agent-loop/tests/request-reconstruction.spec.ts
++++ b/packages/core/agent-loop/tests/request-reconstruction.spec.ts
+@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest'
+ import { Context } from '@deepseek-ai/cordis'
+ import LlmRuntime, { createUserMessage, LlmError, ReasoningEffortId  } from '@deepseek-ai/dsh-llm'
+ import type { GenerateOptions, LlmModelReasoningInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
+-import SessionStore, { Session, SessionId, foldRequestHeader } from '@deepseek-ai/dsh-session'
++import SessionStore, { Session, SessionId, SessionLogOffset, foldRequestHeader } from '@deepseek-ai/dsh-session'
++import type { SessionEvent } from '@deepseek-ai/dsh-session'
+ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+ import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+@@ -73,6 +74,32 @@ function registerEcho(ctx: Context) {
+ }
+
+ describe('request stability across the loop', () => {
++  it('rebuilds a native request after checkout without the undone user/answer or duplicated system', async () => {
++    const adapter = new MockAdapter([textResponse('answer A'), textResponse('answer B'), textResponse('answer C')])
++    const ctx = await harness(adapter)
++    try {
++      const agent = await ctx.agentLoop.create(SessionId('request-checkout'), { provider: 'mock', model: 'mock' })
++      const prefixes: (readonly SessionEvent[])[] = []
++      ctx.on('llm/stream', (_request, next) => { prefixes.push(agent.session.snapshotEvents()); return next() }, { prepend: true })
++      send(agent, 'user A'); await agent.whenIdle()
++      const firstEnd = agent.session.snapshotEvents().at(-1)!.seq
++      send(agent, 'user B'); await agent.whenIdle()
++      const original = agent.session.snapshotEvents()
++      const marker = agent.session.checkout(firstEnd)
++      send(agent, 'user C'); await agent.whenIdle()
++      expect(adapter.requests).toHaveLength(3)
++      const last = adapter.requests[2]!
++      expect(JSON.stringify(last.messages)).not.toContain('user B')
++      expect(JSON.stringify(last.messages)).not.toContain('answer B')
++      expect(JSON.stringify(last.messages)).toContain('user A')
++      expect(JSON.stringify(last.messages)).toContain('user C')
++      expect(last.messages.filter(message => message.role === 'system')).toHaveLength(1)
++      const replay = Session.fromRestore(agent.id, prefixes[2]!, agent.session.header, SessionLogOffset(0), 'shared-frozen')
++      expect(replay.deriveMessages()).toEqual(last.messages)
++      expect(agent.session.snapshotEvents(0 as SessionLogOffset, original.length as SessionLogOffset)).toEqual(original)
++      expect(agent.session.snapshotEvents().filter(event => event.type === 'request/header' && event.seq > marker.seq).map(event => event.data.reason)).toEqual(['series'])
++    } finally { await ctx.fiber.dispose() }
++  })
+   it('each step request within a turn append-extends the previous, frozen end to end', async () => {
+     const adapter = new MockAdapter([
+       toolCallResponse('c1', 'echo', { text: 'one' }, 'first'),
+diff --git a/packages/core/agent-loop/tests/runtime-context.spec.ts b/packages/core/agent-loop/tests/runtime-context.spec.ts
+index 37c13bdc6..8ce42cca5 100644
+--- a/packages/core/agent-loop/tests/runtime-context.spec.ts
++++ b/packages/core/agent-loop/tests/runtime-context.spec.ts
+@@ -14,6 +14,21 @@ function contextMessage(text: string) {
+ }
+
+ describe('RuntimeContextProjection', () => {
++  it('restores the selected branch context and does not invent a clear message after checkout to empty', async () => {
++    const ctx = new Context(); await ctx.plugin(SessionStore)
++    try {
++      const session = ctx.sessions.create(SessionId('runtime-context-checkout'))
++      const first = session.append('user/message', contextMessage('first context'), { surfaceOp: 'append' })
++      const projection = new RuntimeContextProjection(ctx, session)
++      session.append('user/message', contextMessage('later context'), { surfaceOp: 'append' })
++      expect(projection.project('later context', [])).toBeUndefined()
++      session.checkout(first.seq)
++      expect(projection.project('first context', [])).toBeUndefined()
++      expect(projection.project('later context', [])).toBeDefined()
++      session.checkout(-1)
++      expect(projection.project('', [])).toBeUndefined()
++    } finally { await ctx.fiber.dispose() }
++  })
+   it('restores the latest visible owned snapshot and ignores other sessions', async () => {
+     const ctx = new Context()
+     await ctx.plugin(SessionStore)
+diff --git a/packages/core/agent-loop/tests/system-prompt-projection.spec.ts b/packages/core/agent-loop/tests/system-prompt-projection.spec.ts
+index c50b06455..35a994348 100644
+--- a/packages/core/agent-loop/tests/system-prompt-projection.spec.ts
++++ b/packages/core/agent-loop/tests/system-prompt-projection.spec.ts
+@@ -134,18 +134,19 @@ describe('SystemPromptProjection', () => {
+     const ctx = await sessionStore()
+     const session = ctx.sessions.create(SessionId('system-prompt-shadowed'))
+     const projection = new SystemPromptProjection(session)
+-    appendUser(session, 'before any prompt')
+-    const late = projection.project('late prompt', REPLACING)[0]
++    commit(session, 1, projection.project('first prompt', CONTINUING)[0])
++    appendUser(session, 'before the later prompt')
++    const late = projection.project('late prompt', CONTINUING)[0]
+     expect(late?.intent).toEqual({ surfaceOp: 'append' })
+     const node = commit(session, 1, late)
+-    expect(session.surface.nodes.indexOf(node.seq)).toBe(1)
+-    expect(projection.project('late prompt', REPLACING)[0]).toBeUndefined()
++    expect(session.surface.nodes.indexOf(node.seq)).toBe(2)
++    expect(projection.project('late prompt', CONTINUING)[0]).toBeUndefined()
+
+     session.append('user/message', createUserMessage({
+       content: [{ type: 'text', text: 'summary' }],
+       source: { kind: 'plugin', plugin: 'test-compaction' },
+     }), replaceOf(node.seq))
+-    expect(projection.project('late prompt', REPLACING)[0]?.intent).toEqual({ surfaceOp: 'append' })
++    expect(projection.project('late prompt', CONTINUING)[0]?.intent).toEqual({ surfaceOp: 'append' })
+   })
+
+   it('appends a changed prompt after cached history on an in-history route while the series continues', async () => {
+diff --git a/packages/core/session/src/index.ts b/packages/core/session/src/index.ts
+index 9db832740..1d287cf6e 100644
+--- a/packages/core/session/src/index.ts
++++ b/packages/core/session/src/index.ts
+@@ -15,10 +15,11 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
+ import type { Message } from '@deepseek-ai/dsh-llm'
+ import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
+ import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
+-import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
++import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SessionSeqCursor, SurfaceIntent, SurfaceEventType } from './types.ts'
+ import { deriveEventMessage, SurfaceManager, validateSessionEventData, validateSurfaceMetadata } from './surface.ts'
+ import type { SessionSurface } from './surface.ts'
+ import { foldRequestHeader } from './request-header.ts'
++import { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
+
+ export * from './types.ts'
+ export { SessionPreparation } from './preparation.ts'
+@@ -29,6 +30,7 @@ export type { SessionSurface, SurfaceFoldReplacement, SurfaceFoldResult } from '
+ export { deriveEventMessage, foldSurface, isAppendSurfaceEvent, isReplacementSurfaceEvent, isSurfaceEvent, isSurfaceEligibleType } from './surface.ts'
+ export { canonicalHeader, foldRequestHeader, headerEquals } from './request-header.ts'
+ export { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
++export { assertStableHistoryBoundary, selectActiveHistoryEvents } from './history.ts'
+
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+@@ -703,9 +705,13 @@ export class Session {
+   append<T extends SessionEventType>(
+     type: T,
+     data: SessionEventMap[T],
+-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : []
++    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : [opts?: { ignorable: true }]
+   ): SessionEvent<T> {
+-    const surfaceOpts: SurfaceIntent | undefined = opts[0]
++    const surfaceOpts = opts[0] as (SurfaceIntent & { ignorable?: true }) | undefined
++    if (surfaceOpts?.ignorable === true && (KNOWN_SESSION_EVENT_TYPES.has(type)
++      || surfaceOpts.surfaceOp !== undefined || surfaceOpts.sourceEventSeqs !== undefined)) {
++      throw new Error('only external log-only Session events may be informational')
++    }
+     const surfaceMetadata = {
+       ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
+       ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
+@@ -727,6 +733,7 @@ export class Session {
+       seq: SessionSeq(this.log.length),
+       time: Date.now(),
+       data: dataSnapshot,
++      ...(surfaceOpts?.ignorable === true ? { ignorable: true as const } : {}),
+       ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
+     } as unknown as SessionEvent<T>)
+     validateSessionEventData(event, `session event "${type}" at seq ${event.seq}`)
+@@ -753,6 +760,11 @@ export class Session {
+     }
+   }
+
++  /** Restore an earlier stable history surface by appending a required event, without deleting any original event. */
++  checkout(throughSeq: SessionSeqCursor, options: { operationId?: string } = {}): SessionEvent<'session/history-checkout'> {
++    return this.append('session/history-checkout', { throughSeq, ...(options.operationId === undefined ? {} : { operationId: options.operationId }) })
++  }
++
+   /** Cached fold of the request-header events — see {@link requestHeader}. */
+   private headerFold: EpochHeader | undefined
+   /** Log position (events consumed) the header fold has reached. */
+diff --git a/packages/core/session/src/invariant.ts b/packages/core/session/src/invariant.ts
+index 6ed0b6b3c..6bbecf963 100644
+--- a/packages/core/session/src/invariant.ts
++++ b/packages/core/session/src/invariant.ts
+@@ -69,6 +69,9 @@ function validateEvent(
+   // Context and plugin-owned log-only events may be appended between model
+   // executions. Core execution events retain their explicit turn relations.
+   switch (event.type) {
++    case 'session/history-checkout':
++      if (trace.openTurn !== null || trace.openStep !== null) fail('history checkout requires a stable turn boundary')
++      break
+     case 'turn/start': {
+       if (trace.openTurn !== null) {
+         fail(`turn/start ${event.data.turn} while turn ${trace.openTurn} is still open`)
+diff --git a/packages/core/session/src/known-event-types.ts b/packages/core/session/src/known-event-types.ts
+index dd6411240..d540e501f 100644
+--- a/packages/core/session/src/known-event-types.ts
++++ b/packages/core/session/src/known-event-types.ts
+@@ -51,6 +51,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
+   'schedule/change',
+   'session-log-deepseek/delivery-accepted',
+   'session/end-seed',
++  'session/history-checkout',
+   'session/title',
+   'session/title-llm-request',
+   'step/end',
+diff --git a/packages/core/session/src/surface.ts b/packages/core/session/src/surface.ts
+index 5d8ce74fe..a44f0b747 100644
+--- a/packages/core/session/src/surface.ts
++++ b/packages/core/session/src/surface.ts
+@@ -11,6 +11,9 @@
+ import type { Message } from '@deepseek-ai/dsh-llm'
+ import { SessionLogOffset, SessionSeq } from './types.ts'
+ import { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
++import { assertHistoryCheckoutEvent, assertStableHistoryBoundary } from './history.ts'
++export { assertHistoryCheckoutEvent, assertStableHistoryBoundary, selectActiveHistoryEvents } from './history.ts'
++export type { HistoryEvent } from './history.ts'
+ import type {
+   SessionEvent,
+   SessionSeqCursor,
+@@ -125,6 +128,34 @@ export function deriveEventMessage(event: SessionEvent): Message | null {
+   }
+ }
+
++/** A checkout may end inside a raw turn only when its model-visible tool exchanges are complete. */
++export function assertCompleteSurfaceToolPairs(events: readonly SessionEvent[], nodes: readonly SessionSeq[]): void {
++  const pending = new Set<string>()
++  let balance = 0
++  for (const seq of nodes) {
++    const event = events[seq]
++    if (event === undefined) throw new Error('history checkout target references a missing surface event')
++    balance += surfaceToolPairingDelta(event)
++    if (balance < 0) throw new Error('history checkout target contains an unmatched tool result')
++    const message = deriveEventMessage(event)
++    for (const block of message?.content ?? []) {
++      if (block.type === 'tool-call') {
++        if (pending.has(block.id)) throw new Error('history checkout target repeats an unmatched tool call')
++        pending.add(block.id)
++      } else if (block.type === 'tool-result') {
++        if (!pending.delete(block.toolCallId)) throw new Error('history checkout target contains an unmatched tool result')
++      }
++    }
++  }
++  if (pending.size || balance !== 0) throw new Error('history checkout target ends with unmatched tool calls')
++}
++
++/** Shared pure tool-balance change used by current-surface cut validators. */
++export function surfaceToolPairingDelta(event: SessionEvent): number {
++  if (event.type === 'assistant/message') return event.data.message.content.filter(block => block.type === 'tool-call').length
++  return event.type === 'tool/result' ? -1 : 0
++}
++
+ /** Whether a payload field is a JSON object rather than an array or scalar. */
+ function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === 'object' && value !== null && !Array.isArray(value)
+@@ -190,7 +221,7 @@ export interface SurfaceFoldResult {
+ export interface SessionSurface {
+   /** Current surface event sequences in model-visible order. */
+   readonly nodes: readonly SessionSeq[]
+-  /** Monotonic count of committed positional replacements. */
++  /** Monotonic generation of positional rewrites, including checkout and a late system head. */
+   readonly replaceGeneration: number
+ }
+
+@@ -209,7 +240,8 @@ interface SurfaceReplacePlan extends SurfaceFoldReplacement {
+
+ /** One validated surface transition that has not mutated fold state yet. */
+ type SurfacePlan =
+-  | { kind: 'append'; seq: SessionSeq }
++  | { kind: 'append'; seq: SessionSeq; systemHead?: true }
++  | { kind: 'checkout'; nodes: readonly SessionSeq[] }
+   | SurfaceReplacePlan
+
+ /** Create an empty surface fold state. */
+@@ -311,6 +343,7 @@ function assertProvenance(
+  * @throws when metadata violates event-local eligibility, marker, or source-sequence rules.
+  */
+ export function validateSurfaceMetadata(event: SessionEvent): SurfaceOp | undefined {
++  assertHistoryCheckoutEvent(event)
+   const op = surfaceOpOf(event)
+   if (op !== undefined && op !== 'append'
+     && (op.startSeq >= event.seq || op.endSeq >= event.seq)) {
+@@ -424,14 +457,27 @@ function planSurfaceEvent(
+   expectedSeq: SessionSeq,
+   events: readonly SessionEvent[],
+   baseSeq: SessionLogOffset,
++  checkoutSurface?: (throughSeq: number) => readonly SessionSeq[],
+ ): SurfacePlan | undefined {
+   if (event.seq !== expectedSeq) {
+     throw new Error(`session event seq ${event.seq} is not contiguous; expected ${expectedSeq}`)
+   }
+   const surfaceOp = validateSurfaceMetadata(event)
++  if (event.type === 'session/history-checkout') {
++    assertHistoryCheckoutEvent(event)
++    if (baseSeq !== 0) throw new Error('history checkout surface requires the complete log')
++    assertStableHistoryBoundary(events, event.seq === 0 ? -1 : SessionSeq(event.seq - 1))
++    const nodes = checkoutSurface?.(event.data.throughSeq)
++      ?? foldSurface(events.slice(0, event.data.throughSeq + 1)).nodes
++    assertCompleteSurfaceToolPairs(events, nodes)
++    return { kind: 'checkout', nodes }
++  }
+   if (surfaceOp === undefined) return
+   if (surfaceOp === 'append') {
+-    return { kind: 'append', seq: event.seq }
++    const head = state.nodes[0]
++    const firstSystem = event.type === 'system/message'
++      && (head === undefined || events[head - baseSeq]?.type !== 'system/message')
++    return { kind: 'append', seq: event.seq, ...(firstSystem ? { systemHead: true as const } : {}) }
+   }
+   const range = replacementRange(state, surfaceOp)
+   assertProvenance(event, range.shadowedSeqs)
+@@ -453,8 +499,9 @@ function applySurfaceEvent(
+   expectedSeq: SessionSeq,
+   events: readonly SessionEvent[],
+   baseSeq: SessionLogOffset,
++  checkoutSurface?: (throughSeq: number) => readonly SessionSeq[],
+ ): SurfaceFoldReplacement | undefined {
+-  const plan = planSurfaceEvent(state, event, expectedSeq, events, baseSeq)
++  const plan = planSurfaceEvent(state, event, expectedSeq, events, baseSeq, checkoutSurface)
+   return applySurfacePlan(state, plan)
+ }
+
+@@ -464,10 +511,20 @@ function applySurfacePlan(
+   plan: SurfacePlan | undefined,
+ ): SurfaceFoldReplacement | undefined {
+   if (plan?.kind === 'append') {
+-    state.nodes.push(plan.seq)
++    // A Session may already contain a queued user surface before its first
++    // real model step. Reserve the system projection head when it arrives;
++    // append-origin human history and durable seq/time stay unchanged.
++    if (plan.systemHead) {
++      if (state.nodes.length > 0) state.replaceGeneration += 1
++      state.nodes.unshift(plan.seq)
++    }
++    else state.nodes.push(plan.seq)
+   } else if (plan?.kind === 'replace') {
+     state.nodes.splice(plan.startIdx, plan.endIdx - plan.startIdx + 1, plan.seq)
+     state.replaceGeneration += 1
++  } else if (plan?.kind === 'checkout') {
++    state.nodes = [...plan.nodes]
++    state.replaceGeneration += 1
+   }
+   if (plan?.kind !== 'replace') return
+   return {
+@@ -487,6 +544,8 @@ function applySurfacePlan(
+ export function foldSurface(events: readonly SessionEvent[]): SurfaceFoldResult {
+   const state = createFoldState()
+   const replacements: SurfaceFoldReplacement[] = []
++  const targets = new Set(events.filter(event => event.type === 'session/history-checkout').map(event => event.data.throughSeq))
++  const snapshots = new Map<number, readonly SessionSeq[]>([[-1, []]])
+   for (const [index, event] of events.entries()) {
+     const replacement = applySurfaceEvent(
+       state,
+@@ -494,8 +553,14 @@ export function foldSurface(events: readonly SessionEvent[]): SurfaceFoldResult
+       SessionSeq(index),
+       events,
+       SessionLogOffset(0),
++      target => {
++        const snapshot = snapshots.get(target)
++        if (snapshot === undefined) throw new Error('history checkout surface target was not folded')
++        return snapshot
++      },
+     )
+     if (replacement !== undefined) replacements.push(replacement)
++    if (targets.has(event.seq)) snapshots.set(event.seq, [...state.nodes])
+   }
+   return { nodes: [...state.nodes], replacements }
+ }
+@@ -534,7 +599,7 @@ export class SurfaceManager implements SessionSurface {
+     }
+   }
+
+-  /** Monotonic count of folded positional replacements. */
++  /** Monotonic generation of folded positional rewrites. */
+   get replaceGeneration(): number {
+     if (this._lastProcessedSeq < this.baseSeq + this.log.length - 1) this._processDelta()
+     return this._state.replaceGeneration
+diff --git a/packages/core/session/src/types.ts b/packages/core/session/src/types.ts
+index 139fccd5a..460fdef97 100644
+--- a/packages/core/session/src/types.ts
++++ b/packages/core/session/src/types.ts
+@@ -267,6 +267,8 @@ export type RequestHeaderReason = 'initial' | 'resume' | 'change' | 'series'
+  * compact raw streams so persistence stores one durable settlement per attempt.
+  */
+ export interface SessionEventMap {
++  /** Required history branch switch; original events, identities and execution counters remain unchanged. */
++  'session/history-checkout': { throughSeq: SessionSeqCursor; operationId?: string }
+   /**
+    * Opens turn `turn` before the loop claims queued input or runs pre-step.
+    * Rejection, empty input, cancellation, or failure may close it with no
+diff --git a/packages/core/session/tests/surface.spec.ts b/packages/core/session/tests/surface.spec.ts
+index 6d10e2233..2e763ee97 100644
+--- a/packages/core/session/tests/surface.spec.ts
++++ b/packages/core/session/tests/surface.spec.ts
+@@ -942,6 +942,17 @@ describe('system/message surface node', () => {
+     ])).toThrow(/node 0 holds the system prompt/)
+   })
+
++  it('protects a late first system in projection while keeping append-origin chronology', () => {
++    const original = [userEvent(0), userEvent(1), systemEvent(2, 'first')]
++    const before = JSON.stringify(original)
++    expect(foldSurface(original).nodes).toEqual(sourceSeqs(2, 0, 1))
++    expect(JSON.stringify(original)).toBe(before)
++    expect(original.filter(isAppendSurfaceEvent).map(event => event.seq)).toEqual(sourceSeqs(0, 1, 2))
++    expect(foldSurface([...original, systemEvent(3, 'updated', { op: 'replace', startSeq: 2, endSeq: 2 }, [2])]).nodes).toEqual(sourceSeqs(3, 0, 1))
++    expect(() => foldSurface([...original, userEvent(3, { op: 'replace', startSeq: 2, endSeq: 2 }, [2])])).toThrow(/node 0 holds the system prompt/)
++    expect(() => foldSurface([...original, systemEvent(3, 'overbroad', { op: 'replace', startSeq: 2, endSeq: 1 }, [2, 0, 1])])).toThrow(/node 0 holds the system prompt/)
++  })
++
+   it('leaves later system nodes and a non-system head unprotected', () => {
+     const later = foldSurface([
+       systemEvent(0, 'v1'), userEvent(1), systemEvent(2, 'v2'), userEvent(3),
+diff --git a/packages/llm/token-meter/README.md b/packages/llm/token-meter/README.md
+index 4a2173a9f..2c56b4677 100644
+--- a/packages/llm/token-meter/README.md
++++ b/packages/llm/token-meter/README.md
+@@ -33,7 +33,7 @@ Choose it when several plugins should agree on one replay-based measurement —
+
+ ### Measuring pressure
+
+-`ctx.tokenMeter` exposes two operations. `measure(session, requestHeader?)` returns a detached, deeply immutable snapshot at one consumed-log revision: `totalTokens` is request-and-response pressure, and `surfaceTokens` is the surface-only route-priced total equal to the sum of `nodes[].tokens`. An optional `requestHeader` override selects the priced route and pressure fields; the node set still describes the current session. `estimateMessage(message)` prices one message with the fixed heuristic. Every call clones the positional surface nodes, so measurement is O(surface).
++`ctx.tokenMeter` exposes two operations. `measure(session, requestHeader?)` returns a detached, deeply immutable snapshot at one consumed-log revision: `totalTokens` is request-and-response pressure, and `surfaceTokens` is the surface-only route-priced total equal to the sum of `nodes[].tokens`. An optional `requestHeader` override selects the priced route and pressure fields; the node set still describes the current session. `estimateMessage(message)` prices one message with the fixed heuristic. Every call clones the positional surface nodes, so measurement is O(surface). Node order matches `Session.surface.nodes`: a first system message occupies the head even when queued user events precede it in the durable log; later system messages retain their ordinary append positions.
+
+ ```text
+ const { totalTokens, surfaceTokens, nodes } = ctx.tokenMeter.measure(session)
+diff --git a/packages/llm/token-meter/README.zh.md b/packages/llm/token-meter/README.zh.md
+index 23b12324f..e1dcc4c75 100644
+--- a/packages/llm/token-meter/README.zh.md
++++ b/packages/llm/token-meter/README.zh.md
+@@ -33,7 +33,7 @@ kind: "package-reference"
+
+ ### 测量压力
+
+-`ctx.tokenMeter` 暴露两个操作。`measure(session, requestHeader?)` 在同一个已消费日志 revision 上返回独立、深度不可变的快照：`totalTokens` 是请求与响应压力，`surfaceTokens` 是仅表面的路由定价总量，等于 `nodes[].tokens` 之和。可选 `requestHeader` 覆盖会选择计价路由与压力字段；节点集合仍描述当前会话。`estimateMessage(message)` 用固定启发式规则为一条消息计价。每次调用都会克隆带位置的表面节点，因此测量是 O(surface)。
++`ctx.tokenMeter` 暴露两个操作。`measure(session, requestHeader?)` 在同一个已消费日志 revision 上返回独立、深度不可变的快照：`totalTokens` 是请求与响应压力，`surfaceTokens` 是仅表面的路由定价总量，等于 `nodes[].tokens` 之和。可选 `requestHeader` 覆盖会选择计价路由与压力字段；节点集合仍描述当前会话。`estimateMessage(message)` 用固定启发式规则为一条消息计价。每次调用都会克隆带位置的表面节点，因此测量是 O(surface)。 节点顺序与 `Session.surface.nodes` 一致：即使持久日志中已有排队用户事件，首条系统消息也位于表面首位；后续系统消息保持普通追加位置。
+
+ ```text
+ const { totalTokens, surfaceTokens, nodes } = ctx.tokenMeter.measure(session)
+diff --git a/packages/llm/token-meter/src/breakdown-projection.ts b/packages/llm/token-meter/src/breakdown-projection.ts
+index d97338d47..50c372deb 100644
+--- a/packages/llm/token-meter/src/breakdown-projection.ts
++++ b/packages/llm/token-meter/src/breakdown-projection.ts
+@@ -8,7 +8,7 @@ import { z } from 'zod'
+ import { canonicalHeader, isSurfaceEvent, SessionSeq } from '@deepseek-ai/dsh-session'
+ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+ import { estimateToolsTokens } from './estimate.ts'
+-import { commitSurfaceTokens, planSurfaceTokens } from './surface-fold.ts'
++import { checkoutSurfaceTokens, commitSurfaceTokens, planSurfaceTokens } from './surface-fold.ts'
+ // Import for the `contextBreakdown` SessionProjectionStateMap key merge.
+ import type {} from './projection.ts'
+
+@@ -47,13 +47,18 @@ type ContextBreakdownState = z.infer<typeof contextBreakdownStateSchema>
+  */
+ export const contextBreakdownProjectionDefinition = {
+   key: 'contextBreakdown',
+-  stateVersion: 4,
++  stateVersion: 6,
+   stateSchema: contextBreakdownStateSchema,
+   init: (): ContextBreakdownState => ({
+     nodes: [],
+     breakdown: { systemTokens: 0, toolsTokens: 0, messageTokens: 0 },
+   }),
+-  apply: (state, event) => {
++  apply: (state, event, history) => {
++    if (event.type === 'session/history-checkout') {
++      const nodes = checkoutSurfaceTokens(history).map(({ seq, heuristicTokens, system }) => ({ seq, heuristicTokens, system }))
++      const systemTokens = nodes.findLast(node => node.system && node.heuristicTokens > 0)?.heuristicTokens ?? 0
++      return { nodes, breakdown: { systemTokens, toolsTokens: state.breakdown.toolsTokens, messageTokens: nodes.reduce((total, node) => total + node.heuristicTokens, 0) - systemTokens } }
++    }
+     if (event.type === 'request/header') {
+       const toolsTokens = estimateToolsTokens(canonicalHeader(event.data.header))
+       return toolsTokens === state.breakdown.toolsTokens
+diff --git a/packages/llm/token-meter/src/index.ts b/packages/llm/token-meter/src/index.ts
+index 348213ef4..b4e1cf438 100644
+--- a/packages/llm/token-meter/src/index.ts
++++ b/packages/llm/token-meter/src/index.ts
+@@ -32,7 +32,7 @@ import type {
+ import { contextBreakdownProjectionDefinition } from './breakdown-projection.ts'
+ import { contextPressureProjectionDefinition, tokenUsageProjectionDefinition } from './usage-projection.ts'
+ import { estimateContent, estimateMessage, estimateToolsTokens, ROLE_OVERHEAD } from './estimate.ts'
+-import { commitSurfaceTokens, planSurfaceTokens } from './surface-fold.ts'
++import { checkoutSurfaceTokens, commitSurfaceTokens, planSurfaceTokens } from './surface-fold.ts'
+ import type { MeterSurfaceNode } from './surface-fold.ts'
+ import { priceSurface } from './route-pricing.ts'
+
+@@ -231,7 +231,7 @@ export class TokenMeter extends Service {
+     while (state.consumedEvents < session.seq) {
+       // oxlint-disable-next-line typescript/no-non-null-assertion -- contiguous session seqs index the durable log
+       const event = session.eventAt(SessionSeq(state.consumedEvents))!
+-      this._foldEvent(state, event)
++      this._foldEvent(state, event, event.type === 'session/history-checkout' ? session.snapshotEvents(SessionLogOffset(0), SessionLogOffset(event.seq + 1)) : undefined)
+       state.consumedEvents = SessionLogOffset(state.consumedEvents + 1)
+     }
+     return state
+@@ -242,10 +242,11 @@ export class TokenMeter extends Service {
+    * mutating replay state, so a malformed event remains unread on every
+    * retry instead of half-applying.
+    */
+-  private _foldEvent(state: ReplayState, event: SessionEvent): void {
++  private _foldEvent(state: ReplayState, event: SessionEvent, checkoutHistory?: readonly SessionEvent[]): void {
+     let nextHeader = state.header
+     let nextStepStart = state.stepStart
+     let nextAnchor = state.anchor
++    const checkedOut = event.type === 'session/history-checkout' ? checkoutSurfaceTokens(checkoutHistory) : undefined
+
+     switch (event.type) {
+       case 'request/header':
+@@ -311,6 +312,7 @@ export class TokenMeter extends Service {
+     if (plan !== undefined) {
+       commitSurfaceTokens(state.surface, plan)
+     }
++    if (checkedOut !== undefined) state.surface = checkedOut
+     state.anchor = nextAnchor
+   }
+
+diff --git a/packages/llm/token-meter/src/surface-fold.ts b/packages/llm/token-meter/src/surface-fold.ts
+index d0cccea94..5a6fac8ac 100644
+--- a/packages/llm/token-meter/src/surface-fold.ts
++++ b/packages/llm/token-meter/src/surface-fold.ts
+@@ -14,8 +14,8 @@
+  * @module @deepseek-ai/dsh-token-meter/surface-fold
+  */
+
+-import { deriveEventMessage } from '@deepseek-ai/dsh-session'
+-import type { SessionSeq, SurfaceEvent } from '@deepseek-ai/dsh-session'
++import { deriveEventMessage, foldSurface, isSurfaceEvent } from '@deepseek-ai/dsh-session'
++import type { SessionEvent, SessionSeq, SurfaceEvent } from '@deepseek-ai/dsh-session'
+ import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
+ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+ import { estimateMessage, estimateStructuralBlock } from './estimate.ts'
+@@ -26,6 +26,8 @@ type FileAttachmentRef = Extract<ContentBlock, { type: 'file' }>['attachment']
+ export interface MeterSurfaceNode {
+   /** Durable sequence number of the surface event. */
+   readonly seq: SessionSeq
++  /** Whether this position holds a system event, including an empty prompt. */
++  readonly system: boolean
+   /** Fixed-heuristic price of the node's exact message. */
+   readonly heuristicTokens: number
+   /** Structural JSON price replaced when the routed request projects images. */
+@@ -46,8 +48,8 @@ export interface SurfaceTokenPlan<Node = MeterSurfaceNode> {
+   readonly deltaTokens: number
+   /** The priced node the commit inserts for this event. */
+   readonly node: Node
+-  /** Commit position: `append`, or the inclusive replaced index range. */
+-  readonly target: 'append' | { readonly startIdx: number; readonly endIdx: number }
++  /** Commit position: a new tail, the first system head, or an inclusive replacement range. */
++  readonly target: 'append' | 'prepend' | { readonly startIdx: number; readonly endIdx: number }
+ }
+
+ /** Collect projected attachment occurrences and their structural prices. */
+@@ -75,10 +77,11 @@ function collectProjectedAttachments(
+ }
+
+ /** Build one priced node from a surface event's derived message. */
+-function analyzeNode(seq: SessionSeq, message: Message | null): MeterSurfaceNode {
++function analyzeNode(seq: SessionSeq, message: Message | null, system: boolean): MeterSurfaceNode {
+   if (message === null) {
+     return {
+       seq,
++      system,
+       heuristicTokens: 0,
+       imageStructuralTokens: 0,
+       fileStructuralTokens: 0,
+@@ -92,6 +95,7 @@ function analyzeNode(seq: SessionSeq, message: Message | null): MeterSurfaceNode
+   const structural = collectProjectedAttachments(message.content, images, files)
+   return {
+     seq,
++    system,
+     heuristicTokens,
+     imageStructuralTokens: structural.imageTokens,
+     fileStructuralTokens: structural.fileTokens,
+@@ -100,6 +104,16 @@ function analyzeNode(seq: SessionSeq, message: Message | null): MeterSurfaceNode
+   }
+ }
+
++/** Reprice the canonical checkout surface from original events, without storing a second history. */
++export function checkoutSurfaceTokens(events: readonly SessionEvent[] | undefined): MeterSurfaceNode[] {
++  if (events === undefined || events[0]?.seq !== 0) throw new Error('token checkout requires the complete event prefix')
++  return foldSurface(events).nodes.map(seq => {
++    const event = events[seq]
++    if (!event || !isSurfaceEvent(event)) throw new Error('token checkout references a missing surface event')
++    return analyzeNode(seq, deriveEventMessage(event), event.type === 'system/message')
++  })
++}
++
+ /**
+  * Validate and price one surface event without mutating the surface.
+  * @param nodes - the priced surface preceding this event, in model-visible order.
+@@ -110,14 +124,15 @@ function analyzeNode(seq: SessionSeq, message: Message | null): MeterSurfaceNode
+  *   corruption and must fail loud rather than skip the event.
+  */
+ export function planSurfaceTokens(
+-  nodes: readonly Pick<MeterSurfaceNode, 'seq' | 'heuristicTokens'>[],
++  nodes: readonly Pick<MeterSurfaceNode, 'seq' | 'heuristicTokens' | 'system'>[],
+   event: SurfaceEvent,
+ ): SurfaceTokenPlan {
+-  const node = analyzeNode(event.seq, deriveEventMessage(event))
++  const node = analyzeNode(event.seq, deriveEventMessage(event), event.type === 'system/message')
+   const tokens = node.heuristicTokens
+   const op = event.surfaceOp
+   if (op === 'append') {
+-    return { tokens, deltaTokens: tokens, node, target: 'append' }
++    const target = node.system && nodes[0]?.system !== true ? 'prepend' : 'append'
++    return { tokens, deltaTokens: tokens, node, target }
+   }
+   const startIdx = nodes.findIndex(candidate => candidate.seq === op.startSeq)
+   const endIdx = nodes.findIndex(candidate => candidate.seq === op.endSeq)
+@@ -139,6 +154,10 @@ export function planSurfaceTokens(
+  * @param plan - the transition returned by {@link planSurfaceTokens}.
+  */
+ export function commitSurfaceTokens<Node>(nodes: Node[], plan: SurfaceTokenPlan<Node>): void {
++  if (plan.target === 'prepend') {
++    nodes.unshift(plan.node)
++    return
++  }
+   if (plan.target === 'append') {
+     nodes.push(plan.node)
+     return
+diff --git a/packages/llm/token-meter/src/usage-projection.ts b/packages/llm/token-meter/src/usage-projection.ts
+index 815baff91..ddd01b3ad 100644
+--- a/packages/llm/token-meter/src/usage-projection.ts
++++ b/packages/llm/token-meter/src/usage-projection.ts
+@@ -10,6 +10,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
+ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+ import type { ContextPressureProjection, TokenUsageProjection } from './projection.ts'
+ import { foldSurfaceProjection } from './surface-projection.ts'
++import { checkoutSurfaceTokens } from './surface-fold.ts'
+
+ const zeroBuckets = (): TokenUsageProjection => ({
+   uncachedInputTokens: 0,
+@@ -172,10 +173,15 @@ export const tokenUsageProjectionDefinition = {
+  */
+ export const contextPressureProjectionDefinition = {
+   key: 'contextPressure',
+-  stateVersion: 4,
++  stateVersion: 5,
+   stateSchema: contextPressureStateSchema,
+   init: () => ({ surfaceTokens: 0 }),
+-  apply: (state, event) => {
++  apply: (state, event, history) => {
++    if (event.type === 'session/history-checkout') {
++      const surfaceTokens = checkoutSurfaceTokens(history).reduce((total, node) => total + node.heuristicTokens, 0)
++      const { claim: _claim, ...retained } = state
++      return { ...retained, surfaceTokens }
++    }
+     const fold = foldSurfaceProjection(state.claim, event)
+     let next = state
+     if (event.type === 'request/context') {
+diff --git a/packages/llm/token-meter/tests/context-breakdown-projection.spec.ts b/packages/llm/token-meter/tests/context-breakdown-projection.spec.ts
+index 769f00e0e..28f7656af 100644
+--- a/packages/llm/token-meter/tests/context-breakdown-projection.spec.ts
++++ b/packages/llm/token-meter/tests/context-breakdown-projection.spec.ts
+@@ -405,7 +405,7 @@ describe('contextBreakdown session projection', () => {
+       ctx.sessionProjections.checkpoint(session),
+     )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
+     const row = checkpoint['contextBreakdown']!
+-    expect(row.ver).toBe(4)
++    expect(row.ver).toBe(6)
+     expect(ctx.sessionProjections.viewCheckpoint(checkpoint).contextBreakdown).toEqual(projected(ctx, session))
+     const replacement = session.append('user/message', createUserMessage({
+       content: [{ type: 'text', text: 'summary' }], source: { kind: 'user' },
+@@ -424,7 +424,7 @@ describe('contextBreakdown session projection', () => {
+       stale, session.snapshotEvents(), SessionLogOffset(0), session.header, session.inheritedEventCount,
+     )
+     expect(replayed.snapshot.values.contextBreakdown).toEqual(projected(ctx, session))
+-    expect(replayed.checkpoint['contextBreakdown']?.ver).toBe(4)
++    expect(replayed.checkpoint['contextBreakdown']?.ver).toBe(6)
+     const invalid = {
+       ...checkpoint,
+       contextBreakdown: {
+@@ -437,6 +437,22 @@ describe('contextBreakdown session projection', () => {
+     )).toThrow()
+   })
+
++  it('replays version-4 positional checkpoints that placed a late system after queued users', async () => {
++    const { ctx, session } = await harness()
++    const user = appendUser(session, 'queued user')
++    const head = appendSystem(session, 'system head')
++    const current = ctx.sessionProjections.checkpoint(session)
++    const row = current['contextBreakdown']!
++    const state = ctx.sessionProjections.stateOf(session, 'contextBreakdown')!
++    expect(state.nodes.map(node => node.seq)).toEqual([head, user])
++    const stale = { ...current, contextBreakdown: { ...row, ver: 4, val: { ...state, nodes: [...state.nodes].reverse() } } }
++    expect(ctx.sessionProjections.viewCheckpoint(stale).contextBreakdown).toBeUndefined()
++    expect(ctx.sessionProjections.restoreFloor(stale)).toBe(0)
++    const restored = ctx.sessionProjections.restore(stale, session.snapshotEvents(), SessionLogOffset(0), session.header, session.inheritedEventCount)
++    expect(restored.checkpoint).toEqual(current)
++    expect(restored.checkpoint['contextBreakdown']?.ver).toBe(6)
++  })
++
+   it('discards lower-layer version-3 scalar caches and refolds the full surface', async () => {
+     const { ctx, session } = await harness()
+     try {
+@@ -458,7 +474,7 @@ describe('contextBreakdown session projection', () => {
+         systemTokens: 8, toolsTokens: staleValue.toolsTokens, messageTokens: 9,
+       })
+       expect(restored.checkpoint).toEqual(current)
+-      expect(restored.checkpoint['contextBreakdown']?.ver).toBe(4)
++      expect(restored.checkpoint['contextBreakdown']?.ver).toBe(6)
+     } finally {
+       await ctx.fiber.dispose()
+     }
+diff --git a/packages/llm/token-meter/tests/token-meter.spec.ts b/packages/llm/token-meter/tests/token-meter.spec.ts
+index e795ea550..014af79c7 100644
+--- a/packages/llm/token-meter/tests/token-meter.spec.ts
++++ b/packages/llm/token-meter/tests/token-meter.spec.ts
+@@ -142,6 +142,26 @@ describe('TokenMeter configuration and registration', () => {
+ })
+
+ describe('TokenMeter pricing', () => {
++  it.each(['', 'system head'])('keeps a late first system (%j) at the priced head through replay and updates', (argumentsText) => {
++    const service = meter()
++    const session = Session.create(SessionId('late-system-meter'))
++    const early = session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'queued before the first step' }], source: { kind: 'user' } }), { surfaceOp: 'append' }).seq
++    expect(service.measure(session).nodes.map(node => node.seq)).toEqual([early])
++    const head = appendSystem(session, argumentsText)
++    expect(service.measure(session).nodes.map(node => node.seq)).toEqual([head, early])
++    const later = appendSystem(session, 'in-history update')
++    expect(service.measure(session).nodes.map(node => node.seq)).toEqual([head, early, later])
++    const changed = replaceSystem(session, head, 'replacement head')
++    const measured = service.measure(session)
++    expect(measured.nodes.map(node => node.seq)).toEqual([changed, early, later])
++    expectSurfaceTotal(measured)
++    const replay = Session.fromRestore(session.id, session.snapshotEvents(), session.header, session.inheritedEventCount, 'shared-frozen')
++    const restored = meter().measure(replay)
++    expect(restored.nodes).toEqual(measured.nodes)
++    expect(restored.surfaceTokens).toBe(measured.surfaceTokens)
++    expect(restored.totalTokens).toBe(measured.totalTokens)
++  })
++
+   it('prices every built-in content shape and merge-extended blocks with one fixed heuristic', () => {
+     const service = meter()
+     const blocks: ContentBlock[] = [
+diff --git a/packages/llm/token-meter/tests/token-usage-projection.spec.ts b/packages/llm/token-meter/tests/token-usage-projection.spec.ts
+index d57d3f8d1..34c00ab3d 100644
+--- a/packages/llm/token-meter/tests/token-usage-projection.spec.ts
++++ b/packages/llm/token-meter/tests/token-usage-projection.spec.ts
+@@ -439,7 +439,7 @@ describe('contextPressure session projection', () => {
+     const checkpoint = JSON.parse(JSON.stringify(
+       ctx.sessionProjections.checkpoint(session),
+     )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
+-    expect(checkpoint.contextPressure?.ver).toBe(4)
++    expect(checkpoint.contextPressure?.ver).toBe(5)
+
+     await meterFiber.dispose()
+     expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('contextPressure')
+diff --git a/packages/session-query/session-query/src/documents.ts b/packages/session-query/session-query/src/documents.ts
+index f51ae6b73..c4cc3a2af 100644
+--- a/packages/session-query/session-query/src/documents.ts
++++ b/packages/session-query/session-query/src/documents.ts
+@@ -66,9 +66,10 @@ function classifySurface(events: readonly SessionEvent[]): Map<SessionSeq, Sessi
+     )
+   }
+   const result = new Map<SessionSeq, SessionEventSurface>()
+-  for (const seq of folded.nodes) result.set(seq, 'current')
+   for (const replacement of folded.replacements) {
+     for (const seq of replacement.shadowedSeqs) result.set(seq, 'shadowed')
+   }
++  // Checkout can revive an original node that an older compaction shadowed.
++  for (const seq of folded.nodes) result.set(seq, 'current')
+   return result
+ }
+diff --git a/packages/session/session-format-v0-to-v1/src/index.ts b/packages/session/session-format-v0-to-v1/src/index.ts
+index 4409bb31a..8b0e861d6 100644
+--- a/packages/session/session-format-v0-to-v1/src/index.ts
++++ b/packages/session/session-format-v0-to-v1/src/index.ts
+@@ -4,7 +4,7 @@ export * from './codec.ts'
+ export * from './dispositions.ts'
+ export * from './migration.ts'
+ export { assertReleasedPayloadSemantics } from './payload-validation.ts'
+-export { assertReleasedArtifactRelationships } from './relationships.ts'
++export { assertReleasedArtifactRelationships, type ReleasedRelationshipExtensions } from './relationships.ts'
+ export {
+   assertReleasedSurfaceMetadata,
+   assertReleasedEventPayload,
+diff --git a/packages/session/session-format-v0-to-v1/src/relationships.ts b/packages/session/session-format-v0-to-v1/src/relationships.ts
+index 2cd4a432e..fbd256d30 100644
+--- a/packages/session/session-format-v0-to-v1/src/relationships.ts
++++ b/packages/session/session-format-v0-to-v1/src/relationships.ts
+@@ -30,6 +30,12 @@ interface ToolLifecycle {
+
+ /** Relationship roles added by a later format while reusing the released validator. */
+ export interface ReleasedRelationshipExtensions {
++  /** A later format's validated first system append occupies the surface head. */
++  readonly firstSurfaceHeadSeq?: number
++  /** Additional system-head placements validated by the current format after a history checkout. */
++  readonly surfaceHeadSeqs?: ReadonlySet<number>
++  /** Canonical restored surfaces supplied by the later format at required checkout events. */
++  readonly surfaceCheckouts?: ReadonlyMap<number, readonly number[]>
+   /** Event types that must occur inside the current open step. */
+   readonly stepEvents?: ReadonlySet<string>
+   /** Title-request model input was source-validated and preserved across sequence remapping. */
+@@ -63,10 +69,16 @@ export function assertReleasedArtifactRelationships(
+   const commandRuns = new Set<string>()
+
+   for (const event of artifact.events) {
++    const checkout = extensions.surfaceCheckouts?.get(event.seq)
++    if (checkout !== undefined) {
++      if (openTurn !== null || openStep !== null || openCompaction !== undefined) throw new SessionFormatError('history checkout crosses an open activity')
++      surface = [...checkout]
++      continue
++    }
+     const extensionStepEvent = extensions.stepEvents?.has(event.type) === true
+     if (RELEASED_V0_EVENT_DISPOSITIONS[event.type] === undefined && !extensionStepEvent) continue
+     const data = releasedV0Record(event.data, `${event.type} ${event.seq} data`)
+-    if (SURFACE_TYPES.has(event.type)) surface = applySurface(surface, event)
++    if (SURFACE_TYPES.has(event.type)) surface = applySurface(surface, event, event.seq === extensions.firstSurfaceHeadSeq || extensions.surfaceHeadSeqs?.has(event.seq) === true)
+     if ((event.type === 'turn/start' || event.type === 'turn/end')
+       && openCompaction !== undefined && !staleCompactionStarts.has(openCompaction.startSeq)) {
+       throw new SessionFormatError(`${event.type} crosses an open compaction`)
+@@ -401,10 +413,10 @@ function isExactToolNotStartedRepair(
+       === 'The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.'
+ }
+
+-function applySurface(surface: readonly number[], event: SessionFormatEvent): number[] {
++function applySurface(surface: readonly number[], event: SessionFormatEvent, prepend: boolean): number[] {
+   const operation = event['surfaceOp']
+   if (operation === undefined) throw new SessionFormatError(`${event.type} requires a surfaceOp marker`)
+-  if (operation === 'append') return [...surface, event.seq]
++  if (operation === 'append') return prepend ? [event.seq, ...surface] : [...surface, event.seq]
+   const replace = operation as { readonly start: number; readonly end: number }
+   const start = surface.indexOf(replace.start)
+   const end = surface.indexOf(replace.end)
+diff --git a/packages/session/session-format-v1-to-v2/src/validation.ts b/packages/session/session-format-v1-to-v2/src/validation.ts
+index 5725be03a..2fe745f07 100644
+--- a/packages/session/session-format-v1-to-v2/src/validation.ts
++++ b/packages/session/session-format-v1-to-v2/src/validation.ts
+@@ -12,6 +12,7 @@ import type {
+   SessionFormatJsonValue,
+ } from '@deepseek-ai/dsh-session-format'
+ import { assertReleasedArtifactRelationships } from '@deepseek-ai/dsh-session-format-v0-to-v1'
++import type { ReleasedRelationshipExtensions } from '@deepseek-ai/dsh-session-format-v0-to-v1'
+ import { RELEASED_V2_EVENT_DISPOSITIONS } from './dispositions.ts'
+
+ const HEADER_REQUIRED = ['version', 'id', 'createdAt', 'isSeeded', 'delegationDepth'] as const
+@@ -56,6 +57,7 @@ function validateReleasedV2Artifact(
+   mode: 'current' | 'physical',
+   knownEventTypes?: ReadonlySet<string>,
+   relationshipHeaderVersion: number = artifact.header.version,
++  relationshipExtensions: Pick<ReleasedRelationshipExtensions, 'firstSurfaceHeadSeq' | 'surfaceHeadSeqs' | 'surfaceCheckouts'> = {},
+ ): void {
+   assertReleasedV2Header(artifact.header)
+   const cut = sessionFormatCount(artifact.inheritedEventCount, 'format v2 inherited event count')
+@@ -98,7 +100,7 @@ function validateReleasedV2Artifact(
+   if (mode === 'current') {
+     assertReleasedArtifactRelationships({
+       ...artifact, header: { ...artifact.header, version: relationshipHeaderVersion },
+-    }, RELEASED_V2_RELATIONSHIP_EXTENSIONS)
++    }, { ...RELEASED_V2_RELATIONSHIP_EXTENSIONS, ...relationshipExtensions })
+   }
+ }
+
+@@ -143,14 +145,16 @@ export function assertReleasedV2Keys(
+  * @param artifact - detached vocabulary-restored artifact.
+  * @param knownEventTypes - event types understood by the installed current Session package.
+  * @param relationshipHeaderVersion - logical generation whose version-sensitive relationships are checked.
++ * @param relationshipExtensions - validated surface placement supplied by the later format owner.
+  * @returns the same validated artifact.
+  */
+ export function restoreReleasedV2Artifact(
+   artifact: SessionFormatArtifact,
+   knownEventTypes: ReadonlySet<string>,
+   relationshipHeaderVersion: number = artifact.header.version,
++  relationshipExtensions: Pick<ReleasedRelationshipExtensions, 'firstSurfaceHeadSeq' | 'surfaceHeadSeqs' | 'surfaceCheckouts'> = {},
+ ): SessionFormatArtifact {
+-  validateReleasedV2Artifact(artifact, 'current', knownEventTypes, relationshipHeaderVersion)
++  validateReleasedV2Artifact(artifact, 'current', knownEventTypes, relationshipHeaderVersion, relationshipExtensions)
+   return artifact
+ }
+
+diff --git a/packages/session/session-format-v2-to-v3/README.md b/packages/session/session-format-v2-to-v3/README.md
+index 65e62f6d2..db5895055 100644
+--- a/packages/session/session-format-v2-to-v3/README.md
++++ b/packages/session/session-format-v2-to-v3/README.md
+@@ -65,7 +65,7 @@ This conversion does not inspect installed presets or rewrite other occurrences
+ <a id="system-head"></a>
+ ### System head and message identities
+
+-The first `step/start` is followed immediately by an empty `system/message` append, even if the step aborts without a request. Later steps do not create another head. A log with no step and no surface receives no head or invented request.
++The first `step/start` is followed immediately by an empty `system/message` append, even if the step aborts without a request. Later steps do not create another head. Queued user messages before the first step retain their event positions; the first system append occupies the projection head. A log with no step receives no head or invented request.
+
+ At every `request/header`, absent `data.header.system` means the empty prompt; otherwise its string is compared exactly with the current prompt. A change inserts a system message immediately before that request header, replacing exactly the current protected head and citing it in `sourceEventSeqs`. An unchanged prompt inserts nothing. Empty strings and absent fields clear an earlier prompt; whitespace-only strings remain nonempty text. Every request header loses `data.header.system`, regardless of whether a replacement was needed.
+
+@@ -133,7 +133,7 @@ All positions use the same historical kind set; a partial start cannot introduce
+
+ Admission does not rewrite content. In particular, embedded stream bytes are preserved although their owned block fields are inspected. Tool arguments, `replayState.response`, and `replayState.blocks` remain opaque; matching field names inside arbitrary JSON do not trigger this audit. File attachment metadata is validated without interpreting ids or byte counts as Session references. This is not a general schema audit or recursive coordinate inference, and native V3 extension acceptance is separate.
+
+-A surface event before the first step, a changed prompt outside an open step, or a generated-id collision raises `SessionFormatUnsupportedMigrationError` rather than moving events or inventing ownership. Malformed source fields, missing placement, invalid references, inconsistent cuts, delivery violations, and contradictory tool results raise format errors in the direct stage or target validator. The catalog reports migration-stage and transformed-target validation failures as typed unsupported migration; physical decoding failures remain corruption under its selected recovery policy. No source or target repair, generation fallback, or file rewrite is performed by this edge.
++A changed prompt outside an open step or a generated-id collision raises `SessionFormatUnsupportedMigrationError` rather than moving events or inventing ownership. Malformed source fields, missing placement, invalid references, inconsistent cuts, delivery violations, and contradictory tool results raise format errors in the direct stage or target validator. The catalog reports migration-stage and transformed-target validation failures as typed unsupported migration; physical decoding failures remain corruption under its selected recovery policy. No source or target repair, generation fallback, or file rewrite is performed by this edge.
+
+ -----
+
+@@ -155,7 +155,7 @@ Input already marked V3 does not run V2-to-V3. Native catalog reads with `valida
+ <details>
+ <summary>Implementation internals — click to expand</summary>
+
+-The [stage](src/migration.ts) owns synchronous per-artifact sequence maps, message identity sets, and prompt/lifecycle state. Compact runs expand incrementally. The [codec](src/codec.ts) reuses frozen V2 framing; the [restorer](src/validation.ts) validates V3 structure before giving frozen ordinary relationship validation a private system/PTC/repair-id and endpoint view. That view retains the actual target generation for delivery checks and never escapes: restoration returns the original V3 artifact and identities. Frozen V0-to-V1 and V1-to-V2 semantics remain unchanged. No runtime invariant companion is published because this library owns no independently observable registrations or state replicas.
++The [stage](src/migration.ts) owns synchronous per-artifact sequence maps, message identity sets, and prompt/lifecycle state. Compact runs expand incrementally. The [codec](src/codec.ts) reuses frozen V2 framing; the [restorer](src/validation.ts) validates V3 structure before giving frozen ordinary relationship validation a private system/PTC/repair-id and endpoint view. That view retains the actual target generation for delivery checks and gives the relationship fold the validated first system sequence so compaction spans follow the same projection order. It never escapes: restoration returns the original V3 artifact and identities. Frozen V0-to-V1 and V1-to-V2 semantics remain unchanged. No runtime invariant companion is published because this library owns no independently observable registrations or state replicas.
+
+ [Combined catalog tests](tests/combined-migration.spec.ts) exercise transformation composition and native reopen; [migration tests](tests/migration.spec.ts) and [canonical tests](tests/canonical-envelopes.spec.ts) pin preservation and refusal. [Persistence integration](../session-persistence-jsonl/tests/v2-ptc-migration.spec.ts) owns publication evidence. The [released-format decision](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) owns the rationale for testing adjacent composition separately from native admission.
+
+diff --git a/packages/session/session-format-v2-to-v3/README.zh.md b/packages/session/session-format-v2-to-v3/README.zh.md
+index c13a9fa57..1d0eacebe 100644
+--- a/packages/session/session-format-v2-to-v3/README.zh.md
++++ b/packages/session/session-format-v2-to-v3/README.zh.md
+@@ -65,7 +65,7 @@ const targetHeader = sessionFormatV2ToV3.migrateHeader(sourceHeader)
+ <a id="system-head"></a>
+ ### 系统头节点与消息身份
+
+-首个 `step/start` 后立即追加空 `system/message`，即使该步骤在发出请求前中止。后续步骤不再创建头节点。没有步骤也没有 surface 的日志不会获得头节点或虚构请求。
++首个 `step/start` 后立即追加空 `system/message`，即使该步骤在发出请求前中止。后续步骤不再创建头节点。首个步骤前的排队用户消息保留事件位置，首条系统追加占据投影首位。没有步骤的日志不会获得头节点或虚构请求。
+
+ 在每条 `request/header` 处，缺失的 `data.header.system` 表示空提示词；否则，其字符串与当前提示词进行精确比较。发生变化时，在该请求头之前立即插入系统消息，恰好替换当前受保护的头节点，并在 `sourceEventSeqs` 中引用它。提示词不变时不插入消息。空字符串和缺失字段会清空先前的提示词；仅含空白的字符串仍为非空文本。每个请求头都会移除 `data.header.system`，无论是否需要替换。
+
+@@ -133,7 +133,7 @@ V2 `session-log-deepseek/delivery-accepted` 若携带 `data.sessionFormatVersion
+
+ 准入不改写内容。特别是，内嵌流虽然接受归本格式所有的块字段检查，其字节仍保持不变。工具参数、`replayState.response` 和 `replayState.blocks` 保持不透明；任意 JSON 内的同名字段不会触发此审计。文件附件元数据接受校验，但标识或字节计数不会被解释为 Session 引用。这不是通用 schema 审计或递归坐标推断，原生 V3 扩展准入与此分开。
+
+-首个步骤前的 surface 事件、开放步骤外的提示词变化或生成标识冲突，会抛出 `SessionFormatUnsupportedMigrationError`，而非移动事件或虚构归属。源字段格式错误、缺失位置、无效引用、不一致切点、投递违规与矛盾工具结果，会在直接阶段或目标校验器中抛出格式错误。目录将迁移阶段和转换后目标校验失败报告为类型化的不支持迁移；物理解码失败仍按所选恢复策略归类为损坏。本迁移边不修复源或目标，不回退代次，也不改写文件。
++开放步骤外的提示词变化或生成标识冲突，会抛出 `SessionFormatUnsupportedMigrationError`，而非移动事件或虚构归属。源字段格式错误、缺失位置、无效引用、不一致切点、投递违规与矛盾工具结果，会在直接阶段或目标校验器中抛出格式错误。目录将迁移阶段和转换后目标校验失败报告为类型化的不支持迁移；物理解码失败仍按所选恢复策略归类为损坏。本迁移边不修复源或目标，不回退代次，也不改写文件。
+
+ -----
+
+@@ -155,7 +155,7 @@ V2 `session-log-deepseek/delivery-accepted` 若携带 `data.sessionFormatVersion
+ <details>
+ <summary>实现细节 — 点击展开</summary>
+
+-[阶段](src/migration.ts)拥有每份产物独立的同步序列映射、消息身份集合和提示词/生命周期状态。紧凑事件段增量展开。[编解码器](src/codec.ts)复用冻结的 V2 分帧；[恢复器](src/validation.ts)先校验 V3 结构，再向冻结的普通关系校验提供私有 system/PTC/修复标识与端点视图。该视图为投递检查保留实际目标代次，且绝不对外返回：恢复返回原始 V3 产物与身份。冻结的 V0 到 V1 和 V1 到 V2 语义保持不变。本库不拥有可独立观察的注册或状态副本，因此不发布运行时不变量伴随入口。
++[阶段](src/migration.ts)拥有每份产物独立的同步序列映射、消息身份集合和提示词/生命周期状态。紧凑事件段增量展开。[编解码器](src/codec.ts)复用冻结的 V2 分帧；[恢复器](src/validation.ts)先校验 V3 结构，再向冻结的普通关系校验提供私有 system/PTC/修复标识与端点视图。该视图为投递检查保留实际目标代次，并把已校验的首条系统消息序号传给关系折叠，使压缩区间采用相同的投影顺序。该视图绝不对外返回：恢复返回原始 V3 产物与身份。冻结的 V0 到 V1 和 V1 到 V2 语义保持不变。本库不拥有可独立观察的注册或状态副本，因此不发布运行时不变量伴随入口。
+
+ [组合目录测试](tests/combined-migration.spec.ts)验证转换组合与原生重新打开；[迁移测试](tests/migration.spec.ts)和[规范测试](tests/canonical-envelopes.spec.ts)固定保留与拒绝规则。[持久化集成](../session-persistence-jsonl/tests/v2-ptc-migration.spec.ts)负责发布证据。[已发布格式决策](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md)负责将相邻组合测试与原生准入测试分开的依据。
+
+diff --git a/packages/session/session-format-v2-to-v3/package.json b/packages/session/session-format-v2-to-v3/package.json
+index 637cd4f0f..b29b76804 100644
+--- a/packages/session/session-format-v2-to-v3/package.json
++++ b/packages/session/session-format-v2-to-v3/package.json
+@@ -41,7 +41,8 @@
+   "dependencies": {
+     "@deepseek-ai/dsh-session-format": "workspace:^",
+     "@deepseek-ai/dsh-session-format-v0-to-v1": "workspace:^",
+-    "@deepseek-ai/dsh-session-format-v1-to-v2": "workspace:^"
++    "@deepseek-ai/dsh-session-format-v1-to-v2": "workspace:^",
++    "@deepseek-ai/dsh-session": "workspace:^"
+   },
+   "peerDependencies": {
+     "@deepseek-ai/cordis": "workspace:^"
+diff --git a/packages/session/session-format-v2-to-v3/src/migration.ts b/packages/session/session-format-v2-to-v3/src/migration.ts
+index 3aecf8a51..f69dfcfa6 100644
+--- a/packages/session/session-format-v2-to-v3/src/migration.ts
++++ b/packages/session/session-format-v2-to-v3/src/migration.ts
+@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
+ import { SessionFormatError, SessionFormatUnsupportedMigrationError, defineSessionFormatMigration, sessionFormatCount } from '@deepseek-ai/dsh-session-format'
+ import type { SessionFormatEvent, SessionFormatEventRun, SessionFormatJsonObject, SessionFormatJsonValue, SessionFormatMigrationContext, SessionFormatMigrationStage, SessionFormatMigrationStageInput } from '@deepseek-ai/dsh-session-format'
+ import { assertReleasedV2Header } from '@deepseek-ai/dsh-session-format-v1-to-v2'
+-import { assertEvent, canonicalizeTransformedEvent, record, SURFACE_TYPES } from './payload.ts'
++import { assertEvent, canonicalizeTransformedEvent, record } from './payload.ts'
+ import { remapEvent } from './references.ts'
+ import { assertReleasedV3Header } from './validation.ts'
+
+@@ -53,9 +53,8 @@ class ReleasedV2ToV3Stage implements SessionFormatMigrationStage {
+       if (prompt !== this.prompt) this.emitSystem(prompt, event, context)
+       source = { ...event, data: { ...data, header } }
+     }
+-    if (SURFACE_TYPES.has(event.type) && this.head === undefined) {
+-      throw new SessionFormatUnsupportedMigrationError('format v2 surface before first step cannot acquire a system head without changing chronology')
+-    }
++    // A queued user surface can predate the first model step. Preserve that
++    // chronology; the first real step owns system promotion, if one exists.
+     if (event.type === 'session/end-seed' && data['inherited'] === true) {
+       if (!this.input.sourceHeader.isSeeded) throw new SessionFormatError('format v2 unseeded Session contains an inherited end-seed marker')
+       this.sourceCut = event.seq
+diff --git a/packages/session/session-format-v2-to-v3/src/payload.ts b/packages/session/session-format-v2-to-v3/src/payload.ts
+index 3aa2add11..4ab9e2dcf 100644
+--- a/packages/session/session-format-v2-to-v3/src/payload.ts
++++ b/packages/session/session-format-v2-to-v3/src/payload.ts
+@@ -270,6 +270,7 @@ export function assertV3Event(event: SessionFormatEvent, knownEventTypes?: Reado
+     || RELEASED_V2_EVENT_DISPOSITIONS[event.type] !== undefined
+     || event.type === 'tool/ptc-dispatch-start' || event.type === 'tool/ptc-dispatch'
+     || event.type === 'feedback/message-put' || event.type === 'feedback/message-delete'
++    || event.type === 'session/history-checkout'
+     || knownEventTypes?.has(event.type) === true)
+   const opaque = !known
+   keys(value, ['type', 'seq', 'time', 'data'],
+diff --git a/packages/session/session-format-v2-to-v3/src/validation.ts b/packages/session/session-format-v2-to-v3/src/validation.ts
+index 5f6b5972f..667608d16 100644
+--- a/packages/session/session-format-v2-to-v3/src/validation.ts
++++ b/packages/session/session-format-v2-to-v3/src/validation.ts
+@@ -4,6 +4,8 @@ import { SessionFormatError, SessionFormatUnsupportedMigrationError } from '@dee
+ import type { SessionFormatArtifact, SessionFormatEvent, SessionFormatHeader } from '@deepseek-ai/dsh-session-format'
+ import { assertReleasedV2Header, restoreReleasedV2Artifact } from '@deepseek-ai/dsh-session-format-v1-to-v2'
+ import { assertV3Event, isRepairIdentity, record, SURFACE_TYPES } from './payload.ts'
++import { assertHistoryCheckoutEvent, SurfaceManager } from '@deepseek-ai/dsh-session/surface'
++import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
+
+ /**
+  * Validate v3 logical metadata with the released-v2 fields.
+@@ -25,10 +27,22 @@ export function restoreReleasedV3Artifact(artifact: SessionFormatArtifact, known
+   assertReleasedV3Header(artifact.header)
+   let step: { turn: unknown; step: unknown } | undefined
+   let head: number | undefined
+-  let hasSurface = false
++  let firstSurfaceHeadSeq: number | undefined
++  const prefix: SessionEvent[] = []
++  const surface = artifact.events.some(event => event.type === 'session/history-checkout') ? new SurfaceManager(prefix) : undefined
++  const surfaceCheckouts = new Map<number, readonly number[]>(), surfaceHeadSeqs = new Set<number>()
+   const events = artifact.events.map((event): SessionFormatEvent => {
+     assertV3EventAdmission(event)
+     assertV3Event(event, knownEventTypes)
++    const previousHead = surface?.nodes[0] ?? head
++    try { surface?.validateNext(event as unknown as SessionEvent) }
++    catch (error) { throw new SessionFormatError(error instanceof Error ? error.message : String(error)) }
++    prefix.push(event as unknown as SessionEvent)
++    if (event.type === 'session/history-checkout') {
++      surfaceCheckouts.set(event.seq, [...surface!.nodes])
++      const restoredHead = surface!.nodes[0]
++      head = restoredHead !== undefined && prefix[restoredHead]?.type === 'system/message' ? restoredHead : undefined
++    }
+     const system = event.type === 'system/message'
+     if (event.type === 'step/start') {
+       const data = record(event.data, event.type)
+@@ -40,9 +54,15 @@ export function restoreReleasedV3Artifact(artifact: SessionFormatArtifact, known
+         throw new SessionFormatError('system/message does not match an open step')
+       }
+       const operation = event['surfaceOp']
+-      if (hasSurface && head === undefined) throw new SessionFormatError('system/message requires a protected first surface head')
+       if (operation === 'append') {
+-        if (!hasSurface) head = event.seq
++        // The first real step can follow queued/imported user messages.
++        // Its system node becomes the protected projection head without
++        // moving any event in the durable chronology.
++        if (head === undefined) {
++          head = event.seq
++          firstSurfaceHeadSeq = event.seq
++          if (previousHead === undefined || prefix[previousHead]?.type !== 'system/message') surfaceHeadSeqs.add(event.seq)
++        }
+       } else {
+         const replace = record(operation, 'system replacement')
+         if (replace['startSeq'] === head || replace['endSeq'] === head) {
+@@ -63,14 +83,16 @@ export function restoreReleasedV3Artifact(artifact: SessionFormatArtifact, known
+         throw new SessionFormatError('compaction cannot shadow the protected system head')
+       }
+     }
+-    if (SURFACE_TYPES.has(event.type)) hasSurface = true
+     const projected = relationshipEvent(event)
+     if (!SURFACE_TYPES.has(event.type) || event['surfaceOp'] === 'append') return projected
+     const replacement = event['surfaceOp'] as { readonly startSeq: number; readonly endSeq: number }
+     // Only the frozen relationship view uses released endpoint names.
+     return { ...projected, surfaceOp: { op: 'replace', start: replacement.startSeq, end: replacement.endSeq } }
+   })
+-  restoreReleasedV2Artifact({ ...artifact, header: { ...artifact.header, version: 2 }, events }, knownEventTypes, 3)
++  restoreReleasedV2Artifact(
++    { ...artifact, header: { ...artifact.header, version: 2 }, events }, knownEventTypes, 3,
++    { ...(firstSurfaceHeadSeq === undefined ? {} : { firstSurfaceHeadSeq }), surfaceHeadSeqs, surfaceCheckouts },
++  )
+   return artifact
+ }
+
+@@ -79,6 +101,10 @@ export function restoreReleasedV3Artifact(artifact: SessionFormatArtifact, known
+  * @param event - event envelope whose type and ignorable admission markers are available.
+  */
+ export function assertV3EventAdmission(event: SessionFormatEvent): void {
++  if (event.type === 'session/history-checkout') {
++    try { assertHistoryCheckoutEvent(event) }
++    catch (error) { throw new SessionFormatError(error instanceof Error ? error.message : String(error)) }
++  }
+   if ((event.type === 'tool/code-dispatch-start' || event.type === 'tool/code-dispatch')
+     && event['ignorable'] !== true) {
+     throw new SessionFormatUnsupportedMigrationError(
+diff --git a/packages/session/session-format-v2-to-v3/tests/admission.spec.ts b/packages/session/session-format-v2-to-v3/tests/admission.spec.ts
+index 275e5603e..0e2959f9e 100644
+--- a/packages/session/session-format-v2-to-v3/tests/admission.spec.ts
++++ b/packages/session/session-format-v2-to-v3/tests/admission.spec.ts
+@@ -62,8 +62,31 @@ describe('durable V3 admission failures', () => {
+     expect(() => releasedV3SessionFormatCodec.encodeEvent(event('system/message', { ...system, step }, { surfaceOp: 'append' }))).toThrow()
+   })
+
+-  it('refuses appending system context after a history with no protected head', () => {
+-    expect(() => native([...opening, event('user/message', user, { surfaceOp: 'append' }), event('system/message', system, { surfaceOp: 'append' })])).toThrow(/protected first/)
++  it('admits the first system head at a real step after queued user history', () => {
++    expect(() => native([...opening, event('user/message', user, { surfaceOp: 'append' }), event('system/message', system, { surfaceOp: 'append' })])).not.toThrow()
++  })
++
++  it.each([false, true])('validates exact compaction spans after a late first system, later systems=%s', (laterSystems) => {
++    const rows = [event('turn/start', { turn: 1 }), event('user/message', user, { surfaceOp: 'append' }), event('step/start', { turn: 1, step: 1 }), event('system/message', system, { surfaceOp: 'append' }), event('user/message', { ...user, id: 'second' }, { surfaceOp: 'append' })]
++    if (laterSystems) rows.push(event('system/message', { ...system, message: { ...system.message, id: 'later' } }, { surfaceOp: 'append' }), event('system/message', { ...system, message: { ...system.message, id: 'empty', content: [] } }, { surfaceOp: 'append' }))
++    rows.push(event('step/end', { turn: 1, step: 1 }), event('turn/end', { turn: 1, reason: { kind: 'completed' } }))
++    const start = rows.length
++    rows.push(event('compaction/start', { compactionId: 'late-head', turn: null }))
++    const summary = { compactionId: 'late-head', summary: [{ type: 'text', text: 'summary' }], shadowedRange: { start: 1, end: 4 }, shadowedSeqs: [1, 4], shadowedTokenCount: 20, provider: 'mock', model: 'mock' }
++    rows.push(event('compaction/summary', summary))
++    rows.push(event('user/message', { ...user, id: 'checkpoint', source: { kind: 'plugin', plugin: 'compact', compactionId: 'late-head' } }, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 4 }, sourceEventSeqs: [start, start + 1, 1, 4] }))
++    rows.push(event('compaction/end', { compactionId: 'late-head', turn: null }))
++    const before = JSON.stringify(rows)
++    expect(native(rows).events).toEqual(rows.map((row, seq) => ({ ...row, seq })))
++    expect(JSON.stringify(rows)).toBe(before)
++    for (const shadowedSeqs of [[1], [4, 1], [1, 3, 4]]) {
++      const invalid = [...rows]
++      invalid[start + 1] = event('compaction/summary', { ...summary, shadowedSeqs })
++      expect(() => native(invalid)).toThrow(/exact current surface span|protected system head/)
++    }
++    const invalidSource = [...rows]
++    invalidSource[start + 2] = { ...rows[start + 2]!, sourceEventSeqs: [start, start + 1, 1] }
++    expect(() => native(invalidSource)).toThrow(/omit a shadowed surface node/)
+   })
+
+   it('rejects ordinary replacements that consume the protected head', () => {
+diff --git a/packages/session/session-format-v2-to-v3/tests/migration.spec.ts b/packages/session/session-format-v2-to-v3/tests/migration.spec.ts
+index 4b242ca29..b7e7e67fd 100644
+--- a/packages/session/session-format-v2-to-v3/tests/migration.spec.ts
++++ b/packages/session/session-format-v2-to-v3/tests/migration.spec.ts
+@@ -118,8 +118,11 @@ describe('streaming V2 system prompt migration', () => {
+     expect(() => migrate([event('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [user(id)] }), ...input])).toThrow(/collides/)
+   })
+
+-  it('refuses pre-step surfaces and changed prompts outside a step rather than reorder source history', () => {
+-    expect(() => migrate([event('user/message', user(), 'append'), ...opening()])).toThrow(/before first step/)
++  it('retains pre-step surfaces while refusing changed prompts outside a step', () => {
++    const source = [event('user/message', user(), 'append'), ...opening()]
++    const target = migrate(source)
++    expect(target.events.slice(0, 3).map(row => row.type)).toEqual(['user/message', 'turn/start', 'step/start'])
++    expect(target.events[0]?.data).toEqual(source[0]?.data)
+     expect(() => migrate([event('turn/start', { turn: 1 }), event('request/header', request('early')), event('step/start', { turn: 1, step: 1 })])).toThrow(/outside an open step/)
+     expect(() => migrate([...opening(), event('step/end', { turn: 1, step: 1 }), event('request/header', request('late'))])).toThrow(/outside an open step/)
+   })
+diff --git a/packages/session/session-format-v2-to-v3/tsconfig.json b/packages/session/session-format-v2-to-v3/tsconfig.json
+index 36dcdbd69..0220cf2e2 100644
+--- a/packages/session/session-format-v2-to-v3/tsconfig.json
++++ b/packages/session/session-format-v2-to-v3/tsconfig.json
+@@ -19,6 +19,9 @@
+     },
+     {
+       "path": "../session-format-v1-to-v2"
++    },
++    {
++      "path": "../../core/session"
+     }
+   ]
+ }
+diff --git a/packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts b/packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts
+index b8a7fad13..65bee1a50 100644
+--- a/packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts
++++ b/packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts
+@@ -250,7 +250,7 @@ describe('V2 system prompts through current Session and JSONL persistence', () =
+     expect(await observeFile(sourcePath)).toEqual(original)
+   })
+
+-  it.each(['read', 'write'] as const)('refuses unsupported pre-step V2 during %s open without falling back to V1', async (access) => {
++  it.each(['read', 'write'] as const)('preserves pre-step V2 during %s open without falling back to V1', async (access) => {
+     const sourcePath = await writeV2([
+       { type: 'turn/start', data: { turn: 1 } }, user('too early'),
+       { type: 'step/start', data: { turn: 1, step: 1 } }, request('cannot reorder'),
+@@ -260,12 +260,16 @@ describe('V2 system prompts through current Session and JSONL persistence', () =
+     const original = await observeFile(sourcePath)
+     const lower = await observeFile(lowerPath)
+     const ctx = await mount()
+-    await expect(ctx.sessionPersistence.open(id, access)).rejects.toBeInstanceOf(SessionFormatUnsupportedError)
+-    await expect(ctx.sessionPersistence.open(id, access)).rejects.toThrow(/before first step/)
++    const handle = await ctx.sessionPersistence.open(id, access)
++    try {
++      const session = await restore(handle)
++      expect(session.snapshotEvents().slice(0, 3).map(event => event.type)).toEqual(['turn/start', 'user/message', 'step/start'])
++      expect(session.deriveMessages().map(message => message.role)).toEqual(['system', 'user'])
++    } finally { await handle.close() }
+     expect(await observeFile(sourcePath)).toEqual(original)
+     expect(await observeFile(lowerPath)).toEqual(lower)
+     expect((await readdir(dirname(sourcePath))).filter(name => name !== 'session.lock').sort())
+-      .toEqual(['session.v1.jsonl', 'session.v2.jsonl'])
++      .toEqual(access === 'write' ? ['session.v1.jsonl', 'session.v2.jsonl', 'session.v3.jsonl'] : ['session.v1.jsonl', 'session.v2.jsonl'])
+   })
+
+   it('persists native V3 system appends after the protected head without converting them to user messages', async () => {
+diff --git a/packages/session/session-projection/src/index.ts b/packages/session/session-projection/src/index.ts
+index d29c5bb02..cf4780d04 100644
+--- a/packages/session/session-projection/src/index.ts
++++ b/packages/session/session-projection/src/index.ts
+@@ -66,9 +66,10 @@ export interface ProjectionDefinition<
+    * unchanged reference (`Object.is`) produces zero downstream work.
+    * @param state - the state covering all prior events.
+    * @param event - the next committed session event.
++   * @param checkoutHistory - complete immutable prefix through a history-checkout event; omitted for ordinary events.
+    * @returns the next state (same reference when the event is not the unit's).
+    */
+-  apply(state: NoInfer<S>, event: SessionEvent): NoInfer<S>
++  apply(state: NoInfer<S>, event: SessionEvent, checkoutHistory?: readonly SessionEvent[]): NoInfer<S>
+   /** Client view. Omit for host-only units. */
+   wire?: K extends keyof SessionProjectionMap ? {
+     /** Validates the wire payload before it leaves the host. */
+@@ -141,7 +142,7 @@ interface ErasedDefinition {
+   key: string
+   stateSchema: { parse(value: unknown): unknown }
+   init(header: SessionHeader, inheritedEventCount: SessionLogOffset): unknown
+-  apply(state: unknown, event: SessionEvent): unknown
++  apply(state: unknown, event: SessionEvent, checkoutHistory?: readonly SessionEvent[]): unknown
+   wire: { viewSchema: { parse(value: unknown): unknown }; view(state: unknown): unknown } | undefined
+   stateVersion: number
+ }
+@@ -261,7 +262,7 @@ export class SessionProjectionRegistry extends Service {
+       key: definition.key,
+       stateSchema: definition.stateSchema,
+       init: (header, inheritedEventCount) => definition.init(header, inheritedEventCount),
+-      apply: (state, event) => definition.apply(state as S, event),
++      apply: (state, event, history) => definition.apply(state as S, event, history),
+       wire: wire === undefined
+         ? undefined
+         : { viewSchema: wire.viewSchema, view: state => wire.view(state as S) },
+@@ -528,7 +529,7 @@ export class SessionProjectionRegistry extends Service {
+         if (event === undefined || event.seq !== expectedSeq) {
+           throw new Error(`session projection ${JSON.stringify(def.key)} cannot restore across missing seq ${String(expectedSeq)}`)
+         }
+-        state = def.apply(state, event)
++        state = def.apply(state, event, checkoutPrefix(events, event))
+       }
+       if (def.wire !== undefined) values[def.key] = def.wire.viewSchema.parse(def.wire.view(state))
+       refreshed[def.key] = { ver: def.stateVersion, seq: endSeq, val: state }
+@@ -607,7 +608,7 @@ export class SessionProjectionRegistry extends Service {
+     events: readonly SessionEvent[],
+   ): UnitCell {
+     let state = def.init(header, inheritedEventCount)
+-    for (const event of events) state = def.apply(state, event)
++    for (const event of events) state = def.apply(state, event, checkoutPrefix(events, event))
+     return { state, observedSeq: (events.at(-1)?.seq ?? -1), views: [undefined, undefined] }
+   }
+
+@@ -641,7 +642,7 @@ export class SessionProjectionRegistry extends Service {
+       if (event === undefined || event.seq !== seq) {
+         throw new Error(`session projection ${JSON.stringify(def.key)} cannot advance across missing seq ${String(seq)}`)
+       }
+-      const next = def.apply(cell.state, event)
++      const next = def.apply(cell.state, event, event.type === 'session/history-checkout' ? session.snapshotEvents(SessionLogOffset(0), SessionLogOffset(event.seq + 1)) : undefined)
+       if (!Object.is(next, cell.state)) {
+         cell.views[0] = cell.views[1]
+         cell.views[1] = undefined
+@@ -675,7 +676,7 @@ export class SessionProjectionRegistry extends Service {
+         )
+       }
+       const previousState = cell.state
+-      const next = registration.def.apply(previousState, event)
++      const next = registration.def.apply(previousState, event, event.type === 'session/history-checkout' ? session.snapshotEvents(SessionLogOffset(0), SessionLogOffset(event.seq + 1)) : undefined)
+       const changed = !Object.is(next, previousState)
+       cell.state = next
+       cell.observedSeq = event.seq
+@@ -708,4 +709,11 @@ export class SessionProjectionRegistry extends Service {
+   }
+ }
+
++/** Checkout-aware units need the original referenced prefix, never a detached tail checkpoint alone. */
++function checkoutPrefix(events: readonly SessionEvent[], event: SessionEvent): readonly SessionEvent[] | undefined {
++  if (event.type !== 'session/history-checkout') return
++  if (events[0]?.seq !== 0) throw new Error('history checkout projection requires a complete prefix; re-read from seq 0')
++  return events.slice(0, event.seq + 1)
++}
++
+ export default SessionProjectionRegistry
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index be1647c24..68d03c943 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -8061,6 +8061,9 @@ importers:
+
+   packages/session/session-format-v2-to-v3:
+     dependencies:
++      '@deepseek-ai/dsh-session':
++        specifier: workspace:^
++        version: link:../../core/session
+       '@deepseek-ai/dsh-session-format':
+         specifier: workspace:^
+         version: link:../session-format
+diff --git a/packages/core/session/src/history.ts b/packages/core/session/src/history.ts
+new file mode 100644
+index 000000000..7be88fa39
+--- /dev/null
++++ b/packages/core/session/src/history.ts
+@@ -0,0 +1,78 @@
++/** Durable history branch selection; checkout never removes or renumbers original log events. */
++import type { SessionSeqCursor } from './types.ts'
++
++export interface HistoryEvent {
++  readonly type: string
++  readonly seq: number
++  readonly data: unknown
++  readonly ignorable?: true
++  readonly surfaceOp?: unknown
++  readonly sourceEventSeqs?: unknown
++}
++
++/** Validate the required, log-only checkout envelope and its earlier inclusive target. */
++export function assertHistoryCheckoutEvent(event: HistoryEvent): void {
++  if (event.type !== 'session/history-checkout') return
++  const data = event.data
++  if (event.ignorable !== undefined || event.surfaceOp !== undefined || event.sourceEventSeqs !== undefined) {
++    throw new Error('session/history-checkout must be required and log-only')
++  }
++  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('history checkout data must be an object')
++  const value = data as Record<string, unknown>, target = value['throughSeq']
++  if (Object.keys(value).some(key => key !== 'throughSeq' && key !== 'operationId')
++    || typeof target !== 'number' || !Number.isSafeInteger(target) || Object.is(target, -0)
++    || target < -1 || target >= event.seq) throw new Error('history checkout throughSeq must name an earlier event or -1')
++  if (value['operationId'] !== undefined && (typeof value['operationId'] !== 'string' || value['operationId'].length === 0)) {
++    throw new Error('history checkout operationId must be a non-empty string when provided')
++  }
++}
++
++/** Require a complete-log prefix outside every turn, step and compaction activity. */
++export function assertStableHistoryBoundary(events: readonly HistoryEvent[], throughSeq: SessionSeqCursor): void {
++  if (!Number.isSafeInteger(throughSeq) || Object.is(throughSeq, -0) || throughSeq < -1
++    || throughSeq >= events.length || (events.length > 0 && events[0]?.seq !== 0)) {
++    throw new Error('history checkout requires an existing boundary in a complete log')
++  }
++  let turn = false, step = false, compaction = false
++  for (let seq = 0; seq <= throughSeq; seq++) {
++    const event = events[seq]
++    if (event?.seq !== seq) throw new Error('history checkout cannot cross a missing event')
++    if (event.type === 'turn/start') turn = true
++    else if (event.type === 'turn/end') turn = false
++    else if (event.type === 'step/start') step = true
++    else if (event.type === 'step/end') step = false
++    else if (event.type === 'compaction/start') compaction = true
++    else if (event.type === 'compaction/end') compaction = false
++    else if (event.type === 'session/end-seed') compaction = false
++  }
++  if (turn || step || compaction) throw new Error('history checkout requires a stable boundary outside turn, step and compaction')
++}
++
++/**
++ * Select original events on the active branch, including log-only metadata.
++ * Compaction does not hide append-origin human history. A partial contiguous
++ * durable window is supported: a checkout before its first seq clears that
++ * window's earlier items. Merge older pages with the newest window before
++ * selecting, since an isolated old page cannot observe later checkout events.
++ */
++export function selectActiveHistoryEvents<T extends HistoryEvent>(events: readonly T[]): T[] {
++  if (events.length === 0) return []
++  const first = events[0]!.seq, bySeq = new Map<number, T>(), previous = new Map<number, number | undefined>()
++  let tail: number | undefined
++  for (const [index, event] of events.entries()) {
++    if (!Number.isSafeInteger(event.seq) || event.seq < 0 || Object.is(event.seq, -0) || event.seq !== first + index) {
++      throw new Error('active history requires a contiguous durable event window')
++    }
++    let parent = tail
++    if (event.type === 'session/history-checkout') {
++      assertHistoryCheckoutEvent(event)
++      const throughSeq = (event.data as { throughSeq: number }).throughSeq
++      if (throughSeq >= first && !bySeq.has(throughSeq)) throw new Error('history checkout target is missing from the loaded window')
++      parent = throughSeq < first ? undefined : throughSeq
++    }
++    bySeq.set(event.seq, event); previous.set(event.seq, parent); tail = event.seq
++  }
++  const selected: T[] = []
++  while (tail !== undefined) { selected.push(bySeq.get(tail)!); tail = previous.get(tail) }
++  return selected.reverse()
++}
+diff --git a/packages/core/session/tests/history-checkout-native.mjs b/packages/core/session/tests/history-checkout-native.mjs
+new file mode 100644
+index 000000000..9efd5059b
+--- /dev/null
++++ b/packages/core/session/tests/history-checkout-native.mjs
+@@ -0,0 +1,65 @@
++import assert from 'node:assert/strict'
++import { readFile, writeFile, mkdir } from 'node:fs/promises'
++import { join } from 'node:path'
++import { Context } from '@deepseek-ai/cordis'
++import { Session, SessionId, SessionSeq, SessionLogOffset, foldSurface, selectActiveHistoryEvents } from '@deepseek-ai/dsh-session'
++import { createUserMessage } from '@deepseek-ai/dsh-llm'
++import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
++import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
++import TokenMeter from '@deepseek-ai/dsh-token-meter'
++
++const source = process.argv[2], output = process.argv[3]
++await mkdir(output, { recursive: true })
++const originalBytes = await readFile(source), original = JSON.parse(originalBytes)
++const artifact = original.events ? original : original.artifact
++assert(artifact?.events?.length, '需要现成真实Session artifact')
++const open = artifact => Session.fromRestore(SessionId(artifact.header.id), structuredClone(artifact.events), structuredClone(artifact.header), SessionLogOffset(artifact.inheritedEventCount ?? 0), 'detached')
++const session = open(artifact), before = session.snapshotEvents(), beforeSurface = [...session.surface.nodes]
++const users = before.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')
++assert(users.length > 1)
++const targetUser = users.at(-1), throughSeq = targetUser.seq === 0 ? -1 : SessionSeq(targetUser.seq - 1)
++const expected = foldSurface(before.slice(0, throughSeq + 1)).nodes
++const ctx = new Context(), coldCtx = new Context()
++for (const owner of [ctx, coldCtx]) { await owner.plugin(SessionProjectionRegistry); await owner.plugin(TokenMeter) }
++const encoded = current => {
++  const header = sessionFormatCatalog.encodeCurrentHeader(current.header, current.inheritedEventCount)
++  const rows = current.snapshotEvents().map(event => sessionFormatCatalog.encodeCurrentEvent(event))
++  const decoder = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation: 'current' })
++  for (const row of rows) decoder.decodeRow(row)
++  const restored = decoder.finish()
++  assert.deepEqual(restored.events, current.snapshotEvents())
++  return { header, rows, restored }
++}
++try {
++  const informational = open(artifact)
++  informational.append('fixture/worktree-checkpoint', { snapshot: 'external-owner-reference' }, { ignorable: true })
++  const info = encoded(informational)
++  await writeFile(join(output, 'informational.jsonl'), [info.header, ...info.rows].map(row => JSON.stringify(row)).join('\n') + '\n')
++  const pricedBefore = ctx.tokenMeter.measure(session)
++  const operation = session.checkout(throughSeq, { operationId: 'native-file-transaction-test' })
++  assert.deepEqual(session.surface.nodes, expected)
++  assert.deepEqual(session.snapshotEvents(0, before.length), before)
++  assert(!selectActiveHistoryEvents(session.snapshotEvents()).some(event => event.seq === targetUser.seq))
++  const priced = ctx.tokenMeter.measure(session)
++  assert.deepEqual(priced.nodes.map(node => node.seq), expected)
++  const undo = encoded(session), reopened = open(undo.restored)
++  assert.deepEqual(reopened.surface.nodes, expected)
++  assert.deepEqual(reopened.deriveMessages(), session.deriveMessages())
++  assert.deepEqual(coldCtx.tokenMeter.measure(reopened), { ...priced, logRevision: reopened.seq })
++  assert.deepEqual(coldCtx.sessionProjections.snapshot(reopened).values, ctx.sessionProjections.snapshot(session).values)
++  await writeFile(join(output, 'undo.jsonl'), [undo.header, ...undo.rows].map(row => JSON.stringify(row)).join('\n') + '\n')
++  session.checkout(SessionSeq(before.length - 1), { operationId: 'native-redo-test' })
++  assert.deepEqual(session.surface.nodes, beforeSurface)
++  assert.deepEqual(ctx.tokenMeter.measure(session), { ...pricedBefore, logRevision: session.seq })
++  encoded(session)
++  session.checkout(throughSeq)
++  const branch = session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '隔离Session原生checkout后的新分支追加' }] }), { surfaceOp: 'append' })
++  const active = selectActiveHistoryEvents(session.snapshotEvents())
++  assert(active.some(event => event.seq === branch.seq)); assert(!active.some(event => event.seq === targetUser.seq))
++  const final = encoded(session)
++  assert.deepEqual(open(final.restored).surface.nodes, session.surface.nodes)
++  assert((await readFile(source)).equals(originalBytes))
++  await writeFile(join(output, 'branch.jsonl'), [final.header, ...final.rows].map(row => JSON.stringify(row)).join('\n') + '\n')
++  await writeFile(join(output, 'result.json'), JSON.stringify({ status: 'PASS_NATIVE_HISTORY_CHECKOUT_CODEC', source, originalEvents: artifact.events.length, sourceUnchanged: true, throughSeq, targetUserSeq: targetUser.seq, checkoutSeq: operation.seq, operationId: operation.data.operationId, restoredSurface: expected, redoSurfaceExact: true, hotColdMeterExact: true, strictCodecEventsExact: true, allOriginalEventsPreserved: true, activeBranchExcludesUndoneUser: true, modelRequests: 0 }, null, 2) + '\n')
++  console.log(JSON.stringify({ status: 'PASS_NATIVE_HISTORY_CHECKOUT_CODEC', output, originalEvents: artifact.events.length, throughSeq }))
++} finally { await coldCtx.fiber.dispose(); await ctx.fiber.dispose() }
+diff --git a/packages/core/session/tests/history-checkout-old-reader.mjs b/packages/core/session/tests/history-checkout-old-reader.mjs
+new file mode 100644
+index 000000000..e20958bf9
+--- /dev/null
++++ b/packages/core/session/tests/history-checkout-old-reader.mjs
+@@ -0,0 +1,22 @@
++import assert from 'node:assert/strict'
++import { createRequire } from 'node:module'
++import { readFile, writeFile, realpath } from 'node:fs/promises'
++import { join } from 'node:path'
++import { pathToFileURL } from 'node:url'
++
++const install = await realpath(process.argv[2]), output = process.argv[3]
++const requireOld = createRequire(join(install, 'package.json'))
++const codecPath = await realpath(requireOld.resolve('@deepseek-ai/dsh-session-format-catalog'))
++assert(codecPath.startsWith(install + '/'), '必须使用独立旧发行读器')
++const { sessionFormatCatalog } = await import(pathToFileURL(codecPath).href)
++async function restore(name) {
++  const [header, ...rows] = (await readFile(join(output, name), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
++  return sessionFormatCatalog.decodeArtifact(header, rows)
++}
++const info = await restore('informational.jsonl')
++assert(info.events.some(event => event.type === 'fixture/worktree-checkpoint' && event.ignorable === true))
++let refused
++try { await restore('undo.jsonl') } catch (error) { refused = String(error) }
++assert.match(refused ?? '', /unknown event type.*session\/history-checkout/)
++await writeFile(join(output, 'old-reader.json'), JSON.stringify({ status: 'PASS_OLD_READER_BOUNDARY', codecPath, informationalRetained: true, checkoutRequiredRejected: true, error: refused, modelRequests: 0 }, null, 2) + '\n')
++console.log(JSON.stringify({ status: 'PASS_OLD_READER_BOUNDARY', output }))
+diff --git a/packages/core/session/tests/history-checkout.spec.ts b/packages/core/session/tests/history-checkout.spec.ts
+new file mode 100644
+index 000000000..0d340a3f3
+--- /dev/null
++++ b/packages/core/session/tests/history-checkout.spec.ts
+@@ -0,0 +1,97 @@
++import { describe, expect, it } from 'vitest'
++import { Session, SessionId, SessionLogOffset, SessionSeq, foldSurface, isAppendSurfaceEvent, selectActiveHistoryEvents } from '@deepseek-ai/dsh-session'
++import type { SessionSeqCursor } from '@deepseek-ai/dsh-session'
++import { createMessage, createSystemMessage, createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
++declare module '@deepseek-ai/dsh-session/types' { interface SessionEventMap { 'fixture/worktree': { snapshot: string } } }
++
++function user(session: Session, text: string) {
++  return session.append('user/message', createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }), { surfaceOp: 'append' })
++}
++function text(session: Session) { return session.deriveMessages().flatMap(message => message.content).flatMap(block => block.type === 'text' ? [block.text] : []) }
++function turn(session: Session, n: number, value: string) {
++  session.append('turn/start', { turn: n }); const message = user(session, value)
++  const end = session.append('turn/end', { turn: n, reason: { kind: 'completed' } })
++  return { message, end }
++}
++
++describe('required reversible history checkout', () => {
++  it('restores canonical replacement state and original human history across undo, redo and a new branch', () => {
++    const session = Session.create(SessionId('checkout'))
++    const a = turn(session, 1, 'A'), b = turn(session, 2, 'B')
++    const summary = session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'AB summary' }], source: { kind: 'plugin', plugin: 'fixture' } }), { surfaceOp: { op: 'replace', startSeq: a.message.seq, endSeq: b.message.seq }, sourceEventSeqs: [a.message.seq, b.message.seq] })
++    const original = session.snapshotEvents(), generation = session.surface.replaceGeneration
++    expect(text(session)).toEqual(['AB summary'])
++    const checkout = session.checkout(a.end.seq, { operationId: 'files-transaction-1' })
++    expect(checkout.data).toEqual({ throughSeq: a.end.seq, operationId: 'files-transaction-1' })
++    expect(checkout.ignorable).toBeUndefined(); expect(checkout.surfaceOp).toBeUndefined()
++    expect(text(session)).toEqual(['A']); expect(session.surface.replaceGeneration).toBe(generation + 1)
++    expect(session.snapshotEvents(SessionLogOffset(0), SessionLogOffset(original.length))).toEqual(original)
++    session.checkout(summary.seq)
++    expect(text(session)).toEqual(['AB summary'])
++    expect(selectActiveHistoryEvents(session.snapshotEvents()).filter(isAppendSurfaceEvent).map(event => event.seq)).toEqual([a.message.seq, b.message.seq])
++    session.checkout(a.end.seq); const c = turn(session, 3, 'C')
++    expect(text(session)).toEqual(['A', 'C'])
++    expect(selectActiveHistoryEvents(session.snapshotEvents()).filter(isAppendSurfaceEvent).map(event => event.seq)).toEqual([a.message.seq, c.message.seq])
++    expect(foldSurface(session.snapshotEvents()).nodes).toEqual(session.surface.nodes)
++    const restored = Session.fromRestore(session.id, session.snapshotEvents(), session.header, SessionLogOffset(0), 'shared-frozen')
++    expect(text(restored)).toEqual(text(session)); expect(restored.surface.nodes).toEqual(session.surface.nodes)
++  })
++
++  it('targets an earlier user boundary inside the same turn and step while requiring the writer to be idle', () => {
++    const session = Session.create(SessionId('steer'))
++    session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 })
++    const system = session.append('system/message', { turn: 1, step: 1, message: createSystemMessage('system', 'fixture') }, { surfaceOp: 'append' })
++    const first = user(session, 'earlier user'); const target = SessionSeq(session.seq - 1)
++    user(session, 'later user')
++    const before = session.snapshotEvents()
++    expect(() => session.checkout(target)).toThrow(/stable boundary/)
++    expect(session.snapshotEvents()).toEqual(before)
++    session.append('step/end', { turn: 1, step: 1 }); session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
++    session.checkout(target)
++    expect(session.surface.nodes).toEqual([system.seq, first.seq]); expect(text(session)).toEqual(['system', 'earlier user'])
++  })
++
++  it('rejects incomplete tool exchanges and accepts the same prefix after its original tool result', () => {
++    const session = Session.create(SessionId('tools'))
++    session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 })
++    const callId = ToolCallId('checkout-tool')
++    const assistant = session.append('assistant/message', { turn: 1, step: 1, stream: [], message: createMessage({ role: 'assistant', source: { kind: 'model', provider: 'fixture', model: 'fixture' }, content: [{ type: 'tool-call', id: callId, name: 'read', arguments: '{}' }] }) }, { surfaceOp: 'append' })
++    const result = session.append('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId, content: [{ type: 'text', text: 'original result' }], isError: false }) }, { surfaceOp: 'append' })
++    session.append('step/end', { turn: 1, step: 1 }); session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
++    expect(() => session.checkout(assistant.seq)).toThrow(/unmatched tool calls/)
++    session.checkout(result.seq)
++    expect(session.surface.nodes).toEqual([assistant.seq, result.seq])
++  })
++
++  it('never downgrades checkout to ignorable and retains external informational metadata', () => {
++    const session = Session.create(SessionId('external'))
++    const info = session.append('fixture/worktree', { snapshot: 'owner-reference' }, { ignorable: true })
++    expect(info.ignorable).toBe(true)
++    expect(() => session.append('session/history-checkout', { throughSeq: -1 }, { ignorable: true })).toThrow(/informational/)
++    const checkout = session.checkout(info.seq)
++    expect(selectActiveHistoryEvents(session.snapshotEvents()).map(event => event.seq)).toEqual([info.seq, checkout.seq])
++    for (const value of [-2, NaN, Infinity, -0, session.seq, 0.5]) expect(() => session.checkout(value as SessionSeqCursor)).toThrow()
++    expect(() => session.checkout(-1, { operationId: '' })).toThrow(/operationId/)
++    session.checkout(-1); expect(session.surface.nodes).toEqual([])
++  })
++
++  it('selects a partial durable window by absolute seq and rejects gaps or fractional UI positions', () => {
++    const event = (seq: number, type = 'fixture', data: unknown = {}) => ({ type, seq, data })
++    const window = [event(20), event(21), event(22, 'session/history-checkout', { throughSeq: 5 }), event(23)]
++    expect(selectActiveHistoryEvents(window).map(event => event.seq)).toEqual([22, 23])
++    expect(selectActiveHistoryEvents([...window, event(24, 'session/history-checkout', { throughSeq: 21 })]).map(event => event.seq)).toEqual([20, 21, 24])
++    expect(() => selectActiveHistoryEvents([event(20), event(22)])).toThrow(/contiguous/)
++    expect(() => selectActiveHistoryEvents([event(20.5)])).toThrow(/durable/)
++  })
++
++  it('keeps the derived cache canonical when a first system head follows already observed queued history', () => {
++    const session = Session.create(SessionId('late-head-cache'))
++    user(session, 'queued'); expect(text(session)).toEqual(['queued'])
++    session.append('system/message', { turn: 1, step: 1, message: createSystemMessage('late head', 'fixture') }, { surfaceOp: 'append' })
++    expect(text(session)).toEqual(['late head', 'queued'])
++    session.checkout(-1); expect(text(session)).toEqual([])
++    user(session, 'new queued'); expect(text(session)).toEqual(['new queued'])
++    session.append('system/message', { turn: 2, step: 1, message: createSystemMessage('new head', 'fixture') }, { surfaceOp: 'append' })
++    expect(text(session)).toEqual(['new head', 'new queued'])
++  })
++})
+diff --git a/packages/llm/token-meter/tests/history-checkout.spec.ts b/packages/llm/token-meter/tests/history-checkout.spec.ts
+new file mode 100644
+index 000000000..cb143b6bf
+--- /dev/null
++++ b/packages/llm/token-meter/tests/history-checkout.spec.ts
+@@ -0,0 +1,53 @@
++import { describe, expect, it } from 'vitest'
++import { Context } from '@deepseek-ai/cordis'
++import { createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
++import SessionStore, { Session, SessionId, SessionLogOffset, SessionSeq, foldSurface } from '@deepseek-ai/dsh-session'
++import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
++import TokenMeter from '@deepseek-ai/dsh-token-meter'
++
++async function context() {
++  const ctx = new Context()
++  await ctx.plugin(SessionStore); await ctx.plugin(SessionProjectionRegistry); await ctx.plugin(TokenMeter)
++  return ctx
++}
++function user(session: Session, text: string) { return session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }), { surfaceOp: 'append' }) }
++
++describe('canonical history checkout pricing', () => {
++  it('rebuilds hot, cold and persisted-checkpoint meter surfaces without resetting cumulative log facts', async () => {
++    const ctx = await context(), cold = await context()
++    try {
++      const session = ctx.sessions.create(SessionId('meter-checkout'))
++      session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 })
++      const system = session.append('system/message', { turn: 1, step: 1, message: createSystemMessage('system v1', 'fixture') }, { surfaceOp: 'append' })
++      const a = user(session, '用户 A 中文内容')
++      session.append('request/header', { header: { config: { provider: 'fixture', model: 'first' } }, reason: 'initial' })
++      session.append('step/end', { turn: 1, step: 1 }); session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
++      const first = SessionSeq(session.seq - 1)
++      session.append('turn/start', { turn: 2 }); session.append('step/start', { turn: 2, step: 1 })
++      session.append('system/message', { turn: 2, step: 1, message: createSystemMessage('system v2', 'fixture') }, { surfaceOp: { op: 'replace', startSeq: system.seq, endSeq: system.seq }, sourceEventSeqs: [system.seq] })
++      const beforeSecondUser = SessionSeq(session.seq - 1)
++      user(session, '用户 B 应在undo后隐藏')
++      session.append('request/header', { header: { config: { provider: 'fixture', model: 'latest' }, tools: [{ name: 'read', description: 'read', parameters: { type: 'object' } }] }, reason: 'change' })
++      session.append('step/end', { turn: 2, step: 1 }); session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
++      const redo = SessionSeq(session.seq - 1), before = ctx.tokenMeter.measure(session)
++      const checkpoint = ctx.sessionProjections.checkpoint(session)
++      session.checkout(first)
++      const live = ctx.tokenMeter.measure(session), snapshot = ctx.sessionProjections.snapshot(session)
++      expect(live.nodes.map(node => node.seq)).toEqual([system.seq, a.seq])
++      expect(live.surfaceTokens).toBeLessThan(before.surfaceTokens)
++      expect(session.requestHeader()?.config.model).toBe('latest')
++      const restored = Session.fromRestore(session.id, session.snapshotEvents(), session.header, SessionLogOffset(0), 'shared-frozen')
++      expect(cold.tokenMeter.measure(restored)).toEqual({ ...live, logRevision: restored.seq })
++      expect(cold.sessionProjections.snapshot(restored).values).toEqual(snapshot.values)
++      const tail = session.snapshotEvents(SessionLogOffset(redo))
++      expect(() => ctx.sessionProjections.restore(checkpoint, tail, SessionLogOffset(redo), session.header, SessionLogOffset(0))).toThrow(/re-read from seq 0/)
++      const replay = ctx.sessionProjections.restore(checkpoint, session.snapshotEvents(), SessionLogOffset(0), session.header, SessionLogOffset(0))
++      expect(replay.snapshot.values).toEqual(snapshot.values)
++      session.checkout(redo)
++      expect(ctx.tokenMeter.measure(session)).toEqual({ ...before, logRevision: session.seq })
++      session.checkout(beforeSecondUser)
++      expect(ctx.tokenMeter.measure(session).nodes.map(node => node.seq)).toEqual(foldSurface(session.snapshotEvents()).nodes)
++      expect(ctx.sessionProjections.snapshot(session).values.contextBreakdown).toEqual(cold.sessionProjections.restore({}, session.snapshotEvents(), SessionLogOffset(0), session.header, SessionLogOffset(0)).snapshot.values.contextBreakdown)
++    } finally { await cold.fiber.dispose(); await ctx.fiber.dispose() }
++  })
++})
+diff --git a/packages/session-query/session-query/tests/history-checkout.spec.ts b/packages/session-query/session-query/tests/history-checkout.spec.ts
+new file mode 100644
+index 000000000..f7a85b795
+--- /dev/null
++++ b/packages/session-query/session-query/tests/history-checkout.spec.ts
+@@ -0,0 +1,16 @@
++import { expect, it } from 'vitest'
++import { Session, SessionId } from '@deepseek-ai/dsh-session'
++import { createUserMessage } from '@deepseek-ai/dsh-llm'
++import { buildSessionEventSearchDocuments } from '../src/documents.ts'
++
++it('classifies a checkout-revived original node as current while retaining raw audit search records', () => {
++  const session = Session.create(SessionId('search-checkout'))
++  const message = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
++  const a = session.append('user/message', message('original A'), { surfaceOp: 'append' })
++  const b = session.append('user/message', message('original B'), { surfaceOp: 'append' })
++  session.append('user/message', message('summary'), { surfaceOp: { op: 'replace', startSeq: a.seq, endSeq: b.seq }, sourceEventSeqs: [a.seq, b.seq] })
++  session.checkout(a.seq)
++  const docs = buildSessionEventSearchDocuments(session.id, session.snapshotEvents())
++  expect(docs.find(row => row.seq === a.seq)?.surface).toBe('current')
++  expect(docs.find(row => row.seq === b.seq)?.text).toContain('original B')
++})
+diff --git a/packages/session/session-format-v2-to-v3/tests/history-checkout.spec.ts b/packages/session/session-format-v2-to-v3/tests/history-checkout.spec.ts
+new file mode 100644
+index 000000000..e85a9791d
+--- /dev/null
++++ b/packages/session/session-format-v2-to-v3/tests/history-checkout.spec.ts
+@@ -0,0 +1,61 @@
++import { describe, expect, it } from 'vitest'
++import { Session, SessionId, SessionSeq, KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
++import { createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
++import { SessionFormatEventCollector } from '@deepseek-ai/dsh-session-format'
++import type { SessionFormatArtifact, SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
++import { releasedV3SessionFormatCodec, restoreReleasedV3Artifact } from '../src/index.ts'
++
++function fixture() {
++  const id = SessionId('codec-checkout')
++  const session = Session.create(id, undefined, { version: 3, id, createdAt: 1, isSeeded: false, delegationDepth: 0 })
++  session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 })
++  session.append('system/message', { turn: 1, step: 1, message: createSystemMessage('head', 'fixture') }, { surfaceOp: 'append' })
++  const user = (text: string) => session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
++  const first = user('first'), target = first.seq
++  user('second')
++  session.append('step/end', { turn: 1, step: 1 }); session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
++  session.checkout(target, { operationId: 'filesystem-atomic-link' })
++  const artifact = { header: session.header, events: session.snapshotEvents(), inheritedEventCount: 0 } as unknown as SessionFormatArtifact
++  return { session, artifact }
++}
++
++describe('native V3 required history checkout', () => {
++  it('preserves operationId and original events across strict codec and current relationship validation', () => {
++    const { artifact } = fixture()
++    const header = releasedV3SessionFormatCodec.encodeHeader(artifact.header, 0)
++    const decoder = releasedV3SessionFormatCodec.createDecoder(header, 'strict'), collected = new SessionFormatEventCollector()
++    for (const event of artifact.events) decoder.decodeRow(releasedV3SessionFormatCodec.encodeEvent(event), collected)
++    decoder.finish(collected)
++    expect(collected.values).toEqual(artifact.events)
++    expect(restoreReleasedV3Artifact({ ...artifact, events: collected.values }, KNOWN_SESSION_EVENT_TYPES)).toEqual(artifact)
++  })
++
++  it('refuses the required event when the reader vocabulary predates checkout', () => {
++    const { artifact } = fixture(), old = new Set(KNOWN_SESSION_EVENT_TYPES)
++    old.delete('session/history-checkout')
++    expect(() => restoreReleasedV3Artifact(artifact, old)).toThrow(/unknown event type.*session\/history-checkout/)
++  })
++
++  it.each([
++    { ignorable: true },
++    { surfaceOp: 'append' },
++    { data: { throughSeq: -2 } },
++    { data: { throughSeq: 1000 } },
++    { data: { throughSeq: 3, operationId: '' } },
++    { data: { throughSeq: 3, unexpected: true } },
++  ])('never discards malformed checkout as a recoverable tail: %j', override => {
++    const { artifact } = fixture(), good = artifact.events.at(-1)!
++    const bad = { ...good, ...override } as SessionFormatEvent
++    const decoder = releasedV3SessionFormatCodec.createDecoder(releasedV3SessionFormatCodec.encodeHeader(artifact.header, 0), 'recoverable')
++    const collected = new SessionFormatEventCollector()
++    for (const event of artifact.events.slice(0, -1)) decoder.decodeRow(event, collected)
++    expect(() => decoder.decodeRow(bad, collected)).toThrow()
++    expect(() => releasedV3SessionFormatCodec.encodeEvent(bad)).toThrow()
++  })
++
++  it('rejects a checkout appended inside an active raw turn even when its target surface is safe', () => {
++    const { session, artifact } = fixture()
++    const events = [...artifact.events, { type: 'turn/start', seq: session.seq, time: 1, data: { turn: 2 } }, { type: 'session/history-checkout', seq: SessionSeq(session.seq + 1), time: 1, data: { throughSeq: 3 } }] as SessionFormatEvent[]
++    expect(() => restoreReleasedV3Artifact({ ...artifact, events }, KNOWN_SESSION_EVENT_TYPES)).toThrow(/stable boundary/)
++  })
++})

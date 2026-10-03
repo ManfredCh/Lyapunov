@@ -1,0 +1,29 @@
+{
+  "packId": "franka_shadow_hand",
+  "version": "2026.09.23",
+  "family": "arm-hand-combo",
+  "asset": { "modelEntry": "asset/mjcf/franka_shadow_right.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_ROBOVERSE.json#franka_shadow_hand" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "tendon"],
+    "directControl": "suitable",
+    "combo": "Franka Panda 7-DoF 臂 + Shadow Dexterous Hand（左手/右手各一份 mjcf + urdf）",
+    "fingerDoF": "实读：手部 24 DoF（FF/MF/RF 各 4 指节 + LF 5 + TH 5 = 22 指节，另 WRJ1/WRJ2 腕 2）+ 臂 7 = 单侧 31 受控关节；mjcf 含 4 条 fixed tendon（T_FFJ1c/T_MFJ1c/T_RFJ1c/T_LFJ1c，耦合 J1–J2）与 27 个执行器"
+  },
+  "status": "BLOCKED:grasp-hold",
+  "provenance": {
+    "source": "HF RoboVerseOrg/roboverse_data@fab63ccaaed54f413901f86edc3fa1ab77a96500/robots/franka_shadow_hand",
+    "commit": "fab63ccaaed54f413901f86edc3fa1ab77a96500",
+    "author": "Franka + Shadow 臂手组合模型（RoboVerseOrg/roboverse_data 账内原件，组内未声明原始作者；手型模型族出自 Shadow Robot Company，本包不据此声称许可证）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "UNVERIFIED(源仓无 LICENSE 文件，不编造)",
+    "policy": "无随包基础 policy：mimo/GPT6 System-2 直控（臂走 trajectory/joint、手走 joint/tendon + P0–P3）；vla-base 微调位仅占位（见 policy/manifest.json vlaBaseFinetuneSlot，PARTIAL:hand-not-in-embodiment）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,29 @@
+{
+  "packId": "franka_allegro_hand",
+  "version": "2026.09.23",
+  "family": "arm-hand-combo",
+  "asset": { "modelEntry": "asset/urdf/franka_allegro_left.urdf" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_ROBOVERSE.json#franka_allegro_hand" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper"],
+    "directControl": "suitable",
+    "combo": "Franka Panda 7-DoF 臂 + Allegro Hand（左手/右手各一份 URDF，另有手部单独 URDF）",
+    "fingerDoF": "实读：Allegro 手 16 指节（4 指 × 4 维：index/middle/ring/thumb，joint_0..15）+ 臂 7 = 单侧 23 受控关节；URDF 实读无 mimic/fixed-tendon 耦合定义 ⇒ 无 tendon 通道（与 franka_shadow_hand 不同）"
+  },
+  "status": "BLOCKED:grasp-hold",
+  "provenance": {
+    "source": "HF RoboVerseOrg/roboverse_data@fab63ccaaed54f413901f86edc3fa1ab77a96500/robots/franka_allegro_hand",
+    "commit": "fab63ccaaed54f413901f86edc3fa1ab77a96500",
+    "author": "Franka + Allegro 臂手组合模型（RoboVerseOrg/roboverse_data 账内原件，组内未声明原始作者；Allegro Hand 为 Wonik Robotics 手型模型族，本包不据此声称许可证）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "UNVERIFIED(源仓无 LICENSE 文件，不编造)",
+    "policy": "无随包基础 policy：mimo/GPT6 System-2 直控（臂走 trajectory/joint、手走 joint + P0–P3）；vla-base 微调位仅占位（见 policy/manifest.json vlaBaseFinetuneSlot，PARTIAL:hand-not-in-embodiment）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

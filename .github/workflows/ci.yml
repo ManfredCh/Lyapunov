@@ -1,0 +1,186 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DSH_CLIENT_TITLE: Lyapunov
+  DSH_TELEMETRY_DISABLED: "1"
+  HF_ENDPOINT: https://hf-mirror.com
+
+# CI 检查构建、类型和静态合同；LIVE、GPU、供应商及发行运行门由各自驱动执行。
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      # setup-node 的 Node 下载在本环境不稳定,改用 npmmirror 官方镜像直装 Node 24(与 package.json engines>=24 一致)。
+      - name: Install Node 24 (npmmirror tarball)
+        run: |
+          set -eu
+          curl -fsSL --retry 3 -o /tmp/node.tar.xz https://npmmirror.com/mirrors/node/v24.20.0/node-v24.20.0-linux-x64.tar.xz
+          sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+          node --version
+          npm --version
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      # 子进程测试使用绝对 Bun 路径，避免 runner 的 PATH 与 harness 看到的 PATH 漂移。
+      - name: Export test runtime paths
+        run: |
+          set -eu
+          bun_path=$(command -v bun)
+          test -x "$bun_path"
+          echo "TESTCI_BUN=$bun_path" >> "$GITHUB_ENV"
+
+      # 上游钉在自有 fork(公开仓库,无需凭据);浅克隆加速,bootstrap 会校验 commit 并应用产品补丁。
+      - name: Seed upstream checkout (shallow clone of pinned fork)
+        run: |
+          set -eu
+          dir=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).directory")
+          commit=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).commit")
+          branch=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).upstreamBase.patchedBranch")
+          repo=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).repository")
+          mkdir -p "$(dirname "$dir")"
+          git clone --depth 40 --branch "$branch" "$repo" "$dir"
+          git -C "$dir" checkout --detach "$commit"
+
+      - name: Restore pnpm store cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Bootstrap (upstream clone/patch/pnpm build + bun install + plugins build)
+        run: node script/bootstrap.mjs
+
+      - name: Build desktop
+        run: bun run script/build-desktop.ts
+
+      # CI 唯一的 python venv（CCMM-09）：**在技能校验之前**就绪，装齐下面两处真用到的依赖。
+      #  · PyYAML：`Validate skill files` 解析 SKILL.md frontmatter 要 `import yaml`；
+      #  · numpy / Pillow：纳入清单的 python 用例真实依赖（`test_worker_protocol.py` import numpy；
+      #    `packages/benchmark-gymnasium/python/worker.py` 里 `from PIL import Image`）。
+      # 之后一律用这个 venv 的解释器，**不依赖 ubuntu-latest 是否碰巧预装 PyYAML**（那是偶然事实，不是前提）。
+      - name: Provision CI python venv (PyYAML + numpy + Pillow)
+        run: |
+          set -eu
+          python3 -m venv .runtime/ci-py
+          export TESTCI_PYTHON="$PWD/.runtime/ci-py/bin/python"
+          echo "TESTCI_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
+          "$TESTCI_PYTHON" -m pip install -q pyyaml numpy pillow
+          "$TESTCI_PYTHON" -c "import yaml, numpy, PIL; print('ci-py ok', yaml.__version__, numpy.__version__, PIL.__version__)"
+
+      - name: Validate skill files
+        run: |
+          "$TESTCI_PYTHON" - <<'PY'
+          import yaml, glob, sys
+          bad = 0
+          for f in sorted(glob.glob('packages/*/skills/*/SKILL.md')):
+              txt = open(f, encoding='utf8').read()
+              fm = txt.split('---')[1] if txt.startswith('---') else ''
+              try:
+                  d = yaml.safe_load(fm) or {}
+              except Exception as e:
+                  print('FAIL', f, e); bad += 1; continue
+              ok = bool(d.get('name')) and bool(d.get('description')) and len(d['description']) < 490
+              print('PASS' if ok else 'FAIL', f, len(d.get('description', '')))
+              bad += 0 if ok else 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      # 两个本仓独立检查入口均直接采用 tsc 退出码；import 闭包可能重叠。
+      # 根检查已把 packages/lyapunov-api-client 并入（include 含 packages/*/src）；服务端账户 API 源码
+      # 已于 2026-09-26 移出本仓库（归 LyapunovOM backend/dev-server/），其类型检查由该独立仓库自检。
+      - name: TypeScript product sources & script (root tsconfig.json)
+        run: ./node_modules/.bin/tsc --noEmit -p tsconfig.json
+
+      - name: TypeScript gate drivers (script/tsconfig.gates.json)
+        run: ./node_modules/.bin/tsc --noEmit -p script/tsconfig.gates.json
+
+      # 地图用例（`packages/scene-kit/test/map-*` 与 `proj-cli`）直接调用系统 PROJ 命令行
+      # （projinfo / cct / geod / cs2cs / proj）；缺依赖时它们如实报 `MAP_PROJ_UNAVAILABLE` 而红。
+      # 在行为测试**之前**显式装 proj-bin（Ubuntu 正常包；libproj22 硬依赖 proj-data，proj.db 随之就位），
+      # 并用 command -v + 版本读数确认五个二进制真的可调用（不靠 runner 碰巧预装，也不是"存在就跳过"）。
+      - name: Provision PROJ CLI (proj-bin)
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends proj-bin
+          for bin in proj projinfo cct cs2cs geod; do command -v "$bin"; done
+          proj 2>&1 | head -n 1
+          projinfo EPSG:4326 >/dev/null
+          echo "proj cli ok"
+
+      # Viewer 两条离线回归（`packages/viewer/test/robot-glb-mesh.test.ts`、
+      # `packages/viewer/test/robot-glb-ktx2-texture.test.ts`）读
+      # `materials/robots/unitree_go1/menagerie/go1.xml`，而 `.gitignore` 明确忽略该目录 ⇒
+      # **干净 checkout 里没有这些字节**。本步在行为测试**之前**按固定上游 commit 取 6 件 + LICENSE：
+      # 缓存命中（size/sha256 一致）就复用、不重复下载；不存在才下载、校验后原子落盘。
+      # 已存在但不符 ⇒ 明确报错、非 0、不覆盖；下载不符/失败 ⇒ 点名对象并非 0（不静默换 source/revision）。
+      # 字节仍不入 Git、不进软件发行包；这是测试依赖准备。清单与来源见 script/prepare-viewer-test-assets.*。
+      - name: Prepare Go1 viewer test assets (pinned menagerie commit)
+        run: |
+          set -eu
+          "$TESTCI_BUN" --no-env-file script/prepare-viewer-test-assets.ts
+
+      # 真实**离线行为**入口：逐用例文件独立进程、传播真实非 0 退出码、报告 pass/fail/skip。
+      # 默认集合只含无外部标记的用例；需要真实供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/
+      # 本机 lane 凭据的用例**不在本步**，由各自驱动执行——清单对每一行都给 not-run 理由（不跑 ≠ 通过）。
+      # 发现到但未审的用例 fail-closed（退出码 2），不会被"顺手跑绿"；**已纳入却缺文件**同样是
+      # 配置错误（退出码 2），不被记成"跳过"蒙过去（CCMM-09）。python 用例用上面那一个 venv（TESTCI_PYTHON）。
+      - name: Behavior tests (offline default set)
+        id: behavior-tests
+        run: |
+          "$TESTCI_BUN" --no-env-file script/test-ci.ts --json test-ci-report.json
+
+      - name: Retain offline behavior report (including failures)
+        if: ${{ always() && steps.behavior-tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-behavior-report
+          path: test-ci-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Asset layout gate (isolated native fixture, no developer runtime)
+        id: asset-layout
+        run: |
+          set -o pipefail
+          bun --no-env-file script/verify-asset-layout.ts --ci | tee asset-layout-report.txt
+
+      - name: Retain isolated asset layout report
+        if: ${{ always() && steps.asset-layout.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-layout-report
+          path: asset-layout-report.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upstream lock consistency
+        run: |
+          set -eu
+          dir=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).directory")
+          commit=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).commit")
+          head=$(git -C "$dir" rev-parse HEAD)
+          echo "lock=$commit head=$head"
+          [ "$head" = "$commit" ]
+
+      - name: Dist artifacts exist
+        run: |
+          test -s packages/desktop/dist/main.js
+          test -s packages/lyapunov-shell/dist/plugin.js
+          test -s packages/scene-kit/dist/plugin.js
+          echo "dist artifacts ok"

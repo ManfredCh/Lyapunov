@@ -1,0 +1,20 @@
+<mujoco model="t135-arm">
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <geom name="base-geom" type="cylinder" size="0.05 0.04" pos="0 0 0.04"/>
+      <body name="link1" pos="0 0 0.08">
+        <joint name="j1" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+        <geom name="link1-geom" type="capsule" fromto="0 0 0 0 0 0.2" size="0.02"/>
+        <body name="link2" pos="0 0 0.2">
+          <joint name="j2" type="hinge" axis="0 1 0" range="-3.14 3.14"/>
+          <geom name="link2-geom" type="capsule" fromto="0 0 0 0 0 0.18" size="0.018"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="m1" joint="j1" gear="1"/>
+    <motor name="m2" joint="j2" gear="1"/>
+  </actuator>
+</mujoco>

@@ -1,0 +1,67 @@
+[package]
+title = "Lyapunov Isaac RTX (GPU physics + RTX rendering)"
+version = "0.1.0"
+# 本机 Isaac 6.0.1 的 isaacsim.exp.base(.python) 依赖 isaacsim.cortex.behaviors，而该扩展在本机
+# exts/extscache/离线 registry 里都不存在（见 evidence/gpu-139/rtx-diag/boot1.log 的依赖求解失败）。
+# 这里用本机确实存在的扩展拼一个最小 RTX 经验：GPU 物理 + RTX 渲染/传感器，不用全家桶经验。
+[dependencies]
+"omni.usd" = {}
+"omni.physics.physx" = {}
+"omni.physx.tensors" = {}
+"omni.physx.fabric" = {}
+"isaacsim.core.simulation_manager" = {}
+"isaacsim.core.experimental.prims" = {}
+"isaacsim.asset.importer.mjcf" = {}
+"isaacsim.asset.importer.urdf" = {}
+"isaacsim.sensors.experimental.rtx" = {}
+"omni.hydra.rtx" = {}
+"omni.hydra.usdrt_delegate" = {}
+"omni.kit.hydra_texture" = {}
+# 少了这两个，渲染循环在 headless 下**一帧都不出**（实测：sensor 的 annotator 永远 None、BasicWriter
+# 张数为 0）。omni.replicator.core 的 orchestrator 等渲染结果靠的是 viewport.window（它自己的警告原文：
+# "omni.kit.viewport.window extension is required to wait for render"，随后 "Timed out while waiting for
+# pending Replicator writer schedules to drain"）；loop-isaac 是官方 base 经验里的主循环。
+"omni.kit.viewport.window" = {}
+"omni.kit.loop-isaac" = {}
+"omni.kit.viewport.rtx" = {}
+"omni.rtx.settings.core" = {}
+# gpu_foundation_factory 读的是 /persistent/renderer/startupMessageDisplayed（strings 实证）；
+# 不置位时 headless 启动会弹 zenity「IOMMU Enabled」模态框并**永久阻塞**，Kit 永远到不了 ready。
+[settings.persistent]
+renderer.startupMessageDisplayed = true
+# captureOnPlay 必须走 persistent：orchestrator 的 reset() 在扩展初始化时用
+# /persistent/omni/replicator/captureOnPlay **覆盖**运行时键（orchestrator.py:247-250），
+# 只写 [settings] 会被无条件抹成 false → 时间线 play 时 orchestrator 不启动、不建 tick 图
+# → DispatchSync 的 simTimesToWrite 永远为空 → annotator dataPtr 恒为 0 → get_data 永远 None
+# （139 的 evidence/gpu-139/rtx-capture-diag 里"渲染正常但拿不到图"）。
+omni.replicator.captureOnPlay = true
+[settings]
+app.window.enabled = false
+app.renderer.enabled = true
+app.settings.persistent = false
+app.fastShutdown = true
+app.content.emptyStageOnStart = true
+app.useFabricSceneDelegate = true
+app.gatherRenderResults = true
+app.settings.fabricDefaultStageFrameHistoryCount = 3
+app.asyncRendering = false
+renderer.asyncInit = true
+rtx.hydra.mdlMaterialWarmup = true
+rtx.hydra.supportMultiTickRate = true
+rtx.rendering.perSensorTickTlas = true
+exts."omni.kit.renderer.core".present.enabled = false
+omni.replicator.asyncRendering = false
+telemetry.enableAnonymousData = false
+telemetry.enableNVDF = false
+telemetry.enableSentry = false
+privacy.usage = false
+privacy.performance = false
+privacy.personalization = false
+# 官方 base 经验里的渲染循环参数：headless 没有窗口，不显式关掉"最小化就不渲染 / 焦点外休眠"时，
+# 渲染器会把整个应用当成不可见而跳过出帧（放在文件末尾，避免上面的键被挂进这张子表）。
+[settings.app.renderer]
+resolution.height = 240
+resolution.width = 320
+skipWhileMinimized = false
+sleepMsOnFocus = 0
+sleepMsOutOfFocus = 0

@@ -1,0 +1,17 @@
+<mujoco model="robot-glb-ktx2-material">
+  <!-- 同上，但可视图元**声明了 MJCF 材质**（`material="shell_paint"`，该材质没有贴图）。
+       这一份量的不是 KTX2 那条链，而是它的**邻居**：装配器按既有"调制色"语义用自己的材质替换 glTF 材质时，
+       `.glb` 自带的贴图会被丢掉 —— 那种"无贴图"必须也是**明确报错**，不许静默。 -->
+  <compiler angle="radian" meshdir="." />
+  <asset>
+    <mesh name="shell" file="cube-ktx2-etc1s.glb" />
+    <material name="shell_paint" rgba="0.8 0.2 0.2 1" />
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 0.1">
+      <joint name="yaw" type="hinge" axis="0 0 1" />
+      <geom name="shell_visual" type="mesh" mesh="shell" material="shell_paint" contype="0" conaffinity="0" group="1" />
+      <geom name="base_collision" type="box" size="0.05 0.05 0.05" />
+    </body>
+  </worldbody>
+</mujoco>

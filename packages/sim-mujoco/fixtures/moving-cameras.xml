@@ -1,0 +1,31 @@
+<mujoco model="moving-camera-mechanism">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002"/>
+  <visual><global offwidth="320" offheight="240"/><headlight ambient=".35 .35 .35" diffuse=".7 .7 .7" specular=".1 .1 .1"/></visual>
+  <default><camera fovy="60" resolution="320 240"/><joint damping="2" armature=".05"/><geom friction="1 .005 .0001"/></default>
+  <worldbody>
+    <light pos="1 -1 3" dir="-.2 .1 -1" diffuse=".8 .8 .8"/>
+    <body name="base" pos="0 0 .2">
+      <geom type="box" size=".6 .06 .04" rgba=".4 .4 .45 1"/>
+      <camera name="overview" pos="0 0 2.3" quat="1 0 0 0"/>
+      <site name="overview_mount" pos="0 0 2.3" quat="1 0 0 0" size=".002" rgba="0 0 0 0"/>
+      <body name="carriage" pos="0 0 .2">
+        <joint name="travel" type="slide" axis="1 0 0" range="-.5 .5"/>
+        <geom type="box" size=".09 .09 .04" mass="1" rgba=".1 .3 .8 1"/>
+        <body name="turntable" pos="0 0 .1">
+          <joint name="yaw" type="hinge" axis="0 0 1" range="-1.2 1.2"/>
+          <geom type="cylinder" size=".1 .04" mass=".5" rgba=".8 .6 .1 1"/>
+          <geom type="capsule" fromto="0 0 0 .18 0 0" size=".018" mass=".1" rgba=".1 .8 .2 1"/>
+          <camera name="wrist" pos=".15 0 .9" euler="0 0 .15" fovy="70"/>
+          <site name="wrist_mount" pos=".15 0 .9" euler="0 0 .15" size=".002" rgba="0 0 0 0"/>
+        </body>
+      </body>
+    </body>
+    <body name="red_landmark" pos=".45 .25 .12"><geom type="box" size=".12 .09 .12" rgba=".9 .08 .04 1"/></body>
+    <body name="green_landmark" pos="-.2 -.35 .08"><geom type="box" size=".08 .08 .08" rgba=".05 .8 .2 1"/></body>
+  </worldbody>
+  <actuator>
+    <position name="travel_position" joint="travel" kp="250" kv="35"/>
+    <position name="yaw_position" joint="yaw" kp="180" kv="25"/>
+  </actuator>
+</mujoco>

@@ -1,0 +1,57 @@
+diff --git a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
+--- a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
+@@ -1062,11 +1062,18 @@
+   return `${location.kind}:${coordinates.turn ?? ''}:${coordinates.step ?? ''}`
+ }
+ 
+-/** Chat target factory contributed to the Conversation view registry. */
++/**
++ * Chat target factory contributed to the Conversation view registry.
++ *
++ * Durable command outcomes are persistent, visible flow rows, so any assembled
++ * Node — including a command-only history — counts as Conversation activity and
++ * leaves the blank Hero to show it. A Session without any assembled Node keeps
++ * the Hero.
++ */
+ export const chatViewDefinition: ConversationViewDefinition<ChatConversationViewNode, ChatSnapshot> = {
+   target: 'chat',
+   create: () => new ChatSnapshotBuilder(),
+-  isActive: snapshot => snapshot.order.some(key => snapshot.nodes.get(key)?.kind !== 'command'),
++  isActive: snapshot => snapshot.order.length > 0,
+ }
+ 
+ /**
+diff --git a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+--- a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
++++ b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+@@ -244,7 +244,7 @@
+     expect(systemMessageDefinition(inspectSystemPrompt).update({ state } as never, invalidStart)).toBe(state)
+   })
+ 
+-  it('keeps ordinary command-only history inactive for the Conversation shell', () => {
++  it('treats ordinary command-only history as Conversation shell activity', () => {
+     const value = assembler([
+       at(1, 'command/run', {
+         commandId: 'command-1',
+@@ -254,12 +254,20 @@
+       at(2, 'command/done', {
+         commandId: 'command-1',
+         kind: 'success',
++        text: 'usage: help [command]',
+       }),
+     ])
+     const current = snapshot(value)
+ 
+     expect(current.order).toHaveLength(1)
+     expect(current.nodes.get(current.order[0] ?? '')?.kind).toBe('command')
++    expect(chatViewDefinition.isActive?.(current)).toBe(true)
++  })
++
++  it('keeps a Session without any assembled Node inactive for the Conversation shell', () => {
++    const current = snapshot(assembler())
++
++    expect(current.order).toHaveLength(0)
+     expect(chatViewDefinition.isActive?.(current)).toBe(false)
+   })
+ 

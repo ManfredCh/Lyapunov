@@ -1,0 +1,57 @@
+diff --git a/packages/client/ui-sidebar-right/src/client/locales.ts b/packages/client/ui-sidebar-right/src/client/locales.ts
+index 7f411c8519..ae144522d0 100644
+--- a/packages/client/ui-sidebar-right/src/client/locales.ts
++++ b/packages/client/ui-sidebar-right/src/client/locales.ts
+@@ -10,8 +10,8 @@
+ export const zh = {
+   'chrome.expand': '打开侧边栏',
+   'chrome.expandAria': '打开右侧边栏',
+-  'chrome.collapse': '收起侧边栏',
+-  'chrome.collapseAria': '收起右侧边栏',
++  'chrome.collapse': '文件',
++  'chrome.collapseAria': '开合文件标签',
+   'chrome.toFullscreen': '全屏',
+   'chrome.exitFullscreen': '退出全屏',
+   'dock.emptyPane': '空面板',
+@@ -38,8 +38,8 @@ export type SidebarRightKey = keyof typeof zh
+ export const en = {
+   'chrome.expand': 'Open sidebar',
+   'chrome.expandAria': 'Open right sidebar',
+-  'chrome.collapse': 'Collapse sidebar',
+-  'chrome.collapseAria': 'Collapse right sidebar',
++  'chrome.collapse': 'Files',
++  'chrome.collapseAria': 'Toggle files tab',
+   'chrome.toFullscreen': 'Fullscreen',
+   'chrome.exitFullscreen': 'Exit fullscreen',
+   'dock.emptyPane': 'Empty pane',
+diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+index 3112717572..8f67074f77 100644
+--- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
++++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+@@ -254,7 +254,7 @@ function ExitFullscreenGlyph(): ReactNode {
+ }
+ 
+ /** The panel's two controls, placed by the kit at the top-right pane's strip end. */
+-function PanelChrome({ sessionId, fullscreen, autoFullscreen, actions, t }: Pick<PanelProps, 'sessionId' | 'actions' | 't' | 'fullscreen' | 'autoFullscreen'>): ReactNode {
++function PanelChrome({ sessionId, fullscreen, autoFullscreen, actions, t, openTab }: Pick<PanelProps, 'sessionId' | 'actions' | 't' | 'fullscreen' | 'autoFullscreen' | 'openTab'>): ReactNode {
+   const next: DockMode = fullscreen ? 'push' : 'fullscreen'
+   const modeLabel = fullscreen ? t('chrome.exitFullscreen') : t('chrome.toFullscreen')
+   return (
+@@ -279,7 +279,7 @@ function PanelChrome({ sessionId, fullscreen, autoFullscreen, actions, t }: Pick
+           className={css.iconButton}
+           aria-label={t('chrome.collapseAria')}
+           data-sidebar-right-toggle
+-          onClick={() => { actions.toggleExpanded(sessionId) }}
++          onClick={() => { openTab('files') }}
+         >
+           <IconPanelLeftOutline16 className={css.collapseGlyph} />
+         </button>
+@@ -324,7 +324,7 @@ function SidebarPanel(panel: PanelProps & { width: number; panelRef: RefObject<H
+           renderTabTitle={titlesFor(panel)}
+           renderTabMenuItems={(tab, dismiss) =>
+             renderSlot('sidebar.right.tab.menu.item', { tab, dismiss })}
+-          chrome={<PanelChrome sessionId={sessionId} fullscreen={fullscreen} autoFullscreen={autoFullscreen} actions={actions} t={t} />}
++          chrome={<PanelChrome sessionId={sessionId} fullscreen={fullscreen} autoFullscreen={autoFullscreen} actions={actions} t={t} openTab={openTab} />}
+           onRoom={reportRoom}
+         />
+         {renderSlot('sidebar.right.surface.actions',{ expanded,...activeTab===undefined?{}:{ activeTab } })}

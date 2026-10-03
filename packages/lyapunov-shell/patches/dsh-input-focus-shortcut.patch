@@ -1,0 +1,44 @@
+diff --git a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
+index 8747f70..06c69ba 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
+@@ -185,6 +185,13 @@ export const InputBar = memo(function InputBar({
+     editor.getRootElement()?.focus({ preventScroll: true })
+     editor.focus(() => { revealSelection() })
+   }, [locked, sessionId, editor])
++  useEffect(() => {
++    if (locked || editor === null) return
++    return installInputFocusShortcut(() => {
++      editor.getRootElement()?.focus({ preventScroll: true })
++      editor.focus(() => { revealSelection() })
++    })
++  }, [locked, sessionId, editor])
+ 
+   // A persisted draft arrives AFTER the unlock effect: ConversationSession
+   // adopts it in its own mount effect, and a parent's mount effect runs after
+@@ -554,3 +561,4 @@ export const InputBar = memo(function InputBar({
+     </div>
+   )
+ })
++import { installInputFocusShortcut } from './input-focus-shortcut.ts'
+diff --git a/packages/client/ui-conversation/src/client/skeleton/input-focus-shortcut.ts b/packages/client/ui-conversation/src/client/skeleton/input-focus-shortcut.ts
+new file mode 100644
+index 0000000..06146d0
+--- /dev/null
++++ b/packages/client/ui-conversation/src/client/skeleton/input-focus-shortcut.ts
+@@ -0,0 +1,15 @@
++/** Install the input owner's focus shortcut without finding an external DOM node.
++ * @param focus - action over the input owner's editor reference.
++ * @param target - keyboard event source.
++ * @returns listener disposer.
++ */
++export function installInputFocusShortcut(focus: () => void, target: Pick<Document, 'addEventListener' | 'removeEventListener'> = document): () => void {
++  const listener = (event: KeyboardEvent): void => {
++    if (event.defaultPrevented || event.repeat || event.isComposing || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
++    if (event.code !== 'KeyL' && event.key.toLowerCase() !== 'l') return
++    if (typeof Element !== 'undefined' && event.target instanceof Element && event.target.closest('[role=dialog],.xterm,.monaco-editor')) return
++    event.preventDefault(); focus()
++  }
++  target.addEventListener('keydown', listener as EventListener)
++  return () => { target.removeEventListener('keydown', listener as EventListener) }
++}

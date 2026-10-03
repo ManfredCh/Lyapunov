@@ -1,0 +1,34 @@
+{
+ "packId": "iiwa_allegro",
+ "version": "2026.09.23",
+ "family": "arm-hand-combo",
+ "asset": { "modelEntry": "asset/mjcf/scene.xml", "model": "asset/mjcf/iiwa14.xml" },
+ "pieces": {
+  "asset": {
+   "ref": "ASSET_STAGING_MANIFEST_ROBOVERSE.json#iiwa_allegro"
+  },
+  "context": "ready",
+  "policy": "ready",
+  "vla": "ready"
+ },
+ "capabilities": {
+  "channels": [
+   "joint",
+   "trajectory",
+   "gripper"
+  ],
+  "directControl": "suitable"
+ },
+ "status": "USABLE",
+ "provenance": {
+  "source": "ASSET_STAGING_MANIFEST_ROBOVERSE.json",
+  "commit": null,
+  "author": "模型原件随台账；context/policy/vla/tests 为 LyapunovDev 自有"
+ },
+ "license": {
+  "model": "UNVERIFIED(源仓无 LICENSE 文件，不编造)",
+  "policy": "无基础 policy；mimo/GPT6 直控内容为 LyapunovDev 自有"
+ },
+ "tests": "tests/acceptance.md",
+ "notes": "KUKA iiwa14 + Allegro 臂手组合（RoboVerse urdf/usd/mjcf 三变体；mjcf/iiwa14.xml 已冒烟 PASS nq=7/geoms=61——来源为 2026-09-23 本会话物理冒烟实测）。实读注记：①臂关节名 iiwa7_joint_*（限位 j1/3/5 ±2.9671、j2/4/6 ±2.0944、j7 ±3.0543）vs 文件名 iiwa14.xml vs 台账组名 KUKA_LBR_IIWA14 三处命名不一致（fm-iiwa-naming-drift）；②本包资产来自 RoboVerse 而非 materials 的 iiwa14，**勿套用 Drake BSD 注记**（license 以本包 UNVERIFIED 口径为准）；③mjcf 变体仅臂 7 关节/0 腱（无手），组合手在 urdf 变体（iiwa_allegro.urdf 23 关节=臂 7+Allegro 16）；URDF 变体网格路径需展开。Allegro 限位（本变体实读）：joint_0 ±0.5585、joint_1..3 [-0.2792,1.7278]、thumb 0 [0.2792,1.5708]/1 [-0.3316,1.1519]/2 [-0.2792,1.7278]/3 [-0.2792,1.7627]（与 franka_allegro 包非同一套，fm-allegro-variant-limits）。"
+}

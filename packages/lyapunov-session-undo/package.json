@@ -1,0 +1,8 @@
+{
+  "name": "@lyapunov/session-undo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/plugin.js", "./client": "./dist/client.js", "./package.json": "./package.json" },
+  "dsh": { "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-conversation"] } }
+}

@@ -1,0 +1,14 @@
+/** 无账号/网络/模型的静态产品组件画面，不冒充正式工作台或应用栏验收。 */
+import { renderToStaticMarkup } from 'react-dom/server'
+import { writeFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { Mark, BrandName, WelcomeHeadline } from '../packages/lyapunov-shell/src/product-ui.tsx'
+import { createWelcomeVerseStore } from '../packages/lyapunov-shell/src/welcome-verses.ts'
+import { SessionId } from '@deepseek-ai/dsh-session'
+const out=process.argv[2]!
+await mkdir(out,{recursive:true})
+for(const theme of ['dark','light']) {
+ const html=renderToStaticMarkup(<><aside><div className="brand"><Mark size={24}/><BrandName t={key=>key}/></div><button>＋ 新会话</button><p>工作区</p><div className="row">隔离欢迎画面</div><div className="settings">⚙ 设置</div></aside><main><div className="welcome"><Mark size={34}/><WelcomeHeadline sessionId={SessionId('preview-'+theme)} store={createWelcomeVerseStore(()=>0)}/></div><div className="workspace">▱ 隔离工作区⌄</div><div className="composer">描述你想要构建的内容，/ 调用指令，@ 文件或对话<div className="buttons"><button>＋</button><span>◈ Peiri⌄</span><button>↑</button></div></div><p className="fixture-label">A06 静态品牌组件预览 · 无账号、模型或后台连接</p></main></>)
+ const page=`<!doctype html><html><head><meta charset="utf-8"><title>Lyapunov A06 独立品牌预览</title><style>*{box-sizing:border-box}body{margin:0;display:flex;min-height:100vh;font-family:"Noto Sans","Noto Sans CJK SC",sans-serif;background:${theme==='dark'?'#141416':'#fafafa'};color:${theme==='dark'?'#f1f1f2':'#242429'}}aside{width:280px;padding:28px 20px;background:${theme==='dark'?'#1c1c1f':'#f0f0f2'};position:relative;flex-shrink:0}.brand{display:flex;align-items:center;gap:12px;font-size:18px;margin-bottom:32px}button{font:inherit;color:inherit;background:${theme==='dark'?'#34343a':'#e0e0e4'};border:0;border-radius:10px;padding:12px}aside>button{width:100%}aside p{font-size:13px;opacity:.6;margin-top:28px}.row{padding:13px;background:${theme==='dark'?'#2a2a2e':'#e7e7eb'};border-radius:8px}.settings{position:absolute;bottom:28px}main{width:540px;max-width:calc(100vw - 280px);padding:0 28px;display:flex;flex-direction:column;justify-content:center;min-height:100vh}.welcome{display:flex;align-items:center;justify-content:center;gap:13px;min-height:58px;margin-bottom:38px}.workspace{font-size:14px;opacity:.7;margin:0 14px 16px}.composer{border-radius:24px;background:${theme==='dark'?'#29292e':'#ededf0'};padding:24px 20px 15px;font-size:14px;color:${theme==='dark'?'#9c9ca6':'#797982'};min-height:154px}.buttons{display:flex;align-items:center;margin-top:45px;gap:18px}.buttons span{margin-left:auto}.buttons button{padding:8px 13px}.fixture-label{font-size:11px;text-align:center;opacity:.5;margin-top:30px}@media(max-width:800px){aside{width:200px;padding:24px 14px}.brand{gap:9px;font-size:17px}main{max-width:calc(100vw - 200px);padding:0 20px}.welcome{gap:11px}.composer{padding:22px 17px}} </style></head><body>${html}</body></html>`
+ await writeFile(join(out,theme+'.html'),page)
+}

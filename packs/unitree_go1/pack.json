@@ -1,0 +1,33 @@
+{
+ "packId": "unitree_go1",
+ "version": "2026.09.22",
+ "family": "quadruped",
+ "asset": { "modelEntry": "asset/menagerie/go1.xml" },
+ "pieces": {
+  "asset": {
+   "ref": "ASSET_STAGING_MANIFEST.json#unitree_go1"
+  },
+  "context": "ready",
+  "policy": "ready",
+  "vla": "ready"
+ },
+ "capabilities": {
+  "channels": [
+   "joint",
+   "gait",
+   "control"
+  ],
+  "directControl": "requiresPolicy"
+ },
+ "status": "PARTIAL:behavior-unverified",
+ "provenance": {
+  "source": "模型：MuJoCo Menagerie go1 + Unitree Go1 URDF（materials/robots/unitree_go1，精确来源提交以 ASSET_STAGING_MANIFEST.json#unitree_go1 落账为准）；policy：Improbable-AI/walk-these-ways",
+  "commit": null,
+  "author": "Unitree（硬件与 CAD）；Improbable AI Lab（Walk These Ways 权重）；LyapunovDev（context/policy/vla/tests 内容）"
+ },
+ "license": {
+  "model": "以 ASSET_STAGING_MANIFEST.json#unitree_go1 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+  "policy": "MIT（Improbable-AI/walk-these-ways，LICENSE 已核对 2026-09-22：Copyright 2022 MIT Improbable AI Lab；另见其 licenses/legged_gym、licenses/rsl_rl 附加条款，文件头有标注者从其标注）"
+ },
+ "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,7 @@
+# Wire-only dependencies for graspgenx_adapter.py.  The GraspGenX model
+# dependencies are installed separately in Dockerfile.worker-blackwell so the
+# NGC CUDA 12.8 / PyTorch build is never replaced by pip dependency resolution.
+numpy==1.26.4
+msgpack==1.1.0
+msgpack-numpy==0.4.8
+pyzmq==26.2.1

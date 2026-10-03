@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "packId": "unitree_g1",
+  "version": "2026.09.22",
+  "mode": "base-policy",
+  "source": {
+    "provider": "github",
+    "repo": "unitreerobotics/unitree_rl_gym",
+    "commit": "276801e46c5d433564f24658bac64f254b7d2d4b"
+  },
+  "adapter": "torchscript",
+  "observation": {
+    "dim": 47,
+    "note": "47 维观测（base 姿态/角速度/关节位置与速度/上一动作/速度指令等，按 unitree_rl_gym 口径）；与 robot_describe 实测 joint 名逐项核对"
+  },
+  "action": {
+    "dim": 12,
+    "semantics": "下肢 12 关节位置目标",
+    "formula": "目标 = action × 0.25 + default_angles",
+    "scale": 0.25,
+    "offset": "default_angles（模型默认站姿角）"
+  },
+  "freq": {
+    "policyHz": 50,
+    "physics": {
+      "dt": 0.002,
+      "decimation": 10,
+      "note": "每 10 个 0.002s 物理步更新一次目标 = 50Hz"
+    }
+  },
+  "deps": [
+    "torch（与 .runtime/sim-python 匹配）",
+    "mujoco==3.13.0",
+    "mink==1.3.0",
+    "numpy>=1.25,<3"
+  ],
+  "weights": {
+    "bundled": false,
+    "file": null,
+    "bytes": null,
+    "sha256": null,
+    "availability": "resolvable",
+    "providedBy": "unitreerobotics/unitree_rl_gym 仓内 deploy/pre_train/g1/motion.pt（不随本包分发；经该已登记来源取件）",
+    "pin": "unitreerobotics/unitree_rl_gym@276801e46c5d433564f24658bac64f254b7d2d4b",
+    "resolution": {
+      "provider": "github",
+      "modelId": "unitreerobotics/unitree_rl_gym",
+      "revision": "276801e46c5d433564f24658bac64f254b7d2d4b"
+    }
+  },
+  "status": "ready",
+  "notes": "官方 12DOF TorchScript 适配可用：客户端已登记 unitree-g1-12dof-v1 适配器（python/prepare_unitree.py，实跑回执见 bugfixHistory）。变更是**权重声明如实化**：本包不随包分发权重（bundled=false），权重经已登记来源 unitreerobotics/unitree_rl_gym@276801e4… 取件。禁止把本适配器借给 Go1/Go2。真机另需 Unitree 通讯、状态估计、PD 限幅、急停与厂商安全栈。"
+}

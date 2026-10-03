@@ -1,0 +1,2 @@
+trimesh==5.1.0
+-r requirements-common.txt

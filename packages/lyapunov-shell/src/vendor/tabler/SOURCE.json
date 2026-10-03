@@ -1,0 +1,85 @@
+{
+ "project": "Tabler Icons",
+ "repository": "https://github.com/tabler/tabler-icons",
+ "revision": "55f87a73f45cf1d9eaf16d7da705065483a9e4f9",
+ "license": "MIT",
+ "licenseFile": {
+  "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/LICENSE",
+  "sha256": "b740a1d46122672da62833e97f7e7c8a13fa85cbc7445b584b297cc00dde93db",
+  "bytes": 1073,
+  "summary": "MIT License，Copyright (c) 2020-2026 Paweł Kuna。保留版权与许可声明后，可免费使用、复制、修改、合并、发布、分发、再许可和/或销售本软件；软件按“原样”提供，不附带任何明示或默示担保。本文件与工作树内同目录 LICENSE 逐字节一致（diff 为空）。"
+ },
+ "icons": {
+  "scene": "box",
+  "environment": "world",
+  "robot": "robot-face",
+  "object": "assembly",
+  "camera": "camera",
+  "asset": "folder-open",
+  "file": "files",
+  "terminal": "terminal-2",
+  "deliverable": "stack-2",
+  "engine": "cpu",
+  "annotation": "message-2"
+ },
+ "iconSources": {
+  "robot": {
+   "name": "robot-face",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/robot-face.svg",
+   "fetchedAt": "2026-09-13T04:52:44Z",
+   "httpStatus": 200,
+   "bytes": 589,
+   "sha256": "b1730449466fc8e627a5e0b4c633154caa023bbd818a7d680fcb83b797b42c2c",
+   "svgVersion": "2.37",
+   "svgUnicode": "fcbe",
+   "paths": [
+    "M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2",
+    "M9 16c1 .667 2 1 3 1s2 -.333 3 -1",
+    "M9 7l-1 -4",
+    "M15 7l1 -4",
+    "M9 12v-1",
+    "M15 12v-1"
+   ],
+   "pathsSha256": "3c0d6e6a37b36305824f9c4cb9110a7aca9a15471dfc20523cb29a2e0a1150f4",
+   "pathsSha256Method": "六条 path 的 d 值以 \\n 连接后的 sha256",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"robot\"（逐字节一致，仅省略行尾空格）"
+  },
+  "engine": {
+   "name": "cpu",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/cpu.svg",
+   "note": "物理引擎切换入口用；路径数据逐字节等于该 revision 的 Tabler outline/cpu.svg（MIT）。"
+  },
+  "annotation": {
+   "name": "message-2",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/message-2.svg",
+   "fetchedAt": "2026-09-17T23:26:38Z",
+   "httpStatus": 200,
+   "bytes": 516,
+   "sha256": "35d02bef771d2be43e8be5f4554b0a375e47b753372d6913a2cf07198a7fd08d",
+   "svgVersion": "1.0",
+   "svgUnicode": "eaec",
+   "paths": [
+    "M8 9h8",
+    "M8 13h6",
+    "M9 18h-3a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-3l-3 3l-3 -3"
+   ],
+   "note": "3D 批注入口用（Tabler category=Communication，tags 含 comment）；路径数据逐字节等于该 revision 的 Tabler outline/message-2.svg（MIT）。"
+  }
+ },
+ "revisionChecks": {
+  "robot": {
+   "comment": "被 robot-face 替换掉的旧 robot case：其 9 条 path 与本修订 robot.svg 逐字节一致，证明本 vendor 集此前确实取自该 revision；该文件仅为溯源核对保留，未再内联。",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/robot.svg",
+   "sha256": "d1dbd329f869a168699a632f5469a42d4d1dca5b972e2c1fbf9572faefb9a991",
+   "bytes": 646,
+   "pathsMatchPreviousVendoredRobot": true
+  },
+  "robot-off": {
+   "comment": "同一修订下的另一枚机器人候选（带禁用斜杠），入口语义不符，未采用。",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/robot-off.svg",
+   "sha256": "be072d0c6afca2a82d5eb56d709459155e53b2c8d7d2abb8f7f1f148f1c843b6",
+   "bytes": 594
+  }
+ },
+ "unchangedIcons": "除 robot→robot-face 与新增 annotation→message-2 外，其余 9 枚（box/world/assembly/camera/folder-open/files/terminal-2/stack-2/cpu）的 path 数据与新增前逐字节相同。"
+}

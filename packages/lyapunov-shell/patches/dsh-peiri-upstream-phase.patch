@@ -1,0 +1,25 @@
+--- a/packages/llm/llm-pi-ai/src/stream.ts
++++ b/packages/llm/llm-pi-ai/src/stream.ts
+@@ -47,6 +47,9 @@
+   // same request cannot succeed, so it is invalid, not transient.
+   if (/\b413\b|failed to buffer the request body:\s*length limit exceeded|payload too large|request body too large/i.test(message)) return 'INVALID_REQUEST'
+   if (/\b400\b|invalid.?request/i.test(message)) return 'INVALID_REQUEST'
++  // Unified gateway codes preserve the failed phase before the generic HTTP status.
++  if (/\bupstream_timeout\b/i.test(message)) return 'TIMEOUT'
++  if (/\bupstream_connection_error\b/i.test(message)) return 'TRANSPORT'
+   if (/\b5\d\d\b/.test(message)) return 'SERVER'
+   if (/\btime(?:d)?\s*out\b|timeout/i.test(message)) return 'TIMEOUT'
+   // A stream truncated before the provider's terminal event: each pi-ai provider
+--- a/packages/llm/llm-pi-ai/tests/convert.spec.ts
++++ b/packages/llm/llm-pi-ai/tests/convert.spec.ts
+@@ -898,6 +898,10 @@
+       .toMatchObject({ kind: 'error', failure: { code: 'SERVER' } })
+     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'provider timed out' })))
+       .toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
++    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: '504 upstream_timeout' })))
++      .toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
++    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: '502 upstream_connection_error' })))
++      .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'ECONNRESET socket closed' })))
+       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+     expect(mapStopReason(assistant({

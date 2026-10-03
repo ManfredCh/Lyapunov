@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "oldArtifactSha256": "030960391eac91eb298b5018b96bc1a4fc8a5995de55c421cf097150c918b384",
+  "englishArtifactSha256": "16b94f78a102d7820163decdf3204b853afbc63833c1745b21ff9ee36a1d70c2",
+  "beforeHashes": {
+    "packages/bundle/web-app/src/index.ts": "8f99fb38e68a6eb9709f0bda65febc41a6058b0ad4ca852b6190e6e7a18bde87",
+    "packages/bundle/web-app/tests/web-app.spec.ts": "85e88a9b55a5160abb5cf4a0c1a0edd274b3665d419da27a29ff4e620848aa30",
+    "packages/compaction/compaction-basic/package.json": "5594a5b46430a050fafabb2fd803e1da65c31a9a14da5c8be69aaef4f133b688",
+    "packages/compaction/compaction-basic/src/summarizer.ts": "1ce827f6bf35dc2b86177bf4f41403d3a0e3a9c45e31680a839050b0a278bf33",
+    "packages/compaction/compaction-basic/tests/compaction-basic.spec.ts": "aeb83e6eea022890b3a8344b377185d252609648fe9e36959b5b1ca7c220d3a0",
+    "packages/compaction/compaction-basic/tsconfig.json": "1e5ea6e00cee4dcf402397e06d41972ba9345a880a93ef8911100e07fa4a0896",
+    "packages/core/agent-loop/src/agent.ts": "214722825bb662feef0331258a43f9c32d7e09dcd2b2d1eb744faa5a849693d9",
+    "packages/core/system-prompt/src/index.ts": "098851213f60ef3dd927eb7372ad5c8bdd4eaa04295cc11d81d4e3633015e1d4",
+    "packages/session/session-title-llm/src/index.ts": "9e5fbfde6205c86f08b55242f63d0010ce489567fd14d4c11344361973c483d5",
+    "pnpm-lock.yaml": "71dfefdfe4c59409d59c2b8d3084d77ba64ff1a9f40ad0a67a4ab8c9667f0211"
+  },
+  "afterHashes": {
+    "packages/bundle/web-app/src/index.ts": "acfc5cb53d22d99b14e7562ab4c5982b0424311582498028ed2213f53df0753b",
+    "packages/bundle/web-app/tests/web-app.spec.ts": "3d966a93182a11c7b34e581162befd8e07a07e90b5f16d6f64b273b419e5205c",
+    "packages/compaction/compaction-basic/package.json": "5594a5b46430a050fafabb2fd803e1da65c31a9a14da5c8be69aaef4f133b688",
+    "packages/compaction/compaction-basic/src/summarizer.ts": "1ce827f6bf35dc2b86177bf4f41403d3a0e3a9c45e31680a839050b0a278bf33",
+    "packages/compaction/compaction-basic/tests/compaction-basic.spec.ts": "aeb83e6eea022890b3a8344b377185d252609648fe9e36959b5b1ca7c220d3a0",
+    "packages/compaction/compaction-basic/tsconfig.json": "1e5ea6e00cee4dcf402397e06d41972ba9345a880a93ef8911100e07fa4a0896",
+    "packages/core/agent-loop/src/agent.ts": "214722825bb662feef0331258a43f9c32d7e09dcd2b2d1eb744faa5a849693d9",
+    "packages/core/system-prompt/src/index.ts": "098851213f60ef3dd927eb7372ad5c8bdd4eaa04295cc11d81d4e3633015e1d4",
+    "packages/session/session-title-llm/src/index.ts": "9e5fbfde6205c86f08b55242f63d0010ce489567fd14d4c11344361973c483d5",
+    "pnpm-lock.yaml": "71dfefdfe4c59409d59c2b8d3084d77ba64ff1a9f40ad0a67a4ab8c9667f0211"
+  }
+}

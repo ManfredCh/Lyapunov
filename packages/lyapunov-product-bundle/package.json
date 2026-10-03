@@ -1,0 +1,5 @@
+{
+  "name": "@lyapunov/product-bundle", "version": "0.1.0", "private": true, "type": "module",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "files": ["cordis.patch.yml", "dist", "README.md"]
+}

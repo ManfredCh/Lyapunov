@@ -1,0 +1,33 @@
+{
+  "packId": "unitree_h1",
+  "version": "2026.09.23",
+  "family": "humanoid",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/h1.xml" },
+  "pieces": {
+    "asset": {
+      "ref": "ASSET_STAGING_MANIFEST_T1.json#unitree_h1"
+    },
+    "context": "ready",
+    "policy": "blocked:adapter-not-ported",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": [
+      "joint",
+      "gait",
+      "control"
+    ],
+    "directControl": "requiresPolicy"
+  },
+  "status": "BLOCKED:policy-adapter-not-ported",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie unitree_h1（ASSET_STAGING_MANIFEST_T1.json#unitree_h1 落账，mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7/unitree_h1）；policy：unitreerobotics/unitree_rl_gym@276801e46c5d433564f24658bac64f254b7d2d4b（与 G1 同链；H1 的检查点与部署口径未在本轮核实，不声称“随仓”/“随包”）",
+    "commit": "276801e46c5d433564f24658bac64f254b7d2d4b",
+    "author": "Unitree Robotics（H1 硬件、原始 URDF/资产与 unitree_rl_gym）；Google DeepMind MuJoCo Menagerie（MJCF 模型）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Unitree Robotics；ASSET_STAGING_MANIFEST_T1.json#unitree_h1 license=BSD-3-Clause 落账）",
+    "policy": "以 unitreerobotics/unitree_rl_gym@276801e… 随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）；**权重不随包分发，且 H1 适配未移植**——客户端只登记了 unitree_g1/unitree_go2/unitree_go1 三个执行适配器，(h1, torchscript) 无登记项，故本包 policy 面 blocked（见 policy/manifest.json；旧文“H1 检查点随仓、权重 sha256 待对账”已删除：既无随包字节也无可核对身份）"
+  },
+  "tests": "tests/acceptance.md"
+}

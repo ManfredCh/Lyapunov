@@ -1,0 +1,19 @@
+# 共同完善Lyapunov
+
+杭州奇异宇宙人工智能有限公司出品。欢迎[Discussions](https://github.com/ManfredCh/Lyapunov/discussions)讨论问题与方向、[Issues](https://github.com/ManfredCh/Lyapunov/issues)反馈最小复现、[Pull requests](https://github.com/ManfredCh/Lyapunov/pulls)提交修改。
+
+## 提交可复现问题
+
+说明应用版本/源码提交、系统与引擎、输入类型、最小操作、预期与实际结果。附已去隐私的诊断和截图；不要提交模型Key、账号会话、用户数据库或客户私有工程。区分源码/依赖检查、真实引擎结果与任务成功。
+
+## 修改与评审流程
+
+公开仓库是可复现发行源码入口，维护者在开发集成（Dev）、测试验收（Issue）与公开发行快照（public）之间同步经过评审的变化。提交PR说明具体问题、范围、实际测试和未覆盖项；使用该版本现有检查入口，保持Scene/Resource/Sim/Viewer和原生Agent/Session各自的状态归属。账号/部署服务与运维由独立OM边界维护，客户端PR不自动授权更改在线服务。
+
+模型/SDK/资产与机器人控制适配需说明官方来源、许可、依赖闭包、坐标/单位、joint/actuator/observation/rate与真实结果。下载、编译、可见或MATCHED不能替代执行证据。图表和教程保留素材来源与范围，不添加假FPS或任务完成声明。
+
+## 许可与署名
+
+遵循根 [Apache License 2.0](LICENSE) 和 [NOTICE](NOTICE)，保留上游版权与组件许可。提交到本项目的贡献按 Apache 2.0 第 5 条处理，本贡献说明不另设 CLA 或月活、营收署名门槛。
+
+提交时使用已添加并验证到个人 GitHub 账号的邮箱，或该账号的 GitHub noreply 邮箱。共同完成的真实提交可在提交说明中使用 `Co-authored-by: 姓名 <已关联邮箱>`；默认分支合并后的贡献由 GitHub 统计。仓库写入权限由维护者在 Settings → Collaborators 单独授予。

@@ -1,0 +1,27 @@
+<mujoco model="g19-building">
+  <!-- DEV-011 做机器人任务验收用的**最小真实建筑件**（scene-kit 测试夹具，不是导出器产物）：
+       地面 + 背墙 + 门柱 + 一块 0.9 m 宽 × 0.06 m 厚 × 2.0 m 高、带竖直铰链与位置执行器的门板。
+       尺寸与 `g19-building-scale-animation.test.ts` 的已知实测尺寸 0.9/0.06/2.0 逐轴一致。
+       它的意义是**原生带 <joint> 的 MJCF**：物理驱动的唯一来源（GLB 动画不会被升级成关节）。 -->
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002"/>
+  <default>
+    <geom friction="1 0.005 0.0001"/>
+  </default>
+  <worldbody>
+    <geom name="building_floor" type="plane" size="0 0 0.05" pos="0 0 0"/>
+    <geom name="building_back_wall" type="box" size="0.1 2.0 1.5" pos="-2.6 0 1.5"/>
+    <geom name="building_side_wall_north" type="box" size="2.6 0.1 1.5" pos="0 2.0 1.5"/>
+    <body name="door_post" pos="-0.5 0 0">
+      <geom name="door_post_geom" type="box" size="0.05 0.05 1.25" pos="0 0 1.25"/>
+      <!-- 铰链在门柱外侧留 0.08 m 净空（门板半厚 0.03）：整扇门能真的转过去，不被门柱卡住。 -->
+      <body name="door_panel" pos="0.13 0 0">
+        <joint name="door_hinge" type="hinge" axis="0 0 1" range="-1.5 1.5" damping="0.1" frictionloss="0.05"/>
+        <geom name="door_panel_geom" type="box" size="0.45 0.03 0.99" pos="0.45 0 1.02" mass="8" friction="0.2 0.005 0.0001"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="door_drive" joint="door_hinge" kp="80" kv="8" ctrlrange="-1.6 1.6"/>
+  </actuator>
+</mujoco>

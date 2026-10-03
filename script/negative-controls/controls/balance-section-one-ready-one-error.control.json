@@ -1,0 +1,23 @@
+{
+  "claim": "余额面板的『同时给出 status=ready 与 message』必须走 error 分支（`surfaces returned account messages as sync errors`）—— 把 message 判定挪到 ready 判定之后，这条用例必须精确变红",
+  "target": "packages/lyapunov-shell/src/balance-section-helpers.ts",
+  "testFile": "packages/lyapunov-shell/test/balance-section-helpers.test.ts",
+  "runner": "bun:test",
+  "baseline": { "pass": 4, "fail": 0, "assertions": 5 },
+  "anchors": [
+    {
+      "name": "N1 message 判定挪到 ready 之后（症状：账户同步失败被显示成『正常』）",
+      "find": "  if (message) return { kind: \"error\", text: message }\n  if (input.state?.status === \"ready\") return { kind: \"ready\" }",
+      "replace": "  if (input.state?.status === \"ready\") return { kind: \"ready\" }\n  if (message) return { kind: \"error\", text: message }",
+      "expectFailed": ["surfaces returned account messages as sync errors"]
+    },
+    {
+      "name": "N2 错误消息不再原样透出（症状：用户看不到后端给的原因）",
+      "find": "  if (message) return { kind: \"error\", text: message }",
+      "replace": "  if (message) return { kind: \"error\" }",
+      "expectFailed": ["surfaces returned account messages as sync errors"],
+      "note": "本变异另会让 TypeScript 报『text 缺失』，但 bun test 不做类型检查 ⇒ 读数仍只由运行期断言决定"
+    }
+  ],
+  "origin": "本单新建（NOTRUN-TRIAGE-AND-NC-VAULT-20260927）。目标文件在 `git status` 里是**干净**的、用例离线可跑（netns 复跑绿），符合『干净 checkout 里只看库内文件就能复算』。"
+}

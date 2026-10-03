@@ -1,0 +1,4 @@
+- id: session-telemetry-otel
+  disabled: true
+- id: session-title-llm
+  disabled: true

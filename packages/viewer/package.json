@@ -1,0 +1,26 @@
+{
+  "name": "@lyapunov/viewer",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/plugin.js",
+    "./projection": "./src/projection.ts",
+    "./client": {
+      "types": "./src/client.tsx",
+      "default": "./dist/client.js"
+    }
+  },
+  "dependencies": {
+    "@lyapunov/contracts": "workspace:*",
+    "three": "0.180.0",
+    "@sparkjsdev/spark": "2.0.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.180.0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  }
+}

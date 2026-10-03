@@ -1,0 +1,8 @@
+{
+  "name": "@lyapunov/terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/plugin.js", "./remote": "./dist/remote-terminal.js", "./package.json": "./package.json" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

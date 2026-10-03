@@ -1,0 +1,35 @@
+{
+  "packId": "ur5e",
+  "version": "2026.09.23",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/ur5e.xml" },
+  "pieces": {
+    "asset": {
+      "ref": "ASSET_STAGING_MANIFEST_T1.json#ur5e"
+    },
+    "context": "ready",
+    "policy": "blocked:no-client-inference-adapter",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": [
+      "joint",
+      "trajectory",
+      "gripper",
+      "control",
+      "ik"
+    ],
+    "directControl": "suitable"
+  },
+  "status": "PARTIAL:policy-no-client-inference-adapter",
+  "provenance": {
+    "source": "https://github.com/google-deepmind/mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7#universal_robots_ur5e/ur5e.xml",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "Google DeepMind MuJoCo Menagerie（模型原件，源自 ROS-Industrial 描述）；openpi/pi05_base（policy norm_stats 复制件）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright 2018 ROS Industrial Consortium + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）",
+    "policy": "π0.5 pi05_base 检查点（openpi）服务端执行、权重不随包分发；policy/norm_stats.json 为官方统计复制件，⚠ 权重/统计许可 UNVERIFIED：openpi 代码许可（仓根 LICENSE=Apache-2.0）≠ 检查点权重许可（gs://openpi-assets 树内无 LICENSE/NOTICE、README 零许可声明，2026-09-23 实查，PI05_POLICY_MAPPING §7），商用/再分发前须与 Physical Intelligence 确认并保守按受限处理；context/vla/tests 为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,16 @@
+<mujoco model="three-joint-arm">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002"/>
+  <default><joint damping="1" armature=".05"/><geom friction="1 .005 .0001"/></default>
+  <worldbody>
+    <body name="base" pos="0 0 .2"><geom type="box" size=".12 .12 .2" contype="0" conaffinity="0"/>
+      <body name="link1" pos="0 0 .2"><joint name="j1" axis="0 0 1" range="-2 2"/><geom type="capsule" fromto="0 0 0 .3 0 0" size=".04" mass=".8"/>
+        <body name="link2" pos=".3 0 0"><joint name="j2" axis="0 1 0" range="-1.8 1.8"/><geom type="capsule" fromto="0 0 0 .25 0 0" size=".035" mass=".5"/>
+          <body name="link3" pos=".25 0 0"><joint name="j3" axis="0 1 0" range="-1.8 1.8"/><geom type="capsule" fromto="0 0 0 .15 0 0" size=".025" mass=".2"/><site name="tcp" pos=".15 0 0"/></body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator><position name="a1" joint="j1" kp="300" kv="30"/><position name="a2" joint="j2" kp="300" kv="30"/><position name="a3" joint="j3" kp="200" kv="20"/></actuator>
+  <sensor><jointpos name="encoder1" joint="j1"/><jointvel name="encoder-velocity1" joint="j1"/></sensor>
+</mujoco>

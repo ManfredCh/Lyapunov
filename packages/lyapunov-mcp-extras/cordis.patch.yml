@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-mcp-extras
+      name: '@lyapunov/mcp-extras'

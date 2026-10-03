@@ -1,0 +1,1067 @@
+diff --git a/packages/api/workspace-files/src/index.ts b/packages/api/workspace-files/src/index.ts
+index 0205186879..3cfa94f5cc 100644
+--- a/packages/api/workspace-files/src/index.ts
++++ b/packages/api/workspace-files/src/index.ts
+@@ -8,7 +8,7 @@
+  * relative paths, with the sandbox policy root as its no-cwd fallback, not a
+  * read-containment restriction. Directory listings and change observations
+  * remain workspace-scoped. File-kind checks and configured read caps apply to
+- * every preview; this service exposes no mutations.
++ * every preview; explicit create operations use the live Session task policy.
+  *
+  * A page is cut from `streamText`, which decodes and rejects non-UTF-8 as it
+  * goes, so the file is read only up to the first character past the page and
+@@ -22,7 +22,7 @@
+ import { posix, win32 } from 'node:path'
+ import type { Context } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+-import type {} from '@deepseek-ai/dsh-fs'
++import { FsError } from '@deepseek-ai/dsh-fs'
+ import type { FsDirEntry, FsInfo, FsPathInfo, FsTarget } from '@deepseek-ai/dsh-fs'
+ import type {} from '@deepseek-ai/dsh-sandbox-policy'
+ import type {} from '@deepseek-ai/dsh-session'
+@@ -336,7 +336,7 @@ export class WorkspaceFiles extends TypertRemoteService {
+   @Remote
+   async list(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing> {
+     const { root, workspaceRoot, entry } = await this.inspect(workspaceFileScope, path, signal)
+-    if (entry.type !== 'directory') {
++    if (entry.type !== 'directory' && !(entry.type === 'symlink' && await this.isWorkspaceRootAlias(root, workspaceRoot, path, signal))) {
+       throw new RemoteError(
+         'workspace-file/not-directory',
+         `"${path}" is a ${entry.type}`,
+@@ -347,11 +347,71 @@ export class WorkspaceFiles extends TypertRemoteService {
+     const children = await this.ctx.fs.listDir(target, signal)
+     return {
+       path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)),
++      absolutePath: this.ctx.fs.processPath(target),
++      rootPath: this.ctx.fs.processPath(root),
+       entries: children.slice(0, this.config.maxEntries).map(directoryEntry),
+       truncated: children.length > this.config.maxEntries,
+     }
+   }
+ 
++  /** The workspace root may itself be chosen through a symlink. Other symlink directories keep the existing refusal. */
++  private async isWorkspaceRootAlias(root: FsTarget, workspaceRoot: string, path: string, signal: AbortSignal): Promise<boolean> {
++    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
++    return this.ctx.fs.contains(root, target) && this.ctx.fs.contains(target, root) && (await this.ctx.fs.stat(target, signal))?.type === 'directory'
++  }
++
++  private mutationPolicy(scope: WorkspaceFileScope) {
++    const session = this.ctx.sessions.get(scope.sessionId)
++    if (!session || !session.header.cwd || session.header.cwd !== scope.workspaceRoot) {
++      throw new RemoteError('workspace-file/session-unavailable', 'open this Session before modifying its workspace', { sessionId: String(scope.sessionId) })
++    }
++    const policy = this.ctx.sandboxPolicy.resolve({ session })
++    if (policy.mode === 'read-only') throw new RemoteError('workspace-file/write-denied', 'workspace is read-only', { path: scope.workspaceRoot })
++    return policy
++  }
++
++  private async creationTarget(scope: WorkspaceFileScope, parentPath: string, name: string, signal: AbortSignal) {
++    if (!name.trim() || name === '.' || name === '..' || /[/\\\x00]/.test(name)) {
++      throw new RemoteError('workspace-file/invalid-name', 'use one non-blank file or folder name', { name })
++    }
++    const { root, workspaceRoot, entry } = await this.inspect(scope, parentPath, signal)
++    if (entry.type !== 'directory' && !(entry.type === 'symlink' && await this.isWorkspaceRootAlias(root, workspaceRoot, parentPath, signal))) throw new RemoteError('workspace-file/not-directory', 'parent is not a directory', { path: parentPath, kind: entry.type })
++    const parent = await this.confine(root, workspaceRoot, parentPath, signal)
++    const absolute = this.ctx.fs.processPath(parent)
++    const paths = /^[A-Za-z]:[\\/]/.test(absolute) ? win32 : posix
++    const child = paths.join(absolute, name)
++    if (await this.ctx.fs.lstat(child, { cwd: workspaceRoot }, signal)) throw new RemoteError('workspace-file/already-exists', 'file or folder already exists', { path: child })
++    const target = await this.confine(root, workspaceRoot, child, signal)
++    return { root, target }
++  }
++
++  @Remote
++  async createDirectory(workspaceFileScope: WorkspaceFileScope, parentPath: string, name: string, signal: AbortSignal): Promise<{ absolutePath: string; path: string; type: 'directory' }> {
++    const policy = this.mutationPolicy(workspaceFileScope)
++    const { root, target } = await this.creationTarget(workspaceFileScope, parentPath, name, signal)
++    try { await this.ctx.fs.createDirectory(target, signal, policy) }
++    catch (error) {
++      if (error instanceof FsError && error.code === 'FS_STALE_VERSION') throw new RemoteError('workspace-file/already-exists', 'folder already exists', { path: this.ctx.fs.processPath(target) })
++      if (error instanceof FsError && error.code === 'FS_SANDBOX_DENIED') throw new RemoteError('workspace-file/write-denied', error.message, { path: this.ctx.fs.processPath(target) })
++      throw error
++    }
++    return { absolutePath: this.ctx.fs.processPath(target), path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)), type: 'directory' }
++  }
++
++  @Remote
++  async createFile(workspaceFileScope: WorkspaceFileScope, parentPath: string, name: string, signal: AbortSignal): Promise<{ absolutePath: string; path: string; type: 'file' }> {
++    const policy = this.mutationPolicy(workspaceFileScope)
++    const { root, target } = await this.creationTarget(workspaceFileScope, parentPath, name, signal)
++    if (await this.ctx.fs.stat(target, signal)) throw new RemoteError('workspace-file/already-exists', 'file already exists', { path: this.ctx.fs.processPath(target) })
++    try { await this.ctx.fs.writeText(target, '', { kind: 'createIfAbsent' }, signal, policy) }
++    catch (error) {
++      if (error instanceof FsError && ['FS_STALE_VERSION', 'FS_NOT_OBSERVED'].includes(error.code)) throw new RemoteError('workspace-file/already-exists', 'file already exists', { path: this.ctx.fs.processPath(target) })
++      if (error instanceof FsError && error.code === 'FS_SANDBOX_DENIED') throw new RemoteError('workspace-file/write-denied', error.message, { path: this.ctx.fs.processPath(target) })
++      throw error
++    }
++    return { absolutePath: this.ctx.fs.processPath(target), path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)), type: 'file' }
++  }
++
+   /**
+    * Stream every `fs/observed` observation of a file inside the Session's
+    * workspace. Only instrumented filesystem operations report here; the OS is
+diff --git a/packages/api/workspace-files/src/types.ts b/packages/api/workspace-files/src/types.ts
+index 93b3725775..20b5d9e695 100644
+--- a/packages/api/workspace-files/src/types.ts
++++ b/packages/api/workspace-files/src/types.ts
+@@ -109,6 +109,9 @@ export interface WorkspaceDirectoryListing {
+    * Direct children in the backend's stable name order, cut to the configured
+    * entry cap. Presentation order is the caller's choice.
+    */
++  readonly absolutePath?: string
++  /** Canonical Session workspace root. */
++  readonly rootPath?: string
+   readonly entries: readonly WorkspaceDirectoryEntry[]
+   /** Whether the entry cap dropped children from {@link entries}. */
+   readonly truncated: boolean
+@@ -146,6 +149,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
+   interface RemoteErrorDetailsMap {
+     /** No entry exists at that path inside the workspace. */
+     'workspace-file/not-found': { readonly path: string }
++    'workspace-file/invalid-name': { readonly name: string }
++    'workspace-file/already-exists': { readonly path: string }
++    'workspace-file/write-denied': { readonly path: string }
++    'workspace-file/session-unavailable': { readonly sessionId: string }
+     /** The directory listing path resolves outside the session's workspace root. */
+     'workspace-file/outside-workspace': { readonly path: string }
+     /** The requested page exceeds the configured byte cap; nothing is returned. */
+diff --git a/packages/api/workspace-files/tests/create.spec.ts b/packages/api/workspace-files/tests/create.spec.ts
+new file mode 100644
+index 0000000000..089d140edb
+--- /dev/null
++++ b/packages/api/workspace-files/tests/create.spec.ts
+@@ -0,0 +1,84 @@
++import { afterEach, beforeEach, describe, expect, it } from 'vitest'
++import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import { Context } from '@deepseek-ai/cordis'
++import { SandboxedFileSystem } from '@deepseek-ai/dsh-fs-sandbox'
++import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
++import { SessionId } from '@deepseek-ai/dsh-session/types'
++import { WorkspaceFiles } from '../src/index.ts'
++
++let directory: string, root: string, outside: string, ctx: Context, endpoint: WorkspaceFiles
++let mode: 'workspace-write' | 'read-only', live: boolean
++let dispose: () => Promise<void>
++const id = SessionId('files-test')
++const signal = () => new AbortController().signal
++const scope = () => ({ sessionId: id, workspaceRoot: root })
++beforeEach(async () => {
++ directory = await mkdtemp(join(tmpdir(), 'a08-files-')); root = join(directory, 'work'); outside = join(directory, 'outside')
++ await mkdir(root); await mkdir(outside); mode = 'workspace-write'; live = true; ctx = new Context()
++ ctx.provide('sessionProjections', { register: () => () => {}, stateOf: () => mode } as never)
++ const policy = new SandboxPolicyService(ctx, { mode: 'workspace-write', workspaceRoot: root })
++ const session = { id, header: { id, cwd: root } }
++ ctx.provide('sessions', { get: () => live ? session : undefined } as never)
++ const fiber = await ctx.plugin(SandboxedFileSystem, { cwd: root })
++ endpoint = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 100, maxEntries: 100 })
++ dispose = async () => { await fiber.dispose(); await rm(directory, { recursive: true, force: true }) }
++ expect(policy.resolve({ session: session as never }).mode).toBe('workspace-write')
++})
++afterEach(async () => { await dispose() })
++describe('Session-scoped workspace creation over real task FS', () => {
++ it('creates Chinese/space folder and empty file, then lists the canonical path', async () => {
++  const folder = await endpoint.createDirectory(scope(), '.', '中文 文件夹', signal())
++  expect(folder.absolutePath).toBe(join(root, '中文 文件夹'))
++  const file = await endpoint.createFile(scope(), folder.absolutePath, '草稿 notes.txt', signal())
++  expect(await readFile(file.absolutePath, 'utf8')).toBe('')
++  const listing = await endpoint.list(scope(), folder.absolutePath + '/.', signal())
++  expect(listing.absolutePath).toBe(folder.absolutePath); expect(listing.rootPath).toBe(root)
++  expect(listing.entries.map(row => row.name)).toEqual(['草稿 notes.txt'])
++ })
++ it('refuses repeated creation and preserves existing file bytes', async () => {
++  await endpoint.createDirectory(scope(), '.', 'same', signal())
++  await expect(endpoint.createDirectory(scope(), '.', 'same', signal())).rejects.toMatchObject({ code: 'workspace-file/already-exists' })
++  await writeFile(join(root, 'keep.txt'), 'preserve')
++  await expect(endpoint.createFile(scope(), '.', 'keep.txt', signal())).rejects.toMatchObject({ code: 'workspace-file/already-exists' })
++  expect(await readFile(join(root, 'keep.txt'), 'utf8')).toBe('preserve')
++  await symlink(join(outside, 'missing'), join(root, 'dangling'))
++  await expect(endpoint.createFile(scope(), '.', 'dangling', signal())).rejects.toMatchObject({ code: 'workspace-file/already-exists' })
++  expect(await readdir(outside)).toEqual([])
++ })
++ it('read-only applies to both UI file and folder creation', async () => {
++  mode = 'read-only'
++  await expect(endpoint.createDirectory(scope(), '.', 'blocked', signal())).rejects.toMatchObject({ code: 'workspace-file/write-denied' })
++  await expect(endpoint.createFile(scope(), '.', 'blocked.txt', signal())).rejects.toMatchObject({ code: 'workspace-file/write-denied' })
++  expect(await readdir(root)).toEqual([])
++ })
++ it('refuses outside parent and a symlink to an outside directory', async () => {
++  await symlink(outside, join(root, 'escape'))
++  await expect(endpoint.createDirectory(scope(), outside, 'bad', signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
++  await expect(endpoint.createFile(scope(), '../outside', 'bad.txt', signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
++  await expect(endpoint.createDirectory(scope(), join(root, 'escape'), 'bad', signal())).rejects.toBeDefined()
++  expect(await readdir(outside)).toEqual([])
++ })
++ it('requires one non-blank segment and never creates parents implicitly', async () => {
++  for (const name of ['', '  ', '.', '..', 'a/b', 'a\\b', 'bad\0name']) {
++   await expect(endpoint.createDirectory(scope(), '.', name, signal())).rejects.toMatchObject({ code: 'workspace-file/invalid-name' })
++  }
++  await expect(endpoint.createDirectory(scope(), 'missing', 'child', signal())).rejects.toMatchObject({ code: 'workspace-file/not-found' })
++  expect(await readdir(root)).toEqual([])
++ })
++ it('an aborted request does not create and a cold Session cannot modify', async () => {
++  const abort = new AbortController(); abort.abort()
++  await expect(endpoint.createDirectory(scope(), '.', 'cancelled', abort.signal)).rejects.toBeDefined()
++  live = false
++  await expect(endpoint.createFile(scope(), '.', 'cold.txt', signal())).rejects.toMatchObject({ code: 'workspace-file/session-unavailable' })
++  expect(await readdir(root)).toEqual([])
++ })
++ it('concurrent file creation has one winner without overwriting', async () => {
++  const results = await Promise.allSettled([endpoint.createFile(scope(), '.', 'one.txt', signal()), endpoint.createFile(scope(), '.', 'one.txt', signal())])
++  expect(results.filter(row => row.status === 'fulfilled')).toHaveLength(1)
++  const failure = results.find(row => row.status === 'rejected') as PromiseRejectedResult
++  expect(failure.reason.code).toBe('workspace-file/already-exists')
++  expect(await readdir(root)).toEqual(['one.txt'])
++ })
++})
+diff --git a/packages/api/workspace-files/tests/list.spec.ts b/packages/api/workspace-files/tests/list.spec.ts
+index 6cadad6ce3..1fa900e227 100644
+--- a/packages/api/workspace-files/tests/list.spec.ts
++++ b/packages/api/workspace-files/tests/list.spec.ts
+@@ -35,6 +35,17 @@ describe('workspaceFiles.list — the happy path', () => {
+     ])
+   })
+ 
++  it('reports the canonical root for a workspace selected through its own symlink without opening outside links', async () => {
++    const alias = join(outside, 'workspace-alias')
++    await symlink(workspace, alias)
++    const listing = await endpoint().list({ ...harness.scope, workspaceRoot: alias }, '.', signal())
++    expect(listing.absolutePath).toBe(workspace)
++    expect(listing.rootPath).toBe(workspace)
++    await symlink(outside, join(workspace, 'escape-root'))
++    const failure = await failureOf(endpoint().list({ ...harness.scope, workspaceRoot: alias }, 'escape-root', signal()))
++    expect(failure.code).toBe('workspace-file/not-directory')
++  })
++
+   it('accepts the absolute workspace root and reports the same empty path', async () => {
+     const listing = await endpoint().list(harness.scope, workspace, signal())
+     expect(listing.path).toBe('')
+diff --git a/packages/client/ui-sidebar-files/src/client/FilesBody.module.css b/packages/client/ui-sidebar-files/src/client/FilesBody.module.css
+index a49f6688a3..a834fd90b9 100644
+--- a/packages/client/ui-sidebar-files/src/client/FilesBody.module.css
++++ b/packages/client/ui-sidebar-files/src/client/FilesBody.module.css
+@@ -206,3 +206,8 @@
+ .titleIcon {
+   flex: none;
+ }
++
++.directoryRow{display:flex;align-items:center}.directoryRow[data-files-selected]{background:var(--dsw-alias-bg-l2)}
++.crumbs,.pathForm,.toolbar{display:flex;gap:5px;align-items:center;padding:5px 8px;flex-wrap:wrap;flex-shrink:0}
++.pathForm input{flex:1;min-width:100px}.crumbs button,.toolbar button,.createForm button{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l3);border-radius:4px;background:transparent;padding:3px 6px}
++.createForm{display:flex;gap:6px;flex-wrap:wrap;padding:8px;border-bottom:1px solid var(--dsw-alias-border-l3)}.createForm span{width:100%;overflow-wrap:anywhere}.createForm input{flex:1;min-width:80px}
+diff --git a/packages/client/ui-sidebar-files/src/client/FilesBody.tsx b/packages/client/ui-sidebar-files/src/client/FilesBody.tsx
+index 7a8c70f501..4094ed36e7 100644
+--- a/packages/client/ui-sidebar-files/src/client/FilesBody.tsx
++++ b/packages/client/ui-sidebar-files/src/client/FilesBody.tsx
+@@ -10,11 +10,11 @@
+  * ink, then the one control at its end, reload, which drops every listed level
+  * and asks again for the expanded ones.
+  */
+-import { useEffect, useLayoutEffect, useRef } from 'react'
++import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+ import type { ReactNode, RefObject } from 'react'
+ import clsx from 'clsx'
+ import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
+-import type { PropsLocale, PropsRuntime, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
++import type { PropsLocale, PropsRuntime, PropsStore, PropsRenderSlots, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+ import {
+   FileTypeIcon, IconFolderClose16, IconFolderOpen16, IconRefreshOutline16, classifyFileType,
+ } from '@deepseek-ai/dsh-client-ui-primitives'
+@@ -25,6 +25,20 @@ import type { FilesInjected } from './face.ts'
+ import type {} from './locales.ts'
+ import type { FilesTabState, createFilesStore } from './store.ts'
+ import css from './FilesBody.module.css'
++import { directoryCrumbs, parentInWorkspace } from './navigation.ts'
++
++export interface FilesActionOwner {
++  sessionId: string
++  absolutePath: string
++  rootPath: string
++  signal: AbortSignal
++  openResource: (address: string) => void
++}
++declare module '@deepseek-ai/dsh-client-ui-slots' {
++  interface SlotMap {
++    'sidebar.right.tab.files.actions': { kind: 'list'; scope: 'scoped'; owner: FilesActionOwner }
++  }
++}
+ 
+ /** The body's composed props: the tab it draws, its store, its face, and its copy. */
+ export type FilesBodyProps =
+@@ -32,6 +46,7 @@ export type FilesBodyProps =
+   & PropsStore<ReturnType<typeof createFilesStore>>
+   & FilesInjected
+   & PropsLocale<'sidebarFiles'>
++  & PropsRenderSlots<'sidebar.right.tab.files.actions'>
+ 
+ /** Natural, case-insensitive name order, so `file2` precedes `file10`. */
+ const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+@@ -58,6 +73,10 @@ export function orderEntries(entries: readonly WorkspaceDirectoryEntry[]): Works
+  */
+ export function failureLine(t: TranslateNS<'sidebarFiles'>, failure: RemoteFailure): string {
+   switch (failure.code) {
++    case 'workspace-file/write-denied': return t('error.writeDenied')
++    case 'workspace-file/already-exists': return t('error.alreadyExists')
++    case 'workspace-file/invalid-name': return t('error.invalidName')
++    case 'workspace-file/session-unavailable': return t('error.sessionUnavailable')
+     case 'workspace-file/not-found': return t('error.notFound')
+     case 'workspace-file/outside-workspace': return t('error.outsideWorkspace')
+     case 'workspace-file/not-directory': return t('error.notDirectory')
+@@ -105,6 +124,7 @@ interface TreeContext {
+   readonly state: FilesTabState
+   readonly onToggle: (path: string) => void
+   readonly onOpen: (path: string) => void
++  readonly onNavigate: (path: string) => void
+   readonly t: TranslateNS<'sidebarFiles'>
+ }
+ 
+@@ -115,17 +135,19 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
+     const expanded = tree.state.expanded.includes(path)
+     return (
+       <li className={css.item} data-files-entry="directory" data-files-path={path}>
+-        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onToggle(path) }}>
++        <div className={css.directoryRow} data-files-selected={tree.state.selectedPath === path || undefined}>
++        <button type="button" className={css.tool} aria-label={tree.t('expand', { name: entry.name })} aria-expanded={expanded} onClick={() => { tree.onToggle(path) }}>
+           {expanded ? <IconFolderOpen16 className={css.icon} /> : <IconFolderClose16 className={css.icon} />}
+-          <span className={css.name}>{entry.name}</span>
+         </button>
++        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onNavigate(path) }}><span className={css.name}>{entry.name}</span></button>
++        </div>
+         {expanded && <ul className={css.level}><Level path={path} tree={tree} /></ul>}
+       </li>
+     )
+   }
+   if (entry.type === 'file') {
+     return (
+-      <li className={css.item} data-files-entry="file" data-files-path={path}>
++      <li className={css.item} data-files-entry="file" data-files-path={path} data-files-selected={tree.state.selectedPath === path || undefined}>
+         <button type="button" className={css.row} onClick={() => { tree.onOpen(path) }}>
+           <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />
+           <span className={css.name}>{entry.name}</span>
+@@ -156,7 +178,7 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
+       </li>
+     )
+   }
+-  const entries = orderEntries(level.level.entries)
++  const entries = orderEntries(level.level.entries).filter(entry => state.showHidden || !entry.name.startsWith('.'))
+   return (
+     <>
+       {entries.length === 0 && <li className={css.note} data-files-row="empty">{t('empty')}</li>}
+@@ -168,17 +190,31 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
+ 
+ /** The file tree's body: the workspace root and whatever the reader has opened under it. */
+ export function FilesBody({
+-  useTabInfo, sessionId, useSessions, useStore, actions, start, load, toggle, t,
++  useTabInfo, sessionId, useSessions, useStore, actions, start, load, toggle, navigate, createEntry, renderSlot, t,
+ }: FilesBodyProps): ReactNode {
+   const { tab } = useTabInfo()
+   const { signal, actions: tabActions } = tab
+   const cwd = useSessions(sessions => sessions.byId[sessionId]?.cwd)
+   const state = useStore(store => store.byTab[tab.id])
++  const currentPath = state?.currentPath ?? state?.root ?? cwd ?? ''
++  const [pathDraft, setPathDraft] = useState(currentPath)
++  const [createKind, setCreateKind] = useState<'file' | 'directory'>()
++  const [nameDraft, setNameDraft] = useState('')
++  const [operationError, setOperationError] = useState('')
++  const [creating, setCreating] = useState(false)
++  const mutation = useRef<{ controller: AbortController; scope: string }>()
++  const scopeKey = `${sessionId}:${tab.id}:${currentPath}`
++  const currentScope = useRef(scopeKey)
++  currentScope.current = scopeKey
++  useEffect(() => {
++    setPathDraft(currentPath); setCreateKind(undefined); setOperationError(''); setCreating(false)
++    return () => { if (mutation.current?.scope === scopeKey) { mutation.current.controller.abort(); mutation.current = undefined } }
++  }, [scopeKey, currentPath])
+   const pathRef = useRef<HTMLDivElement>(null)
+   const pathTextRef = useRef<HTMLSpanElement>(null)
+   const bodyRef = useRef<HTMLDivElement>(null)
+   const scrollTopRef = useRef(0)
+-  usePathClipped(pathRef, pathTextRef, state?.root)
++  usePathClipped(pathRef, pathTextRef, state === undefined ? undefined : currentPath)
+   // Come back where the reader was: loaded levels outlive the body in the
+   // store, so a remounted tree lays out at its full height before this runs
+   // and the stored offset re-lands exactly. A fresh tree stores 0.
+@@ -214,8 +250,9 @@ export function FilesBody({
+   const tree: TreeContext = {
+     state,
+     onToggle: (path) => { toggle(tab.id, path, state.levels[path] !== undefined, signal) },
++    onNavigate: (path) => { navigate(tab.id, path, signal) },
+     // Every row is under the tree's root, so its address is session-relative.
+-    onOpen: (path) => { tabActions.openResource(fileAddressFor(sessionId, state.root, path)) },
++    onOpen: (path) => { actions.selected(tab.id, path); tabActions.openResource(fileAddressFor(sessionId, state.root, path)) },
+     t,
+   }
+   // Reload drops every level and asks again for the expanded ones; a collapsed
+@@ -224,36 +261,62 @@ export function FilesBody({
+     actions.reset(tab.id)
+     for (const path of state.expanded) load(tab.id, path, signal)
+   }
+-  const { directory, name } = pathPartsOf(state.root)
++  const { directory, name } = pathPartsOf(currentPath)
++  const crumbs = directoryCrumbs(state.root, currentPath)
++  const parent = parentInWorkspace(state.root, currentPath)
++  const create = async (): Promise<void> => {
++    if (!createEntry || !createKind || creating || !nameDraft.trim() || signal.aborted || currentScope.current !== scopeKey) return
++    const owner = currentScope.current, kind = createKind, capturedPath = currentPath
++    const controller = new AbortController(); mutation.current = { controller, scope: owner }
++    const abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true })
++    setCreating(true); setOperationError('')
++    try {
++      const result = await createEntry(capturedPath, nameDraft, kind, controller.signal)
++      if (controller.signal.aborted || currentScope.current !== owner || mutation.current?.controller !== controller) return
++      if (!result.ok) { setOperationError(failureLine(t, result.error)); return }
++      setCreateKind(undefined); setNameDraft(''); if (nameDraft.startsWith('.')) actions.hidden(tab.id, true)
++      load(tab.id, capturedPath, signal); actions.selected(tab.id, result.value.absolutePath)
++      if (kind === 'file') tabActions.openResource(fileAddressFor(sessionId, state.root, result.value.absolutePath))
++    } catch (error) {
++      if (!controller.signal.aborted && currentScope.current === owner) setOperationError(String(error instanceof Error ? error.message : error))
++    } finally {
++      signal.removeEventListener('abort', abort)
++      if (mutation.current?.controller === controller) { mutation.current = undefined; setCreating(false) }
++    }
++  }
+   return (
+     <div className={css.root} data-files-state="tree" data-files-root={state.root}>
+-      {/* jscpd:ignore-start -- the text preview's header row; see `usePathClipped`. */}
+       <div className={css.header}>
+-        <div ref={pathRef} className={css.path} title={state.root} data-files-path>
+-          <span ref={pathTextRef} className={css.pathText}>
+-            {directory !== '' && <span className={css.pathDirectory}>{directory}</span>}
+-            <span className={css.pathName}>{name}</span>
+-          </span>
+-        </div>
+-        <button
+-          type="button"
+-          className={css.tool}
+-          aria-label={t('reload')}
+-          title={t('reload')}
+-          data-files-reload
+-          onClick={reload}
+-        >
+-          <IconRefreshOutline16 />
+-        </button>
++        <button type="button" className={css.tool} aria-label={t('back')} disabled={state.historyIndex === 0 || !!state.pendingPath} onClick={() => navigate(tab.id, state.history[state.historyIndex - 1]!, signal, state.historyIndex - 1)}>←</button>
++        <button type="button" className={css.tool} aria-label={t('forward')} disabled={state.historyIndex >= state.history.length - 1 || !!state.pendingPath} onClick={() => navigate(tab.id, state.history[state.historyIndex + 1]!, signal, state.historyIndex + 1)}>→</button>
++        <button type="button" className={css.tool} aria-label={t('up')} disabled={!parent || !!state.pendingPath} onClick={() => { if (parent) navigate(tab.id, parent, signal) }}>↑</button>
++        <div ref={pathRef} className={css.path} title={currentPath} data-files-path><span ref={pathTextRef} className={css.pathText}>{directory && <span className={css.pathDirectory}>{directory}</span>}<span className={css.pathName}>{name}</span></span></div>
++        <button type="button" className={css.tool} aria-label={t('copyPath')} onClick={() => { void Promise.resolve().then(() => { if (!navigator.clipboard) throw new Error(t('copyUnavailable')); return navigator.clipboard.writeText(currentPath) }).catch(error => setOperationError(String(error))) }}>⧉</button>
++        <button type="button" className={css.tool} aria-label={t('reload')} title={t('reload')} data-files-reload disabled={!!state.pendingPath} onClick={reload}><IconRefreshOutline16 /></button>
++      </div>
++      <nav className={css.crumbs} aria-label={t('breadcrumbs')}>{crumbs.map(crumb => <button key={crumb.path} type="button" onClick={() => navigate(tab.id, crumb.path, signal)} title={crumb.path}>{crumb.name}</button>)}</nav>
++      <form className={css.pathForm} onSubmit={event => { event.preventDefault(); navigate(tab.id, pathDraft, signal) }}><input aria-label={t('path')} value={pathDraft} onChange={event => setPathDraft(event.target.value)}/><button type="submit">{t('open')}</button></form>
++      <div className={css.toolbar}>
++        <button type="button" disabled={!createEntry || creating || !!state.pendingPath || state.levels[currentPath]?.kind !== 'ready'} onClick={() => { setCreateKind('file'); setNameDraft(''); setOperationError('') }}>{t('newFile')}</button>
++        <button type="button" disabled={!createEntry || creating || !!state.pendingPath || state.levels[currentPath]?.kind !== 'ready'} onClick={() => { setCreateKind('directory'); setNameDraft(''); setOperationError('') }}>{t('newFolder')}</button>
++        <button type="button" aria-pressed={state.showHidden} onClick={() => actions.hidden(tab.id, !state.showHidden)}>{t('showHidden')}</button>
+       </div>
+-      {/* jscpd:ignore-end */}
++      {renderSlot?.('sidebar.right.tab.files.actions', { sessionId, absolutePath: currentPath, rootPath: state.root, signal, openResource: address => tabActions.openResource(address) })}
++      {createKind && <form role="dialog" aria-label={t(createKind === 'file' ? 'newFile' : 'newFolder')} className={css.createForm} onSubmit={event => { event.preventDefault(); void create() }}>
++        <span>{t('createIn')} <code>{currentPath}</code></span>
++        <input autoFocus aria-label={t('entryName')} disabled={creating} value={nameDraft} onChange={event => setNameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !creating) { event.preventDefault(); setCreateKind(undefined) } }}/>
++        <button type="submit" disabled={creating || !nameDraft.trim()}>{t('create')}</button><button type="button" disabled={creating} onClick={() => setCreateKind(undefined)}>{t('cancel')}</button>
++      </form>}
++      {state.pendingPath && <p role="status">{t('loading')}</p>}
++      {state.navigationError && <p role="alert">{failureLine(t, state.navigationError)}</p>}
++      {operationError && <p role="alert">{operationError}</p>}
+       <div
+         ref={bodyRef}
+         className={css.body}
+         data-files-body
+         onScroll={(event) => { scrollTopRef.current = event.currentTarget.scrollTop }}
+       >
+-        <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
++        <ul className={css.level}><Level path={currentPath} tree={tree} /></ul>
+       </div>
+     </div>
+   )
+diff --git a/packages/client/ui-sidebar-files/src/client/face.ts b/packages/client/ui-sidebar-files/src/client/face.ts
+index a170e897ce..13c5117d17 100644
+--- a/packages/client/ui-sidebar-files/src/client/face.ts
++++ b/packages/client/ui-sidebar-files/src/client/face.ts
+@@ -54,7 +54,7 @@ export function createList(remote: WorkspaceFilesListRemote): ListWorkspaceDirec
+   return async (sessionId, path, signal) => {
+     const result = await remote.workspaceFiles.list(sessionId, path, signal)
+     if (!result.ok) return result
+-    return { ok: true, value: { entries: result.value.entries, truncated: result.value.truncated } }
++    return { ok: true, value: { entries: result.value.entries, truncated: result.value.truncated, ...result.value.absolutePath ? { absolutePath: result.value.absolutePath } : {}, ...result.value.rootPath ? { rootPath: result.value.rootPath } : {} } }
+   }
+ }
+ 
+@@ -72,7 +72,15 @@ export function childPath(parent: string, name: string): string {
+ }
+ 
+ /** The tree's injected business face, as the body receives it. */
++export type CreateWorkspaceEntry = (sessionId: SessionId, parent: string, name: string, kind: 'file' | 'directory', signal: AbortSignal) => Promise<RemoteResult<{ absolutePath: string; path: string; type: 'file' | 'directory' }>>
++export function createEntries(remote: { workspaceFiles: Pick<ClientRemote['workspaceFiles'], 'createFile' | 'createDirectory'> }): CreateWorkspaceEntry {
++  return (sessionId, parent, name, kind, signal) => kind === 'directory'
++    ? remote.workspaceFiles.createDirectory(sessionId, parent, name, signal)
++    : remote.workspaceFiles.createFile(sessionId, parent, name, signal)
++}
+ export interface FilesInjected {
++  readonly createEntry?: (parent: string, name: string, kind: 'file' | 'directory', signal: AbortSignal) => ReturnType<CreateWorkspaceEntry>
++  readonly navigate: (tabId: TabId, path: string, signal: AbortSignal, historyIndex?: number) => void
+   /**
+    * Seed this tab's tree and list its root.
+    * @param tabId - the tab being drawn.
+@@ -104,6 +112,7 @@ export interface FilesInjected {
+  */
+ export function filesFace(
+   list: ListWorkspaceDirectory,
++  create?: CreateWorkspaceEntry,
+ ): (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>) => FilesInjected {
+   return (
+     sessionId: SessionId,
+@@ -111,6 +120,8 @@ export function filesFace(
+   ): FilesInjected => {
+     /** Per tab, per absolute path: the listing generation a settlement must match; the latest request wins. */
+     const generations = new Map<TabId, Map<string, number>>()
++    const navigationGenerations = new Map<TabId, number>()
++    const navigationTargets = new Map<TabId, { path: string; historyIndex?: number }>()
+     const nextGeneration = (tabId: TabId, path: string): number => {
+       const byPath = generations.get(tabId) ?? new Map<string, number>()
+       generations.set(tabId, byPath)
+@@ -120,6 +131,8 @@ export function filesFace(
+     }
+     const load = (tabId: TabId, path: string, signal: AbortSignal): void => {
+       if (signal.aborted) return
++      const pending = navigationTargets.get(tabId)
++      if (pending?.path === path) { navigate(tabId, path, signal, pending.historyIndex); return }
+       const generation = nextGeneration(tabId, path)
+       actions.loading(tabId, path)
+       void list(sessionId, path, signal).then((result) => {
+@@ -130,17 +143,39 @@ export function filesFace(
+         else actions.failed(tabId, path, result.error)
+       })
+     }
++    function navigate(tabId: TabId, path: string, signal: AbortSignal, historyIndex?: number): void {
++        if (signal.aborted) return
++        const sequence = (navigationGenerations.get(tabId) ?? 0) + 1
++        navigationGenerations.set(tabId, sequence)
++        navigationTargets.set(tabId, { path, ...historyIndex === undefined ? {} : { historyIndex } })
++        const generation = nextGeneration(tabId, path)
++        actions.navigating(tabId, path)
++        actions.loading(tabId, path)
++        void list(sessionId, path, signal).then(result => {
++          if (signal.aborted || navigationGenerations.get(tabId) !== sequence || generations.get(tabId)?.get(path) !== generation) return
++          navigationTargets.delete(tabId)
++          if (!result.ok) { actions.failed(tabId, path, result.error); actions.navigationFailed(tabId, result.error); return }
++          actions.loaded(tabId, path, result.value)
++          actions.navigated(tabId, result.value.absolutePath ?? path, historyIndex)
++        })
++      }
+     return {
++      ...create ? { createEntry: (parent: string, name: string, kind: 'file' | 'directory', signal: AbortSignal) => create(sessionId, parent, name, kind, signal) } : {},
++      navigate,
+       start(tabId, root, signal) {
++        if (signal.aborted) return
+         actions.start(tabId, root)
+         signal.addEventListener('abort', () => {
+           generations.delete(tabId)
++          navigationGenerations.delete(tabId)
++          navigationTargets.delete(tabId)
+           actions.forget(tabId)
+         }, { once: true })
+         load(tabId, root, signal)
+       },
+       load,
+       toggle(tabId, path, loaded, signal) {
++        if (signal.aborted) return
+         actions.toggled(tabId, path)
+         if (!loaded) load(tabId, path, signal)
+       },
+diff --git a/packages/client/ui-sidebar-files/src/client/index.ts b/packages/client/ui-sidebar-files/src/client/index.ts
+index 572f5583b5..8ccc43552a 100644
+--- a/packages/client/ui-sidebar-files/src/client/index.ts
++++ b/packages/client/ui-sidebar-files/src/client/index.ts
+@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+ import { FILES_ID, filesDefinition } from './definition.tsx'
+-import { createList, filesFace } from './face.ts'
++import { createEntries, createList, filesFace } from './face.ts'
+ import { FilesBody } from './FilesBody.tsx'
+ import { FilesTitle } from './FilesTitle.tsx'
+ import { en, zh } from './locales.ts'
+@@ -46,9 +46,9 @@ export function apply(ctx: ClientContext): void {
+   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar-files: dictionaries')
+ 
+   const store = createFilesStore()
+-  const inject = filesFace(createList(ctx.remote))
++  const inject = filesFace(createList(ctx.remote), createEntries(ctx.remote))
+   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
+-    { name: 'sidebar.right.pane.tab', key: FILES_ID, locale: NS, store, inject },
++    { name: 'sidebar.right.pane.tab', key: FILES_ID, locale: NS, store, inject, children: { 'sidebar.right.tab.files.actions': { kind: 'list', scope: 'scoped' } } },
+     FilesBody,
+   )), 'ui-sidebar-files: files tab body')
+   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
+diff --git a/packages/client/ui-sidebar-files/src/client/locales.ts b/packages/client/ui-sidebar-files/src/client/locales.ts
+index b88e6bab40..ecc691c596 100644
+--- a/packages/client/ui-sidebar-files/src/client/locales.ts
++++ b/packages/client/ui-sidebar-files/src/client/locales.ts
+@@ -20,6 +20,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+ 
+ /** Simplified Chinese dictionary and key-set source of truth. */
+ export const zh = {
++  copyUnavailable: '当前浏览器无法访问剪贴板，可从路径栏复制。',
++  'error.writeDenied': '当前工作区禁止写入。', 'error.alreadyExists': '同名文件或文件夹已存在。', 'error.invalidName': '请填写单个文件或文件夹名称，不能包含路径分隔符。', 'error.sessionUnavailable': '请先打开这个会话再修改工作区。',
++  back: '后退', forward: '前进', up: '上一级', copyPath: '复制完整路径', breadcrumbs: '目录面包屑', path: '当前目录路径', open: '打开', newFile: '新建文件', newFolder: '新建文件夹', showHidden: '显示隐藏文件', createIn: '创建位置：', entryName: '文件或文件夹名称', create: '创建', cancel: '取消', expand: '展开或收起 {name}',
++
+   'type.label': '文件',
+   'guide.title': '工作区文件',
+   'guide.description': '浏览会话工作区的文件',
+@@ -40,6 +44,10 @@ export type SidebarFilesKey = keyof typeof zh
+ 
+ /** English dictionary, checked against the Chinese key set. */
+ export const en = {
++  copyUnavailable: 'Clipboard unavailable; copy from the path field.',
++  'error.writeDenied': 'This workspace is read-only.', 'error.alreadyExists': 'That file or folder already exists.', 'error.invalidName': 'Use one file or folder name, without path separators.', 'error.sessionUnavailable': 'Open this Session before modifying the workspace.',
++  back: 'Back', forward: 'Forward', up: 'Up', copyPath: 'Copy full path', breadcrumbs: 'Directory breadcrumbs', path: 'Current directory path', open: 'Open', newFile: 'New file', newFolder: 'New folder', showHidden: 'Show hidden files', createIn: 'Create in:', entryName: 'File or folder name', create: 'Create', cancel: 'Cancel', expand: 'Expand or collapse {name}',
++
+   'type.label': 'Files',
+   'guide.title': 'Workspace files',
+   'guide.description': 'Browse files in this session\'s workspace',
+diff --git a/packages/client/ui-sidebar-files/src/client/navigation.ts b/packages/client/ui-sidebar-files/src/client/navigation.ts
+new file mode 100644
+index 0000000000..36a710e5e2
+--- /dev/null
++++ b/packages/client/ui-sidebar-files/src/client/navigation.ts
+@@ -0,0 +1,18 @@
++/** Paths for presentation only; the Host resolves and confines every navigation. */
++export function directoryCrumbs(root: string, path: string): Array<{ path: string; name: string }> {
++  const windows = /^[A-Za-z]:[\\/]/.test(root) || root.startsWith('\\\\')
++  const normalize = (value: string) => (windows ? value.replace(/\\/g, '/') : value).replace(/\/$/, '') || '/'
++  const base = normalize(root), current = normalize(path)
++  const insensitive = windows
++  const same = (a: string, b: string) => insensitive ? a.toLowerCase() === b.toLowerCase() : a === b
++  const prefix = base === '/' ? '/' : base + '/'
++  if (!same(current, base) && !same(current.slice(0, prefix.length), prefix)) return []
++  const result = [{ path: root, name: base.split('/').at(-1) || base }]
++  if (same(current, base)) return result
++  let at = base === '/' ? '' : base
++  for (const name of current.slice(prefix.length).split('/').filter(Boolean)) { at += '/' + name; result.push({ path: at, name }) }
++  return result
++}
++export function parentInWorkspace(root: string, path: string): string | undefined {
++  return directoryCrumbs(root, path).at(-2)?.path
++}
+diff --git a/packages/client/ui-sidebar-files/src/client/store.ts b/packages/client/ui-sidebar-files/src/client/store.ts
+index 468b8b17de..08a98c7372 100644
+--- a/packages/client/ui-sidebar-files/src/client/store.ts
++++ b/packages/client/ui-sidebar-files/src/client/store.ts
+@@ -26,6 +26,8 @@ export interface DirLevel {
+   readonly entries: readonly WorkspaceDirectoryEntry[]
+   /** The listing hit the endpoint's entry cap, so entries are missing. */
+   readonly truncated: boolean
++  readonly absolutePath?: string
++  readonly rootPath?: string
+ }
+ 
+ /** What one directory level is doing right now. */
+@@ -43,6 +45,13 @@ export type LevelState =
+ export interface FilesTabState {
+   /** Absolute path of the workspace root this tree is rooted at. */
+   root: string
++  currentPath: string
++  history: string[]
++  historyIndex: number
++  showHidden: boolean
++  selectedPath?: string
++  pendingPath?: string | undefined
++  navigationError?: RemoteFailure | undefined
+   /** Level state by absolute directory path; a path absent here was never asked for. */
+   levels: Record<string, LevelState>
+   /** Expanded absolute directory paths, root included. */
+@@ -78,6 +87,11 @@ type FilesActions = {
+   toggled: (draft: FilesState, tabId: TabId, path: string) => void
+   scrolled: (draft: FilesState, tabId: TabId, scrollTop: number) => void
+   reset: (draft: FilesState, tabId: TabId) => void
++  navigating: (draft: FilesState, tabId: TabId, path: string) => void
++  navigated: (draft: FilesState, tabId: TabId, path: string, historyIndex?: number) => void
++  navigationFailed: (draft: FilesState, tabId: TabId, failure: RemoteFailure) => void
++  selected: (draft: FilesState, tabId: TabId, path: string) => void
++  hidden: (draft: FilesState, tabId: TabId, show: boolean) => void
+   forget: (draft: FilesState, tabId: TabId) => void
+ }
+ 
+@@ -99,7 +113,7 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions>
+        * @param root - absolute path of the workspace root.
+        */
+       start: (d, tabId: TabId, root: string) => {
+-        d.byTab[tabId] = { root, levels: {}, expanded: [root], scrollTop: 0 }
++        d.byTab[tabId] = { root, currentPath: root, history: [root], historyIndex: 0, showHidden: false, levels: {}, expanded: [root], scrollTop: 0 }
+       },
+       /**
+        * Mark one directory as being listed.
+@@ -118,7 +132,22 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions>
+        * @param level - the listing to show under it.
+        */
+       loaded: (d, tabId: TabId, path: string, level: DirLevel) => {
+-        bucket(d, tabId).levels[path] = { kind: 'ready', level }
++        const tree = bucket(d, tabId)
++        tree.levels[path] = { kind: 'ready', level }
++        if (level.rootPath && tree.root !== level.rootPath) {
++          const oldRoot = tree.root
++          tree.root = level.rootPath
++          tree.history = tree.history.map(value => value === oldRoot ? tree.root : value)
++          tree.expanded = tree.expanded.map(value => value === oldRoot ? tree.root : value)
++          if (tree.currentPath === oldRoot) tree.currentPath = tree.root
++        }
++        if (level.absolutePath) {
++          tree.levels[level.absolutePath] = { kind: 'ready', level }
++          if (tree.currentPath === path) {
++            tree.currentPath = level.absolutePath
++            tree.history[tree.historyIndex] = level.absolutePath
++          }
++        }
+       },
+       /**
+        * Record why one directory could not be listed.
+@@ -161,6 +190,17 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions>
+        * @param d - draft state.
+        * @param tabId - the tab being drawn.
+        */
++      navigating: (d, tabId, path) => { const tree = bucket(d, tabId); tree.pendingPath = path; tree.navigationError = undefined },
++      navigated: (d, tabId, path, historyIndex) => {
++        const tree = bucket(d, tabId)
++        if (historyIndex !== undefined) { tree.historyIndex = historyIndex; tree.history[historyIndex] = path }
++        else if (tree.currentPath !== path) { tree.history = [...tree.history.slice(0, tree.historyIndex + 1), path]; tree.historyIndex = tree.history.length - 1 }
++        tree.currentPath = path; tree.selectedPath = path; tree.pendingPath = undefined; tree.navigationError = undefined
++        if (!tree.expanded.includes(path)) tree.expanded.push(path)
++      },
++      navigationFailed: (d, tabId, failure) => { const tree = bucket(d, tabId); tree.pendingPath = undefined; tree.navigationError = failure },
++      selected: (d, tabId, path) => { bucket(d, tabId).selectedPath = path },
++      hidden: (d, tabId, show) => { bucket(d, tabId).showHidden = show },
+       reset: (d, tabId: TabId) => {
+         bucket(d, tabId).levels = {}
+       },
+diff --git a/packages/client/ui-sidebar-files/tests/files-body.client.spec.tsx b/packages/client/ui-sidebar-files/tests/files-body.client.spec.tsx
+index e8dd9cecd5..0efe049b15 100644
+--- a/packages/client/ui-sidebar-files/tests/files-body.client.spec.tsx
++++ b/packages/client/ui-sidebar-files/tests/files-body.client.spec.tsx
+@@ -43,7 +43,7 @@ describe('FilesBody', () => {
+     expect(script.list).not.toHaveBeenCalled()
+   })
+ 
+-  it('lists the root on mount, heads it with its path split at the last segment, and draws directories first with dotfiles kept', async () => {
++  it('lists the root on mount, heads it with its path split at the last segment, and draws directories first with dotfiles hidden until requested', async () => {
+     const { view, script } = mountBody()
+     expect(script.list).toHaveBeenCalledWith(SESSION, ROOT, expect.any(AbortSignal))
+     expect(view.container.querySelector('[data-files-row="loading"]')).not.toBeNull()
+@@ -52,6 +52,8 @@ describe('FilesBody', () => {
+     const path = view.container.querySelector('[data-files-path]')
+     expect(path?.getAttribute('title')).toBe(ROOT)
+     expect([...path?.querySelectorAll('span > span') ?? []].map(span => span.textContent)).toEqual(['/work/', 'app'])
++    expect(names(view.container)).toEqual([`${ROOT}/src`, `${ROOT}/pipe`, `${ROOT}/README.md`])
++    fireEvent.click(view.getByRole('button', {name: zh.showHidden}))
+     expect(names(view.container)).toEqual([`${ROOT}/src`, `${ROOT}/.env`, `${ROOT}/pipe`, `${ROOT}/README.md`])
+     const envIcon = view.container.querySelector(`[data-files-path="${ROOT}/.env"] svg`)?.innerHTML
+     const readmeIcon = view.container.querySelector(`[data-files-path="${ROOT}/README.md"] svg`)?.innerHTML
+@@ -63,6 +65,8 @@ describe('FilesBody', () => {
+     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+     const path = view.container.querySelector('[data-files-path]')
+     expect([...path?.querySelectorAll('span > span') ?? []].map(span => span.textContent)).toEqual(['/'])
++    expect(names(view.container)).toEqual(['/src', '/pipe', '/README.md'])
++    fireEvent.click(view.getByRole('button', {name: zh.showHidden}))
+     expect(names(view.container)).toEqual(['/src', '/.env', '/pipe', '/README.md'])
+   })
+ 
+@@ -118,7 +122,7 @@ describe('FilesBody', () => {
+   it('a directory click lists that level once and marks it expanded; a second click collapses without asking again', async () => {
+     const { view, script } = mountBody()
+     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+-    const dir = view.container.querySelector(`[data-files-path="${ROOT}/src"] > button`)!
++    const dir = view.container.querySelector(`[data-files-path="${ROOT}/src"] > div > button:first-child`)!
+     act(() => { fireEvent.click(dir) })
+     expect(script.list).toHaveBeenLastCalledWith(SESSION, `${ROOT}/src`, expect.any(AbortSignal))
+     expect(dir.getAttribute('aria-expanded')).toBe('true')
+@@ -148,7 +152,7 @@ describe('FilesBody', () => {
+     const { view, script } = mountBody()
+     await act(() => script.settle({ ok: true, value: { entries: [{ name: 'd', type: 'directory' }], truncated: true } }))
+     expect(view.container.querySelector('[data-files-row="truncated"]')?.textContent).toBe(zh.truncated)
+-    act(() => { fireEvent.click(view.container.querySelector(`[data-files-path="${ROOT}/d"] > button`)!) })
++    act(() => { fireEvent.click(view.container.querySelector(`[data-files-path="${ROOT}/d"] > div > button:first-child`)!) })
+     await act(() => script.settle({ ok: true, value: { entries: [], truncated: false } }))
+     expect(view.container.querySelector('[data-files-row="empty"]')?.textContent).toBe(zh.empty)
+   })
+@@ -169,7 +173,7 @@ describe('FilesBody', () => {
+     const child = `${ROOT}/src`
+     const collapsed = `${ROOT}/docs`
+     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+-    act(() => { fireEvent.click(view.container.querySelector(`[data-files-path="${child}"] > button`)!) })
++    act(() => { fireEvent.click(view.container.querySelector(`[data-files-path="${child}"] > div > button:first-child`)!) })
+     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+     // A level listed earlier and since collapsed is dropped, not re-fetched.
+     act(() => { instance.actions.loaded(TAB, collapsed, ROOT_LEVEL) })
+diff --git a/packages/client/ui-sidebar-files/tests/mount.client.tsx b/packages/client/ui-sidebar-files/tests/mount.client.tsx
+index 54131b5e31..6ecb8bf911 100644
+--- a/packages/client/ui-sidebar-files/tests/mount.client.tsx
++++ b/packages/client/ui-sidebar-files/tests/mount.client.tsx
+@@ -15,7 +15,7 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import type { SidebarRightTabActions } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+ import { filesFace } from '../src/client/face.ts'
+-import type { FilesInjected } from '../src/client/face.ts'
++import type { CreateWorkspaceEntry, FilesInjected } from '../src/client/face.ts'
+ import { FilesBody } from '../src/client/FilesBody.tsx'
+ import type { FilesBodyProps } from '../src/client/FilesBody.tsx'
+ import { zh } from '../src/client/locales.ts'
+@@ -58,10 +58,10 @@ export interface Mounted {
+ }
+ 
+ /** One store instance, one face, one owner share. */
+-function harness(cwd: string | null) {
++function harness(cwd: string | null, create?: CreateWorkspaceEntry) {
+   const instance = createFilesStore().create()
+   const script = scriptedList()
+-  const face = filesFace(script.list)(SESSION, instance.actions)
++  const face = filesFace(script.list, create)(SESSION, instance.actions)
+   const controller = new AbortController()
+   const tabActions: MockedTabActions = {
+     openResource: vi.fn<SidebarRightTabActions['openResource']>(),
+@@ -95,8 +95,8 @@ function harness(cwd: string | null) {
+  * Mount the body.
+  * @param cwd - the session's working directory as `useSessions` reports it; `null` for a session without one.
+  */
+-export function mountBody(cwd: string | null = ROOT): Mounted {
+-  const { shared, ...hands } = harness(cwd)
++export function mountBody(cwd: string | null = ROOT, create?: CreateWorkspaceEntry): Mounted {
++  const { shared, ...hands } = harness(cwd, create)
+   const view = render(<FilesBody {...shared as unknown as FilesBodyProps} />)
+   return { ...hands, view, remount: () => render(<FilesBody {...shared as unknown as FilesBodyProps} />) }
+ }
+diff --git a/packages/client/ui-sidebar-files/tests/navigation.client.spec.ts b/packages/client/ui-sidebar-files/tests/navigation.client.spec.ts
+new file mode 100644
+index 0000000000..42089e0e76
+--- /dev/null
++++ b/packages/client/ui-sidebar-files/tests/navigation.client.spec.ts
+@@ -0,0 +1,50 @@
++import { describe, expect, it } from 'vitest'
++import type { SessionId } from '@deepseek-ai/dsh-session/types'
++import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
++import { createFilesStore } from '../src/client/store.ts'
++import { filesFace } from '../src/client/face.ts'
++import { directoryCrumbs, parentInWorkspace } from '../src/client/navigation.ts'
++import { scriptedList } from './scripted-list.client.ts'
++const tab = 'tab-files' as TabId, root = '/工作区 空格'
++const level = (path: string) => ({ entries: [], truncated: false, absolutePath: path, rootPath: root })
++function mount(){ const store = createFilesStore().create(), script = scriptedList(), abort = new AbortController(); const face = filesFace(script.list)('s' as SessionId, store.actions); face.start(tab, root, abort.signal); return { store, script, abort, face, state:()=>store.getSnapshot().byTab[tab]! } }
++describe('native Files navigation owner', () => {
++ it('canonical directory changes history and back/forward preserve its identity', async () => {
++  const h = mount(); await h.script.settle({ ok:true,value:level(root) })
++  h.face.navigate(tab, './中文', h.abort.signal); await h.script.settle({ok:true,value:level(root+'/中文')})
++  expect(h.state().currentPath).toBe(root+'/中文'); expect(h.state().history).toEqual([root,root+'/中文'])
++  h.face.navigate(tab, root, h.abort.signal, 0); await h.script.settle({ok:true,value:level(root)})
++  expect(h.state().historyIndex).toBe(0)
++  h.face.navigate(tab, root+'/中文', h.abort.signal, 1); await h.script.settle({ok:true,value:level(root+'/中文')})
++  expect(h.state().historyIndex).toBe(1); expect(h.state().history).toHaveLength(2)
++ })
++ it('late A navigation never overwrites B or clears B pending state', async () => {
++  const h=mount(); await h.script.settle({ok:true,value:level(root)})
++  h.face.navigate(tab,root+'/A',h.abort.signal); h.face.navigate(tab,root+'/B',h.abort.signal)
++  await h.script.settle({ok:true,value:level(root+'/A')}); expect(h.state().pendingPath).toBe(root+'/B'); expect(h.state().currentPath).toBe(root)
++  await h.script.settle({ok:true,value:level(root+'/B')}); expect(h.state().currentPath).toBe(root+'/B'); expect(h.state().pendingPath).toBeUndefined()
++ })
++ it('abort removes the tab; its late navigation cannot recreate a bucket', async () => {
++  const h=mount(); await h.script.settle({ok:true,value:level(root)})
++  h.face.navigate(tab,root+'/A',h.abort.signal); h.abort.abort()
++  await h.script.settle({ok:true,value:level(root+'/A')}); expect(h.store.getSnapshot().byTab[tab]).toBeUndefined()
++ })
++ it('expansion does not change directory; hiding uses the same store', async () => {
++  const h=mount(); await h.script.settle({ok:true,value:level(root)})
++  h.face.toggle(tab,root+'/A',false,h.abort.signal); await h.script.settle({ok:true,value:level(root+'/A')})
++  expect(h.state().currentPath).toBe(root); h.store.actions.hidden(tab,true); expect(h.state().showHidden).toBe(true)
++ })
++ it('refresh of a pending directory retires the old request and completes navigation', async () => {
++  const h=mount(); await h.script.settle({ok:true,value:level(root)})
++  h.face.navigate(tab,root+'/A',h.abort.signal); h.face.load(tab,root+'/A',h.abort.signal)
++  await h.script.settle({ok:true,value:level(root+'/A')});expect(h.state().pendingPath).toBe(root+'/A')
++  await h.script.settle({ok:true,value:level(root+'/A')});expect(h.state().pendingPath).toBeUndefined();expect(h.state().currentPath).toBe(root+'/A')
++ })
++ it('root parent is unavailable and crumbs retain Chinese/space names', () => {
++  expect(parentInWorkspace(root,root)).toBeUndefined()
++  expect(directoryCrumbs(root,root+'/中文/空 格').map(row=>row.name)).toEqual(['工作区 空格','中文','空 格'])
++  expect(directoryCrumbs(root,'/工作区 空格-other')).toEqual([])
++  expect(directoryCrumbs('/work', '/work/a\\b').at(-1)).toEqual({path:'/work/a\\b',name:'a\\b'})
++  expect(parentInWorkspace('C:\\work','C:\\work\\child')).toBe('C:\\work')
++ })
++})
+diff --git a/packages/client/ui-sidebar-files/tests/operations.client.spec.tsx b/packages/client/ui-sidebar-files/tests/operations.client.spec.tsx
+new file mode 100644
+index 0000000000..faedf56135
+--- /dev/null
++++ b/packages/client/ui-sidebar-files/tests/operations.client.spec.tsx
+@@ -0,0 +1,77 @@
++// @vitest-environment jsdom
++import { afterEach, describe, expect, it, vi } from 'vitest'
++import { act, cleanup, fireEvent } from '@testing-library/react'
++import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
++import type { CreateWorkspaceEntry } from '../src/client/face.ts'
++import { mountBody, ROOT, SESSION, TAB } from './mount.client.tsx'
++import { zh } from '../src/client/locales.ts'
++afterEach(()=>{cleanup()})
++const level=(path=ROOT)=>({entries:[],truncated:false,absolutePath:path,rootPath:ROOT})
++async function start(create?:CreateWorkspaceEntry){const h=mountBody(ROOT,create);await act(()=>h.script.settle({ok:true,value:level()}));return h}
++async function fill(h:Awaited<ReturnType<typeof start>>,kind:'file'|'directory',name:string){
++ await act(async()=>{fireEvent.click(h.view.getByRole('button',{name:kind==='file'?zh.newFile:zh.newFolder}))})
++ fireEvent.change(h.view.getByRole('textbox',{name:zh.entryName}),{target:{value:name}})
++ await act(async()=>{fireEvent.click(h.view.getByRole('button',{name:zh.create}));await Promise.resolve()})
++}
++describe('native Files operations in the real component/store',()=>{
++ it('directory entry updates canonical path, breadcrumbs and back/forward; expansion keeps its current path',async()=>{
++  const h=mountBody();await act(()=>h.script.settle({ok:true,value:{...level(),entries:[{name:'中文 空格',type:'directory'}]}}))
++  fireEvent.click(h.view.getByRole('button',{name:'展开或收起 中文 空格'}));await act(()=>h.script.settle({ok:true,value:level(ROOT+'/中文 空格')}))
++  expect(h.instance.getSnapshot().byTab[TAB]!.currentPath).toBe(ROOT)
++  fireEvent.click(h.view.getByRole('button',{name:'中文 空格'}));await act(()=>h.script.settle({ok:true,value:level(ROOT+'/中文 空格')}))
++  expect((h.view.getByRole('textbox',{name:zh.path}) as HTMLInputElement).value).toBe(ROOT+'/中文 空格')
++  expect(h.view.getByRole('navigation',{name:zh.breadcrumbs}).textContent).toContain('中文 空格')
++  fireEvent.click(h.view.getByRole('button',{name:zh.back}));await act(()=>h.script.settle({ok:true,value:level()}))
++  expect(h.instance.getSnapshot().byTab[TAB]!.currentPath).toBe(ROOT)
++  fireEvent.click(h.view.getByRole('button',{name:zh.forward}));await act(()=>h.script.settle({ok:true,value:level(ROOT+'/中文 空格')}))
++  expect(h.instance.getSnapshot().byTab[TAB]!.currentPath).toBe(ROOT+'/中文 空格')
++ })
++ it('copy path uses the canonical directory value, including Chinese spaces',async()=>{
++  const previous=Object.getOwnPropertyDescriptor(navigator,'clipboard'),writeText=vi.fn().mockResolvedValue(undefined)
++  Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText}})
++  try{const h=await start();act(()=>h.face.navigate(TAB,ROOT+'/中文 空格',h.controller.signal));await act(()=>h.script.settle({ok:true,value:level(ROOT+'/中文 空格')}))
++   await act(async()=>{fireEvent.click(h.view.getByRole('button',{name:zh.copyPath}));await Promise.resolve()});expect(writeText).toHaveBeenCalledWith(ROOT+'/中文 空格')
++  }finally{if(previous)Object.defineProperty(navigator,'clipboard',previous);else Reflect.deleteProperty(navigator,'clipboard')}
++ })
++ it('Cancel creates nothing and empty creation remains disabled',async()=>{
++  const create=vi.fn<CreateWorkspaceEntry>();const h=await start(create)
++  fireEvent.click(h.view.getByRole('button',{name:zh.newFolder}))
++  expect((h.view.getByRole('button',{name:zh.create}) as HTMLButtonElement).disabled).toBe(true)
++  fireEvent.click(h.view.getByRole('button',{name:zh.cancel}));expect(create).not.toHaveBeenCalled()
++  expect(h.view.queryByRole('dialog')).toBeNull()
++ })
++ it('file creation uses the current Session/parent and opens the existing document address',async()=>{
++  const create=vi.fn<CreateWorkspaceEntry>().mockResolvedValue({ok:true,value:{absolutePath:ROOT+'/notes.txt',path:'notes.txt',type:'file'}})
++  const h=await start(create);await fill(h,'file','notes.txt')
++  expect(create).toHaveBeenCalledWith(SESSION,ROOT,'notes.txt','file',expect.any(AbortSignal))
++  expect(h.tabActions.openResource).toHaveBeenCalledWith('dsh-resource://file/session/s-test/notes.txt')
++  expect(h.script.outstanding()).toEqual([ROOT]);await act(()=>h.script.settle({ok:true,value:level()}))
++ })
++ it('a real write-denied reply keeps the dialog/draft and never opens a fake document',async()=>{
++  const create=vi.fn<CreateWorkspaceEntry>().mockResolvedValue({ok:false,error:new RemoteError('workspace-file/write-denied','read-only',{path:ROOT})})
++  const h=await start(create);await fill(h,'directory','保留名字')
++  expect(h.view.getByRole('alert').textContent).toBe(zh['error.writeDenied'])
++  expect((h.view.getByRole('textbox',{name:zh.entryName}) as HTMLInputElement).value).toBe('保留名字')
++  expect(h.tabActions.openResource).not.toHaveBeenCalled()
++ })
++ it('old A create/finally never touches B create after directory scope changes',async()=>{
++  const pending:Array<{settle:(x:Awaited<ReturnType<CreateWorkspaceEntry>>)=>void;signal:AbortSignal}>=[]
++  const create=vi.fn<CreateWorkspaceEntry>((_s,_p,_n,_k,signal)=>new Promise(settle=>pending.push({settle,signal})))
++  const h=await start(create);await fill(h,'directory','A')
++  act(()=>h.face.navigate(TAB,ROOT+'/B',h.controller.signal));await act(()=>h.script.settle({ok:true,value:level(ROOT+'/B')}))
++  expect(pending[0]!.signal.aborted).toBe(true);await fill(h,'directory','B-child')
++  await act(async()=>{pending[0]!.settle({ok:true,value:{absolutePath:ROOT+'/A',path:'A',type:'directory'}});await Promise.resolve()})
++  expect((h.view.getByRole('button',{name:zh.create}) as HTMLButtonElement).disabled).toBe(true)
++  await act(async()=>{pending[1]!.settle({ok:true,value:{absolutePath:ROOT+'/B/B-child',path:'B/B-child',type:'directory'}});await Promise.resolve()})
++  expect(h.view.queryByRole('dialog')).toBeNull();expect(h.script.outstanding()).toEqual([ROOT+'/B'])
++  await act(()=>h.script.settle({ok:true,value:{...level(ROOT+'/B'),entries:[{name:'B-child',type:'directory'}]}}))
++  expect(h.instance.getSnapshot().byTab[TAB]!.selectedPath).toBe(ROOT+'/B/B-child')
++ })
++ it('creation of a dot folder makes the selected new entry visible',async()=>{
++  const create=vi.fn<CreateWorkspaceEntry>().mockResolvedValue({ok:true,value:{absolutePath:ROOT+'/.notes',path:'.notes',type:'directory'}})
++  const h=await start(create);await fill(h,'directory','.notes')
++  await act(()=>h.script.settle({ok:true,value:{...level(),entries:[{name:'.notes',type:'directory'}]}}))
++  expect(h.instance.getSnapshot().byTab[TAB]!.showHidden).toBe(true)
++  expect(h.view.getByRole('button',{name:'.notes'})).toBeDefined()
++ })
++})
+diff --git a/packages/client/ui-sidebar-files/tests/store.client.spec.ts b/packages/client/ui-sidebar-files/tests/store.client.spec.ts
+index c85ec67a9a..2bded9b5d4 100644
+--- a/packages/client/ui-sidebar-files/tests/store.client.spec.ts
++++ b/packages/client/ui-sidebar-files/tests/store.client.spec.ts
+@@ -33,7 +33,7 @@ describe('createFilesStore', () => {
+     const { actions } = store
+     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
+     actions.start(TAB, ROOT)
+-    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, levels: {}, expanded: [ROOT], scrollTop: 0 })
++    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, currentPath: ROOT, history: [ROOT], historyIndex: 0, showHidden: false, levels: {}, expanded: [ROOT], scrollTop: 0 })
+   })
+ 
+   it('walks one level through loading, ready, and failed', () => {
+@@ -75,7 +75,7 @@ describe('createFilesStore', () => {
+     actions.toggled(TAB, child)
+     actions.loaded(TAB, child, LEVEL)
+     actions.reset(TAB)
+-    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, levels: {}, expanded: [ROOT, child], scrollTop: 0 })
++    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, currentPath: ROOT, history: [ROOT], historyIndex: 0, showHidden: false, levels: {}, expanded: [ROOT, child], scrollTop: 0 })
+   })
+ 
+   it('remembers where the body is scrolled to', () => {
+diff --git a/packages/fs/fs-local/src/index.ts b/packages/fs/fs-local/src/index.ts
+index b755bbb0e5..2e00cd33f6 100644
+--- a/packages/fs/fs-local/src/index.ts
++++ b/packages/fs/fs-local/src/index.ts
+@@ -6,6 +6,7 @@
+ 
+ import { Context } from '@deepseek-ai/cordis'
+ import { constants as bufferConstants } from 'node:buffer'
++import { mkdir } from 'node:fs/promises'
+ import { isAbsolute, relative, resolve, sep } from 'node:path'
+ import { pathToFileURL } from 'node:url'
+ import z from '@deepseek-ai/schemastery'
+@@ -174,6 +175,20 @@ export class LocalFileSystem extends FileSystem {
+     }))
+   }
+ 
++  override async createDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
++    await this.withLock(String(target.targetKey), async () => {
++      if (signal?.aborted) throw new FsError('directory creation aborted', 'FS_ABORTED')
++      try {
++        // Use the exact canonical target checked by the policy backend, not the caller's alias.
++        await mkdir(String(target.targetKey))
++      } catch (error) {
++        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new FsError('directory already exists', 'FS_STALE_VERSION', { cause: error })
++        if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new FsError('parent directory no longer exists', 'FS_NOT_FOUND', { cause: error })
++        throw new FsError('directory creation failed', 'FS_IO_ERROR', { cause: error })
++      }
++    })
++  }
++
+   override async writeText(
+     target: FsTarget,
+     content: string,
+diff --git a/packages/fs/fs-sandbox/src/index.ts b/packages/fs/fs-sandbox/src/index.ts
+index 60dd6b3bad..a2456ca06d 100644
+--- a/packages/fs/fs-sandbox/src/index.ts
++++ b/packages/fs/fs-sandbox/src/index.ts
+@@ -77,6 +77,10 @@ export class SandboxedFileSystem extends LocalFileSystem {
+    *   the deployment fallback.
+    * @returns the write outcome from the inherited backend.
+    */
++  override async createDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
++    return super.createDirectory(await this.checkedTarget(target, sandboxPolicy), signal)
++  }
++
+   override async writeText(
+     target: FsTarget,
+     content: string,
+diff --git a/packages/fs/fs/src/index.ts b/packages/fs/fs/src/index.ts
+index bfa05bf257..45045080ce 100644
+--- a/packages/fs/fs/src/index.ts
++++ b/packages/fs/fs/src/index.ts
+@@ -10,6 +10,7 @@
+ 
+ import { Context, Service } from '@deepseek-ai/cordis'
+ import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
++import { FsError } from './types.ts'
+ import type {
+   FsDirEntry,
+   FsEditOutcome,
+@@ -235,6 +236,11 @@ export abstract class FileSystem extends Service {
+    */
+   abstract listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]>
+ 
++  /** Create one directory, never its missing parents. The mutation uses the same task policy as text writes. */
++  createDirectory(_target: FsTarget, _signal?: AbortSignal, _sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
++    return Promise.reject(new FsError('filesystem backend does not support directory creation', 'FS_IO_ERROR'))
++  }
++
+   /**
+    * Atomically create or replace UTF-8 text. `expected` guards intent and
+    * staleness; omission allows unconditional overwrite.

@@ -1,0 +1,84 @@
+diff --git a/packages/client/ui-settings-general/src/client/SettingsRoot.tsx b/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
+index d5b1df1..da209e6 100644
+--- a/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
++++ b/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
+@@ -128,6 +128,8 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
+     setActiveId(id)
+     setOpen(true)
+   }, [])
++  // Extra owner action is optional to older trigger consumers; no new service or state.
++  const triggerControl = { wide, openSettings: () => { setOpen(true) } }
+ 
+   // The ledger tick keeps the nav rows fresh: registrants re-register with
+   // freshly localized text on locale change, and the trigger/header/close
+@@ -188,7 +190,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
+           aria-expanded={open}
+           onClick={() => { setOpen(true) }}
+         >
+-          {renderSlot('settings.trigger', { wide })}
++          {renderSlot('settings.trigger', triggerControl)}
+         </button>
+         <ConnectionIndicator
+           state={wide ? connectionIndicator : undefined}
+diff --git a/packages/client/ui-settings-general/src/client/chrome.tsx b/packages/client/ui-settings-general/src/client/chrome.tsx
+index 9698d90..85daa17 100644
+--- a/packages/client/ui-settings-general/src/client/chrome.tsx
++++ b/packages/client/ui-settings-general/src/client/chrome.tsx
+@@ -5,11 +5,16 @@
+  * reads each entry's `label` option for aria text.
+  */
+ import { IconSettingsOutline14, IconSettingsOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
++import { useEffect } from 'react'
+ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+ import css from './chrome.module.css'
++import { installSettingsOpenShortcut } from './settings-open-shortcut.ts'
+ 
+ /** Trigger content props: the sidebar column state + the standard locale seat. */
+-export type TriggerContentProps = PropsRuntime<'settings.trigger'> & PropsLocale<'settings'>
++export type TriggerContentProps = PropsRuntime<'settings.trigger'> & PropsLocale<'settings'> & {
++  /** Optional shell-owned action, so existing slot hosts remain compatible. */
++  openSettings?: () => void
++}
+ 
+ /** Header content props: the standard locale seat only. */
+ export type HeaderContentProps = PropsRuntime<'settings.header'> & PropsLocale<'settings'>
+@@ -19,7 +24,8 @@ export type HeaderContentProps = PropsRuntime<'settings.header'> & PropsLocale<'
+  * @param props - composed slot props.
+  * @returns the trigger content fragment.
+  */
+-export function TriggerContent({ wide, t }: TriggerContentProps) {
++export function TriggerContent({ wide, t, openSettings }: TriggerContentProps) {
++  useEffect(() => openSettings === undefined ? undefined : installSettingsOpenShortcut(openSettings), [openSettings])
+   return (
+     <>
+       {wide ? <IconSettingsOutline16 size={16} /> : <IconSettingsOutline14 size={18} />}
+diff --git a/packages/client/ui-settings-general/src/client/settings-open-shortcut.ts b/packages/client/ui-settings-general/src/client/settings-open-shortcut.ts
+new file mode 100644
+index 0000000..b200f8f
+--- /dev/null
++++ b/packages/client/ui-settings-general/src/client/settings-open-shortcut.ts
+@@ -0,0 +1,11 @@
++/** Compatibility helper: the Settings shell keeps its own single open state. */
++export function installSettingsOpenShortcut(open: () => void, target: Pick<Document, 'addEventListener' | 'removeEventListener'> = document): () => void {
++  const listener = (event: KeyboardEvent): void => {
++    if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.shiftKey) return
++    if (!(event.ctrlKey !== event.metaKey) || (event.code !== 'Comma' && event.key !== ',')) return
++    event.preventDefault()
++    open()
++  }
++  target.addEventListener('keydown', listener as EventListener)
++  return () => { target.removeEventListener('keydown', listener as EventListener) }
++}
+diff --git a/packages/client/ui-settings-general/tests/settings-root.client.spec.tsx b/packages/client/ui-settings-general/tests/settings-root.client.spec.tsx
+--- a/packages/client/ui-settings-general/tests/settings-root.client.spec.tsx
++++ b/packages/client/ui-settings-general/tests/settings-root.client.spec.tsx
+@@ -140,7 +140,8 @@
+     const { renderSlot } = mount({ wide, dictionary })
+     const trigger = screen.getByRole('button', { name })
+     expect(trigger.getAttribute('aria-label')).toBe(name)
+-    expect(renderSlot).toHaveBeenCalledWith('settings.trigger', { wide })
++    expect(renderSlot).toHaveBeenCalledWith('settings.trigger',
++      expect.objectContaining({ wide, openSettings: expect.any(Function) }))
+     expect(trigger.getAttribute('aria-expanded')).toBe('false')
+     trigger.focus()
+     fireEvent.click(trigger, { detail: 0 })

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "packId": "unitree_go2",
+  "version": "2026.09.22",
+  "mode": "base-policy",
+  "source": {
+    "provider": "github",
+    "repo": "inria-paris-robotics-lab/go2_onnx_controller",
+    "commit": "c1729e1a4aa2e7e1091ccff42be68d42bd054764"
+  },
+  "adapter": "onnx",
+  "observation": {
+    "dim": 98,
+    "frames": 2,
+    "note": "98 维观测、两帧拼接（历史帧）；观测语义与关节顺序按 go2_onnx_controller 口径，与 robot_describe 实测 joint 名逐项核对（FR/FL/RR/RL × hip/thigh/calf 共 12 个腿关节）"
+  },
+  "action": {
+    "dim": 12,
+    "semantics": "腿关节位置目标（12 维）",
+    "pd": {
+      "kp": 28,
+      "kd": 0.5
+    },
+    "scale": 0.25,
+    "formula": "关节目标 = 默认站姿 + action × 0.25（比例 0.25）"
+  },
+  "freq": {
+    "policyHz": 50
+  },
+  "deps": [
+    "onnxruntime==1.23.2"
+  ],
+  "weights": {
+    "bundled": false,
+    "file": null,
+    "bytes": null,
+    "sha256": null,
+    "availability": "resolvable",
+    "providedBy": "inria-paris-robotics-lab/go2_onnx_controller 仓内 onnx_inference/data/model.onnx（不随本包分发；权重只在取件时经该已登记来源落客户端缓存）",
+    "pin": "inria-paris-robotics-lab/go2_onnx_controller@c1729e1a4aa2e7e1091ccff42be68d42bd054764",
+    "resolution": {
+      "provider": "github",
+      "modelId": "inria-paris-robotics-lab/go2_onnx_controller",
+      "revision": "c1729e1a4aa2e7e1091ccff42be68d42bd054764"
+    }
+  },
+  "status": "ready",
+  "notes": "INRIA ONNX 适配可用：客户端已登记 inria-go2-onnx-v1 适配器（python/prepare_go2.py，实跑回执见 bugfixHistory）。变更是**权重声明如实化**：本包不随包分发权重（bundled=false），权重经已登记来源 inria-paris-robotics-lab/go2_onnx_controller@c1729e1a… 取件（policy_download provider=github）。禁止把本适配器借给 Go1/G1（观测、关节顺序、PD、动作尺度、频率均不同）。行为级行走验收状态见 tests/acceptance.md（未跑即 UNVERIFIED，不因 policy 面就绪而升级）。"
+}

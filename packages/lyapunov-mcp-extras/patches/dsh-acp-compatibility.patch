@@ -1,0 +1,288 @@
+diff --git a/packages/acp/acp/src/content.ts b/packages/acp/acp/src/content.ts
+index e31807b27..8783d2912 100644
+--- a/packages/acp/acp/src/content.ts
++++ b/packages/acp/acp/src/content.ts
+@@ -3,7 +3,7 @@
+ import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
+ import type { Context } from '@deepseek-ai/cordis'
+ import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
+-import type { ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
++import type { FileAttachmentRef, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
+ import type { ModelSelection } from '@deepseek-ai/dsh-agent'
+ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+
+@@ -128,6 +128,7 @@ export async function admitAcpPrompt(
+   signal: AbortSignal,
+ ): Promise<ContentBlock[]> {
+   const images: SaveImageAttachment[] = []
++  const files: Array<{ data: Uint8Array; name: string }> = []
+   for (const block of prompt) {
+     switch (block.type) {
+       case 'text':
+@@ -140,13 +141,28 @@ export async function admitAcpPrompt(
+       case 'audio':
+         throw new AcpContentError('audio prompt content is not supported', 'invalid')
+       case 'resource':
+-        throw new AcpContentError('embedded resource prompt content is not supported', 'invalid')
++        if ('blob' in block.resource) {
++          if (!CANONICAL_BASE64.test(block.resource.blob)) throw new AcpContentError('embedded resource must use canonical base64', 'invalid')
++          const data = Buffer.from(block.resource.blob, 'base64')
++          if (data.toString('base64') !== block.resource.blob) throw new AcpContentError('embedded resource must use canonical base64', 'invalid')
++          const name = block.resource.uri.split('/').at(-1)?.split('?')[0] || 'embedded-resource'
++          files.push({ data, name })
++        }
++        break
+       /* v8 ignore next 2 -- ACP ContentBlock is a closed generated union. */
+       default:
+         throw new AcpContentError('unsupported ACP prompt content', 'invalid')
+     }
+   }
+
++  const fileRefs: FileAttachmentRef[] = []
++  if (files.length > 0) {
++    const attachments = ctx.get('attachments')
++    if (!attachments) throw new AcpContentError('no attachment store is mounted for embedded resources', 'invalid')
++    for (const file of files) { signal.throwIfAborted(); fileRefs.push(await attachments.saveFile(file)) }
++    signal.throwIfAborted()
++  }
++
+   let refs: readonly ImageAttachmentRef[] = []
+   if (images.length > 0) {
+     const attachments = ctx.get('attachments')
+@@ -167,6 +183,7 @@ export async function admitAcpPrompt(
+   const content: ContentBlock[] = []
+   let pendingText = ''
+   let imageIndex = 0
++  let fileIndex = 0
+   const flushText = (): void => {
+     if (pendingText.length === 0) return
+     content.push({ type: 'text', text: pendingText })
+@@ -186,9 +203,14 @@ export async function admitAcpPrompt(
+         content.push({ type: 'image', attachment: ref })
+         break
+       }
+-      /* v8 ignore start -- the validation pass above rejects both tags before reconstruction. */
++      case 'resource': {
++        pendingText += `\n[resource uri=${JSON.stringify(block.resource.uri)} mimeType=${JSON.stringify(block.resource.mimeType ?? 'application/octet-stream')}]\n`
++        if ('text' in block.resource) pendingText += block.resource.text
++        else { flushText(); content.push({ type: 'file', attachment: fileRefs[fileIndex++] as FileAttachmentRef }) }
++        break
++      }
++      /* v8 ignore start -- the validation pass above rejects audio before reconstruction. */
+       case 'audio':
+-      case 'resource':
+         break
+       /* v8 ignore stop */
+       /* v8 ignore next 2 -- validated by the first closed-union switch. */
+@@ -197,7 +219,7 @@ export async function admitAcpPrompt(
+     }
+   }
+   flushText()
+-  if (!content.some(block => block.type === 'image' || (block.type === 'text' && block.text.trim().length > 0))) {
++  if (!content.some(block => block.type === 'image' || block.type === 'file' || (block.type === 'text' && block.text.trim().length > 0))) {
+     throw new AcpContentError('empty prompt', 'invalid')
+   }
+   return content
+@@ -218,6 +240,13 @@ export async function assistantBlockToAcp(
+   if (block.type === 'text') {
+     return block.text.length === 0 ? undefined : { type: 'text', text: block.text }
+   }
++  if (block.type === 'file') {
++    const attachments = ctx.get('attachments')
++    if (!attachments) throw new AcpContentError('cannot deliver stored file without attachment store', 'internal')
++    const chunks: Uint8Array[] = []
++    for await (const chunk of attachments.readFileStream(block.attachment)) chunks.push(chunk)
++    return { type: 'resource', resource: { uri: `attachment://${block.attachment.attachmentId}/${encodeURIComponent(block.attachment.name)}`, mimeType: 'application/octet-stream', blob: Buffer.concat(chunks).toString('base64') } }
++  }
+   if (block.type !== 'image') return undefined
+   const attachments = ctx.get('attachments')
+   if (attachments === undefined) {
+diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
+index b346dd763..5395aee26 100644
+--- a/packages/acp/acp/src/index.ts
++++ b/packages/acp/acp/src/index.ts
+@@ -31,6 +31,10 @@ import {
+   type CloseSessionResponse,
+   type InitializeRequest,
+   type InitializeResponse,
++  type LoadSessionRequest,
++  type LoadSessionResponse,
++  type ForkSessionRequest,
++  type ForkSessionResponse,
+   type ListSessionsRequest,
+   type ListSessionsResponse,
+   type NewSessionRequest,
+@@ -181,9 +185,10 @@ export function apply(ctx: Context, config: AcpConfig): void {
+         protocolVersion: PROTOCOL_VERSION,
+         agentInfo: { name: 'deepseek-harness-acp', version: '0.0.1' },
+         agentCapabilities: {
+-          mcpCapabilities: { http: true },
+-          promptCapabilities: { image: imagePromptEnabled, audio: false, embeddedContext: false },
+-          sessionCapabilities: { close: {}, list: {}, resume: {} },
++          loadSession: true,
++          mcpCapabilities: { http: true, sse: true },
++          promptCapabilities: { image: imagePromptEnabled, audio: false, embeddedContext: ctx.get('attachments') !== undefined },
++          sessionCapabilities: { close: {}, list: {}, resume: {}, fork: {} },
+         },
+         authMethods: [],
+       }
+@@ -246,7 +251,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
+       activating.add(sessionId)
+       return (async (): Promise<ResumeSessionResponse> => {
+         const persisted = (await persistence.stat(sessionId, { signal }))?.header
+-        if (persisted === undefined || persisted.origin === 'subagent' || persisted.parentSession !== undefined) {
++        if (persisted === undefined || persisted.origin === 'subagent' || (persisted.parentSession !== undefined && !persisted.isSeeded)) {
+           throw invalidParams(`session is not resumable: ${sessionId}`)
+         }
+         if (!await sameDirectory(persisted.cwd, params.cwd)) {
+@@ -289,6 +294,33 @@ export function apply(ctx: Context, config: AcpConfig): void {
+       })().finally(() => { activating.delete(sessionId) })
+     },
+
++    async loadSession(params: LoadSessionRequest, signal: AbortSignal): Promise<LoadSessionResponse> {
++      const result = await implementation.resumeSession(params, signal)
++      const id = brandString<SessionId>(params.sessionId), record = requireSession(id)
++      try { await record.replayHistory(); return result }
++      catch (error) { sessions.delete(id); await record.close('session/load replay failed'); throw error }
++    },
++
++    async forkSession(params: ForkSessionRequest, signal: AbortSignal): Promise<ForkSessionResponse> {
++      assertOpen(); validateWorkspaceParams(params)
++      const sourceId = brandString<SessionId>(params.sessionId), active = sessions.get(sourceId)?.agent.session
++      const handle = active ? undefined : await persistence.open(sourceId, 'read', { signal })
++      let source
++      try { source = { header: active?.header ?? handle!.header, events: active?.snapshotEvents() ?? (await handle!.read(undefined, undefined, { signal })).events } }
++      finally { await handle?.close() }
++      if (source.header.origin === 'subagent' || (source.header.parentSession !== undefined && !source.header.isSeeded) || !await sameDirectory(source.header.cwd, params.cwd)) throw invalidParams('fork source workspace or ownership does not match')
++      const boundary = source.events.findLast(event => event.type === 'turn/end')
++      if (!boundary) throw invalidParams('session has no completed turn to fork')
++      let cut = boundary.seq + 1
++      while (cut < source.events.length && source.events[cut]?.type !== 'turn/start') cut++
++      const sessionId = brandString<SessionId>(randomUUID())
++      const record = await AcpSession.create(ctx, { sessionId, cwd: params.cwd, mcpServers: params.mcpServers ?? [], agentOptions: agentOptions(config), fallbackSelection: initialSelection(config), signal, notify, seed: source.events.slice(0, cut), parentSession: sourceId })
++      if (closed) { await record.close('connection closed during fork'); throw internalError('connection closed during fork') }
++      sessions.set(sessionId, record)
++      try { const configOptions = await record.configOptions(signal); await ctx.sessions.flush(record.agent.session); await record.replayHistory(); return { sessionId, configOptions } }
++      catch (error) { sessions.delete(sessionId); await record.close('session/fork activation failed'); throw error }
++    },
++
+     async listSessions(params: ListSessionsRequest, signal: AbortSignal): Promise<ListSessionsResponse> {
+       assertOpen()
+       if (params.cwd !== undefined && params.cwd !== null && !isAbsolute(params.cwd)) {
+@@ -307,7 +339,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
+             || activating.has(header.id)
+             || ctx.sessions.get(header.id) !== undefined
+             || header.origin === 'subagent'
+-            || header.parentSession !== undefined
++            || (header.parentSession !== undefined && !header.isSeeded)
+             || header.cwd === undefined
+             || !isAbsolute(header.cwd)
+         ) return undefined
+@@ -375,7 +407,9 @@ export function apply(ctx: Context, config: AcpConfig): void {
+     Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
+     Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
+   )
++  // The SDK awaits each nonmatching handler; dispatch cancellation before request routes.
+   const app = createAcpAgentApp({ name: 'deepseek-harness-acp' })
++    .onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params))
+     .onRequest(methods.agent.initialize, ({ params }) => implementation.initialize(params))
+     .onRequest(methods.agent.authenticate, async ({ params }) => {
+       await implementation.authenticate(params)
+@@ -384,10 +418,11 @@ export function apply(ctx: Context, config: AcpConfig): void {
+     .onRequest(methods.agent.session.new, ({ params, signal }) => implementation.newSession(params, signal))
+     .onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal))
+     .onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal))
++    .onRequest(methods.agent.session.load, ({ params, signal }) => implementation.loadSession(params, signal))
++    .onRequest(methods.agent.session.fork, ({ params, signal }) => implementation.forkSession(params, signal))
+     .onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params))
+     .onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal))
+     .onRequest(methods.agent.session.prompt, ({ params, signal }) => implementation.prompt(params, signal))
+-    .onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params))
+   const connection = app.connect(stream)
+   const conn: AgentContext = connection.client
+
+diff --git a/packages/acp/acp/src/mcp.ts b/packages/acp/acp/src/mcp.ts
+index 527b064bb..f2a758655 100644
+--- a/packages/acp/acp/src/mcp.ts
++++ b/packages/acp/acp/src/mcp.ts
+@@ -57,11 +57,11 @@ function resolveMcpConfigs(servers: readonly McpServer[], sessionCwd: string): M
+       }))
+       return { ...config, env }
+     }
+-    if (server.type === 'http') {
++    if (server.type === 'http' || server.type === 'sse') {
+       assertHttpUrl(server.url, `mcpServers[${index}].url`)
+       const headers = entriesToRecord(server.headers, `mcpServers[${index}].headers`, 'header')
+       const config = validateClientConfig(index, () => McpClient.Config({
+-        transport: 'streamable-http',
++        transport: server.type === 'sse' ? 'sse' : 'streamable-http',
+         serverName,
+         url: server.url,
+         headers,
+diff --git a/packages/acp/acp/src/session.ts b/packages/acp/acp/src/session.ts
+index 3fff07535..bab7f0c13 100644
+--- a/packages/acp/acp/src/session.ts
++++ b/packages/acp/acp/src/session.ts
+@@ -12,8 +12,8 @@ import {
+ } from '@agentclientprotocol/sdk'
+ import type { Agent, AgentHandle, AgentOptions, ModelSelection } from '@deepseek-ai/dsh-agent'
+ import { createUserMessage, errorChain, type UserMessage } from '@deepseek-ai/dsh-llm'
+-import { type Session, type SessionEvent, type SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session'
+-import { AcpContentError, admitAcpPrompt } from './content.ts'
++import { SessionLogOffset, type Session, type SessionEvent, type SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session'
++import { AcpContentError, admitAcpPrompt, assistantBlockToAcp } from './content.ts'
+ import { turnEndToStopReason } from './codec.ts'
+ import { mountAcpMcpServers } from './mcp.ts'
+ import { AcpModelControl } from './model-control.ts'
+@@ -38,6 +38,8 @@ interface AcpSessionBuildOptions {
+ /** Fresh ACP session construction inputs. */
+ export interface CreateAcpSessionOptions extends AcpSessionBuildOptions {
+   sessionId: SessionId
++  seed?: readonly SessionEvent[]
++  parentSession?: SessionId
+ }
+
+ /** Persisted ACP session construction inputs. */
+@@ -127,10 +129,12 @@ export class AcpSession {
+     const modelControl = new AcpModelControl(ctx.llm, options.fallbackSelection)
+     const handle = await ctx.agents.create({
+       sessionId: options.sessionId,
+-      meta: { cwd: options.cwd },
++      meta: { cwd: options.cwd, ...(options.seed ? { parentSession: options.parentSession!, isSeeded: true } : {}) },
++      ...(options.seed ? { seed: options.seed, inheritedEventCount: SessionLogOffset(options.seed.length) } : {}),
+       agentOptions: options.agentOptions,
+       signal: options.signal,
+-      setup: async (agentCtx) => {
++      setup: async (agentCtx, agent) => {
++        if (options.seed) modelControl.selection.current = selectionFor(agent.session.requestHeader(), options.fallbackSelection)
+         modelControl.install(agentCtx)
+         await mountAcpMcpServers(agentCtx, options.mcpServers, options.cwd)
+       },
+@@ -186,6 +190,27 @@ export class AcpSession {
+     return this.agent.session === session
+   }
+
++  /** Replay committed user/assistant/tool history for session/load and session/fork. */
++  async replayHistory(): Promise<void> {
++    this.assertActive()
++    for (const event of this.agent.session.snapshotEvents()) {
++      if (event.type === 'user/message' && event.data.source.kind === 'user') {
++        for (const block of event.data.content) {
++          const content = await assistantBlockToAcp(this.ctx, block)
++          if (content) await this.notify({ sessionId: this.agent.session.id, update: { sessionUpdate: 'user_message_chunk', messageId: event.data.id, content } })
++        }
++      } else if (event.type === 'assistant/message') {
++        for (const update of await assistantUpdates(this.ctx, this.agent.session, event)) {
++          if (update.sessionUpdate !== 'usage_update') await this.notify({ sessionId: this.agent.session.id, update })
++        }
++      } else if (event.type === 'tool/call') {
++        await this.notify({ sessionId: this.agent.session.id, update: toolCallUpdate(event) })
++      } else if (event.type === 'tool/result') {
++        await this.notify({ sessionId: this.agent.session.id, update: await toolResultUpdate(this.ctx, event) })
++      }
++    }
++  }
++
+   /**
+    * Return the complete standard model configuration state.
+    * @param signal - optional request cancellation.

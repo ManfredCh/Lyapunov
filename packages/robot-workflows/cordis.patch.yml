@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-robot-workflows
+      name: '@lyapunov/robot-workflows/plugin'

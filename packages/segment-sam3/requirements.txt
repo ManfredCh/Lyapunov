@@ -1,0 +1,10 @@
+# PyTorch wheel 安装来源见 script/dependencies/sam3-install.sh。
+torch==2.10.0
+torchvision==0.25.0
+setuptools==80.9.0
+numpy==1.26.4
+einops==0.8.2
+pycocotools==2.0.11
+psutil==7.2.2
+huggingface_hub==1.30.0
+# sam3 由 SOURCE.json 指定官方源码commit，隔离环境中 editable 安装。

@@ -1,0 +1,458 @@
+{
+  "repository": "https://github.com/ManfredCh/deepseek-harness.git",
+  "commit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
+  "version": "0.1.6-alpha.1",
+  "directory": ".upstream/deepseek-harness-20260911-candidate",
+  "registryStatus": "2026-09-11 已获取官方 dsh-v0.1.5-rc.2 标签并从同一commit构建；不依赖npm版本替代。2026-09-14 起钉死自有 fork（ManfredCh/deepseek-harness）的 lyapunov-patched 分支头：基线 fb2c4b9e + 14 个 vendored 补丁逐个成 commit；上游更新经 fetch 官方 tags 后 rebase 控制节奏。2026-09-15 14 个补丁 rebase 到官方 dsh-v0.1.6-alpha.1（分支 lyapunov-patched-0.1.6，remote-node-transport 部分被上游 installConnection 吸收；0.1.6 原生含侧边栏终端，产品自研底部贯通栏随之退役）。2026-09-16 官方 master 前进 5 个提交（worktree-bootfast2 启动性能系列，无新标签、无 computer-use 新功能——computer-use/browser-use 包组随 0.1.6 引入且已在本检出内），14 个补丁零冲突 rebase 到 master 0d1f50007f（分支头 abf8fce718，force-with-lease 推送）；computer-use(native cua-driver)同日起经 runtime-patch 挂载进产品。2026-09-16 第 15 个补丁 dsh-preset-skill-roots:standard preset 的 skill-filesystem 设 includeDefaultRoots=false,收敛技能目录只含产品显式装配(用户级 ~/.agents 与项目根 .agents 技能不再泄漏进产品会话),分支头 93bc1184dd80。2026-09-18 第 16 个补丁 dsh-goal-guardrails:goal 工具的完成与阻塞补上否定清单(不许仅因困难/缓慢/不确定/不完整/想澄清就标 blocked;不许因预算将尽或自行停工就标 complete),并拆开续跑提示词中把取证与完成并置的一句;分支头 7c3f05885033aa3aed74904d59a94692d12a47f7,17 个补丁零冲突(already-in-branch 9 + already-applied 6 + applied 2)。",
+  "upstreamBase": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "commit": "0d1f50007f9bca3f52b06e1c3074fa14d5fb0720",
+    "tag": "dsh-v0.1.6-alpha.1",
+    "patchedBranch": "lyapunov-patched-0.1.6"
+  },
+  "productPackageManager": "bun@1.3.13",
+  "upstreamPackageManager": "pnpm@11.7.0",
+  "blenderMcp": {
+    "status": "2026-09-18 新增：Blender MCP 从「缺了就抛错让用户手装」改成产品**基本能力**。上游包名是 `mcp-for-blender`（`blender-mcp` 2.0.0 只是兼容 shim，拿不到可用的 stdio 服务；serverInfo 仍报 BlenderMCP），addon 侧是上游仓的 addon.py。两者都钉死版本/提交与 sha256，由 `script/blender-mcp.ts` 幂等供给、`bun run ensure:blender-mcp` 触发。产品**不自建替代 MCP Server**（合同 §2.5）。",
+    "package": "mcp-for-blender",
+    "version": "2.0.0",
+    "requiresPython": ">=3.10",
+    "wheel": {
+      "filename": "mcp_for_blender-2.0.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/cb/93/f60b5b1151f003a92a4fc52a91b7d50b745283fdf199977c4b321b467efd/mcp_for_blender-2.0.0-py3-none-any.whl",
+      "bytes": 120574,
+      "sha256": "785ad7ed2d5d2d880c985451e14a312e0ffdd8a8c7efb8f4997b14c07657784c"
+    },
+    "consoleScript": "mcp-for-blender",
+    "importPackage": "blender_mcp",
+    "importPackageNote": "入口脚本是 mcp-for-blender、发行名是 mcp-for-blender、但**可导入包名是 blender_mcp**（实测：`blender_mcp/server.py`，entry_points 为 `mcp-for-blender = blender_mcp.server:main`）。就绪判据按可导入包算，不按 dist-info 名算。",
+    "bundledAddon": {
+      "pathInWheel": "blender_mcp/bundled/addon.py",
+      "note": "实测：锁定的 wheel 里**自带** addon.py，sha256 与上游仓 6f992ffbca3c 的 addon.py 逐字节相同。因此默认**从 wheel 取 addon**（单一上游来源、不额外联网、服务端与 addon 版本天然一致）；仅当用户用 LYAPUNOV_BLENDER_MCP_COMMAND 指向自己的 MCP 安装（此时没有我们的 wheel）才回退到 GitHub 原始文件。两条来源都用下面同一个 sha256 校验。"
+    },
+    "addon": {
+      "repository": "https://github.com/ahujasid/blender-mcp",
+      "commit": "6f992ffbca3cb715d111fc640b737b808632273c",
+      "path": "addon.py",
+      "url": "https://raw.githubusercontent.com/ahujasid/blender-mcp/6f992ffbca3cb715d111fc640b737b808632273c/addon.py",
+      "bytes": 197042,
+      "sha256": "c836e1e7f9a7177e0101abeb9b34d80103e194dcdec8d086deb0bd9251451767",
+      "blInfoVersion": "1.7"
+    }
+  },
+  "terminalLifecyclePatch": {
+    "file": "packages/lyapunov-terminal/patches/dsh-app-interrupt.patch",
+    "packages": [
+      "@deepseek-ai/dsh-cmdline",
+      "@deepseek-ai/dsh"
+    ],
+    "scope": "可选 appInterrupt.onInterrupt 只消费 SIGINT；未消费与 SIGTERM 继续原生关闭。"
+  },
+  "terminalRemoteTransportPatch": {
+    "file": "packages/lyapunov-terminal/patches/remote-node-transport.patch",
+    "packages": [
+      "@deepseek-ai/dsh-client-connection",
+      "@deepseek-ai/dsh-api-gateway"
+    ],
+    "scope": "同一 ConnectionController、ClientRemote 与 RemoteStreamMuxClient 的 /node 导出及显式 origin/transport/WebSocket factory 注入；不修改原生协议或领域 owner。"
+  },
+  "terminalPromptCancellationPatch": {
+    "file": "packages/lyapunov-terminal/patches/dsh-session-prompt-cancellation.patch",
+    "packages": [
+      "@deepseek-ai/dsh-api-session-controller"
+    ],
+    "scope": "沿原生prompt准入链传递并检查请求取消信号；Agent解析、图片串行准入、模型与附件准备后直到inbox提交前取消有效，已提交事实不回滚，不改Session格式。"
+  },
+  "browserUseRecoveryPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-browser-use-recovery.patch",
+    "packages": [
+      "@deepseek-ai/dsh-experimental-browser-use-runtime",
+      "@deepseek-ai/dsh-mcp-client"
+    ],
+    "scope": "会话自有的浏览器连接在浏览器 target 关闭（Target closed / Target.setDiscoverTargets 等）时，由真正 owner 原地重建该会话的 MCP/浏览器连接：只回收死亡连接、不自动重放失败操作、不杀外部附着浏览器。同会话同 provider 的自动重建有连续失败预算（3 次）：连续的真实浏览器调用/启动失败后停止自动拉新进程，返回明确健康状态与最后原因，基础 Bash/web 等其它工具不受影响；成功的 listTools/建 MCP 连接不算浏览器操作成功、不清零计数，只有真实浏览器操作成功才恢复健康，新 activation 重新获得预算（受控重置途径），不新造全局 browser 管理器。取消保证：每个 run 只按自己的执行槽（真正开始资源操作后）触发释放，排队中被单独取消的调用不会释放/重建别的在跑调用的连接；abort 后调用方要等本会话 owned 连接/进程实际释放才返回，释放被拒绝时如实报失败而不是干净停止；释放是否完成由真实 MCP connection owner 的可核验结果（ConnectionHandle.disposal()：closed/reason）确认，browser-use 在 Stop/recycle 时消费该确认，仅靠 Cordis fiber dispose 解析或 logger 文案不算确认；释放未证实时保留旧 client owner、不挂载替代连接、不并存新旧进程、不返回已干净停止，释放失败保留旧 client owner 供后续显式清理；重建/丢失文案只声明已请求恢复、下一次等待重建，不声称死连接已经释放（只有用户 Stop 路径等真实释放）。取消只释放/重建本会话自有连接，不因一个 turn Stop 关停世界/Host 等长寿命资源，A/B 会话隔离不变。资源条目、工具注册与独占归属保持不变；并发失败/重建合并且不会为同一会话启动多个 provider。一般 MCP（非浏览器）销毁合同不变：dispose() 仍解析，不因未确认关闭而抛错。"
+  },
+  "sessionHistoryCheckoutPatch": {
+    "file": "packages/lyaup-migrations/patches/dsh-v2-queued-surface.patch",
+    "packages": [
+      "@deepseek-ai/dsh-session",
+      "@deepseek-ai/dsh-agent-loop",
+      "@deepseek-ai/dsh-session-projection",
+      "@deepseek-ai/dsh-token-meter",
+      "@deepseek-ai/dsh-compaction-basic",
+      "@deepseek-ai/dsh-session-query"
+    ],
+    "scope": "在原Session格式补丁内合入required session/history-checkout；同一活动历史供模型、投影、计量、压缩和查询使用，保留全部原始事件。旧兼容读取器对未支持的required checkout明确拒绝。"
+  },
+  "sessionHistoryConsumersPatch": {
+    "file": "packages/lyapunov-session-undo/patches/dsh-history-consumers.patch",
+    "packages": [
+      "@deepseek-ai/dsh-api-session-controller",
+      "@deepseek-ai/dsh-client-ui-conversation",
+      "@deepseek-ai/dsh-client-ui-commands"
+    ],
+    "scope": "历史分页与网页活动节点重建；原生commandResult单独传递到发起客户端的提交完成事件，产品薄适配恢复草稿与附件，不回显或重发模型。"
+  },
+  "browserUseRuntimeDiagnosticsPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-browser-use-runtime-diagnostics.patch",
+    "packages": [
+      "@deepseek-ai/dsh-experimental-browser-use-runtime"
+    ],
+    "scope": "在A06恢复补丁后收窄TargetClosed分类：CDP方法名本身不触发恢复，关闭页面保留原浏览器并重读目录，浏览器根连接关闭/明确crash才请求本Session owner隔离重建；sandbox/display/profile/executable/launch/transport错误明确暂停浏览器，schema缺失给当前目录说明，不暗换模型或整个Host。后续浏览器操作等待本owner全部release/recycle链，prompt在恢复稳定后重新收集schema；无法确认释放时保留旧owner、禁止操作和替代连接；失败操作不重放，Jobs/World/其他会话保持各自生命周期。"
+  },
+  "modelRequestPhaseBudgetPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-model-request-phase-budget.patch",
+    "packages": [
+      "@deepseek-ai/dsh-llm",
+      "@deepseek-ai/dsh-agent-loop"
+    ],
+    "precondition": "dsh-current-context-snapshot.patch 已应用",
+    "scope": "仅正式Peiri normal retryPolicy显式开启150000ms模型request/retry/退避总预算；cap5仍保留，REQUEST_PHASE_TIMEOUT不可重试；局部signal不abort整个turn/Jobs，成功模型终态后执行工具前清理；保原Session日志和已发工具，不自动重放。"
+  },
+  "guestEmptyModelPatch": {
+    "file": "packages/desktop/patches/dsh-guest-empty-model.patch",
+    "packages": [
+      "@deepseek-ai/dsh-agent-default-model",
+      "@deepseek-ai/dsh-api-session-controller",
+      "@deepseek-ai/dsh-client-ui-model-selection",
+      "@deepseek-ai/dsh-app-boot"
+    ],
+    "scope": "真实 manualOnly:true 空模型装配；不装默认settings、不从历史header恢复模型，保原Agent/Session/Commands；catalog default=null，prompt稳定拒绝并阻止无路由notice进入模型；启动owner显式禁用所有.env文件读取，guest私有cwd/HOME/DSH_HOME独立。 同一manualOnly owner仅向空模型catalog投影可选guest呈现标记，由原生ModelDirectoryResolver选择双语未配置提示；正式不可用模型原提示与Send门保持，不新状态owner。",
+    "upgrade": {
+      "manifest": "packages/desktop/patches/dsh-guest-presentation-227-to-d756.json",
+      "fromSha256": "227dabcedb03c1d4e2e2a178899329ac83b5181e0c38fb474de859cae3a5a950",
+      "toSha256": "d756ac06a68a74be6edc26b97e0a33eebd11d4ebbabcd46b4c5d602e7e8d5bf2",
+      "scope": "仅已签完整14源码pre/post的227旧guest与Root7717其他A08组合，check→apply→post验证；未知混合拒绝，不回装裸基线或泛冲突覆盖"
+    }
+  },
+  "formalModelInputPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.patch",
+    "packages": [
+      "@deepseek-ai/dsh-system-prompt",
+      "@deepseek-ai/dsh-agent-loop",
+      "@deepseek-ai/dsh-compaction-basic",
+      "@deepseek-ai/dsh-web-app",
+      "@deepseek-ai/dsh-session-title-llm"
+    ],
+    "precondition": "A07 当前快照/技能复用/模型请求阶段及测试补丁已应用",
+    "scope": "可选纯模型输入投影，正式/开发 Web 文案区分；辅助压缩与标题去coding限定，raw用户/授权/图像与工具结果保留，native Session/Loop/Jobs/权限不另建。"
+  },
+  "browserRootOwnerPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-browser-root-owner.patch",
+    "postimage": "packages/lyapunov-shell/patches/dsh-browser-root-owner.postimage.json",
+    "precondition": "在 browser-use-recovery 与 browser-use-runtime-diagnostics 之后消费，原补丁及原签名不变；只新增精确三补丁与14文件组合。",
+    "scope": "原Chrome 1.9.0 MCP服务薄诊断/释放装饰，按实际browser.connected/Page.isClosed和自有进程真实退出区分关闭归属；nonce+operation UUID+sequence匹配，诊断写失败不改变原操作结果，未知不重建，正常exit0不标crash；旧根连接和进程未确认释放禁止replacement；保Session队列/budget/Jobs/World/其他Session。"
+  },
+  "a08JobsObservationPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-jobs-observation-identity.patch",
+    "sha256": "21452d1f29e99423275a1905b6d71eccb59a84691e379f7b10a9323d3ba4b47c",
+    "files": [
+      {
+        "path": ".agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.i18n.yaml",
+        "preSha256": null,
+        "postSha256": "022f0c431004133dc7bee70ff8f8de503c8f521d8e5b93dc9ff522658da51ec6"
+      },
+      {
+        "path": ".agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.md",
+        "preSha256": null,
+        "postSha256": "20ac858ccd47c4e190180416d0a8e32ac3dd25d1a5e0ead704d1c40c6c13fb7b"
+      },
+      {
+        "path": ".agents/notes/implemented/feature/2026-10-01-job-execution-instance-receipts.zh.md",
+        "preSha256": null,
+        "postSha256": "39ff4bab67c08d8319c66ff2b4cf94b3cf02251b5205e0bcbdaa3ea2cbc5ff56"
+      },
+      {
+        "path": "docs/subsystems/jobs.i18n.yaml",
+        "preSha256": "abe276fb1d831125b53f368e0a8e808b3084604ab7234a7831c0d3c0f06a71ef",
+        "postSha256": "102e4ec042ac10c5f0d6abda241fa94b1e02cc816c57564205bd8338c4770773"
+      },
+      {
+        "path": "docs/subsystems/jobs.md",
+        "preSha256": "8e2937638228366fa353e85d6be71af81ccedce7f2246fba6693c7c99918fe03",
+        "postSha256": "44392c5148549a5a9b5fab47794653448fa69e0619b30219317b7a46bb777059"
+      },
+      {
+        "path": "docs/subsystems/jobs.zh.md",
+        "preSha256": "e8aa728372ff1f9202d1cca2a0848ce0ebb1d21ee1d3db4c97ea235b8c036811",
+        "postSha256": "002c1434618e2755e90701b7ebec363cd0c6e5661a520966d50547cfdf3c0581"
+      },
+      {
+        "path": "packages/api/session-controller/src/control.ts",
+        "preSha256": "a38002b1eb9603bfe220439cc59268145d9c8933a21a8c72b7cc54e442ee1e26",
+        "postSha256": "fef1fed62ece37f20d8340bd1afe1c7672f450871a72d1bc613661f80e0679b3"
+      },
+      {
+        "path": "packages/api/session-controller/src/types.ts",
+        "preSha256": "a616c03cc031936e1d9cdbd485f98e0d8bc2823e0bd025baf6c3e4c9a46b8500",
+        "postSha256": "56a9b051c95f77e3420200d311ae244e0bc9021189e8510c4d3b1ecc743b8aa0"
+      },
+      {
+        "path": "packages/api/session-controller/tests/control-jobs.host.spec.ts",
+        "preSha256": "a7fe029060288a09b3e09499a61161c00509200ddea1a41f328496f3fb43533a",
+        "postSha256": "243540f39f223870a7737fd6e2109320bf3be1f63292973e371d76533c1a944d"
+      },
+      {
+        "path": "packages/jobs/jobs-local/src/index.ts",
+        "preSha256": "c1f0cc7de70a11989f6f0f1bf8df8c275858b462603fde19bc8df5b7517bf479",
+        "postSha256": "580d79e13bdc9c14b9e7eb1a72bf589daf9f37bdd459ced96151b8cfdd695851"
+      },
+      {
+        "path": "packages/jobs/jobs/src/brand.ts",
+        "preSha256": "2c32667ce16df059efaa06681339f78875ea57511751ae66269293bfa7cdf3c8",
+        "postSha256": "d2fb80ca3393f40ff835655f71e42236af49b361074a54b521f5149c81732daa"
+      },
+      {
+        "path": "packages/jobs/jobs/src/index.ts",
+        "preSha256": "11e4a5fc2aa1bf2cb131f5dfdead07864614f2de2aa325dcc2e292f5eed94a10",
+        "postSha256": "b8204eccf4233d719070ee6cc8a1c46d0f643f5223e3167ec448ebab795bcbbc"
+      },
+      {
+        "path": "packages/jobs/jobs/src/types.ts",
+        "preSha256": "e5c440b983e350859e893fa849d8cdcb036894f1b63cfaa27e9217d28abc5de2",
+        "postSha256": "961dc14d95d339c8bbf391f428c7b954c9e6fea789b6ab24f7d4cf74d8dbd2a7"
+      },
+      {
+        "path": "packages/jobs/tool-jobs/src/index.ts",
+        "preSha256": "e340b479d813ca828e9ef59b33c21e8d1b19ef8cff13b3e4a42efd9b17229298",
+        "postSha256": "f97d8842c3076f1f0fc7f7d43e4302a40c872683531b23d34f37db517c35a35f"
+      },
+      {
+        "path": "packages/jobs/tool-jobs/tests/tool-jobs.spec.ts",
+        "preSha256": "94a25b60ba7e4b7440a660a88c5972708f761b6c693a731e17abbcf9dab8a097",
+        "postSha256": "88983521b4c77b841ab721d9319e0976fef067e57458e7856a3900046fd166e3"
+      },
+      {
+        "path": "packages/shell/tool-bash/src/index.ts",
+        "preSha256": "f5293be1a5fcc26f9281b352f83d9478454ffe019e9d63d7e5adf118b9b8afea",
+        "postSha256": "4ac1edd69141158f58dca5f278e4c82524e40a008a1636d6c04b02b25517bef6"
+      },
+      {
+        "path": "packages/shell/tool-bash/tests/tools.spec.ts",
+        "preSha256": "3c3b70ae956e246a0e969d60046d49cd6eb3df5c562b3615d25016765cab58f3",
+        "postSha256": "a5ae37ba5bfea97cab3c741f04c4fa44e7447352cdcb238a9b4e84e4a0ae74b7"
+      }
+    ],
+    "scope": "原生Jobs代次、通知reported claim及公开controller/工具身份；不另建Job owner。"
+  },
+  "a08PublicModelDiagnosticsPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-public-model-diagnostics.patch",
+    "sha256": "478cd58d9ed2a26abffde5ec70a775a10253e858a95a438dfe75d15fb923c416",
+    "files": [
+      {
+        "path": ".agents/notes/implemented/bug-fix/2026-10-01-central-model-diagnostics-retry-veto.i18n.yaml",
+        "preSha256": null,
+        "postSha256": "4a7174cec07df972d128bcf70da71fcc97765ede0f82677f82966aab8b26cf4d"
+      },
+      {
+        "path": ".agents/notes/implemented/bug-fix/2026-10-01-central-model-diagnostics-retry-veto.md",
+        "preSha256": null,
+        "postSha256": "d6de95e299fb61d63e5afbbb944bd6862794229442c171ab54e60ebfe9b14db4"
+      },
+      {
+        "path": ".agents/notes/implemented/bug-fix/2026-10-01-central-model-diagnostics-retry-veto.zh.md",
+        "preSha256": null,
+        "postSha256": "a5a3ed2b00d16fa881bd4199420bda3c59b03ac235e94c4aa5185a636621f927"
+      },
+      {
+        "path": "docs/architecture.i18n.yaml",
+        "preSha256": "b191be7ec3344d3122a5b1c01c4d681effe7004b16c60807b08712d911249d31",
+        "postSha256": "f7e422dc09df3e5c1ca325bd79c0296387d787044dd8e94d6dea805ab63be76c"
+      },
+      {
+        "path": "docs/architecture.md",
+        "preSha256": "11b6793755e704105d0c87111f8bb86f19ff247b49380471ae4047604c01f313",
+        "postSha256": "c84c22d62d2f85c3e9d0e145407b2132bc6737aeff7a5a5e42c7053ec64b0229"
+      },
+      {
+        "path": "docs/architecture.zh.md",
+        "preSha256": "10c157d1cf0615615859490c78e4186491d88f0fd9d090546036f9a281b8e7f9",
+        "postSha256": "6a0d3df1c192bfc81f991c28d6ce1fcb0d23f64a573e02d17f73c822b783616f"
+      },
+      {
+        "path": "docs/persistence-catalog.i18n.yaml",
+        "preSha256": "9b06aa1c5e9a1b98b90179c24da9025d0f1c2de36661e2c57936d273df95848b",
+        "postSha256": "e126d53cc498ca861d445d3f3d7d14afea90e8887957760ec777d10568c3cfa8"
+      },
+      {
+        "path": "docs/persistence-catalog.md",
+        "preSha256": "a70830a6b583f9932a456708029a4ddb0bbe233d9deb8325c67a9777b5be2aa4",
+        "postSha256": "36be26c2b5dca3b7738cb11b36d5a2690f60fd893c8dea6761da78aa19d4eb16"
+      },
+      {
+        "path": "docs/persistence-catalog.zh.md",
+        "preSha256": "d8fa64b4d863dc33793ac43320e19bb949e1a9b49ac6893396c5cd6060bd3da2",
+        "postSha256": "16a73bcb5376690077a620fe16aff7453db7c9c2493add7ed15c5ed60b965060"
+      },
+      {
+        "path": "docs/persistence-changes/2026-10-01-central-public-diagnostics.i18n.yaml",
+        "preSha256": null,
+        "postSha256": "630ae0d53cee86e2aee9b5332ffcd39dbdcc9a3bda556965cc889ec0653892c1"
+      },
+      {
+        "path": "docs/persistence-changes/2026-10-01-central-public-diagnostics.md",
+        "preSha256": null,
+        "postSha256": "5561828e245f9dc045d0464dfc87976bd86eab511ce2e8612f2db3c418545162"
+      },
+      {
+        "path": "docs/persistence-changes/2026-10-01-central-public-diagnostics.schema.json",
+        "preSha256": null,
+        "postSha256": "4ef986293e1a3a72cf79fbc399da4831d0e96f407c700ba6808367472ce05047"
+      },
+      {
+        "path": "docs/persistence-changes/2026-10-01-central-public-diagnostics.zh.md",
+        "preSha256": null,
+        "postSha256": "b4c72e8581e748801e935f82c0631080ca06697c3e8bc751942df025d6e4d36f"
+      },
+      {
+        "path": "docs/persistence-schema.json",
+        "preSha256": "8c61232a9fd07d814afc4c12f208956a1193a6e10dd487337c8a7ae03b527b09",
+        "postSha256": "d3be312197b9a991c7a4523a9863e7995709cb9271561292c0afcc7374f39410"
+      },
+      {
+        "path": "docs/subsystems/llm-streaming.i18n.yaml",
+        "preSha256": "f83e0292296567658d1aa6d32c37c031d58c934cc46d95d8e24c8b690e280cc3",
+        "postSha256": "84c83fa939a3d2e2d3fd5c5d9d11201a630e5a185f0a9924ac231a4164664bd8"
+      },
+      {
+        "path": "docs/subsystems/llm-streaming.md",
+        "preSha256": "b3db5089a892aa03889d143c268a46e536f00ea74418d3870023016761fd4aa4",
+        "postSha256": "2a03c992a0822eaccd7d79578e5ded23a755bf7334790f98e17b9efb86c59025"
+      },
+      {
+        "path": "docs/subsystems/llm-streaming.zh.md",
+        "preSha256": "d7a765ba2140be938e501530c104d254ebac217e44503e06c38e07cde0919256",
+        "postSha256": "d0bcac5ce87324596830f2ae4a8901ae41cca64215e05b0893bd8c310af449e9"
+      },
+      {
+        "path": "packages/core/agent-loop/src/agent.ts",
+        "preSha256": "70c23564f397a9b38e6cf03d88247312605a653c05833c7b3251d86c0b813a74",
+        "postSha256": "355db9d7501ee12c503ce29c8db8b8891d38789772eade2cd778cd5dc27d80f1"
+      },
+      {
+        "path": "packages/llm/llm-pi-ai/src/adapter.ts",
+        "preSha256": "1ef83165bc2715c2b9ef5a0d5aba50102bc74b988f4bb0d58d745e8f9db0c15a",
+        "postSha256": "1baa4f643f49d9c20f3292c318d2d4182b0751259495f770be18173510c1105b"
+      },
+      {
+        "path": "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts",
+        "preSha256": null,
+        "postSha256": "4f6378f9069820df75eac181ac657d7a8017c5537bcc194f4749cf2f88992a82"
+      },
+      {
+        "path": "packages/llm/llm-pi-ai/src/stream.ts",
+        "preSha256": "5dd1f92506e14829cbf5f8b0c9815a65756e229c22ee0a72cb32bd0a0c38de8b",
+        "postSha256": "08b3af769ef795f848dc14aea2b625108129a537c53f6b8f35b034624edea09b"
+      },
+      {
+        "path": "packages/llm/llm-retry/src/index.ts",
+        "preSha256": "d33553781ed2118aab3b249c159fae550d359627565e4714c9ea599e474b8093",
+        "postSha256": "09081a5e10068fe354b802c0a1a531f64c6601969f2a9debc3ed401bbef168ee"
+      },
+      {
+        "path": "packages/llm/llm/src/adapter-failure.ts",
+        "preSha256": "533507191d814fc7b3df5ae65076b2ebc4134bbb47a2bbd9bb7309d7e7f9241b",
+        "postSha256": "9018a5366d8d3dd5fe9335e920686b8b6a26589dc056101ec8cffc99fd31f60e"
+      },
+      {
+        "path": "packages/llm/llm/src/index.ts",
+        "preSha256": "9f138a505ef551d36fddea5919c2c73143299b831ff6e73b519db064fef17899",
+        "postSha256": "3720f20000020a40914024d9e62ecbfc1be4f3770cd4f346ede33b698d9d1118"
+      },
+      {
+        "path": "packages/llm/llm/src/public-diagnostic.ts",
+        "preSha256": null,
+        "postSha256": "14ae260a92d4e92ed059acd77bdc38564d82aa8483718af98164bbf7505562a5"
+      },
+      {
+        "path": "packages/llm/llm/src/types.ts",
+        "preSha256": "d56520a684bf0faaa9ac47679b2567c17df0fb7c54b11243071a4f70159f3452",
+        "postSha256": "ae8b421a4ced26315b4099f7617981db32139eed2f232273daf4204fd4935059"
+      }
+    ],
+    "scope": "公开wire诊断、未知结果重试门、同步用户取消quiescence；无新Loop或global fetch。",
+    "composition": {
+      "prerequisite": "dsh-model-request-phase-budget.patch",
+      "prerequisiteSha256": "7302437df8f7c711f2cf2d4932327f0117b8c799f75b15eff31dd53aa9408948",
+      "postHashes": {
+        "packages/core/agent-loop/src/agent.ts": "355db9d7501ee12c503ce29c8db8b8891d38789772eade2cd778cd5dc27d80f1",
+        "packages/llm/llm/src/retry-policy.ts": "75153eb0214e0e56d16d7a3c8534f472b385489d46986c0fb5d2f8c0d11c9b71",
+        "packages/llm/llm/tests/retry-policy.spec.ts": "417ff4bcfc333654bfe7e407dae5b8c09722e5e7509a10862ca1cebf8699f848"
+      },
+      "formalModelInput": {
+        "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.patch",
+        "sha256": "16b94f78a102d7820163decdf3204b853afbc63833c1745b21ff9ee36a1d70c2",
+        "publicModelSha256": "478cd58d9ed2a26abffde5ec70a775a10253e858a95a438dfe75d15fb923c416",
+        "requestBudgetSha256": "7302437df8f7c711f2cf2d4932327f0117b8c799f75b15eff31dd53aa9408948",
+        "postHashes": {
+          "packages/core/agent-loop/src/agent.ts": "214722825bb662feef0331258a43f9c32d7e09dcd2b2d1eb744faa5a849693d9",
+          "packages/llm/llm/src/retry-policy.ts": "75153eb0214e0e56d16d7a3c8534f472b385489d46986c0fb5d2f8c0d11c9b71",
+          "packages/llm/llm/tests/retry-policy.spec.ts": "417ff4bcfc333654bfe7e407dae5b8c09722e5e7509a10862ca1cebf8699f848"
+        }
+      }
+    }
+  },
+  "a08BrowserRecoveryEnglishPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-browser-recovery-english.patch",
+    "sha256": "1e715323fefa842808efeae1a2ba03310b03f825abb74487b62413c99ef93668",
+    "files": [
+      {
+        "path": "packages/experimental/browser-use-runtime/src/mcp.ts",
+        "preSha256": "9baf3f5e7c7c3f0a440c2fa6c897b690b9db8723cf14d5346d7aeb5ab060e3f8",
+        "postSha256": "3c5a04854e5e32c0db8d8273c594edfbb66d87a0c8c6dd8c153e58dac2b16fcd"
+      }
+    ],
+    "precondition": "browser-root-owner原14文件精确签定组合之后，新增static English guidance delta；旧artifact/原raw error不改，Graph S04须实际完整registry重放签定",
+    "scope": "仅browserFailureAdvice与恢复assembly/error静态指导英语；机器条件、ownership、原provider reason和现有行为保持"
+  },
+  "guestOwnProviderPatch": {
+    "file": "packages/desktop/patches/dsh-guest-own-provider.patch",
+    "sha256": "5c238d8c885464588a66173a63e2150941af3ac2b1a86cb48730d91d32d8b4d9",
+    "manifest": "packages/desktop/patches/dsh-guest-own-provider.json",
+    "manifestSha256": "5d47eb0095735699947fc1f70e44302d93ac32b5e69f69646041a229bcd475c5",
+    "packages": [
+      "@deepseek-ai/dsh-agent-default-model",
+      "@deepseek-ai/dsh-api-session-controller",
+      "@deepseek-ai/dsh-llm-pi-ai"
+    ],
+    "prerequisite": "dsh-guest-empty-model.patch@d756及已有A08补丁；本项在registry最后",
+    "scope": "游客初始空模型、原生Models显式自有provider/key/selection；独立settings与model-key存储，browser-session grant内存；composition政策验证原始/解析/实际冻结模型URL与discovery、禁ambient env/file auth、产品server目的地与redirect拒；不恢复formal账户、不提供Peiri/Billing。旧manualOnly永久空行为保留。",
+    "signedComposedSources": 20,
+    "rootPreimageCommit": "b8aa594f196b82168cc6a7fc801696a8cd81cd74"
+  },
+  "a08SkillReuseEnglishPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-skill-reuse-english.patch",
+    "sha256": "fc8abc66be81f935cf5cd0e638d5ab47ccdc1d419255c3081da2c6db47597658",
+    "files": [
+      {
+        "path": "packages/skill/tool-skill/src/index.ts",
+        "preSha256": "7164beccb48c0ed273a4d52415853de39383e81c02d66edebf3ec93c98ea5cc3",
+        "postSha256": "bb794b72be7e715c00afaddbb1d7a92a0ff1ecabc70d8f33c560899cbf221004"
+      }
+    ],
+    "precondition": "在既有skill-content-reuse之后消费，原patch不改；须Graph S04实际whole-registry签定",
+    "scope": "仅同hash已可见正文的Tool默认复用说明English；机器变量/去重逻辑/raw正文与来源保留"
+  },
+  "sdkSourceIntegrity": {
+    "file": "script/sdk-source-integrity.json",
+    "sha256": "7db656f98483521a97e648eb0162f69b0e9633bf353047bb4f8f85c628361266",
+    "baseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
+    "scope": "固定7c全部tracked未覆本体＋已签完整registry合法stage/final；unknown新增源码拒绝，标准ignoreddeps/cache/build按实际Git约束保留"
+  },
+  "sdkFormalEnglishUpgrade": {
+    "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
+    "sha256": "486a612a7574021e53454289f6ccc9dc3d0da2c717851baa3f105ed197e4e2c3",
+    "patch": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.patch",
+    "patchSha256": "e88cd737592a99d1d66e2e65ea6603959419f907d73207eeb6fe50ad85f313d6",
+    "scope": "只认旧正式完整post→English两文件字面量；fresh仍消费完整正式patch，未知/混合失败保留"
+  },
+  "desktopDirectoryNavigationPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-files-directory-flow.patch",
+    "sha256": "3c8369e6c2d4b8204afb998c6bc4222139efaf9d28d2e6b247169e4dbcc68b44",
+    "manifest": "packages/lyapunov-shell/patches/dsh-files-directory-flow.patch.json",
+    "manifestSha256": "7cc5f0fa5bd0e28c747f43bb6fa7ef96243bf3e2c591d87dfe31aafae080f33b",
+    "packages": [
+      "@deepseek-ai/dsh-client-ui-directory-picker-browse"
+    ],
+    "scope": "原生目录选择器的 scoped 文件页入口、当前绝对路径与完整祖先导航；浏览不改 Session.cwd 或 Agent/fs/sandbox 权限；确认后由原生工作区与会话导航处理。"
+  }
+}

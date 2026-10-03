@@ -1,0 +1,27 @@
+{
+  "packId": "allegro_hand",
+  "version": "2026.09.22",
+  "family": "hand",
+  "asset": { "modelEntry": "asset/scene_left.xml", "model": "asset/left_hand.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#allegro_hand" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gripper", "control"],
+    "directControl": "suitable"
+  },
+  "status": "BLOCKED:hold-drift",
+  "provenance": {
+    "source": "Allegro Hand 模型（ASSET_STAGING_MANIFEST.json#allegro_hand 落账）",
+    "commit": null,
+    "author": "Wonik Robotics（Allegro Hand 模型族）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#allegro_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控（按模型执行器映射控制）；包内容为 LyapunovDev 自有"
+  },
+  "tests": "tests/acceptance.md"
+}

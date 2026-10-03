@@ -1,0 +1,707 @@
+{
+  "schemaVersion": 1,
+  "generated_from": "packs/*/pack.json（包内容的单一事实源；tier 元数据独立见 tierRoster）",
+  "tierRoster": "t0-roster.json",
+  "packs": [
+    {
+      "packId": "agility_cassie",
+      "version": "2026.09.23",
+      "family": "humanoid-legs",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "BLOCKED:no-public-deployed-policy",
+      "licenseSummary": "model: MIT（asset/LICENSE 实读 MIT / Agility Robotics；ASSET_STAGING_MANIFEST_T1.json#agility_cassie license=MIT 落账）；policy: 无公开部署级 policy ⇒ 无权重可分发、不声称权重许可；学术 RL 训练代码位仅作 provenance 记录，不构成本包可执行 policy"
+    },
+    {
+      "packId": "allegro_hand",
+      "version": "2026.09.22",
+      "family": "hand",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gripper",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "BLOCKED:hold-drift",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#allegro_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 无基础 policy：mimo/GPT6 System-2 直控（按模型执行器映射控制）；包内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "aloha",
+      "version": "2026.09.23",
+      "family": "dual-arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "batch"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:policy-no-client-inference-adapter",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Trossen Robotics；ASSET_STAGING_MANIFEST_T1.json#aloha license=BSD-3-Clause 落账）；policy: π0.5 pi05_base 权重不随包分发（服务端优先执行，PI05_POLICY_MAPPING §3）；policy/norm_stats.json 为官方 trossen norm_stats 复制件（sha256=417c7dc8ee9598b28dc2f0b545e371338be9f4611b255975ba7ea07eb21e46c1）；openpi/π0.5 许可以其发布页随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）；⚠ 2026-09-23 复核：服务端推理侧无已见实现（inference.implemented=false）⇒ 本包 policy 面 PARTIAL/blocked，包级状态见 status 字段"
+    },
+    {
+      "packId": "arx_l5",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD-3-Clause（arx_l5/LICENSE 已核对 2026-09-22：(c) 2023-2025 ARXrobotics；全文随 asset/ 由 staging 提供）；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "crazyflie_2",
+      "version": "2026.09.30",
+      "family": "quadrotor",
+      "capabilities": {
+        "channels": [
+          "thrust",
+          "bodyWrench",
+          "control"
+        ],
+        "directControl": "nativeLocalPidExperimental",
+        "flightProfile": "crazyflie-2-native-pid-v1",
+        "verifiedEngine": "mujoco"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "EXPERIMENTAL:bounded-local-native-flight",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#crazyflie_2 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 无基础 policy：产品不内置飞控，悬停/航点/姿态稳定由外部控制器闭环；通道与任务内容（context/vla/tests）为 LyapunovDev 自有"
+    },
+    {
+      "packId": "forklift_c",
+      "version": "2026.09.22",
+      "family": "vehicle",
+      "capabilities": {
+        "channels": [
+          "vehicle",
+          "lift",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "PARTIAL:library-entry-missing",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#forklift_c 随附 LICENSE 为准（Isaac 资产许可；staging 定稿前不声称具体许可证）；policy: 无基础 policy：vehicle/lift 通道直控（mimo/GPT6 System-2）；包内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "franka_allegro_hand",
+      "version": "2026.09.23",
+      "family": "arm-hand-combo",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper"
+        ],
+        "directControl": "suitable",
+        "combo": "Franka Panda 7-DoF 臂 + Allegro Hand（左手/右手各一份 URDF，另有手部单独 URDF）",
+        "fingerDoF": "实读：Allegro 手 16 指节（4 指 × 4 维：index/middle/ring/thumb，joint_0..15）+ 臂 7 = 单侧 23 受控关节；URDF 实读无 mimic/fixed-tendon 耦合定义 ⇒ 无 tendon 通道（与 franka_shadow_hand 不同）"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "BLOCKED:grasp-hold",
+      "licenseSummary": "model: UNVERIFIED(源仓无 LICENSE 文件，不编造)；policy: 无随包基础 policy：mimo/GPT6 System-2 直控（臂走 trajectory/joint、手走 joint + P0–P3）；vla-base 微调位仅占位（见 policy/manifest.json vlaBaseFinetuneSlot，PARTIAL:hand-not-in-embodiment）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "franka_panda",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: Apache-2.0（franka_emika_panda/LICENSE 已核对 2026-09-22；全文随 asset/ 由 staging 提供）；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "franka_shadow_hand",
+      "version": "2026.09.23",
+      "family": "arm-hand-combo",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "tendon"
+        ],
+        "directControl": "suitable",
+        "combo": "Franka Panda 7-DoF 臂 + Shadow Dexterous Hand（左手/右手各一份 mjcf + urdf）",
+        "fingerDoF": "实读：手部 24 DoF（FF/MF/RF 各 4 指节 + LF 5 + TH 5 = 22 指节，另 WRJ1/WRJ2 腕 2）+ 臂 7 = 单侧 31 受控关节；mjcf 含 4 条 fixed tendon（T_FFJ1c/T_MFJ1c/T_RFJ1c/T_LFJ1c，耦合 J1–J2）与 27 个执行器"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "BLOCKED:grasp-hold",
+      "licenseSummary": "model: UNVERIFIED(源仓无 LICENSE 文件，不编造)；policy: 无随包基础 policy：mimo/GPT6 System-2 直控（臂走 trajectory/joint、手走 joint/tendon + P0–P3）；vla-base 微调位仅占位（见 policy/manifest.json vlaBaseFinetuneSlot，PARTIAL:hand-not-in-embodiment）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "generic_quadrotor",
+      "version": "2026.09.23",
+      "family": "quadrotor",
+      "capabilities": {
+        "channels": [
+          "thrust",
+          "control"
+        ],
+        "directControl": "requiresExternalController"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:fc-bridge-not-integrated",
+      "licenseSummary": "model: MIT（LICENSE 正文判读 2026-09-23：permission+disclaimer 全文）；policy: 无学习策略；PX4/ArduPilot SITL 外接飞控（服务端/旁路运行），内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "iiwa14",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "batch"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD-3-Clause（Drake/Robot Locomotion Group 正文；LICENSE 自述部分源码片段可能适用其他宽松非病毒许可）；policy: 无基础 policy：mimo/GPT6 直控（context/vla/tests 为 LyapunovDev 自有，随包分发）"
+    },
+    {
+      "packId": "iiwa_allegro",
+      "version": "2026.09.23",
+      "family": "arm-hand-combo",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: UNVERIFIED(源仓无 LICENSE 文件，不编造)；policy: 无基础 policy；mimo/GPT6 直控内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "leap_hand",
+      "version": "2026.09.22",
+      "family": "hand",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gripper",
+          "tendon"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#leap_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 无基础 policy：mimo/GPT6 System-2 直控（tendon/关节/夹持通道）；包内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "low_cost_robot_arm",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: Apache-2.0（low_cost_robot_arm/LICENSE 已核对 2026-09-22；全文随 asset/ 由 staging 提供）；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "lyaup_demo_arm",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: 本地生成作品（conversation-local-robot:Lyaup演示机械臂.mjcf），源树无 LICENSE、无第三方再分发条款；原件随 asset/ 由 staging 提供；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "robotiq_2f85",
+      "version": "2026.09.22",
+      "family": "gripper",
+      "capabilities": {
+        "channels": [
+          "gripper",
+          "joint",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#robotiq_2f85 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 无基础 policy：mimo/GPT6 System-2 直控（gripper 通道）；包内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "robotstudio_so101",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:policy-no-client-inference-adapter",
+      "licenseSummary": "model: Apache-2.0（asset/LICENSE 正文判读 2026-09-23：Apache License Version 2.0, January 2004 全文；与 ASSET_STAGING_MANIFEST_T1.json#robotstudio_so101 记载一致；全文随 asset/ 由 staging 提供）；policy: G0.5 Community License Agreement（NON-COMMERCIAL + LIMITED PATENT，Release 2026-06-16，Licensor=Xinghaitu (Beijing) AI Technology / Galaxea；LICENSE-G0.5 正文判读 2026-09-23，仓内 LICENSE-G0/LICENSE-G0.5/LICENSE-G0Plus 三许可并存、逐包适用范围以正文为准）：Permitted Purpose 仅限学术研究/个人使用/教育/评估（含受限 Internal Evaluation PoC）；Commercial Use 定义极宽（含 SaaS/API/托管推理服务、生产部署），商用须另签商业授权且商用无专利授权；再分发须附协议与 NOTICE。⚠ 合规红旗：产品对外提供 G05 推理服务很可能构成 Commercial Use，部署前必须取得商业授权或经合规审查——技术可用≠许可可用。G05 权重/统计来源 OpenGalaxea/G05@g05-so101（2026-09-23 全量入库，sha256 全值入 policy/manifest.json 台账），权重不随包分发（服务端执行）；policy/dataset_stats.json 为官方统计复制件（逐字节对账）；context/vla/tests 为 LyapunovDev 自有，随包分发；⚠ 2026-09-23 复核：服务端推理侧无已见实现（inference.implemented=false）⇒ 本包 policy 面 PARTIAL/blocked，包级状态见 status 字段"
+    },
+    {
+      "packId": "shadow_dexee",
+      "version": "2026.09.23",
+      "family": "dexterous-hand",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gripper"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: Apache-2.0（asset/LICENSE 全文含附录，判读 2026-09-23）；policy: 无基础 policy；tendon/关节直控内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "shadow_hand",
+      "version": "2026.09.22",
+      "family": "hand",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "tendon",
+          "gripper",
+          "control"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "BLOCKED:grasp-hold",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#shadow_hand 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 无基础 policy：mimo/GPT6 System-2 直控（fixed tendon／关节联动；停止保持）；包内容为 LyapunovDev 自有"
+    },
+    {
+      "packId": "trossen_vx300s",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:policy-no-client-inference-adapter",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright (c) 2023, Trossen Robotics + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）；policy: π0.5 pi05_base 检查点（openpi）服务端执行、权重不随包分发；policy/norm_stats.json 为官方统计复制件（trossen 双臂 14 维），许可以 openpi（Physical-Intelligence/openpi）随附 LICENSE 为准（本轮未判读其正文，不声称具体许可证）；context/vla/tests 为 LyapunovDev 自有，随包分发；⚠ 2026-09-23 复核：服务端推理侧无已见实现（inference.implemented=false）⇒ 本包 policy 面 PARTIAL/blocked，包级状态见 status 字段"
+    },
+    {
+      "packId": "trossen_wx250s",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:policy-embodiment-mismatch",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright (c) 2023, Trossen Robotics + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）；policy: π0.5 pi05_droid 检查点（openpi）服务端执行、权重不随包分发；policy/norm_stats.json 为官方统计复制件（droid 8 维），许可以 openpi（Physical-Intelligence/openpi）随附 LICENSE 为准（本轮未判读其正文，不声称具体许可证）；context/vla/tests 为 LyapunovDev 自有，随包分发；⚠ 2026-09-23 复核：服务端推理侧无已见实现（inference.implemented=false）⇒ 本包 policy 面 PARTIAL/blocked，包级状态见 status 字段"
+    },
+    {
+      "packId": "trossen_wxai",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Trossen Robotics；ASSET_STAGING_MANIFEST_T1.json#trossen_wxai license=BSD-3-Clause 落账）；policy: 无基础 policy：mimo/GPT6 System-2 直控内容（context/policy/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "ufactory_lite6",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright (c) 2018, UFACTORY Inc. + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "ufactory_xarm7",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright (c) 2018, UFACTORY Inc. + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）；policy: 无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+    },
+    {
+      "packId": "unitree_a1",
+      "version": "2026.09.23",
+      "family": "quadruped",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "BLOCKED:policy-adapter-not-ported",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Unitree Robotics；ASSET_STAGING_MANIFEST_T1.json#unitree_a1 license=BSD-3-Clause 落账）；policy: 以 Improbable-AI/walk-these-ways@0e7236bd… 随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）；权重不随包分发，且 A1 适配未移植（见 policy/manifest.json）"
+    },
+    {
+      "packId": "unitree_g1",
+      "version": "2026.09.22",
+      "family": "humanoid",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#unitree_g1 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 以 unitreerobotics/unitree_rl_gym@276801e46c5d433564f24658bac64f254b7d2d4b 随附 LICENSE 为准（2026-09-22 未取得 LICENSE 原文，不声称具体许可证）"
+    },
+    {
+      "packId": "unitree_go1",
+      "version": "2026.09.22",
+      "family": "quadruped",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "PARTIAL:behavior-unverified",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#unitree_go1 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: MIT（Improbable-AI/walk-these-ways，LICENSE 已核对 2026-09-22：Copyright 2022 MIT Improbable AI Lab；另见其 licenses/legged_gym、licenses/rsl_rl 附加条款，文件头有标注者从其标注）"
+    },
+    {
+      "packId": "unitree_go2",
+      "version": "2026.09.22",
+      "family": "quadruped",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: 以 ASSET_STAGING_MANIFEST.json#unitree_go2 随附 LICENSE 为准（staging 定稿前不声称具体许可证）；policy: 以 inria-paris-robotics-lab/go2_onnx_controller@c1729e1a4aa2e7e1091ccff42be68d42bd054764 随附 LICENSE 为准（2026-09-22 未取得 LICENSE 原文，不声称具体许可证）；onnxruntime==1.23.2 为运行时依赖，按其发布页许可为准，不随包分发"
+    },
+    {
+      "packId": "unitree_h1",
+      "version": "2026.09.23",
+      "family": "humanoid",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gait",
+          "control"
+        ],
+        "directControl": "requiresPolicy"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "BLOCKED:policy-adapter-not-ported",
+      "licenseSummary": "以 unitreerobotics/unitree_rl_gym@276801e… 随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）；**权重不随包分发，且 H1 适配未移植**——客户端只登记了 unitree_g1/unitree_go2/unitree_go1 三个执行适配器，(h1, torchscript) 无登记项，故本包 policy 面 blocked（见 policy/manifest.json；旧文“H1 检查点随仓、权重 sha256 待对账”已删除：既无随包字节也无可核对身份）"
+    },
+    {
+      "packId": "ur10e",
+      "version": "2026.09.22",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "batch"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "USABLE",
+      "licenseSummary": "model: BSD（ROS Industrial Consortium 2018 条款，universal_robots_ur10e/LICENSE 已核对 2026-09-22；全文随 asset/ 由 staging 提供）；policy: 无基础 policy：mimo/GPT6 直控（context/vla/tests 为 LyapunovDev 自有，随包分发）"
+    },
+    {
+      "packId": "ur5e",
+      "version": "2026.09.23",
+      "family": "arm",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "trajectory",
+          "gripper",
+          "control",
+          "ik"
+        ],
+        "directControl": "suitable"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": false,
+        "vla": true
+      },
+      "status": "PARTIAL:policy-no-client-inference-adapter",
+      "licenseSummary": "model: BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright 2018 ROS Industrial Consortium + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）；policy: π0.5 pi05_base 检查点（openpi）服务端执行、权重不随包分发；policy/norm_stats.json 为官方统计复制件，许可以 openpi（Physical-Intelligence/openpi）随附 LICENSE 为准（本轮未判读其正文，不声称具体许可证）；context/vla/tests 为 LyapunovDev 自有，随包分发；⚠ 2026-09-23 复核：服务端推理侧无已见实现（inference.implemented=false）⇒ 本包 policy 面 PARTIAL/blocked，包级状态见 status 字段"
+    },
+    {
+      "packId": "xhand_right",
+      "version": "2026.09.23",
+      "family": "dexterous-hand",
+      "capabilities": {
+        "channels": [
+          "joint",
+          "gripper"
+        ],
+        "directControl": "suitable",
+        "fingers": 5,
+        "fingerDoF": "实读 asset/urdf/xhand_right.urdf：thumb 3（bend+rota1+rota2）+ index 3（bend+joint1+joint2）+ mid 2 + ring 2 + pinky 2 = 12 个 revolute 指节关节（另有 17 个 fixed 关节/连杆）"
+      },
+      "pieces": {
+        "asset": true,
+        "context": true,
+        "policy": true,
+        "vla": true
+      },
+      "status": "UNVERIFIED:grasp-hold",
+      "licenseSummary": "model: UNVERIFIED(源仓无 LICENSE 文件，不编造)；policy: 无基础 policy：mimo/GPT6 System-2 直控（joint/gripper 通道 + P0–P3 抓取预设）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+    }
+  ]
+}

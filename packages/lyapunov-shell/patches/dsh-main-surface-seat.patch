@@ -1,0 +1,132 @@
+diff --git a/packages/client/ui-layout/src/client/index.ts b/packages/client/ui-layout/src/client/index.ts
+--- a/packages/client/ui-layout/src/client/index.ts
++++ b/packages/client/ui-layout/src/client/index.ts
+@@ -1,13 +1,14 @@
+ /**
+  * Layout plugin, browser half: one register() call contributes AppFrame into
+  * the runtime's built-in 'root' slot and, in the same breath, declares the
+- * four child slots (declaration = exclusive render authority), seats the
++ * child slots (declaration = exclusive render authority), seats the
+  * layout store (panel geometry), and wires the panel-action service face.
+  * ctx.layout selects the main panel and controls column geometry; Session
+  * selection belongs to the Session Controller. A second effect seats the theme
+  * presenter, which projects ctx.theme snapshots onto document.body.
+  */
+ import type { Context as ClientContext } from '@deepseek-ai/cordis'
++import type { ReactNode } from 'react'
+ import type {} from '@deepseek-ai/dsh-client-locale/client'
+ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+@@ -65,6 +66,27 @@
+      */
+     'main': { kind: 'keyed'; scope: 'root' }
+     /**
++     * The centre's composition seat: a single occupant receives the already
++     * dispatched main panel as an owner prop (`main`) and returns the whole
++     * centre body — typically the panel laid out beside the product's own
++     * surfaces (a workbench, a rail, a drawer). An unoccupied seat renders the
++     * frame's own fallback, which is that same node, so the shipped centre is
++     * unchanged when no product composes here.
++     *
++     * Lifecycle is the occupant's own responsibility, and it is NOT "never
++     * remounts": the product must render `main` at a stable position in its own
++     * tree. The frame hands over a fresh node each render, and the seat itself
++     * lives and dies with the frame — unloading the occupant (or a crash that
++     * retires the entry) puts the frame's fallback back in place, switching the
++     * main panel swaps the node the seat receives, and a product that wants the
++     * centre rebuilt per Session must key its own subtree deliberately. The
++     * frame never keys the tree that contains `main`.
++     *
++     * The main slot stays the only selector of what the centre shows;
++     * this seat only decides how the centre is composed around it.
++     */
++    'main.surface': { kind: 'single'; scope: 'root'; owner: MainSurfaceOwnerProps }
++    /**
+      * The right column: a track the centre makes room for, or nothing. OCCUPIED
+      * by the right Sidebar, which uses the resolved column width in normal
+      * mode and covers the viewport in fullscreen, retaining the wide-screen
+@@ -106,6 +128,17 @@
+   width: number
+ }
+ 
++/**
++ * Centre-composition owner share: the centre's own content, already dispatched
++ * by the frame (the native Conversation, or the global panel the user selected).
++ * The occupant renders it as-is; it is a React node from this render pass, not a
++ * copy of any Session state.
++ */
++export interface MainSurfaceOwnerProps {
++  /** The centre's own content: the dispatched main panel. */
++  main: ReactNode
++}
++
+ /** Right column owner share: resolved normal geometry and opening eligibility. */
+ export interface RightbarOwnerProps {
+   /** Resolved normal panel width in px, not the saved preference; zero if it cannot fit. */
+@@ -124,7 +157,7 @@
+ 
+ /**
+  * Client plugin body: provide ctx.layout, then one register() call — AppFrame
+- * into 'root' with the four child-slot declarations, the layout store seat,
++ * into 'root' with the child-slot declarations, the layout store seat,
+  * and the shared root instance supplying commands and the panel-info source.
+  * @param ctx - client root context.
+  */
+@@ -151,6 +184,7 @@
+       children: {
+         'sidebar': { kind: 'single', scope: 'root' },
+         'main': { kind: 'keyed', scope: 'root' },
++        'main.surface': { kind: 'single', scope: 'root' },
+         'rightbar': { kind: 'single', scope: 'root' },
+         'shell.overlay': { kind: 'list', scope: 'root' },
+       },
+diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
+--- a/packages/client/ui-layout/src/client/AppFrame.tsx
++++ b/packages/client/ui-layout/src/client/AppFrame.tsx
+@@ -13,6 +13,15 @@
+  * shown/track/fullscreen through `ctx.layout`; fullscreen keeps the reported
+  * track but hides the outer resize handle. Everything arrives through the framework
+  * shares — zero cordis or framework imports, zero self-made hooks.
++ *
++ * The centre has a composition seat: 'main.surface' receives the already
++ * dispatched main panel as an owner prop and may lay it out beside its own
++ * surfaces (a workbench around the Conversation, for instance). The occupant
++ * must render that node at a stable position of its own tree — the share is a
++ * render-pass node, not a cached instance, and the seat's lifecycle follows the
++ * frame (unloading the occupant restores the fallback; switching the main panel
++ * changes the node it receives). With no occupant the frame renders that same
++ * node itself (`fallback`), which is the shipped centre.
+  */
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+ import type { ReactNode } from 'react'
+@@ -27,7 +36,7 @@
+ /** Full composed props: runtime share + child-slot render share + store share. */
+ export type AppFrameProps =
+   & PropsRuntime<'root'>
+-  & PropsRenderSlots<'sidebar' | 'main' | 'rightbar' | 'shell.overlay'>
++  & PropsRenderSlots<'sidebar' | 'main' | 'main.surface' | 'rightbar' | 'shell.overlay'>
+   & PropsStore<ReturnType<typeof createLayoutStore>>
+   & PropsLocale<'common'>
+ 
+@@ -197,6 +206,12 @@
+   const main = useMemo(() => (
+     <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} />
+   ), [usePanelInfo, renderSlot])
++  // The centre's composition seat (see the module doc). The fallback IS the
++  // dispatched main panel, so an unoccupied frame renders exactly what it did
++  // before this seat existed.
++  const centre = useMemo(
++    () => renderSlot('main.surface', { main }, { fallback: main }),
++    [renderSlot, main])
+   const overlays = useMemo(() => renderSlot('shell.overlay', {}), [renderSlot])
+ 
+   return (
+@@ -222,7 +237,7 @@
+         {sidebar}
+       </div>
+       <>
+-        <CenterColumn>{main}</CenterColumn>
++        <CenterColumn>{centre}</CenterColumn>
+         <RightbarColumn>
+           {renderSlot('rightbar', { width: normal.rightbar, viewportWidth: viewport, canShow: normal.rightbar > 0 })}
+         </RightbarColumn>

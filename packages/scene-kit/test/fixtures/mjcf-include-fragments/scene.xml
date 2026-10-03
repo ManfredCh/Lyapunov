@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="declared scene">
+  <compiler angle="degree"/>
+  <include file="asset-fragment.xml"/>
+  <compiler angle="radian" meshdir="meshes"/>
+  <asset>
+    <mesh name="table_top" file="c.stl"/>
+  </asset>
+  <include file="body-fragment.xml"/>
+  <worldbody>
+    <geom name="floor" type="plane" size="0 0 0.05"/>
+    <body name="table">
+      <geom name="table_geom" type="mesh" mesh="table_top"/>
+    </body>
+  </worldbody>
+</mujoco>

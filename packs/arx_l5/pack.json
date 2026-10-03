@@ -1,0 +1,27 @@
+{
+  "packId": "arx_l5",
+  "version": "2026.09.22",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/arx_l5/scene.xml", "model": "asset/arx_l5/arx_l5.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#arx_l5" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "control", "ik"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "https://github.com/google-deepmind/mujoco_menagerie@da76818e269b82289eba39808e2fb91d679d6994#arx_l5/arx_l5.xml",
+    "commit": "da76818e269b82289eba39808e2fb91d679d6994",
+    "author": "ARXrobotics（模型，BSD 3-Clause，(c) 2023-2025）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（arx_l5/LICENSE 已核对 2026-09-22：(c) 2023-2025 ARXrobotics；全文随 asset/ 由 staging 提供）",
+    "policy": "无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "patchSha256": "3c8369e6c2d4b8204afb998c6bc4222139efaf9d28d2e6b247169e4dbcc68b44",
+  "files": [
+    {
+      "path": "packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.module.css",
+      "beforeSha256": "03dc82e3f909181877eb918e034e3c90839bffe5a55983cde920468178e03389",
+      "afterSha256": "522dacd20b7f1e9a53536e3dba7903b7878182d5437353535e7bd38ea8896c88"
+    },
+    {
+      "path": "packages/client/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx",
+      "beforeSha256": "691ccef7956c20e7e83f2996219da864f7ffac1efc18755e1f117afe2609de8a",
+      "afterSha256": "0e86eae773535ae4439d309ec360298c638a92737ceff03b42894f71be8bfec8"
+    },
+    {
+      "path": "packages/client/ui-directory-picker-browse/src/client/flow.ts",
+      "beforeSha256": "2524732855c5aec36b34387f549218324ebff43cceca5c4083556028cbefc9c5",
+      "afterSha256": "bbaa787317ec51605522d55720a7cca14a9e58b65c7834cf07f7d417f8100aa1"
+    },
+    {
+      "path": "packages/client/ui-directory-picker-browse/src/client/index.ts",
+      "beforeSha256": "7dfcf42cbe37ca0d54264dfc2e7e0248536a38f7ccfd51a17c401fc0514f1128",
+      "afterSha256": "bbff8afd96efe63a4c7b77293290be00eb93bf0bd1cfbc633b66d0800643ba3b"
+    },
+    {
+      "path": "packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx",
+      "beforeSha256": "0f1c86cdd6557aeb821e9fcade161127e6e9ed0af37e85d555b1d5a3519732d3",
+      "afterSha256": "f7c34c4c5407c703d041499c48ca57069dd1df81484ff33508a4ea914974d056"
+    },
+    {
+      "path": "packages/client/ui-directory-picker-browse/tests/directory-browser.client.spec.tsx",
+      "beforeSha256": "68dceaa96bacd90940742798f00e4459812bfbc54f478ba31e91dd2dc0d5f200",
+      "afterSha256": "12dfe68014a3f4fb7f0369ebe3b42404f3ca5ee130f6f8c3028f630d6c27384a"
+    }
+  ]
+}

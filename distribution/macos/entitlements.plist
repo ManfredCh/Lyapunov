@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS 硬化运行时授权模板（模板，未被任何构建脚本引用，也未在任何机器上执行过）
+
+  用途：未来给 Developer ID 分发构建签名时，用
+    codesign --options runtime --entitlements distribution/macos/entitlements.plist ...
+  传到签名步骤。公证要求硬化运行时；本仓库当前没有任何打包或签名流程引用此文件。
+
+  为什么是这两项：
+  - com.apple.security.cs.allow-jit
+      现有客户端是 Electron 43.5.1（内嵌 V8），V8 需要可写可执行内存来生成 JIT 代码。
+      没有这一项时，硬化运行时下应用会在启动阶段崩溃。
+      注意 docs/macos-adaptation-plan.md §4 写的是"v1 避免 allow-jit"——那条的前提是
+      SwiftUI + WKWebView 原生客户端，与本仓库现有实现（Chromium/Electron，见
+      distribution/macos/README.md §3）不是同一技术栈。若将来真的改成 WKWebView，
+      应按计划 §4 重新收紧这张表。
+  - com.apple.security.network.client
+      唯一的网络需求：访问 Lyapunov 账户/模型服务（HTTPS）。不需要 server socket，
+      也没有 com.apple.security.network.server。
+
+  有意留空的项：
+  - com.apple.security.app-sandbox
+      计划 §4 建议开启 App Sandbox，但现有实现没有沙箱，也没有做过沙箱下的验收
+      （导出路径不经保存面板、Host 子进程、数据目录都不满足沙箱约束）。在真正实现并
+      验收之前不要把这一项打开，否则会得到一个没验证过的运行形态。
+  - com.apple.security.files.user-selected.read-write
+      计划 §4 里给"导出资产"用；现有代码没有保存面板导出路径，启用它属于新增行为。
+      将来实现导出时，把下面注释里的这一项打开并真机验收。
+  - com.apple.security.cs.allow-unsigned-executable-memory
+      仅在实测出现可执行内存映射失败时才评估；Electron 12+ 的常规构建只需要 allow-jit。
+
+  签名要求（人工，用真实证书）：
+  - 从内到外签名：Electron Framework → Helper (GPU/Renderer/Plugin) → 主可执行文件，
+    嵌套二进制要带同样的授权；用 electron-builder/osx-sign 会自动处理，
+    手工签名时要自己保证顺序。
+  - 不要用已废弃的 --deep 做签名（验证可以用）。
+  - 证书、Team ID、公证凭据一律来自 CI/发布负责人，绝不写入本文件或仓库。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 导出功能真正实现后再评估：
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	-->
+</dict>
+</plist>

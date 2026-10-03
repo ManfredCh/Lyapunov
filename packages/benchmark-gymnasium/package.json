@@ -1,0 +1,33 @@
+{
+  "name": "@lyapunov/benchmark-gymnasium",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/plugin.ts",
+    "./worker": "./python/worker.py",
+    "./adapter": "./src/adapter.ts",
+    "./catalog": "./src/catalog.ts"
+  },
+  "dependencies": {
+    "@lyapunov/benchmark-contract": "workspace:*",
+    "@lyapunov/contracts": "workspace:*",
+    "@lyapunov/sim-contract": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-tools": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-commands": "0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    }
+  }
+}

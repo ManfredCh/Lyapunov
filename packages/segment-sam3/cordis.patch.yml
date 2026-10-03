@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-segment-sam3
+      name: '@lyapunov/segment-sam3'

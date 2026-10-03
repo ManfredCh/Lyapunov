@@ -1,0 +1,24 @@
+diff --git a/packages/bundle/web-app/src/index.ts b/packages/bundle/web-app/src/index.ts
+--- a/packages/bundle/web-app/src/index.ts
++++ b/packages/bundle/web-app/src/index.ts
+@@ -136,7 +136,7 @@
+ 
+ /** Model-visible orientation and acceptance boundary for sessions created through `dsh web`. */
+ export function webSurfacePrompt(webUrl: string, presentation: 'developer' | 'product' = 'developer'): string {
+-  if (presentation === 'product') return '当前交互界面是 Lyapunov。用户说“这里”“当前场景”或“选中对象”时，以本会话最新工作台事实为准。界面回执不足以证明画面变化；需要视觉判断时读取同一窗口的真实观察。没有有效窗口或状态时，说明具体缺项。'
++  if (presentation === 'product') return 'The current interface is Lyapunov. Resolve references such as "here", "the current scene", or "the selected object" from this session\'s latest workbench facts. An interface acknowledgement does not prove that the displayed image changed; use a real observation from the same window when visual judgement is needed. If no valid window or state is available, report the specific missing information.'
+   const updateContract = 'The client-plugin HMR receiver is active, but client-plugin changes reload without a refresh only while '
+     + '`pnpm run dev:web` is also running from this same checkout to rebuild their bundles; verify that watcher before promising automatic updates. '
+     + 'Every other change — the apps/web shell and plain packages — requires rebuilding the affected Web artifacts and verifying this existing URL after a page refresh. '
+diff --git a/packages/bundle/web-app/tests/web-app.spec.ts b/packages/bundle/web-app/tests/web-app.spec.ts
+--- a/packages/bundle/web-app/tests/web-app.spec.ts
++++ b/packages/bundle/web-app/tests/web-app.spec.ts
+@@ -127,7 +127,7 @@
+     expect(assembly.sections.some(section=>section.name==='harness:source')).toBe(false)
+     expect(assembly.sections.some(section=>section.name==='harness:identity')).toBe(false)
+     const text=assembly.sections.find(section=>section.name==='app:web-surface')?.text
+-    expect(text).toBe('当前交互界面是 Lyapunov。用户说“这里”“当前场景”或“选中对象”时，以本会话最新工作台事实为准。界面回执不足以证明画面变化；需要视觉判断时读取同一窗口的真实观察。没有有效窗口或状态时，说明具体缺项。')
++    expect(text).toBe('The current interface is Lyapunov. Resolve references such as "here", "the current scene", or "the selected object" from this session\'s latest workbench facts. An interface acknowledgement does not prove that the displayed image changed; use a real observation from the same window when visual judgement is needed. If no valid window or state is available, report the specific missing information.')
+     expect(text).not.toContain('HMR')
+     expect(text).not.toContain('pnpm')
+     expect(seat()).toBeDefined()

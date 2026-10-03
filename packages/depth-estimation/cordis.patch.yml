@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-depth-estimation
+      name: '@lyapunov/depth-estimation'

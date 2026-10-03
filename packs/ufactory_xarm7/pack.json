@@ -1,0 +1,27 @@
+{
+  "packId": "ufactory_xarm7",
+  "version": "2026.09.23",
+  "family": "arm",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/xarm7.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_T1.json#ufactory_xarm7" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "trajectory", "gripper", "control", "ik"],
+    "directControl": "suitable"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "https://github.com/google-deepmind/mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7#ufactory_xarm7/xarm7.xml",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "Google DeepMind MuJoCo Menagerie（模型原件，源自 UFACTORY 描述）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 正文判读 2026-09-23：Copyright (c) 2018, UFACTORY Inc. + 三条款 BSD 再分发与免责声明；全文随 asset/ 由 staging 提供）",
+    "policy": "无基础 policy；mimo/GPT6 直控内容（context/vla/tests）为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

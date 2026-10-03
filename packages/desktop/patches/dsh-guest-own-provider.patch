@@ -1,0 +1,281 @@
+diff --git a/packages/api/session-controller/src/commands.ts b/packages/api/session-controller/src/commands.ts
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -148,6 +148,11 @@
+             ? {}
+             : { reasoningEffort: resolved.reasoningEffort }),
+         }
++        // An opted-in empty composition must acquire its validated default
++        // before installing the Session selection. A failed write stays empty.
++        if (this.ctx.agentDefaultModel.optionalSelection() === undefined && this.ctx.agentDefaultModel.allowsEmptySelection) {
++          await this.ctx.agentDefaultModel.saveSelection(selected)
++        }
+         this.agents.selectForNextRequest(agent, selected)
+         try {
+           await this.ctx.agentDefaultModel.saveSelection(selected)
+@@ -320,7 +325,7 @@
+     signal?.throwIfAborted()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     if (this.ctx.agentDefaultModel.optionalSelection() === undefined) {
+-      throw new RemoteError('session/model-not-configured', '尚未配置模型，请登录后启用对话；本地手动操作仍可使用。', {})
++      throw new RemoteError('session/model-not-configured', 'No model is configured. Configure your own provider in Models; local manual commands remain available.', {})
+     }
+     const selection = this.agents.selectionFor(agent).current
+     if (!routeServed(this.ctx, selection.provider)) {
+diff --git a/packages/core/agent-default-model/src/index.ts b/packages/core/agent-default-model/src/index.ts
+--- a/packages/core/agent-default-model/src/index.ts
++++ b/packages/core/agent-default-model/src/index.ts
+@@ -51,6 +51,13 @@
+   manualOnlyPresentation?: 'guest'
+   provider?: never
+   model?: never
++} | {
++  /** Start without a model; only an explicit settings/selection write enables one. */
++  initiallyUnconfigured: true
++  manualOnlyPresentation?: 'guest'
++  manualOnly?: never
++  provider?: never
++  model?: never
+ }
+ 
+ /** Project stored settings onto the Agent-facing selection type. */
+@@ -73,14 +80,18 @@
+   static Config: z<Config> = z.union([z.object({
+     provider: z.string().required(),
+     model: z.string().required(),
+-  }), z.object({ manualOnly: z.const(true).required(), manualOnlyPresentation: z.const('guest') })])
++  }), z.object({ manualOnly: z.const(true).required(), manualOnlyPresentation: z.const('guest') }),
++    z.object({ initiallyUnconfigured: z.const(true).required(), manualOnlyPresentation: z.const('guest') })])
+ 
+   private source: () => AgentDefaultModelSettings | undefined
+   readonly manualOnlyPresentation: 'guest' | undefined
++  /** An empty composition can be configured only when its owner opted in. */
++  readonly allowsEmptySelection: boolean
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentDefaultModel')
+-    this.manualOnlyPresentation = config.manualOnly === true ? config.manualOnlyPresentation : undefined
++    this.allowsEmptySelection = 'initiallyUnconfigured' in config && config.initiallyUnconfigured === true
++    this.manualOnlyPresentation = 'manualOnlyPresentation' in config ? config.manualOnlyPresentation : undefined
+     if (config.manualOnly === true) {
+       this.source = () => undefined
+       // Manual commands keep their Agent/Session scope, while queued plugin
+@@ -88,7 +99,28 @@
+       ctx.on('agent/pre-step', async (_payload, next) => { await next(); return { kind: 'reject' } })
+       return
+     }
+-    const entry: AgentDefaultModelSettings = { provider: config.provider, model: config.model }
++    if (this.allowsEmptySelection) {
++      this.source = () => undefined
++      const optionalSchema = z.object({ provider: z.string(), model: z.string(), reasoningEffort: z.string() })
++      ctx.inject(['settings'], (settingsCtx) => {
++        settingsCtx.settings.installSection(ctx, AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, optionalSchema, {}, {
++          validate: (value) => {
++            if (Boolean(value.provider) !== Boolean(value.model)) throw new Error('MODEL_SELECTION_INCOMPLETE')
++          },
++          setSource: (current) => { this.source = () => {
++            const value = current()
++            return value.provider && value.model ? { provider: value.provider, model: value.model, ...value.reasoningEffort == null ? {} : { reasoningEffort: value.reasoningEffort } } : undefined
++          } },
++          onChange: () => {},
++        })
++      })
++      ctx.on('agent/pre-step', async (_payload, next) => {
++        const decision = await next()
++        return this.optionalSelection() === undefined ? { kind: 'reject' } : decision
++      })
++      return
++    }
++    const entry: AgentDefaultModelSettings = { provider: config.provider!, model: config.model! }
+     this.source = () => entry
+     ctx.inject(['settings'], (settingsCtx) => {
+       settingsCtx.settings.installSection(ctx, AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, entry, {
+@@ -123,7 +155,7 @@
+    * @returns fulfillment after the optional settings write settles.
+    */
+   async saveSelection(next: ModelSelection): Promise<void> {
+-    if (this.optionalSelection() === undefined) throw new Error('MODEL_NOT_CONFIGURED: model selection is disabled by this composition')
++    if (this.optionalSelection() === undefined && !this.allowsEmptySelection) throw new Error('MODEL_NOT_CONFIGURED: model selection is disabled by this composition')
+     await this.ctx.get('settings')?.replace(AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, {
+       provider: next.provider,
+       model: next.model,
+diff --git a/packages/core/agent-default-model/tests/agent-default-model.spec.ts b/packages/core/agent-default-model/tests/agent-default-model.spec.ts
+--- a/packages/core/agent-default-model/tests/agent-default-model.spec.ts
++++ b/packages/core/agent-default-model/tests/agent-default-model.spec.ts
+@@ -41,6 +41,17 @@
+ }
+ 
+ describe('AgentDefaultModelConfig', () => {
++  it('starts an own-provider composition empty and saves only an explicit complete selection', async () => {
++    const ctx = new Context()
++    await ctx.plugin(MemorySettings)
++    await ctx.plugin(AgentDefaultModelConfig, { initiallyUnconfigured: true, manualOnlyPresentation: 'guest' })
++    expect(ctx.agentDefaultModel.optionalSelection()).toBeUndefined()
++    expect(ctx.agentDefaultModel.allowsEmptySelection).toBe(true)
++    await expect(ctx.settings.update('agent-default-model', { provider: 'fixture' })).rejects.toThrow('MODEL_SELECTION_INCOMPLETE')
++    await ctx.agentDefaultModel.saveSelection({ provider: 'fixture', model: 'fixture-chat' })
++    expect(ctx.agentDefaultModel.optionalSelection()).toEqual({ provider: 'fixture', model: 'fixture-chat' })
++    await ctx.fiber.dispose()
++  })
+   it('only explicit manual-only composition carries the guest copy hint and never acquires a selection', async () => {
+     const ctx = new Context()
+     await ctx.plugin(AgentDefaultModelConfig, { manualOnly: true, manualOnlyPresentation: 'guest' })
+diff --git a/packages/llm/llm-pi-ai/src/adapter.ts b/packages/llm/llm-pi-ai/src/adapter.ts
+--- a/packages/llm/llm-pi-ai/src/adapter.ts
++++ b/packages/llm/llm-pi-ai/src/adapter.ts
+@@ -72,6 +72,8 @@
+ 
+ /** Constructor options for {@link PiAiAdapter}: the two resolution hooks the plugin owns. */
+ export interface PiAiAdapterOptions {
++  /** Check the exact frozen endpoint before any credential or network access. */
++  assertModel?: (provider: string, baseURL: string) => void
+   /** Current validated profiles by provider route; called once per operation. */
+   profiles: () => ReadonlyMap<string, ResolvedPiAiProviderProfile>
+   /**
+@@ -341,6 +343,7 @@
+     // the one it started with and the next call picks up the new one.
+     const profile = this.profileOf(snapshot, options.provider)
+     const model = this.modelOf(snapshot, options.provider, options.model)
++    this.config.assertModel?.(options.provider, model.baseUrl)
+     const reasoning = resolveReasoningLevel(
+       model,
+       options.reasoningEffort ?? profile.reasoning,
+diff --git a/packages/llm/llm-pi-ai/src/auth.ts b/packages/llm/llm-pi-ai/src/auth.ts
+--- a/packages/llm/llm-pi-ai/src/auth.ts
++++ b/packages/llm/llm-pi-ai/src/auth.ts
+@@ -200,7 +200,7 @@
+  * @param ctx - the plugin context carrying the optional `ctx.credentials`.
+  * @returns the auth context to hand `createModels()`.
+  */
+-export function authContextFrom(ctx: Context): AuthContext {
++export function authContextFrom(ctx: Context, allowAmbientCredentials = true): AuthContext {
+   return {
+     async env(name) {
+       // pi-ai asks about arbitrary provider-declared names; one that is not a
+@@ -211,9 +211,11 @@
+         const hit = await credentials?.resolve(credentialRef(name))
+         if (hit !== undefined) return hit.value
+       }
++      if (!allowAmbientCredentials) return undefined
+       return launchEnvironmentOf(ctx).get(name)?.value
+     },
+     async fileExists(path) {
++      if (!allowAmbientCredentials) return false
+       const expanded = path.startsWith('~/') || path === '~'
+         ? resolvePath(homedir(), path.slice(1).replace(/^\//, ''))
+         : path
+diff --git a/packages/llm/llm-pi-ai/src/config.ts b/packages/llm/llm-pi-ai/src/config.ts
+--- a/packages/llm/llm-pi-ai/src/config.ts
++++ b/packages/llm/llm-pi-ai/src/config.ts
+@@ -221,6 +221,8 @@
+ 
+ /** Plugin configuration: the provider routes this instance owns. */
+ export interface Config {
++  /** Composition must wait for its owner policy before registering routes or discovery. */
++  requireCompositionPolicy?: boolean
+   /**
+    * pi-ai provider routes, keyed by provider. An empty (or omitted) dict is
+    * the dormant settings-driven posture: the adapter mounts with no routes
+@@ -349,6 +351,7 @@
+ 
+ /** Runtime schema for {@link Config}. */
+ export const Config: z<Config> = z.object({
++  requireCompositionPolicy: z.boolean(),
+   providers: z.dict(profile).default({}),
+ })
+ 
+diff --git a/packages/llm/llm-pi-ai/src/index.ts b/packages/llm/llm-pi-ai/src/index.ts
+--- a/packages/llm/llm-pi-ai/src/index.ts
++++ b/packages/llm/llm-pi-ai/src/index.ts
+@@ -88,6 +88,16 @@
+ export { recordKeyFor } from './auth.ts'
+ export { supportedProtocols } from './provider.ts'
+ 
++/** Optional composition policy. Settings cannot replace this owner boundary. */
++export interface PiAiCompositionPolicy {
++  readonly allowAmbientCredentials: boolean
++  validateProfiles(providers: Config['providers']): void
++  validateResolved(profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>): void
++  assertDiscovery(request: import('@deepseek-ai/dsh-llm').LlmModelDiscoveryOperation): void
++  assertModel(provider: string, baseURL: string): void
++}
++declare module '@deepseek-ai/cordis' { interface Context { llmPiAiPolicy: PiAiCompositionPolicy } }
++
+ export const name = 'llm-pi-ai'
+ export const inject = ['llm']
+ 
+@@ -144,6 +154,15 @@
+ 
+ /** Register one generic pi-ai adapter for all configured provider routes. */
+ export function apply(ctx: Context, config: Config): void {
++  if (config.requireCompositionPolicy === true) {
++    ctx.inject(['llmPiAiPolicy'], (owned) => { applyBound(owned, config) })
++    return
++  }
++  applyBound(ctx, config)
++}
++
++function applyBound(ctx: Context, config: Config): void {
++  const policy = ctx.get('llmPiAiPolicy')
+   assertManagedProfileAuthority(config.providers, config.providers)
+   let current: () => Config = () => config
+   let lastRaw: Config | undefined
+@@ -159,8 +178,10 @@
+    */
+   const profiles = (): ReadonlyMap<string, ResolvedPiAiProviderProfile> => {
+     const raw = current()
++    policy?.validateProfiles(raw.providers)
+     if (raw === lastRaw && memoized !== undefined) return memoized
+     const next = resolveProfiles(raw.providers, 'deferred')
++    policy?.validateResolved(next)
+     lastRaw = raw
+     memoized = next
+     return next
+@@ -195,9 +216,10 @@
+   // One store and one ambient context for the whole plugin instance: both read
+   // through `ctx` per call, so they stay correct across the collection rebuilds
+   // a configuration change causes, and a sign-in survives one.
+-  const auth = { credentials: credentialStoreFrom(ctx), authContext: authContextFrom(ctx) }
++  const auth = { credentials: credentialStoreFrom(ctx), authContext: authContextFrom(ctx, policy?.allowAmbientCredentials !== false) }
+   const adapter = new PiAiAdapter({
+     profiles,
++    assertModel: (provider, baseURL) => policy?.assertModel(provider, baseURL),
+     resolveApiKey,
+     auth,
+     resolveAttachments: () => ctx.get('attachments'),
+@@ -218,7 +240,7 @@
+   // Scoped to the authorization seam rather than injected outright, because a
+   // composition without it (headless, ACP) simply has no surface to sign in
+   // from, while everything else this plugin does still works.
+-  ctx.inject(['authorization'], (authorized) => { registerPiAiFlows(authorized, auth) })
++  if (policy?.allowAmbientCredentials !== false) ctx.inject(['authorization'], (authorized) => { registerPiAiFlows(authorized, auth) })
+   // The full installed catalog is configurable from the moment the plugin
+   // mounts — dormant or not — so configuration surfaces can offer every
+   // pi-ai provider before any route exists. Hand-declared routes join it as
+@@ -263,10 +285,13 @@
+   // except the stored credential and deployment-owned headers: the curated UI
+   // accepts neither, so an already-configured route supplies both inside the
+   // Host rather than widening the discovery request.
+-  ctx.llm.registerModelDiscovery(NS, (request, signal) => discoverModels(
+-    { ...request, ...signal === undefined ? {} : { signal } },
+-    () => storedDiscoveryProfile(request.provider),
+-  ))
++  ctx.llm.registerModelDiscovery(NS, (request, signal) => {
++    policy?.assertDiscovery(request)
++    return discoverModels(
++      { ...request, ...signal === undefined ? {} : { signal } },
++      () => storedDiscoveryProfile(request.provider),
++    )
++  })
+   // Route effects bind to this apply fiber via the stable `ctx` reference,
+   // even when a swap runs inside the scoped settings callback below. A bare
+   // mount (zero routes) is the dormant posture: nothing registers until a
+@@ -302,6 +327,8 @@
+     let registering = true
+     settingsCtx.settings.installSection(ctx, NS, Config, config, {
+       validate: (value) => {
++        policy?.validateProfiles(value.providers)
++        policy?.validateResolved(resolveProfiles(value.providers, 'deferred'))
+         // Stored catalog drift must not prevent registration of the repair UI.
+         if (registering) {
+           resolveProfiles(value.providers, 'deferred')

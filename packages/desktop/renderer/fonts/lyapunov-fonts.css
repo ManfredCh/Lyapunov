@@ -1,0 +1,18 @@
+/* 账户 file 页面与工作台 Host 使用同一份本地字库和字体变量。 */
+@font-face{
+  font-family:"Lyapunov CJK";
+  src:url("./NotoSansSC-Regular.otf") format("opentype");
+  font-style:normal;
+  font-weight:400;
+  font-display:swap;
+}
+:root{
+  --dsw-font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Lyapunov CJK","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --ds-font-family-code:"SF Mono","JetBrains Mono","Fira Code",Consolas,"Liberation Mono",Menlo,Courier,"Lyapunov CJK","PingFang SC","Microsoft YaHei",monospace;
+  --lyapunov-font-serif:"Noto Serif CJK SC","Noto Serif SC","Lyapunov CJK",serif;
+}
+/* 工作台原有局部变量不参与另一套字体选择；portal 也继承同一入口。 */
+.lya-wb,.lya-wb-panel{
+  --lya-font-ui:var(--dsw-font-family)!important;
+  --lya-font-mono:var(--ds-font-family-code)!important;
+}

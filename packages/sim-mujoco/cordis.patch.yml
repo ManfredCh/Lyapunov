@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-sim-mujoco
+      name: '@lyapunov/sim-mujoco/plugin'

@@ -1,0 +1,45 @@
+{
+ "schemaVersion": 1,
+ "packId": "unitree_go1",
+ "version": "2026.09.22",
+ "mode": "base-policy",
+ "source": {
+  "provider": "github",
+  "repo": "Improbable-AI/walk-these-ways",
+  "commit": "0e7236bd…（bugfixHistory/DEV028 只留短哈希；全哈希待 ASSET_STAGING_MANIFEST.json#unitree_go1 锁定后对账）"
+ },
+ "adapter": "torchscript",
+ "observation": {
+  "dim": null,
+  "note": "Walk These Ways 历史观测（含历史帧/步态指令）；观测顺序、关节顺序、PD、动作尺度、频率须按该来源部署口径（go1_gym_deploy）适配。开发侧曾核对 70 维观测顺序源码副本（bugfixHistory/DEV028），但适配器未进产品前不落定值。"
+ },
+ "action": {
+  "dim": 12,
+  "semantics": "腿关节目标（FR/FL/RR/RL × hip/thigh/calf 共 12 维；关节顺序以 walk-these-ways 部署口径为准并与 robot_describe 实测名逐项核对）",
+  "pd": "按 walk-these-ways 部署口径（待适配器落地对账）",
+  "scale": "待适配器落地对账"
+ },
+ "freq": {
+  "policyHz": 50,
+  "note": "开发侧闭环记录 50 Hz（bugfixHistory/DEV028）；产品适配器落地后以实测对账"
+ },
+ "deps": [
+  "torch（与 .runtime/sim-python 匹配，仅策略推理需要）"
+ ],
+ "weights": {
+  "bundled": false,
+  "file": null,
+  "bytes": null,
+  "sha256": null,
+  "availability": "resolvable",
+  "providedBy": "Improbable-AI/walk-these-ways 三权重件（body_latest.jit 4,980,904B + adaptation_module_latest.jit 2,293,501B + parameters.pkl 484,076B；历史上经产品下载校验共 7,771,554 字节含 LICENSE/README，不随本包分发）",
+  "pin": "Improbable-AI/walk-these-ways@0e7236bdc81ce855cbe3d70345a7899452bdeb1c",
+  "resolution": {
+   "provider": "github",
+   "modelId": "Improbable-AI/walk-these-ways",
+   "revision": "0e7236bdc81ce855cbe3d70345a7899452bdeb1c"
+  }
+ },
+ "status": "ready",
+ "notes": "【2026-09-23 改判】客户端已登记 wtw-go1-torchscript-v1 适配器（python/prepare_wtw.py）：对真实权重 walk-these-ways@0e7236bd（body_latest.jit sha256=6c14b59c… 等三件）实跑 exit=0，派生 go1-position-pd.xml 过 mujoco 双编译 + 10 项物理保持断言，stdout 过 consumePreparedAdapter 契约（PD 20/0.5、50Hz、obs 70×30=2100）。旧记录的“policy_prepare 返回 POLICY_ADAPTER_UNAVAILABLE”是**本轮之前的**状态，已由上述实跑取代。权重不随本包分发（bundled=false），经已登记来源取件。物理模型是本机资产 materials/robots/unitree_go1/menagerie/go1.xml（WTW 自带的 xml/go1.xml 不是 MuJoCo 可解析的 XML）。行为级行走验收仍未做（tests/acceptance.md 记 PARTIAL/UNVERIFIED），不得借用 Go2/G1 结果。证据：bugfixHistory/ROBOT-PACKS-BUILD-20260922.md W28/W30/W34。"
+}

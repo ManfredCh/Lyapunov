@@ -1,0 +1,41 @@
+{
+  "packId": "crazyflie_2",
+  "version": "2026.09.30",
+  "family": "quadrotor",
+  "asset": {
+    "modelEntry": "asset/cf2.xml",
+    "model": "asset/cf2.xml",
+    "builtinAssetId": "crazyflie_2",
+    "builtinModel": "materials/robots/crazyflie_2/bitcraze_crazyflie_2/cf2.xml"
+  },
+  "pieces": {
+    "asset": {
+      "ref": "ASSET_STAGING_MANIFEST.json#crazyflie_2"
+    },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": [
+      "thrust",
+      "bodyWrench",
+      "control"
+    ],
+    "directControl": "nativeLocalPidExperimental",
+    "flightProfile": "crazyflie-2-native-pid-v1",
+    "verifiedEngine": "mujoco"
+  },
+  "status": "EXPERIMENTAL:bounded-local-native-flight",
+  "provenance": {
+    "source": "Crazyflie 2.x 四旋翼模型（ASSET_STAGING_MANIFEST.json#crazyflie_2 落账）",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "Bitcraze（Crazyflie 开源硬件/固件生态）；LyapunovDev（通道、任务与包内容）"
+  },
+  "license": {
+    "model": "MIT，官方固定源45件闭包与LICENSE已逐件核；产品内置原件副本不编辑",
+    "policy": "无学习权重；Lyapunov本地位置/高度PI与姿态PD，固定Crazyflie/MuJoCo小范围实验验证。不是四电机RPM/PX4桥，不签真实硬件或Isaac。"
+  },
+  "tests": "tests/acceptance.md",
+  "notes": "模型库可加入与当前场景实例分别显示；robot_flight与手动面板同一原生执行路径。世界米/Z-up，水平目标≤1m、高度≤1m，单窗口≤30s，完成撤力；land和stop分开。只有当前实例实际compiled source/mass/matrix/freeBase/World代次匹配才可运行；完整发行/GUI/GPU另验。"
+}

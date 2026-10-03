@@ -1,0 +1,66 @@
+name: lyapunov-dsh-graspgenx
+
+services:
+  assets:
+    profiles: [assets]
+    image: lyapunov-dsh-graspgenx-assets:7c834043c11a-19a03c00d19a
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile.assets
+    environment:
+      HF_ENDPOINT: https://hf-mirror.com
+      HF_HUB_DISABLE_XET: "1"
+      LYAPUNOV_GRASPGENX_TERMS_ACCEPTED: "${LYAPUNOV_GRASPGENX_TERMS_ACCEPTED:-${LYAUP_GRASPGENX_TERMS_ACCEPTED:-}}"
+    volumes:
+      - models:/models
+      - grippers:/grippers
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=1g
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  worker:
+    image: "${GRASPGENX_WORKER_IMAGE:-lyapunov-dsh-graspgenx-worker:b9429097}"
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      HF_ENDPOINT: https://hf-mirror.com
+      HF_HUB_OFFLINE: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LYAPUNOV_GRASPGENX_TERMS_ACCEPTED: "${LYAPUNOV_GRASPGENX_TERMS_ACCEPTED:-${LYAUP_GRASPGENX_TERMS_ACCEPTED:-}}"
+    volumes:
+      - models:/models:ro
+      - grippers:/grippers:ro
+    networks: [graspgen]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=4g
+    shm_size: 8g
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GRASPGEN_GPU_DEVICE:-0}"]
+              capabilities: [gpu]
+    restart: on-failure:3
+    stop_grace_period: 30s
+
+networks:
+  graspgen:
+    internal: true
+
+volumes:
+  models:
+    external: true
+    name: "${GRASPGENX_MODEL_VOLUME:-lyapunov-graspgenx-models-7c834043c11a}"
+  grippers:
+    external: true
+    name: "${GRASPGENX_GRIPPER_VOLUME:-lyapunov-graspgenx-grippers-19a03c00d19a}"

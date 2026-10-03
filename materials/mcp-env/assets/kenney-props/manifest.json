@@ -1,0 +1,241 @@
+{
+  "generator": "materials/mcp-env/scripts/place_kenney_props.py",
+  "sourceAsset": "Kenney City Kit (Roads) 2.1",
+  "sourceUrl": "https://kenney.nl/assets/city-kit-roads",
+  "downloadUrl": "https://kenney.nl/media/pages/assets/city-kit-roads/74288c9459-1787042796/kenney_city-kit-roads.zip",
+  "license": "CC0-1.0",
+  "licenseEvidence": "压缩包内 License.txt 原文：“License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/”",
+  "units": "m",
+  "worldUpAxis": "Z",
+  "placementRule": "沿道路弧线等间距布置；横向偏移 = 人行道中线(9.25m)或路面指定偏移；朝向由横向法向推出，无随机",
+  "scaleFactor": 10.0,
+  "scaleFactorBasis": "源 GLB 无单位元数据；×10 后 路灯6.0m/信号灯5.15m/垃圾箱2.06m/锥桶0.94m 最符合街道常识，详见脚本注释",
+  "scaleUncertainty": "真实世界尺度为推断值而非源文件声明值；若源作者意图不同，改 PROP_SCALE 单一常量即可整体修正",
+  "props": [
+    {
+      "object": "prop_00_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.08,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        43.062,
+        -30.467,
+        0.012
+      ],
+      "yawDeg": 54.72,
+      "heightM": 6.0,
+      "footprintZMinM": 0.012
+    },
+    {
+      "object": "prop_01_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.26,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        49.518,
+        -18.18,
+        0.428
+      ],
+      "yawDeg": 69.84,
+      "heightM": 6.0,
+      "footprintZMinM": 0.428
+    },
+    {
+      "object": "prop_02_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.44,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        52.546,
+        -4.634,
+        0.776
+      ],
+      "yawDeg": 84.96,
+      "heightM": 6.0,
+      "footprintZMinM": 0.776
+    },
+    {
+      "object": "prop_03_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.62,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        51.936,
+        9.232,
+        1.016
+      ],
+      "yawDeg": -259.92,
+      "heightM": 6.0,
+      "footprintZMinM": 1.016
+    },
+    {
+      "object": "prop_04_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.8,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        47.73,
+        22.46,
+        1.095
+      ],
+      "yawDeg": -244.8,
+      "heightM": 6.0,
+      "footprintZMinM": 1.095
+    },
+    {
+      "object": "prop_05_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.93,
+      "lateralOffsetM": 9.25,
+      "note": "路灯",
+      "placedAt": [
+        42.611,
+        31.095,
+        1.027
+      ],
+      "yawDeg": -233.88,
+      "heightM": 6.0,
+      "footprintZMinM": 1.027
+    },
+    {
+      "object": "prop_06_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.2,
+      "lateralOffsetM": -9.25,
+      "note": "路灯（对街）",
+      "placedAt": [
+        64.469,
+        -30.337,
+        0.765
+      ],
+      "yawDeg": 64.8,
+      "heightM": 6.0,
+      "footprintZMinM": 0.765
+    },
+    {
+      "object": "prop_07_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.55,
+      "lateralOffsetM": -9.25,
+      "note": "路灯（对街）",
+      "placedAt": [
+        71.059,
+        5.218,
+        1.621
+      ],
+      "yawDeg": -265.8,
+      "heightM": 6.0,
+      "footprintZMinM": 1.621
+    },
+    {
+      "object": "prop_08_light-square",
+      "sourceFile": "light-square.glb",
+      "arcFraction": 0.86,
+      "lateralOffsetM": -9.25,
+      "note": "路灯（对街）",
+      "placedAt": [
+        61.555,
+        35.883,
+        1.87
+      ],
+      "yawDeg": -239.76,
+      "heightM": 6.0,
+      "footprintZMinM": 1.87
+    },
+    {
+      "object": "prop_09_traffic-light",
+      "sourceFile": "traffic-light.glb",
+      "arcFraction": 0.135,
+      "lateralOffsetM": 9.85,
+      "note": "信号灯",
+      "placedAt": [
+        44.86,
+        -26.594,
+        0.126
+      ],
+      "yawDeg": 59.34,
+      "heightM": 5.15,
+      "footprintZMinM": 0.126
+    },
+    {
+      "object": "prop_10_traffic-light",
+      "sourceFile": "traffic-light.glb",
+      "arcFraction": 0.505,
+      "lateralOffsetM": -9.85,
+      "note": "信号灯（对街）",
+      "placedAt": [
+        71.848,
+        0.527,
+        1.548
+      ],
+      "yawDeg": -269.58,
+      "heightM": 5.15,
+      "footprintZMinM": 1.548
+    },
+    {
+      "object": "prop_11_construction-cone",
+      "sourceFile": "construction-cone.glb",
+      "arcFraction": 0.3,
+      "lateralOffsetM": -2.2,
+      "note": "锥桶（路面上）",
+      "placedAt": [
+        61.46,
+        -18.556,
+        0.733
+      ],
+      "yawDeg": 73.2,
+      "heightM": 0.938,
+      "footprintZMinM": 0.733
+    },
+    {
+      "object": "prop_12_construction-cone",
+      "sourceFile": "construction-cone.glb",
+      "arcFraction": 0.32,
+      "lateralOffsetM": -2.2,
+      "note": "锥桶（路面上）",
+      "placedAt": [
+        61.978,
+        -16.746,
+        0.782
+      ],
+      "yawDeg": 74.88,
+      "heightM": 0.938,
+      "footprintZMinM": 0.782
+    },
+    {
+      "object": "prop_13_construction-cone",
+      "sourceFile": "construction-cone.glb",
+      "arcFraction": 0.34,
+      "lateralOffsetM": -2.2,
+      "note": "锥桶（路面上）",
+      "placedAt": [
+        62.442,
+        -14.922,
+        0.83
+      ],
+      "yawDeg": 76.56,
+      "heightM": 0.937,
+      "footprintZMinM": 0.83
+    },
+    {
+      "object": "prop_14_dumpster",
+      "sourceFile": "dumpster.glb",
+      "arcFraction": 0.7,
+      "lateralOffsetM": 8.35,
+      "note": "垃圾箱",
+      "placedAt": [
+        51.36,
+        15.507,
+        1.119
+      ],
+      "yawDeg": -253.2,
+      "heightM": 2.094,
+      "footprintZMinM": 1.119
+    }
+  ]
+}

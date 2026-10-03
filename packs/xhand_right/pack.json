@@ -1,0 +1,29 @@
+{
+  "packId": "xhand_right",
+  "version": "2026.09.23",
+  "family": "dexterous-hand",
+  "asset": { "modelEntry": "asset/urdf/xhand_right.urdf" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_ROBOVERSE.json#xhand_right" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gripper"],
+    "directControl": "suitable",
+    "fingers": 5,
+    "fingerDoF": "实读 asset/urdf/xhand_right.urdf：thumb 3（bend+rota1+rota2）+ index 3（bend+joint1+joint2）+ mid 2 + ring 2 + pinky 2 = 12 个 revolute 指节关节（另有 17 个 fixed 关节/连杆）"
+  },
+  "status": "UNVERIFIED:grasp-hold",
+  "provenance": {
+    "source": "HF RoboVerseOrg/roboverse_data@fab63ccaaed54f413901f86edc3fa1ab77a96500/robots/xhand_right",
+    "commit": "fab63ccaaed54f413901f86edc3fa1ab77a96500",
+    "author": "XHand 右手模型（RoboVerseOrg/roboverse_data 账内原件，组内未声明原始作者）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "UNVERIFIED(源仓无 LICENSE 文件，不编造)",
+    "policy": "无基础 policy：mimo/GPT6 System-2 直控（joint/gripper 通道 + P0–P3 抓取预设）；context/policy/vla/tests 内容为 LyapunovDev 自有，随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

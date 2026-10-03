@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-asset-bake
+      name: '@lyapunov/asset-bake'

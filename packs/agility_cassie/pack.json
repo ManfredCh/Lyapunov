@@ -1,0 +1,27 @@
+{
+  "packId": "agility_cassie",
+  "version": "2026.09.23",
+  "family": "humanoid-legs",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/cassie.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_T1.json#agility_cassie" },
+    "context": "ready",
+    "policy": "blocked:no-public-deployed-policy",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gait", "control"],
+    "directControl": "requiresPolicy"
+  },
+  "status": "BLOCKED:no-public-deployed-policy",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie agility_cassie（ASSET_STAGING_MANIFEST_T1.json#agility_cassie 落账，mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7/agility_cassie）；policy：无公开部署级权重（学术 RL 代码位）",
+    "commit": "822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7",
+    "author": "Agility Robotics（Cassie 原始 MJCF/资产与硬件）；Google DeepMind MuJoCo Menagerie（整理）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "MIT（asset/LICENSE 实读 MIT / Agility Robotics；ASSET_STAGING_MANIFEST_T1.json#agility_cassie license=MIT 落账）",
+    "policy": "无公开部署级 policy ⇒ 无权重可分发、不声称权重许可；学术 RL 训练代码位仅作 provenance 记录，不构成本包可执行 policy"
+  },
+  "tests": "tests/acceptance.md"
+}

@@ -1,0 +1,27 @@
+{
+  "packId": "unitree_go2",
+  "version": "2026.09.22",
+  "family": "quadruped",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/go2.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#unitree_go2" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gait", "control"],
+    "directControl": "requiresPolicy"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie unitree_go2（ASSET_STAGING_MANIFEST.json#unitree_go2 落账）；policy：inria-paris-robotics-lab/go2_onnx_controller",
+    "commit": "c1729e1a4aa2e7e1091ccff42be68d42bd054764",
+    "author": "Unitree（硬件与 CAD）；INRIA Paris Robotics Lab（ONNX 控制器）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#unitree_go2 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "以 inria-paris-robotics-lab/go2_onnx_controller@c1729e1a4aa2e7e1091ccff42be68d42bd054764 随附 LICENSE 为准（2026-09-22 未取得 LICENSE 原文，不声称具体许可证）；onnxruntime==1.23.2 为运行时依赖，按其发布页许可为准，不随包分发"
+  },
+  "tests": "tests/acceptance.md"
+}

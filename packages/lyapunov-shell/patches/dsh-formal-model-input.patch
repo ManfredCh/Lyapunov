@@ -1,0 +1,277 @@
+--- a/packages/core/system-prompt/src/index.ts
++++ b/packages/core/system-prompt/src/index.ts
+@@ -8,11 +8,30 @@
+ import z from '@deepseek-ai/schemastery'
+ import { AnonymousEntries, NamedEntries, ScopedLayers, scopeTarget } from '@deepseek-ai/dsh-scope'
+ import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
+-import type { ContextSnapshotSection, ToolSchema } from '@deepseek-ai/dsh-llm'
++import type { ContextSnapshotSection, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
++
++/** 部署可选的纯模型输入投影；不写 Session、工具结果或领域状态。 */
++export interface ModelMessageProjectionContext {
++  scope?: ScopeKey
++  sessionId?: string
++  purpose?: string
++  /** 当前原生 assembly 渲染正文；辅助压缩用于替换旧合成系统头。 */
++  systemText?: string
++}
++
++export interface ModelMessageProjection {
++  project(messages: readonly Message[], context: ModelMessageProjectionContext): readonly Message[]
++}
++
++/** 未装配投影时保持原生请求；投影只消费同一份既有消息。 */
++export function projectModelMessages(ctx: Context, messages: readonly Message[], context: ModelMessageProjectionContext): readonly Message[] {
++  return ctx.get('modelMessageProjection')?.project(messages, context) ?? messages
++}
+ 
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     systemPrompt: SystemPrompt
++    modelMessageProjection: ModelMessageProjection
+   }
+ 
+   interface Events {
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -24,6 +24,7 @@
+   markAgentLoopRequest,
+ } from '@deepseek-ai/dsh-llm'
+ import { deepFreeze } from '@deepseek-ai/dsh-util-values'
++import { projectModelMessages } from '@deepseek-ai/dsh-system-prompt'
+ import type { Scope } from '@deepseek-ai/dsh-scope'
+ import { createScope } from '@deepseek-ai/dsh-scope'
+ import type { EpochHeader, RequestContext, Session, SessionId, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+@@ -685,6 +686,15 @@
+       deepFreeze(message)
+       this.frozenMessages.add(message)
+     }
++    const projected = projectModelMessages(this.ctx, boundaryMessages, {scope: this, sessionId: this.session.id, purpose: 'main'})
++    if (projected !== boundaryMessages) {
++      boundaryMessages.splice(0, boundaryMessages.length, ...projected)
++      for (const message of boundaryMessages) {
++        if (this.frozenMessages.has(message)) continue
++        deepFreeze(message)
++        this.frozenMessages.add(message)
++      }
++    }
+     Object.freeze(boundaryMessages)
+     const request = markAgentLoopRequest(Object.freeze({
+       ...header.config,
+--- a/packages/compaction/compaction-basic/src/summarizer.ts
++++ b/packages/compaction/compaction-basic/src/summarizer.ts
+@@ -10,6 +10,7 @@
+   ContentBlock, FinishReason, GenerateOptions, Message, TokenUsage, ToolSchema,
+ } from '@deepseek-ai/dsh-llm'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
++import { projectModelMessages, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+ 
+ interface SummaryConfig {
+   readonly summarizationProvider: string
+@@ -29,7 +30,7 @@
+  * request, so the provider's KV cache is reused instead of invalidated.
+  */
+ const COMPACTION_INSTRUCTION = [
+-  'You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.',
++  'Condense the conversation ABOVE into a structured checkpoint for the current task. Preserve the user\'s goals, constraints and authorization so another model can resume the work accurately.',
+   '',
+   'Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.',
+   '',
+@@ -40,13 +41,13 @@
+   '- [technologies, frameworks, patterns, and conventions in play]',
+   '',
+   '## Files and Code',
+-  '- [exact path: why it matters, key changes or snippets]',
++  '- [artifacts, exact resource/file identities and versions: why they matter, changes or snippets]',
+   '',
+   '## Errors and Fixes',
+   '- [error: how it was resolved, plus any related user feedback]',
+   '',
+   '## Pending Jobs',
+-  '- [explicitly requested work not yet completed]',
++  '- [requested work not yet completed; exact job/request/operation ids, observed phase, outcome and uncertainty]',
+   '',
+   '## Current Work',
+   '- [precisely what was in progress at this checkpoint]',
+@@ -58,7 +59,8 @@
+   '- [decisions and their rationale, constraints, user preferences, open questions, data needed to continue]',
+   '',
+   'Rules:',
+-  '- Write concise English engineering prose. Preserve exact file paths, commands, error strings, identifiers, numeric values, function signatures, and syntax fragments.',
++  '- Use the user\'s language. Preserve exact file paths, commands, error strings, identifiers, resource versions, numeric values, interfaces, source and budget constraints.',
++  '- Distinguish authorization from facts and generated suggestions. Keep unknown outcomes, real errors and the next executable action; do not invent task success, permissions or capabilities.',
+   '- Capture user feedback and explicit instructions faithfully, especially corrections.',
+   '- Do NOT mention this summarization request or that the context was compacted.',
+   '- Output only the checkpoint text: do not call any tool or take any other action.',
+@@ -141,8 +143,12 @@
+   }
+ 
+   const assembler = new BlockAssembler()
++  const projection = ctx.get('modelMessageProjection')
++  const system = projection === undefined ? undefined : ctx.get('systemPrompt')
++  const systemText = system === undefined ? undefined : renderPrompt(await system.assemble({scope: agent, ...signal === undefined ? {} : {signal}}))
++  const replay = projectModelMessages(ctx, input.messages, {scope: agent, sessionId: agent.session.id, purpose: 'compaction', ...systemText === undefined ? {} : {systemText}})
+   const messages: Message[] = [
+-    ...input.messages,
++    ...replay,
+     createUserMessage({
+       content: [{ type: 'text', text: COMPACTION_INSTRUCTION }],
+       source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+--- a/packages/bundle/web-app/src/index.ts
++++ b/packages/bundle/web-app/src/index.ts
+@@ -53,6 +53,8 @@
+    * orientation text would be false.
+    */
+   surfaceContext: boolean
++  /** 产品界面使用短事实；普通 DSH 开发部署保留原教程。 */
++  surfacePresentation?: 'developer' | 'product'
+   /** Explicit `--trusted-host` authorities from this invocation. */
+   trustedHosts: string[]
+ }
+@@ -61,6 +63,7 @@
+   openBrowser: z.boolean().default(true),
+   printUrl: z.boolean().default(true),
+   surfaceContext: z.boolean().default(true),
++  surfacePresentation: z.union(['developer', 'product']).default('developer'),
+   trustedHosts: z.array(String).default([]),
+ })
+ 
+@@ -132,7 +135,8 @@
+ }
+ 
+ /** Model-visible orientation and acceptance boundary for sessions created through `dsh web`. */
+-function webSurfacePrompt(webUrl: string): string {
++export function webSurfacePrompt(webUrl: string, presentation: 'developer' | 'product' = 'developer'): string {
++  if (presentation === 'product') return 'The current interface is Lyapunov. Resolve references such as "here", "the current scene", or "the selected object" from this session\'s latest workbench facts. An interface acknowledgement does not prove that the displayed image changed; use a real observation from the same window when visual judgement is needed. If no valid window or state is available, report the specific missing information.'
+   const updateContract = 'The client-plugin HMR receiver is active, but client-plugin changes reload without a refresh only while '
+     + '`pnpm run dev:web` is also running from this same checkout to rebuild their bundles; verify that watcher before promising automatic updates. '
+     + 'Every other change — the apps/web shell and plain packages — requires rebuilding the affected Web artifacts and verifying this existing URL after a page refresh. '
+@@ -232,11 +236,11 @@
+   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
+   if (config.surfaceContext) {
+     ctx.inject(['systemPrompt'], (promptCtx) => {
+-      addHarnessSourceSection(promptCtx, SOURCE_ROOT)
++      if (config.surfacePresentation !== 'product') addHarnessSourceSection(promptCtx, SOURCE_ROOT)
+       promptCtx.systemPrompt.section({
+         name: 'app:web-surface',
+         order: promptCtx.systemPrompt.getSectionOrder('WEB_SURFACE'),
+-        text: () => webSurfacePrompt(localWebUrl(promptCtx)),
++        text: () => webSurfacePrompt(localWebUrl(promptCtx), config.surfacePresentation),
+       })
+     })
+     ctx.inject(['shellEnv'], (runtimeCtx) => {
+--- a/packages/session/session-title-llm/src/index.ts
++++ b/packages/session/session-title-llm/src/index.ts
+@@ -187,7 +187,7 @@
+ /** Stable language-aware system instruction shared by both provider plugins. */
+ function systemPrompt(config: ResolvedSessionTitleLlmConfig): string {
+   return [
+-    'Create a concise title for an AI coding-assistant session from the supplied human messages.',
++    'Create a concise title for the current task from the supplied human messages.',
+     'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
+     'Use the language of the messages.',
+     `Aim for about ${config.targetWords} words in non-CJK languages or ${config.targetCjkCharacters} CJK characters.`,
+--- a/packages/compaction/compaction-basic/package.json
++++ b/packages/compaction/compaction-basic/package.json
+@@ -34,7 +34,8 @@
+     "@deepseek-ai/dsh-compaction-tool-result-pruner": "workspace:^",
+     "@deepseek-ai/dsh-llm": "workspace:^",
+     "@deepseek-ai/dsh-session": "workspace:^",
+-    "@deepseek-ai/dsh-token-meter": "workspace:^"
++    "@deepseek-ai/dsh-token-meter": "workspace:^",
++    "@deepseek-ai/dsh-system-prompt": "workspace:^"
+   },
+   "peerDependenciesMeta": {
+     "@deepseek-ai/dsh-compaction-tool-result-pruner": {
+@@ -62,6 +63,7 @@
+     "@deepseek-ai/dsh-session-projection": "workspace:^",
+     "@deepseek-ai/dsh-token-meter": "workspace:^",
+     "@deepseek-ai/dsh-tools": "workspace:^",
+-    "@deepseek-ai/dsh-compaction-image-offload": "workspace:^"
++    "@deepseek-ai/dsh-compaction-image-offload": "workspace:^",
++    "@deepseek-ai/dsh-system-prompt": "workspace:^"
+   }
+ }
+--- a/packages/compaction/compaction-basic/tsconfig.json
++++ b/packages/compaction/compaction-basic/tsconfig.json
+@@ -4,7 +4,9 @@
+     "rootDir": "src",
+     "outDir": "lib/types"
+   },
+-  "include": ["src"],
++  "include": [
++    "src"
++  ],
+   "references": [
+     {
+       "path": "../../../vendor/cosmokit"
+@@ -35,6 +37,9 @@
+     },
+     {
+       "path": "../compaction-tool-result-pruner"
++    },
++    {
++      "path": "../../core/system-prompt"
+     }
+   ]
+ }
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -4964,6 +4964,9 @@
+       '@deepseek-ai/dsh-session-projection':
+         specifier: workspace:^
+         version: link:../../session/session-projection
++      '@deepseek-ai/dsh-system-prompt':
++        specifier: workspace:^
++        version: link:../../core/system-prompt
+       '@deepseek-ai/dsh-token-meter':
+         specifier: workspace:^
+         version: link:../../llm/token-meter
+--- a/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts
++++ b/packages/compaction/compaction-basic/tests/compaction-basic.spec.ts
+@@ -1400,8 +1400,10 @@
+     expect(messages.slice(0, -1)).toEqual([system, prefix])
+     const last = messages.at(-1)?.content[0]
+     const lastText = last?.type === 'text' ? last.text : ''
+-    expect(lastText).toContain('Write concise English engineering prose.')
+-    expect(lastText).toContain('numeric values, function signatures, and syntax fragments.')
++    expect(lastText).toContain("Use the user's language.")
++    expect(lastText).not.toContain('AI coding assistant')
++    expect(lastText).toContain('resource versions, numeric values, interfaces, source and budget constraints.')
++    expect(lastText).toContain('Distinguish authorization from facts and generated suggestions.')
+     expect(lastText).toContain('## Primary Request and Intent')
+   })
+ 
+--- a/packages/bundle/web-app/tests/web-app.spec.ts
++++ b/packages/bundle/web-app/tests/web-app.spec.ts
+@@ -112,6 +112,30 @@
+ }
+ 
+ describe('web-app runtime glue', () => {
++  it('产品装配只给短界面事实，开发源码段退出；原生 WebRuntime/信任快照/URL 变量仍成立', async () => {
++    stageDist()
++    const ctx = new Context()
++    const {server,seat}=fakeHttpServer('0.0.0.0')
++    ctx.provide('webServer',server)
++    provideConnection(ctx)
++    const contributions:BashContribution[]=[]
++    ctx.provide('shellEnv',{register:(contribution:BashContribution)=>{contributions.push(contribution);return()=>{}}} as never)
++    apply(ctx,new Config({openBrowser:false,printUrl:false,surfaceContext:true,surfacePresentation:'product',trustedHosts:['lab.internal']}))
++    await ctx.plugin(SystemPrompt,{includeHarnessIdentity:false,personaPrefix:''})
++    await new Promise(resolve=>setTimeout(resolve,0))
++    const assembly=await ctx.systemPrompt.assemble()
++    expect(assembly.sections.some(section=>section.name==='harness:source')).toBe(false)
++    expect(assembly.sections.some(section=>section.name==='harness:identity')).toBe(false)
++    const text=assembly.sections.find(section=>section.name==='app:web-surface')?.text
++    expect(text).toBe('The current interface is Lyapunov. Resolve references such as "here", "the current scene", or "the selected object" from this session\'s latest workbench facts. An interface acknowledgement does not prove that the displayed image changed; use a real observation from the same window when visual judgement is needed. If no valid window or state is available, report the specific missing information.')
++    expect(text).not.toContain('HMR')
++    expect(text).not.toContain('pnpm')
++    expect(seat()).toBeDefined()
++    expect(ctx.get('webRuntime')).toEqual({lanAddresses:['192.168.1.5'],trustedHosts:['192.168.1.5','lab.internal']})
++    expect(contributions.find(contribution=>contribution.name==='web-runtime')?.resolve()).toEqual({DSH_WEB_URL:'http://127.0.0.1:4567'})
++    await ctx.fiber.dispose()
++  })
++
+   it('mounts dist serving, prompt section, bash variables, and publishes the URL with the LAN snapshot', async () => {
+     stageDist()
+     const ctx = new Context()

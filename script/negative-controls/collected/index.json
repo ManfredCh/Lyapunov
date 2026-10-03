@@ -1,0 +1,753 @@
+{
+  "at": "2026-09-26T19:47:58.634Z",
+  "source": "bugfixHistory/NEGATIVE-CONTROL-NOOP-SWEEP-20260926.md §2.4（25 个驱动）+ §2.2 / §2.3",
+  "note": "**收编 ≠ 认可**。`collected/**` 是从 `.runtime/**`（gitignored）搬进来的**原样副本**，唯一目的是\"干净 checkout 里只看库内文件就能复算\"。它们**多数不符合** `script/negative-controls/run.ts` 的八条规矩（命中次数断言写法不一、有的改测试文件、有的锚在 lane 内副本上）—— 合规版请按 `run.ts` 的 spec 形状重写。`audits[].why` 逐条写\"为什么收 / 为什么不收\"，不许读成\"全仓只有 N 个隐患\"。",
+  "total": 25,
+  "onDisk": 25,
+  "collectable": 2,
+  "audits": [
+    {
+      "id": "p8fix-ts",
+      "script": ".runtime/lane-p8fix/scripts/negative-control.ts",
+      "scriptExists": true,
+      "scriptSha256": "25cabc831f1e1c221b52434223d7217abe238b0c29cded09508d0a90aa5ee94c",
+      "targetLabel": "lyapunov-share/src/{fetch,operations}.ts",
+      "grade": "A",
+      "declaredAnchors": 6,
+      "extractedAnchors": 8,
+      "anchorHits": [
+        {
+          "anchor": "const throwIfCancelled=(signal:AbortSignal)=>{if(signal.aborted)throw signal.reason??new E…",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/operations.ts"
+        },
+        {
+          "anchor": "catch(error){\n   throwIfCancelled(signal)\n   if(isShareFetchError(error))throw error",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/operations.ts"
+        },
+        {
+          "anchor": "export function isTransientShareStatus(status: number): boolean { return TRANSIENT_STATUS.…",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/fetch.ts"
+        },
+        {
+          "anchor": "url:isShareFetchError(error)?error.url:(input.url??''),",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/operations.ts"
+        },
+        {
+          "anchor": "attempts:isShareFetchError(error)?[...error.attempts]:[...(input.attempts??[])]}",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/operations.ts"
+        },
+        {
+          "anchor": "return { signal: controller.signal, clear: () => clearTimeout(timer) }",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/fetch.ts"
+        },
+        {
+          "anchor": "record(describeError(error), retryable, attempt, Date.now() - started)",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/fetch.ts"
+        },
+        {
+          "anchor": "先修正账户/服务地址/入参再试）'",
+          "hits": 1,
+          "target": "packages/lyapunov-share/src/fetch.ts"
+        }
+      ],
+      "allAnchorsUnique": true,
+      "collectable": true,
+      "why": "目标在库内 + 8 个字面量锚点今天全部**命中恰好 1 次** ⇒ 收编",
+      "selfReported": "6/6 = 1"
+    },
+    {
+      "id": "p8fix5xx-ts",
+      "script": ".runtime/lane-p8fix5xx/scripts/negative-control.ts",
+      "scriptExists": true,
+      "scriptSha256": "343e55f9cfdede906ce41a0e716e23cf81507bf39406af15bc5953164fc9b6f8",
+      "targetLabel": "lyapunov-share/src/preview-route.ts",
+      "grade": "A",
+      "declaredAnchors": 3,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "抽不出字面量锚点（由变量拼出来 / 由命令行传）⇒ 收编也复算不了 ⇒ 只登记",
+      "selfReported": "3/3 = 1"
+    },
+    {
+      "id": "w6-nc",
+      "script": ".runtime/lane-w6/frozen-20260927/nc/nc-mutate.py",
+      "scriptExists": true,
+      "scriptSha256": "c40dbd95d0d82450d571b1132760556adfe7b75a65292978bdecc8829c318fd7",
+      "targetLabel": "script/{profile,build-plugins,runtime-patch}.ts + product-bundle/src/github-cli.ts",
+      "grade": "A+D",
+      "declaredAnchors": 7,
+      "extractedAnchors": 4,
+      "anchorHits": [
+        {
+          "anchor": "/home/s18/WS/Lyapunov/Dev\")\nWHO = sys.argv[1]\n\n\ndef sub(rel, old, new, count=1):\n    p = D…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "script/profile.ts",
+          "hits": 1,
+          "target": "script/build-plugins.ts"
+        },
+        {
+          "anchor": "packages/lyapunov-product-bundle/src/github-cli.ts",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "script/build-plugins.ts\",\n        '''const upstreamLinks=await linkUpstream(root)\nif(upstr…",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标 4 个文件此刻是 `-r--r--r--`（0444）⇒ **就地跑会 EACCES**（VERIFY2-RUNTIME-PATCH-ATTRIBUTION §5.5 已登记）；收编正文 + 登记这个前置条件",
+      "selfReported": "7/7 = 1"
+    },
+    {
+      "id": "p7-dedup",
+      "script": ".runtime/p7-dedup/mutate.py",
+      "scriptExists": true,
+      "scriptSha256": "2664101dfdc23401936f7cea55766fa459dfaeb008766afe4377aaece962536b",
+      "targetLabel": "generate-hunyuan/src/job-record.ts",
+      "grade": "A",
+      "declaredAnchors": 4,
+      "extractedAnchors": 10,
+      "anchorHits": [
+        {
+          "anchor": "await writeFile(temporary, data, { mode: 0o600 })",
+          "hits": 1,
+          "target": "packages/generate-hunyuan/src/job-record.ts"
+        },
+        {
+          "anchor": "{ ...options.read(), ...options.binding, ...update, updatedAt: new Date().toISOString() }",
+          "hits": 1,
+          "target": "packages/generate-hunyuan/src/job-record.ts"
+        },
+        {
+          "anchor": "    options.write(record)\n    await writeFileAtomic0600(options.file, JSON.stringify(recor…",
+          "hits": 1,
+          "target": "packages/generate-hunyuan/src/job-record.ts"
+        },
+        {
+          "anchor": "  const temporary = target + \".\" + randomUUID() + \".tmp\"\n  await writeFile(temporary, data…",
+          "hits": 1,
+          "target": "packages/generate-hunyuan/src/job-record.ts"
+        },
+        {
+          "anchor": "新·共享规则/接线\", [\"bun",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "新·marble 状态机\", [\"bun",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "旧·hunyuan env\", [\"bun",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "旧·image 全部\", [\"bun",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "旧·tripo 全部\", [\"bun",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "门·G13\", [\"node",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点里只有 4/10 个在目标文件上**命中恰好 1 次** ⇒ 剩下的按规矩 1 该拒绝执行 ⇒ 只登记",
+      "selfReported": "4/4 = 1"
+    },
+    {
+      "id": "dev018-residual",
+      "script": ".runtime/dev018-residual/mutate.py",
+      "scriptExists": true,
+      "scriptSha256": "57ee4700ffc285169c4972495d7e0d920978d6efc70d89657aeb1cdaffd5e564",
+      "targetLabel": "benchmark-contract|libero|gymnasium/src/*",
+      "grade": "A",
+      "declaredAnchors": 4,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "抽不出字面量锚点（由变量拼出来 / 由命令行传）⇒ 收编也复算不了 ⇒ 只登记",
+      "selfReported": "✔"
+    },
+    {
+      "id": "dev007-artifact",
+      "script": ".runtime/lane-dev007-artifact/mutate.py",
+      "scriptExists": true,
+      "scriptSha256": "9021bf4ff37089e7f923caba884dec98b2181e688dcc0918348e929fc3514d03",
+      "targetLabel": "generate-tripo/src/operations.ts",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点由**命令行参数**给（`mutate.py <target> <old> <new>`）⇒ 正文里没有字面量可抽；收编的是\"通用变异器\"，不是一条具体对照",
+      "selfReported": "✔"
+    },
+    {
+      "id": "cu-dev036",
+      "script": ".runtime/cu/lane-dev036/mut.py",
+      "scriptExists": true,
+      "scriptSha256": "b90420fdcb4178f7b80a8c392928ef5b69ed050185c6767b07009e40194c6645",
+      "targetLabel": "desktop/src/restart-recovery.ts",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "  return {action:\"none\",reason:workspaces.length===0?\"没有任何可读工作区记录\":\"存在多个工作区且没有唯一目标：进入工作区选择…",
+          "hits": 1,
+          "target": "packages/desktop/src/restart-recovery.ts"
+        }
+      ],
+      "allAnchorsUnique": true,
+      "collectable": true,
+      "why": "目标在库内 + 1 个字面量锚点今天全部**命中恰好 1 次** ⇒ 收编",
+      "selfReported": "✔"
+    },
+    {
+      "id": "env09d-n340",
+      "script": ".runtime/lane-env09d/n340-make-variants.py",
+      "scriptExists": true,
+      "scriptSha256": "59d51db1109e0e84f19885f3e25522f3c04a695f4e8ef93527882bfdb0bfeb07",
+      "targetLabel": "blender/src/photo-registration.ts",
+      "grade": "A",
+      "declaredAnchors": 18,
+      "extractedAnchors": 13,
+      "anchorHits": [
+        {
+          "anchor": "/home/s18/WS/Lyapunov/Dev/packages/blender/src/photo-registration.ts\")\nOUT = pathlib.Path(…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "    const planeDistances: number[] = []",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "    const step = mode === \"point-to-plane\" ? solvePointToPlane(planePairs) : solveSmallAng…",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "v2-compose-trimmed.ts\", V2_PATCHES)\n\n# ── V3：V2 + 深度加权（候选②：近点高权 w = (zRef/z)^2，进解算的行加权；残差口…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "    const residual = (s[0] - q[0]) * n[0] + (s[1] - q[1]) * n[1] + (s[2] - q[2]) * n[2]\n  …",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "      for (let j = 0; j < 6; j++) ata[i]![j] += row[i]! * row[j]!\n      atb[i] -= row[i]! …",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "function solveSmallAngle(pairs: Array<{ s: [number, number, number]; t: [number, number, n…",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "    const residual = [s[0] - t[0], s[1] - t[1], s[2] - t[2]]\n    for (let r = 0; r < 3; r+…",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "        for (let j = 0; j < 6; j++) ata[i]![j] += rows[r]![i]! * rows[r]![j]!\n        atb[…",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "      const s = apply(transform, src[i * 3]!, src[i * 3 + 1]!, src[i * 3 + 2]!)\n      cons…",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "        planePairs.push({ s, q, n: normal }); planePairDistances.push(distances[distances.…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "        pointPairs.push({ s, t: q })",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        },
+        {
+          "anchor": "  const src = subsample(source, options.maxPoints ?? 4000)",
+          "hits": 1,
+          "target": "packages/blender/src/photo-registration.ts"
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点里只有 10/13 个在目标文件上**命中恰好 1 次** ⇒ 剩下的按规矩 1 该拒绝执行 ⇒ 只登记",
+      "selfReported": "全 = 1"
+    },
+    {
+      "id": "client-tests-restore",
+      "script": ".runtime/lane-client-tests-restore/apply_mutation.py",
+      "scriptExists": true,
+      "scriptSha256": "68427a52613281cc24c847ee4d754be941c526500e2db921f7d9a3aebafaba0b",
+      "targetLabel": "policy-registry/src/* + lyapunov-api-client/src/*（8 个 spec 由 mutate.sh 给）",
+      "grade": "A",
+      "declaredAnchors": 8,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点是**正则**且由 `mutate.sh` 逐条以 `pat\\x01rep` 传入 ⇒ 正文抽不出字面量；目标在**快照副本** `.runtime/lane-client-tests-restore/mut/**` 上（不碰工作树）",
+      "selfReported": "8/8 = 1"
+    },
+    {
+      "id": "lod-no-settle",
+      "script": ".runtime/ccds-environment-20260919T164516Z/95_lod_camera_joint/candidate/mutate-no-settle.sh",
+      "scriptExists": true,
+      "scriptSha256": "ceed07ee5db0572e87c69f9e6634e6a04daeea933d4c02bf7eae9d1f51e183e0",
+      "targetLabel": "viewer/src/index.ts",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "抽不出字面量锚点（由变量拼出来 / 由命令行传）⇒ 收编也复算不了 ⇒ 只登记",
+      "selfReported": "1"
+    },
+    {
+      "id": "gate-exit-flush",
+      "script": ".runtime/GATE-EXIT-FLUSH/phases.sh",
+      "scriptExists": true,
+      "scriptSha256": "ad1123ff45c61f0f2f10615e2eabc8232bf211007522584f338e59cc2d6ccef8",
+      "targetLabel": "script/release-gate.ts",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "if (import.meta.main) process.exit(main(process.argv.slice(2)))",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标是**已定版**的 `script/release-gate.ts`（GATE-FINALIZATION §8 声明不再变更）⇒ 收编了也不能跑；只登记",
+      "selfReported": "✔"
+    },
+    {
+      "id": "gate-nondeterminism-patch",
+      "script": ".runtime/lane-gate-nondeterminism/apply_patch.py",
+      "scriptExists": true,
+      "scriptSha256": "b705d1f71daa07925b67beb081aad2161058b4c3d15d5a6d53c53d2a4a49639a",
+      "targetLabel": "script/release-gate.ts",
+      "grade": "A",
+      "declaredAnchors": 6,
+      "extractedAnchors": 6,
+      "anchorHits": [
+        {
+          "anchor": "import { spawnSync } from 'node:child_process'\nimport { existsSync, readFileSync, readdirS…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "/** `bun run preflight`（=`script/test-ci.ts --list`）的读数。收尾行认不出 ⇒ 无读数。 */\nexport function p…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "interface RunResult {\n  code: number | null\n  out: string\n  ms: number\n  timedOut: boolean…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "  // 1) preflight：四类配置问题\n  {\n    const r = run(bunBin(), ['run', 'preflight'], root, 600_0…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "    const r = run(bunBin(), ['run', 'gate:drivers', '--json'], root, 300_000)",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "function execCriteria(root: string, quiet: boolean): CriterionResult[] {",
+          "hits": 1,
+          "target": "script/release-gate.ts"
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "同 `gate-exit-flush`：目标是已定版的门文件",
+      "selfReported": "✔"
+    },
+    {
+      "id": "gate-nondeterminism-tests",
+      "script": ".runtime/lane-gate-nondeterminism/apply_tests.py",
+      "scriptExists": true,
+      "scriptSha256": "1d4f520ae855890e03e0969f5e4814945a16a6ceb189b7354259ca559cc1464f",
+      "targetLabel": "script/release-gate.test.ts",
+      "grade": "A",
+      "declaredAnchors": 8,
+      "extractedAnchors": 4,
+      "anchorHits": [
+        {
+          "anchor": "MISS\", s.count(old), old[:80])\n    s = s.replace(old, new)\n\n# 1) imports\nrep(\"\"\"  evalClai…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "  parsePreflight,\n  parseTscOutput,",
+          "hits": 1,
+          "target": "script/release-gate.test.ts"
+        },
+        {
+          "anchor": "  test('preflight 正常读数：四个数字 + 缺件点名', () => {\n    const raw = [\n      'RUN\\\tbun:test\\\tpacka…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "// ── 2. 判定：每条非绿都要说清是哪一条、差多少 ────────────────────────────────",
+          "hits": 1,
+          "target": "script/release-gate.test.ts"
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标是**用例文件** ⇒ 违反规矩 7（变异只许动产品代码）",
+      "selfReported": "✔"
+    },
+    {
+      "id": "gate-nondeterminism-exports",
+      "script": ".runtime/lane-gate-nondeterminism/apply_exports.py",
+      "scriptExists": true,
+      "scriptSha256": "98d3091c01ad5a8b6de39cd31c27ea6fabbcdf410ad3987917722b8ab47da480",
+      "targetLabel": "script/release-gate.ts",
+      "grade": "A",
+      "declaredAnchors": 2,
+      "extractedAnchors": 2,
+      "anchorHits": [
+        {
+          "anchor": " * 临时目录建不出来（只读 /tmp 等）才退回管道，并在 `capture` 里留痕。\n */\nfunction run(",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": ")\nrep(\" * 这里只把执行器所在目录并进 PATH，**命令与参数一个字不改**。\n */\nfunction runPackageScript(",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "同 `gate-exit-flush`",
+      "selfReported": "✔"
+    },
+    {
+      "id": "gate-nondeterminism-revert",
+      "script": ".runtime/lane-gate-nondeterminism/revert_ctl.py",
+      "scriptExists": true,
+      "scriptSha256": "438d3cd61de4f715062a53dac4afe2e4d07d135bb430839afcf7a0e6c6c692e5",
+      "targetLabel": "script/release-gate.ts",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "  if (dir !== null) {",
+          "hits": 1,
+          "target": "script/release-gate.ts"
+        }
+      ],
+      "allAnchorsUnique": true,
+      "collectable": false,
+      "why": "同 `gate-exit-flush`；且它变异的是取数口（管道回退路径）",
+      "selfReported": "✔"
+    },
+    {
+      "id": "github-429-nodeliver",
+      "script": ".runtime/lane-github-429-noheader/make-nodeliver.ts",
+      "scriptExists": true,
+      "scriptSha256": "b532b06f306b04e8d45459d47b4161f2239ae48a5fb535ad122147bc40be0450",
+      "targetLabel": ".runtime/lane-github-429-noheader/base/src/source.B.ts（lane 内基线副本）",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "    const classifyExhausted = (response: Response, url: string, attempts: number) => githu…",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标不是\"库内现有产品文件\"（`.runtime` 派生件 / lane 副本 / 由命令行给）⇒ 干净 checkout 里复算不了 ⇒ 只登记",
+      "selfReported": "1"
+    },
+    {
+      "id": "github-429-patch",
+      "script": ".runtime/lane-github-429-noheader/patch.ts",
+      "scriptExists": true,
+      "scriptSha256": "1565a49cc54575fa310d49cff30249fc34e51733ec358ece80e60c1dbaee8cb8",
+      "targetLabel": ".runtime/lane-github-429-noheader/base/src/source.ts（lane 内基线副本）",
+      "grade": "A",
+      "declaredAnchors": 1,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标不是\"库内现有产品文件\"（`.runtime` 派生件 / lane 副本 / 由命令行给）⇒ 干净 checkout 里复算不了 ⇒ 只登记",
+      "selfReported": "✔"
+    },
+    {
+      "id": "w25-sh",
+      "script": ".runtime/lane-w25/scripts/negative-control.sh",
+      "scriptExists": true,
+      "scriptSha256": "caff18de39be1b2e749d0c54472d22627a5d6383d23ba9139927a87a5e5a5251",
+      "targetLabel": "policy-registry/src/source.ts",
+      "grade": "B",
+      "declaredAnchors": 2,
+      "extractedAnchors": 2,
+      "anchorHits": [
+        {
+          "anchor": "const composite = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : Abo…",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "export const POLICY_FETCH_ATTEMPTS = 3",
+          "hits": 1,
+          "target": "packages/policy-registry/src/source.ts"
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "它用 lane 内备份 `source.ts.orig` 当被测体（README 说\"锚定在它自己的备份上\"）⇒ 目标在库内、但脚本引的是 `.runtime` 路径",
+      "selfReported": "1/1（在 lane 备份 source.ts.orig @ e5b76780… 上）"
+    },
+    {
+      "id": "p3-rework-sh",
+      "script": ".runtime/lane-p3-rework/negative-control.sh",
+      "scriptExists": true,
+      "scriptSha256": "3c00f8150fe3f9d3a1b10ab1f093f60b6c559ab560e849ede7fe0664ab49e753",
+      "targetLabel": "lyapunov-shell/src/workbench.tsx",
+      "grade": "B",
+      "declaredAnchors": 2,
+      "extractedAnchors": 0,
+      "anchorHits": [],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "抽不出字面量锚点（由变量拼出来 / 由命令行传）⇒ 收编也复算不了 ⇒ 只登记",
+      "selfReported": "1/1"
+    },
+    {
+      "id": "p8-sh",
+      "script": ".runtime/lane-p8/scripts/negative-control.sh",
+      "scriptExists": true,
+      "scriptSha256": "ff8e9c7f59f071945eb46b9e5c3bb37e75b985fbf098b1b5beaefe4adb171530",
+      "targetLabel": "lyapunov-share/src/{fetch,operations}.ts",
+      "grade": "C",
+      "declaredAnchors": 2,
+      "extractedAnchors": 3,
+      "anchorHits": [
+        {
+          "anchor": "      const composite = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "        timer = setTimeout(() => reject(stalled()), timeoutMs)",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "^export const SHARE_FETCH_ATTEMPTS = 3$",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "**它就是 no-op 那一份**：变异 B 的锚点在交付版上命中 0 ⇒ 按规矩 1 应当**拒绝执行**而不是静默继续。收编它是为了留证，不是让它再跑一遍",
+      "selfReported": "A=1 / B=0（**B 就是那条 no-op**）"
+    },
+    {
+      "id": "dev028h",
+      "script": ".runtime/lane-dev028h/patch-height.py",
+      "scriptExists": true,
+      "scriptSha256": "ef2ee1d807c8074c553f9c54bd24b84f8ff567066d1e40ee013c78293ee8818a",
+      "targetLabel": ".runtime 内派生 MJCF",
+      "grade": "D",
+      "declaredAnchors": 1,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "body name=\"trunk\" pos=\"0 0 0.34\"",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标不是\"库内现有产品文件\"（`.runtime` 派生件 / lane 副本 / 由命令行给）⇒ 干净 checkout 里复算不了 ⇒ 只登记",
+      "selfReported": "✔（只保\"变了\"）"
+    },
+    {
+      "id": "p1-viewer-runs",
+      "script": ".runtime/lane-p1-viewer/negative-control-runs.sh",
+      "scriptExists": true,
+      "scriptSha256": "f009dbd21ebbcf650f2f225b7c29475c0c1e6f7659b860b50444f96df204b410",
+      "targetLabel": "viewer/src/framing.ts",
+      "grade": "C",
+      "declaredAnchors": 4,
+      "extractedAnchors": 3,
+      "anchorHits": [
+        {
+          "anchor": "const box=autoFrame?new THREE.Box3():new THREE.Box3().setFromObject(root)",
+          "hits": 1,
+          "target": "packages/viewer/src/framing.ts"
+        },
+        {
+          "anchor": "if(!autoFrame){root.traverse(addSplat);return box}",
+          "hits": 1,
+          "target": "packages/viewer/src/framing.ts"
+        },
+        {
+          "anchor": "packages/viewer/src/robot.ts\")\ns = p.read_text()\nnow = \"\"\"      const modulation = (map: T…",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点里只有 2/3 个在目标文件上**命中恰好 1 次** ⇒ 剩下的按规矩 1 该拒绝执行 ⇒ 只登记",
+      "selfReported": "4 处锚点只守 3 处"
+    },
+    {
+      "id": "p1-viewer-negatives",
+      "script": ".runtime/lane-p1-viewer/make-negatives.ts",
+      "scriptExists": true,
+      "scriptSha256": "a76ee1a991a88aeffb2b9ef475abdd9337a77b8d796534f49d1d107950293355",
+      "targetLabel": "viewer/src/framing.ts",
+      "grade": "C",
+      "declaredAnchors": 4,
+      "extractedAnchors": 2,
+      "anchorHits": [
+        {
+          "anchor": "from \"./viewer-entry.ts\"",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "if(!autoFrame){root.traverse(addSplat);return box}",
+          "hits": 1,
+          "target": "packages/viewer/src/framing.ts"
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "锚点里只有 1/2 个在目标文件上**命中恰好 1 次** ⇒ 剩下的按规矩 1 该拒绝执行 ⇒ 只登记",
+      "selfReported": "4 处锚点只守 3 处"
+    },
+    {
+      "id": "p8-delivered-diag",
+      "script": ".runtime/lane-p8fix/scripts/p8-delivered-negative-control.ts",
+      "scriptExists": true,
+      "scriptSha256": "c7fb651677219783de3e76f84f625f3ef67937929e37e5ccd17340c0e27b67c3",
+      "targetLabel": ".runtime/lane-p8/backup/fetch.ts（P8 交付版副本）",
+      "grade": "C",
+      "declaredAnchors": 2,
+      "extractedAnchors": 3,
+      "anchorHits": [
+        {
+          "anchor": "export const SHARE_FETCH_ATTEMPTS = 3",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "const composite = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])",
+          "hits": 0,
+          "target": null
+        },
+        {
+          "anchor": "      const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => …",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标不是\"库内现有产品文件\"（`.runtime` 派生件 / lane 副本 / 由命令行给）⇒ 干净 checkout 里复算不了 ⇒ 只登记",
+      "selfReported": "1/1（诊断工装）"
+    },
+    {
+      "id": "w15-gitshow",
+      "script": ".runtime/lane-w15/negative-control.sh",
+      "scriptExists": true,
+      "scriptSha256": "b0ac06d9ac4157d28daa49362a9e12578882388b892c158922794a35b9296fba",
+      "targetLabel": "script/terminal-options.ts（用 `git show HEAD:` 取\"改前\"）",
+      "grade": "D",
+      "declaredAnchors": 0,
+      "extractedAnchors": 1,
+      "anchorHits": [
+        {
+          "anchor": "fs\").readFileSync(\".runtime/lane-w15/matrix-neg-terminal.json",
+          "hits": 0,
+          "target": null
+        }
+      ],
+      "allAnchorsUnique": false,
+      "collectable": false,
+      "why": "目标不是\"库内现有产品文件\"（`.runtime` 派生件 / lane 副本 / 由命令行给）⇒ 干净 checkout 里复算不了 ⇒ 只登记",
+      "selfReported": "无模式"
+    }
+  ],
+  "collected": [
+    {
+      "id": "p8fix-ts",
+      "file": "script/negative-controls/collected/p8fix-ts.ts",
+      "sha256": "25cabc831f1e1c221b52434223d7217abe238b0c29cded09508d0a90aa5ee94c",
+      "bytes": 7562,
+      "from": ".runtime/lane-p8fix/scripts/negative-control.ts",
+      "grade": "A",
+      "target": "lyapunov-share/src/{fetch,operations}.ts"
+    },
+    {
+      "id": "cu-dev036",
+      "file": "script/negative-controls/collected/cu-dev036.py",
+      "sha256": "b90420fdcb4178f7b80a8c392928ef5b69ed050185c6767b07009e40194c6645",
+      "bytes": 1438,
+      "from": ".runtime/cu/lane-dev036/mut.py",
+      "grade": "A",
+      "target": "desktop/src/restart-recovery.ts"
+    }
+  ]
+}

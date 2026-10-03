@@ -1,0 +1,27 @@
+{
+  "packId": "forklift_c",
+  "version": "2026.09.22",
+  "family": "vehicle",
+  "asset": { "modelEntry": "asset/forklift_c.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#forklift_c" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["vehicle", "lift", "control"],
+    "directControl": "suitable"
+  },
+  "status": "PARTIAL:library-entry-missing",
+  "provenance": {
+    "source": "Isaac Forklift C 模型（materials/robots/forklift_c/{forklift_c.xml,forklift.xml}；精确来源提交以 ASSET_STAGING_MANIFEST.json#forklift_c 落账为准）",
+    "commit": null,
+    "author": "NVIDIA（Isaac 资产族）；LyapunovDev（通道、任务与包内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#forklift_c 随附 LICENSE 为准（Isaac 资产许可；staging 定稿前不声称具体许可证）",
+    "policy": "无基础 policy：vehicle/lift 通道直控（mimo/GPT6 System-2）；包内容为 LyapunovDev 自有"
+  },
+  "tests": "tests/acceptance.md"
+}

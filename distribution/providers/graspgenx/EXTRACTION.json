@@ -1,0 +1,24 @@
+{
+  "status": "SOURCE_EXTRACTED",
+  "source": "原项目 tools/graspgen 的当前只读定义",
+  "scope": "两个独立服务及必要 COPY 闭包，不包含旧规划服务或用户环境",
+  "copiedFiles": [
+    "Dockerfile.worker",
+    "Dockerfile.assets",
+    "requirements.adapter.txt",
+    "graspgenx_adapter.py",
+    "download-assets.py"
+  ],
+  "preservedPins": {
+    "source": "b9429097728cb1c430dd78b92edf17ba318aad03",
+    "model": "7c834043c11a11417e31d6d5ea9355801e40a2c1",
+    "gripper": "19a03c00d19aeaf052d0f6801f0041982d676e8a"
+  },
+  "changes": [
+    "构建上下文限定在当前 provider 目录",
+    "Hub 操作固定使用项目规定的镜像地址，运行时不携带凭据",
+    "Compose 只包含 assets 和 worker，模型卷由部署方提供",
+    "provider 入口提供 check、reuse、build、assets 和 start 操作"
+  ],
+  "note": "构建、权重和运行回执保留在私有开发/运维记录，不随发布源码提交。"
+}

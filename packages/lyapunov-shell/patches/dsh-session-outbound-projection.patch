@@ -1,0 +1,315 @@
+diff --git a/packages/api/session-controller/src/history.ts b/packages/api/session-controller/src/history.ts
+index e2b5ed2f79..3060f935af 100644
+--- a/packages/api/session-controller/src/history.ts
++++ b/packages/api/session-controller/src/history.ts
+@@ -1,8 +1,9 @@
+ /** Cold Session history pagination and live-event source. */
+ 
+ import type { Context } from '@deepseek-ai/cordis'
+ import { Deque } from '@deepseek-ai/dsh-deque'
+ import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
++import type { AssistantStreamRecord } from '@deepseek-ai/dsh-llm'
+ import {
+   isAppendSurfaceEvent,
+   selectActiveHistoryEvents,
+@@ -22,6 +24,7 @@ import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+ import type {
+   SessionAddress,
++  SessionAssistantStreamBaseline,
+   SessionAssistantStreamFrame,
+   SessionEventEntry,
+   SessionFollowRequest,
+@@ -35,6 +37,7 @@ import type {
+   SessionWireEvent,
+ } from './types.ts'
+ import { SessionAssistantStreamAccumulator } from './assistant-stream.ts'
++import { sessionOutboundProjection } from './outbound-projection.ts'
+ 
+ const DEFAULT_MAX_MESSAGES = 50
+ const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+@@ -43,6 +47,7 @@ const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+ export class SessionHistoryController {
+   private readonly closeFollowers = new Set<() => void>()
+   private readonly assistantStreams = new Map<SessionId, SessionAssistantStreamAccumulator>()
++  private readonly outbound: ReturnType<typeof sessionOutboundProjection>
+ 
+   /**
+    * @param ctx - Host context carrying Session query and projection services.
+@@ -52,6 +57,7 @@ export class SessionHistoryController {
+     private readonly ctx: Context,
+     private readonly promote: (observation: SessionObservation) => void,
+   ) {
++    this.outbound = sessionOutboundProjection(ctx)
+     ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+       let stream = this.assistantStreams.get(agent.session.id)
+       if (stream === undefined) {
+@@ -104,7 +110,7 @@ export class SessionHistoryController {
+       request.maxMessages ?? DEFAULT_MAX_MESSAGES,
+       throughSeq,
+     )
+-    const records = pageRecords(page.events)
++    const records = pageRecords(page.events, this.outbound)
+     return {
+       records,
+       hasMore: page.hasMore,
+@@ -125,7 +131,8 @@ export class SessionHistoryController {
+       | { readonly type: 'event'; readonly event: SessionEvent }
+       | {
+         readonly type: 'assistant-stream'
+-        readonly frame: SessionAssistantStreamFrame
++        readonly frame: AssistantStreamFrame
++        readonly durableCursor: SessionSeqCursor
+         readonly ordinal: number
+       }
+     >()
+@@ -167,7 +174,8 @@ export class SessionHistoryController {
+         if (agent.session.id !== target) return
+         buffered.pushBack({
+           type: 'assistant-stream',
+-          frame: wireAssistantStreamFrame(frame, cursorBeforeNext(agent.session.seq)),
++          frame,
++          durableCursor: cursorBeforeNext(agent.session.seq),
+           ordinal: ++assistantStreamOrdinal,
+         })
+         notify()
+@@ -193,12 +201,14 @@ export class SessionHistoryController {
+         type: 'snapshot',
+         header: wireHeader(source.header),
+         cursor,
+-        records: pageRecords(page.events),
++        records: pageRecords(page.events, this.outbound),
+         hasMore: page.hasMore,
+         projections: source.projections === undefined
+           ? { asOfSeq: cursor, values: {} }
+           : projectionBlock(source.projections),
+-        ...assistantStream === undefined ? {} : { assistantStream },
++        ...assistantStream === undefined
++          ? {}
++          : { assistantStream: outboundStreamBaseline(assistantStream, this.outbound) },
+       }
+       if (address.kind === 'session' && source.source === 'prepared') {
+         const promotion = source.retain()
+@@ -218,7 +228,10 @@ export class SessionHistoryController {
+         }
+         if (item.type === 'assistant-stream') {
+           if (item.ordinal > assistantStreamOrdinalCut) {
+-            yield { type: 'assistant-stream', frame: item.frame }
++            yield {
++              type: 'assistant-stream',
++              frame: wireAssistantStreamFrame(item.frame, item.durableCursor, this.outbound),
++            }
+           }
+           continue
+         }
+@@ -228,7 +241,7 @@ export class SessionHistoryController {
+           throw new RemoteError('gateway/internal', `session event stream skipped seq ${String(expectedSeq)}`, {})
+         }
+         nextOffset = SessionLogOffset(nextOffset + 1)
+-        yield entryFor(item.event)
++        yield entryFor(item.event, this.outbound)
+       }
+     } finally {
+       this.closeFollowers.delete(close)
+@@ -275,6 +288,22 @@ export class SessionHistoryController {
+ 
+ }
+ 
++/** Project detached assistant chunks while preserving reconnect metadata and identity. */
++function outboundStreamBaseline(
++  baseline: SessionAssistantStreamBaseline,
++  outbound: ReturnType<typeof sessionOutboundProjection>,
++): SessionAssistantStreamBaseline {
++  const attempt = baseline.activeAttempt
++  if (attempt === undefined) return baseline
++  return {
++    ...baseline,
++    activeAttempt: {
++      ...attempt,
++      stream: outbound.stream(attempt.stream as unknown as readonly AssistantStreamRecord[]) as readonly JsonValue[],
++    },
++  }
++}
++
+ function cursorBeforeNext(nextSeq: SessionLogOffsetType): SessionSeqCursor {
+   return nextSeq === 0 ? -1 : SessionSeq(nextSeq - 1)
+ }
+@@ -282,12 +311,13 @@ function cursorBeforeNext(nextSeq: SessionLogOffsetType): SessionSeqCursor {
+ function wireAssistantStreamFrame(
+   frame: AssistantStreamFrame,
+   durableCursor: SessionSeqCursor,
++  outbound: ReturnType<typeof sessionOutboundProjection>,
+ ): SessionAssistantStreamFrame {
+   if (frame.type === 'start') return { ...frame, startedAfterSeq: durableCursor }
+   if (frame.type === 'end') return frame
+   return {
+     ...frame,
+-    chunk: frame.chunk as JsonValue,
++    chunk: outbound.block(frame.chunk) as JsonValue,
+   }
+ }
+ 
+@@ -419,15 +449,22 @@ function wireHeader(header: SessionHeader): SessionWireHeader {
+   return { ...header }
+ }
+ 
+-function entryFor(event: SessionEvent): SessionEventEntry {
++function entryFor(
++  event: SessionEvent,
++  outbound: ReturnType<typeof sessionOutboundProjection>,
++): SessionEventEntry {
+   return {
+     type: 'event',
+-    // Session.append validates and freezes event data as JSON before publication.
+-    event: event as unknown as SessionWireEvent,
++    // Session.append validates and freezes event data before publication. The
++    // projector only creates a browser copy; durable values remain unchanged.
++    event: outbound.event(event) as unknown as SessionWireEvent,
+   }
+ }
+ 
+ /** Encode one bounded logical page without changing its pagination cut. */
+-function pageRecords(events: readonly SessionEvent[]): SessionHistoryRecord[] {
+-  return events.map(entryFor)
++function pageRecords(
++  events: readonly SessionEvent[],
++  outbound: ReturnType<typeof sessionOutboundProjection>,
++): SessionHistoryRecord[] {
++  return events.map(event => entryFor(event, outbound))
+ }
+diff --git a/packages/api/session-controller/src/outbound-projection.ts b/packages/api/session-controller/src/outbound-projection.ts
+new file mode 100644
+index 0000000000..eb062fd93d
+--- /dev/null
++++ b/packages/api/session-controller/src/outbound-projection.ts
+@@ -0,0 +1,119 @@
++/** Required consumer projection for Session history leaving the Host for a browser. */
++
++import type { Context } from '@deepseek-ai/cordis'
++import type { AssistantStreamRecord, ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
++import type { SessionEvent } from '@deepseek-ai/dsh-session'
++
++/** Service name a Host plugin provides to own browser wire projection. */
++export const SESSION_OUTBOUND_PROJECTION = 'sessionOutboundProjection'
++
++/**
++ * Pure synchronous projection of detached browser copies. Event projectors own
++ * data, not type/seq/time/sourceEventSeqs/surfaceOp/ignorable. Block projectors
++ * receive content blocks; tool argument fragments may be incomplete JSON.
++ */
++export interface SessionOutboundProjectionService {
++  projectEvent(event: unknown): unknown
++  projectBlock(block: unknown): unknown
++}
++
++/** Late-bound outbound operations; absent or malformed providers fail closed. */
++export interface SessionOutboundProjectors {
++  event(event: SessionEvent): SessionEvent
++  block(chunk: StreamChunk): StreamChunk
++  stream(records: readonly AssistantStreamRecord[]): readonly AssistantStreamRecord[]
++}
++
++/**
++ * Resolve the active provider on each outbound operation, including after
++ * provider load, disposal, or replacement. Missing/malformed providers and
++ * provider errors reject the operation rather than exposing unprojected data.
++ * @param ctx - Host context that may carry the consumer projection service.
++ * @returns projectors for detached events, live chunks, and compact streams.
++ */
++export function sessionOutboundProjection(ctx: Context): SessionOutboundProjectors {
++  const resolve = (): SessionOutboundProjectionService => {
++    const service = ctx.get(SESSION_OUTBOUND_PROJECTION) as SessionOutboundProjectionService | undefined
++    if (service == null
++      || typeof service.projectEvent !== 'function'
++      || typeof service.projectBlock !== 'function') {
++      throw new Error(`missing active ${SESSION_OUTBOUND_PROJECTION} service`)
++    }
++    return service
++  }
++  return {
++    event(event) {
++      const service = resolve()
++      const projected = service.projectEvent(structuredClone(event)) as SessionEvent
++      const data = event.type === 'assistant/message' || event.type === 'assistant/attempt'
++        ? { ...projected.data, stream: projectStream(event.data.stream, service) }
++        : projected.data
++      // Consumers may only replace data; native ordering and surface metadata stay intact.
++      return { ...event, data } as SessionEvent
++    },
++    block(chunk) {
++      return projectChunk(structuredClone(chunk), resolve())
++    },
++    stream(records) {
++      return projectStream(records, resolve())
++    },
++  }
++}
++
++function projectChunk(chunk: StreamChunk, service: SessionOutboundProjectionService): StreamChunk {
++  switch (chunk.type) {
++    case 'block-end':
++      return { ...chunk, block: service.projectBlock(chunk.block) as ContentBlock }
++    case 'tool-call-delta': {
++      const block = service.projectBlock({
++        type: 'tool-call', id: chunk.id, name: chunk.name ?? '', arguments: chunk.argumentsDelta,
++      }) as Extract<ContentBlock, { type: 'tool-call' }>
++      return { ...chunk, argumentsDelta: block.arguments }
++    }
++    case 'text-delta':
++    case 'reasoning-delta': {
++      const block = service.projectBlock({
++        type: chunk.type === 'text-delta' ? 'text' : 'reasoning', text: chunk.text,
++      }) as Extract<ContentBlock, { type: 'text' | 'reasoning' }>
++      return { ...chunk, text: block.text }
++    }
++    default:
++      return chunk
++  }
++}
++
++function projectStream(
++  records: readonly AssistantStreamRecord[],
++  service: SessionOutboundProjectionService,
++): AssistantStreamRecord[] {
++  return records.map((source) => {
++    const record = structuredClone(source)
++    switch (record.type) {
++      case 'chunk':
++        return { ...record, chunk: projectChunk(record.chunk, service) }
++      case 'tool-call-chunks':
++        return {
++          ...record,
++          args: record.args.map(argumentsDelta => {
++            const chunk = projectChunk({
++              type: 'tool-call-delta', index: record.index, id: record.id,
++              ...record.name === undefined ? {} : { name: record.name }, argumentsDelta,
++            }, service) as Extract<StreamChunk, { type: 'tool-call-delta' }>
++            return chunk.argumentsDelta
++          }),
++        }
++      case 'text-chunks':
++      case 'reasoning-chunks':
++        return {
++          ...record,
++          texts: record.texts.map(text => {
++            const chunk = projectChunk({
++              type: record.type === 'text-chunks' ? 'text-delta' : 'reasoning-delta',
++              index: record.index, text,
++            }, service) as Extract<StreamChunk, { type: 'text-delta' | 'reasoning-delta' }>
++            return chunk.text
++          }),
++        }
++    }
++  })
++}
+diff --git a/packages/api/session-controller/tsconfig.host.json b/packages/api/session-controller/tsconfig.host.json
+--- a/packages/api/session-controller/tsconfig.host.json
++++ b/packages/api/session-controller/tsconfig.host.json
+@@ -19,6 +19,7 @@
+     "src/list.ts",
+     "src/media-references.ts",
+     "src/model-selection-projection.ts",
++    "src/outbound-projection.ts",
+     "src/skill-catalog.ts"
+   ],
+   "references": [

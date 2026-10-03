@@ -1,0 +1,57 @@
+diff --git a/packages/client/ui-workspace/src/client/navigation.ts b/packages/client/ui-workspace/src/client/navigation.ts
+--- a/packages/client/ui-workspace/src/client/navigation.ts
++++ b/packages/client/ui-workspace/src/client/navigation.ts
+@@ -34,6 +34,7 @@
+   forkSession(sessionId: SessionId): Promise<void>
+   /**
+    * Resolve the reusable or newly created blank Session for a Workspace.
++   * Reuse stays inside this window: another window's draft is never adopted.
+    * @param workspaceId - target Workspace.
+    * @returns a Session already addressable through the Session Controller.
+    */
+@@ -94,6 +95,8 @@
+ /** Implements Workspace archive and directory UI operations. */
+ class UiWorkspaceService extends Service implements UiWorkspace {
+   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
++  /** Blank Sessions this window's own Service instance staged for a Workspace. */
++  private readonly ownDrafts = new Set<SessionId>()
+   private readonly lifetime = new AbortController()
+ 
+   /**
+@@ -123,14 +126,19 @@
+ 
+     const archived = this.workspaces.list.getSnapshot().archivedSessionIds
+     const sessions = this.sessions.list.getSnapshot()
++    // A blank Session is the draft of the window that created it: reuse only
++    // this window's own drafts, so opening a Workspace or starting a Session
++    // never adopts — and never navigates — another window's draft.
++    const own = sessions.current
+     for (const id of sessions.ids) {
+       const summary = sessions.byId[id]
+-      if (summary !== undefined && summary.blank && summary.cwd === workspace.path
++      if (summary !== undefined && this.isOwnDraft(summary.id, own) && summary.blank && summary.cwd === workspace.path
+         && workspace.sessionIds.includes(summary.id)
+         && !archived.includes(summary.id)) return summary.id
+     }
+ 
+     const attempt = this.sessions.create({ workspaceId })
++      .then((sessionId) => { this.ownDrafts.add(sessionId); return sessionId })
+       .finally(() => { this.connecting.delete(workspaceId) })
+     this.connecting.set(workspaceId, attempt)
+     return attempt
+@@ -247,6 +255,15 @@
+     }
+   }
+ 
++  /**
++   * @param sessionId - candidate Blank Session.
++   * @param current - this window's current selection.
++   * @returns true when the draft belongs to this window rather than another one.
++   */
++  private isOwnDraft(sessionId: SessionId, current: SessionId | undefined): boolean {
++    return sessionId === current || this.ownDrafts.has(sessionId)
++  }
++
+   /** @returns true when an archived current selection was cleared. */
+   private clearArchivedCurrent(): boolean {
+     const current = this.sessions.list.getSnapshot().current

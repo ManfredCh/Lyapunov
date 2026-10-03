@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "precursorFullPatch": "packages/desktop/patches/dsh-guest-empty-model.patch",
+  "precursorFullSha256": "d756ac06a68a74be6edc26b97e0a33eebd11d4ebbabcd46b4c5d602e7e8d5bf2",
+  "patch": "packages/desktop/patches/dsh-guest-own-provider.patch",
+  "patchSha256": "5c238d8c885464588a66173a63e2150941af3ac2b1a86cb48730d91d32d8b4d9",
+  "sdkBaseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
+  "rootPreimageCommit": "b8aa594f196b82168cc6a7fc801696a8cd81cd74",
+  "registration": "必须在既有d756及其他A08补丁之后，仅精确own/root合法组合可升级；不接受裸基线、未知或混合源码",
+  "files": [
+    {
+      "path": "packages/api/session-controller/src/agent.ts",
+      "ownBeforeSha256": "d5d21a164002e348e29a07d5178c8421765672cead7da33a5581495081dd06e6",
+      "rootBeforeSha256": "d5d21a164002e348e29a07d5178c8421765672cead7da33a5581495081dd06e6",
+      "ownAfterSha256": "d5d21a164002e348e29a07d5178c8421765672cead7da33a5581495081dd06e6",
+      "rootAfterSha256": "d5d21a164002e348e29a07d5178c8421765672cead7da33a5581495081dd06e6",
+      "changed": false
+    },
+    {
+      "path": "packages/api/session-controller/src/catalog.ts",
+      "ownBeforeSha256": "227893dcecdbaf0008f5c9a1d84768c0c70f951c4eab43437bfedf598c3cbdd1",
+      "rootBeforeSha256": "227893dcecdbaf0008f5c9a1d84768c0c70f951c4eab43437bfedf598c3cbdd1",
+      "ownAfterSha256": "227893dcecdbaf0008f5c9a1d84768c0c70f951c4eab43437bfedf598c3cbdd1",
+      "rootAfterSha256": "227893dcecdbaf0008f5c9a1d84768c0c70f951c4eab43437bfedf598c3cbdd1",
+      "changed": false
+    },
+    {
+      "path": "packages/api/session-controller/src/commands.ts",
+      "ownBeforeSha256": "84bc2e45a0985ab7e23f45d054690d169a3e94a7e98292e258ba4b2f0eafbfa4",
+      "rootBeforeSha256": "84bc2e45a0985ab7e23f45d054690d169a3e94a7e98292e258ba4b2f0eafbfa4",
+      "ownAfterSha256": "d09f12d434a8f187c6d16d34223aba280b961cfa50d84a7399a04b2256f2e9da",
+      "rootAfterSha256": "d09f12d434a8f187c6d16d34223aba280b961cfa50d84a7399a04b2256f2e9da",
+      "changed": true
+    },
+    {
+      "path": "packages/api/session-controller/src/types.ts",
+      "ownBeforeSha256": "9b4f212c9bc68eaa1deac7995c90382a64ab8f4e865e4220c6c7b139070049c1",
+      "rootBeforeSha256": "3afb10cc9fb6d4b03b015c956f4e6d1b6d42885500bf03bb8098588917b26557",
+      "ownAfterSha256": "9b4f212c9bc68eaa1deac7995c90382a64ab8f4e865e4220c6c7b139070049c1",
+      "rootAfterSha256": "3afb10cc9fb6d4b03b015c956f4e6d1b6d42885500bf03bb8098588917b26557",
+      "changed": false
+    },
+    {
+      "path": "packages/api/session-controller/tests/session-models.host.spec.ts",
+      "ownBeforeSha256": "4e4dfa11355afb29552054665eaa82f55c35bd8be211d893a9ff2bda9fbbd326",
+      "rootBeforeSha256": "4e4dfa11355afb29552054665eaa82f55c35bd8be211d893a9ff2bda9fbbd326",
+      "ownAfterSha256": "4e4dfa11355afb29552054665eaa82f55c35bd8be211d893a9ff2bda9fbbd326",
+      "rootAfterSha256": "4e4dfa11355afb29552054665eaa82f55c35bd8be211d893a9ff2bda9fbbd326",
+      "changed": false
+    },
+    {
+      "path": "packages/api/session-controller/tests/test-remote.ts",
+      "ownBeforeSha256": "188af2a2df2140324d4246a8bec0394f7522d9153cdd02780e4143e80ee45c50",
+      "rootBeforeSha256": "188af2a2df2140324d4246a8bec0394f7522d9153cdd02780e4143e80ee45c50",
+      "ownAfterSha256": "188af2a2df2140324d4246a8bec0394f7522d9153cdd02780e4143e80ee45c50",
+      "rootAfterSha256": "188af2a2df2140324d4246a8bec0394f7522d9153cdd02780e4143e80ee45c50",
+      "changed": false
+    },
+    {
+      "path": "packages/boot/app-boot/src/index.ts",
+      "ownBeforeSha256": "d675d89e4c4c8538c8f3b7673b5d3d36e347acb7256516e06fe4ec0c1f6b74d4",
+      "rootBeforeSha256": "d675d89e4c4c8538c8f3b7673b5d3d36e347acb7256516e06fe4ec0c1f6b74d4",
+      "ownAfterSha256": "d675d89e4c4c8538c8f3b7673b5d3d36e347acb7256516e06fe4ec0c1f6b74d4",
+      "rootAfterSha256": "d675d89e4c4c8538c8f3b7673b5d3d36e347acb7256516e06fe4ec0c1f6b74d4",
+      "changed": false
+    },
+    {
+      "path": "packages/client/ui-model-selection/src/client/directory.ts",
+      "ownBeforeSha256": "e1ac22a43d3478eb17e313907de6ebba6685f149a7fea7395bb6b47ab72685cc",
+      "rootBeforeSha256": "e1ac22a43d3478eb17e313907de6ebba6685f149a7fea7395bb6b47ab72685cc",
+      "ownAfterSha256": "e1ac22a43d3478eb17e313907de6ebba6685f149a7fea7395bb6b47ab72685cc",
+      "rootAfterSha256": "e1ac22a43d3478eb17e313907de6ebba6685f149a7fea7395bb6b47ab72685cc",
+      "changed": false
+    },
+    {
+      "path": "packages/client/ui-model-selection/src/client/index.ts",
+      "ownBeforeSha256": "e0748e7495cf849ddc12061d5c9df0e6054f4e5b0024ad52382a3d1c4b6c1521",
+      "rootBeforeSha256": "e0748e7495cf849ddc12061d5c9df0e6054f4e5b0024ad52382a3d1c4b6c1521",
+      "ownAfterSha256": "e0748e7495cf849ddc12061d5c9df0e6054f4e5b0024ad52382a3d1c4b6c1521",
+      "rootAfterSha256": "e0748e7495cf849ddc12061d5c9df0e6054f4e5b0024ad52382a3d1c4b6c1521",
+      "changed": false
+    },
+    {
+      "path": "packages/client/ui-model-selection/src/client/locales.ts",
+      "ownBeforeSha256": "322a8d80b39d35bdd7377135423595100546b20292dcd06bbed3e5283919f27f",
+      "rootBeforeSha256": "322a8d80b39d35bdd7377135423595100546b20292dcd06bbed3e5283919f27f",
+      "ownAfterSha256": "322a8d80b39d35bdd7377135423595100546b20292dcd06bbed3e5283919f27f",
+      "rootAfterSha256": "322a8d80b39d35bdd7377135423595100546b20292dcd06bbed3e5283919f27f",
+      "changed": false
+    },
+    {
+      "path": "packages/client/ui-model-selection/src/client/service.ts",
+      "ownBeforeSha256": "bb31d100d3fc5e8b723ddf62c1db21eb912fccc9241cb0d584277993a3b7b604",
+      "rootBeforeSha256": "bb31d100d3fc5e8b723ddf62c1db21eb912fccc9241cb0d584277993a3b7b604",
+      "ownAfterSha256": "bb31d100d3fc5e8b723ddf62c1db21eb912fccc9241cb0d584277993a3b7b604",
+      "rootAfterSha256": "bb31d100d3fc5e8b723ddf62c1db21eb912fccc9241cb0d584277993a3b7b604",
+      "changed": false
+    },
+    {
+      "path": "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts",
+      "ownBeforeSha256": "099fa46d3e1c490000916e23e2280ce276e695590f64b1de11f39d424128175c",
+      "rootBeforeSha256": "099fa46d3e1c490000916e23e2280ce276e695590f64b1de11f39d424128175c",
+      "ownAfterSha256": "099fa46d3e1c490000916e23e2280ce276e695590f64b1de11f39d424128175c",
+      "rootAfterSha256": "099fa46d3e1c490000916e23e2280ce276e695590f64b1de11f39d424128175c",
+      "changed": false
+    },
+    {
+      "path": "packages/core/agent-default-model/src/index.ts",
+      "ownBeforeSha256": "2602991bb79070f2ba7183b7c98a3a174617a355cc1ab55c4263058aad65f77e",
+      "rootBeforeSha256": "2602991bb79070f2ba7183b7c98a3a174617a355cc1ab55c4263058aad65f77e",
+      "ownAfterSha256": "1d641a6166b29d3b1b6e1884c0620f846d3242636bf66e4a6da1dccca6beb305",
+      "rootAfterSha256": "1d641a6166b29d3b1b6e1884c0620f846d3242636bf66e4a6da1dccca6beb305",
+      "changed": true
+    },
+    {
+      "path": "packages/core/agent-default-model/tests/agent-default-model.spec.ts",
+      "ownBeforeSha256": "8aaf3b020a06c86bfe4b0ce494656ba352a4f81b6e41d5bc2c7ce48baf0863c7",
+      "rootBeforeSha256": "8aaf3b020a06c86bfe4b0ce494656ba352a4f81b6e41d5bc2c7ce48baf0863c7",
+      "ownAfterSha256": "d9af7a14d3e8c39113dd5f1301ff1284581be5d3fe9bd0b700b59f2e4641607c",
+      "rootAfterSha256": "d9af7a14d3e8c39113dd5f1301ff1284581be5d3fe9bd0b700b59f2e4641607c",
+      "changed": true
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/adapter.ts",
+      "ownBeforeSha256": "1ef83165bc2715c2b9ef5a0d5aba50102bc74b988f4bb0d58d745e8f9db0c15a",
+      "rootBeforeSha256": "1baa4f643f49d9c20f3292c318d2d4182b0751259495f770be18173510c1105b",
+      "ownAfterSha256": "a2def82f4b323181f4db29841b9dd94177ad27bc3fbf850dcb3bbdb0bdfd699b",
+      "rootAfterSha256": "206c98d2212c02438cf61011716240e8cd2e6992d189b19dde7561ca935bb070",
+      "changed": true
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/auth.ts",
+      "ownBeforeSha256": "50fbdd55f60a95bdc256edfbc2686a3d96e108b3b9d4a441c9649a2870ef9fee",
+      "rootBeforeSha256": "50fbdd55f60a95bdc256edfbc2686a3d96e108b3b9d4a441c9649a2870ef9fee",
+      "ownAfterSha256": "5405763d8d2bc4ae9635f4d1fa58e64bf5001aac7db3b045b7af3a1d02afb9f6",
+      "rootAfterSha256": "5405763d8d2bc4ae9635f4d1fa58e64bf5001aac7db3b045b7af3a1d02afb9f6",
+      "changed": true
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/config.ts",
+      "ownBeforeSha256": "9fd82313a8fd8bb585ef3a19158a7c47c9d61a1298e39a223521e92548bcaadd",
+      "rootBeforeSha256": "9fd82313a8fd8bb585ef3a19158a7c47c9d61a1298e39a223521e92548bcaadd",
+      "ownAfterSha256": "d8f27d7ad559a11e5cd909faf6d4dbef78b98ce7e8f150d5217b04aa35de5d4f",
+      "rootAfterSha256": "d8f27d7ad559a11e5cd909faf6d4dbef78b98ce7e8f150d5217b04aa35de5d4f",
+      "changed": true
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/discovery.ts",
+      "ownBeforeSha256": "f8afb8e553b46799dad99c677b88c0b427254aeb9ef866c836acf68cf62d4e8c",
+      "rootBeforeSha256": "f8afb8e553b46799dad99c677b88c0b427254aeb9ef866c836acf68cf62d4e8c",
+      "ownAfterSha256": "f8afb8e553b46799dad99c677b88c0b427254aeb9ef866c836acf68cf62d4e8c",
+      "rootAfterSha256": "f8afb8e553b46799dad99c677b88c0b427254aeb9ef866c836acf68cf62d4e8c",
+      "changed": false
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/index.ts",
+      "ownBeforeSha256": "f890c8f43f31c0f9fd466ed5860283bc906f411c7eee32b003a632834c30a45a",
+      "rootBeforeSha256": "f890c8f43f31c0f9fd466ed5860283bc906f411c7eee32b003a632834c30a45a",
+      "ownAfterSha256": "87c8302c0164a46729909429a9ee2610075db216e63e3d7d9765bee1adc260a5",
+      "rootAfterSha256": "87c8302c0164a46729909429a9ee2610075db216e63e3d7d9765bee1adc260a5",
+      "changed": true
+    },
+    {
+      "path": "packages/llm/llm-pi-ai/src/managed-discovery.ts",
+      "ownBeforeSha256": "6afef7dc034ce676ef930f87b4319497195f5a87d417c122e4a46dd5296f6992",
+      "rootBeforeSha256": "6afef7dc034ce676ef930f87b4319497195f5a87d417c122e4a46dd5296f6992",
+      "ownAfterSha256": "6afef7dc034ce676ef930f87b4319497195f5a87d417c122e4a46dd5296f6992",
+      "rootAfterSha256": "6afef7dc034ce676ef930f87b4319497195f5a87d417c122e4a46dd5296f6992",
+      "changed": false
+    }
+  ],
+  "dependencies": [
+    {
+      "file": "packages/lyapunov-shell/patches/dsh-managed-provider-discovery.patch",
+      "sha256": "7f19b735c915cb0fffda9538bfc54e6db1fed299bfb0e4c95ab8d23ca9743faa"
+    }
+  ]
+}

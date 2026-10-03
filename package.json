@@ -1,0 +1,49 @@
+{
+  "name": "lyapunov",
+  "version": "0.1.0-alpha.4",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.13",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "distribution/*"
+  ],
+  "scripts": {
+    "bootstrap": "node script/bootstrap.mjs",
+    "test:ci": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/test-ci.ts",
+    "test:ci:list": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/test-ci.ts --list",
+    "ensure:blender-mcp": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/blender-mcp.ts",
+    "doctor:blender-mcp": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/blender-mcp.ts --check",
+    "gate:domain-pointers": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/domain-pointers.ts",
+    "build:plugins": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/build-plugins.ts",
+    "dev:developer": "node script/developer.ts",
+    "dev:architecture": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/architecture.ts",
+    "build:desktop": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/build-desktop.ts",
+    "build:linux": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/package-linux.ts",
+    "dev:desktop": "node script/desktop.ts --mode formal",
+    "dev:desktop:developer": "node script/desktop.ts --mode developer",
+    "start": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/launch.ts --mode formal",
+    "preflight": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/test-ci.ts --list",
+    "gate:drivers": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gate-drivers.ts",
+    "release-gate": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/release-gate.ts"
+  },
+  "dependencies": {
+    "three": "0.180.0",
+    "@sparkjsdev/spark": "2.0.0",
+    "fast-xml-parser": "5.2.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.12",
+    "typescript": "5.8.2",
+    "@types/three": "0.180.0",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@types/node": "24.12.2"
+  },
+  "license": "Apache-2.0"
+}

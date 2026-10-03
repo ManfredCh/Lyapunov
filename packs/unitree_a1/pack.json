@@ -1,0 +1,27 @@
+{
+  "packId": "unitree_a1",
+  "version": "2026.09.23",
+  "family": "quadruped",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/a1.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST_T1.json#unitree_a1" },
+    "context": "ready",
+    "policy": "blocked:adapter-not-ported",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gait", "control"],
+    "directControl": "requiresPolicy"
+  },
+  "status": "BLOCKED:policy-adapter-not-ported",
+  "provenance": {
+    "source": "模型：MuJoCo Menagerie unitree_a1（ASSET_STAGING_MANIFEST_T1.json#unitree_a1 落账，mujoco_menagerie@822c2d8f877dd166c5b7d3c9f7e3c3b6589473b7/unitree_a1）；policy：Improbable-AI/walk-these-ways@0e7236bdc81ce855cbe3d70345a7899452bdeb1c（A1 适配未移植）",
+    "commit": "0e7236bdc81ce855cbe3d70345a7899452bdeb1c",
+    "author": "Unitree Robotics（A1 硬件与 CAD）；Google DeepMind MuJoCo Menagerie（MJCF 模型）；Improbable AI Lab（walk-these-ways）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "BSD-3-Clause（asset/LICENSE 实读 BSD 3-Clause / Unitree Robotics；ASSET_STAGING_MANIFEST_T1.json#unitree_a1 license=BSD-3-Clause 落账）",
+    "policy": "以 Improbable-AI/walk-these-ways@0e7236bd… 随附 LICENSE 为准（2026-09-23 未取得 LICENSE 原文，不声称具体许可证）；权重不随包分发，且 A1 适配未移植（见 policy/manifest.json）"
+  },
+  "tests": "tests/acceptance.md"
+}

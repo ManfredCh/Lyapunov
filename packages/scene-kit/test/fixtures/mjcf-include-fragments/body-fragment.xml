@@ -1,0 +1,8 @@
+<mujoco model="body fragment">
+  <worldbody>
+    <body name="arm">
+      <joint name="arm_joint" type="hinge"/>
+      <geom name="arm_geom" type="mesh" mesh="arm_link"/>
+    </body>
+  </worldbody>
+</mujoco>

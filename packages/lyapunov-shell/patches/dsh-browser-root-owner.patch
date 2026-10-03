@@ -1,0 +1,573 @@
+diff --git a/packages/experimental/browser-use-chrome-devtools-mcp/package.json b/packages/experimental/browser-use-chrome-devtools-mcp/package.json
+--- a/packages/experimental/browser-use-chrome-devtools-mcp/package.json
++++ b/packages/experimental/browser-use-chrome-devtools-mcp/package.json
+@@ -19,10 +19,12 @@
+       "default": "./lib/index.js"
+     },
+     "./src/*": "./src/*",
++    "./owner-server": "./lib/types/owner-server.js",
+     "./package.json": "./package.json"
+   },
+   "files": [
+     "lib/index.js",
++    "lib/types/**/*.js",
+     "lib/types/**/*.d.ts"
+   ],
+   "license": "MIT",
+diff --git a/packages/experimental/browser-use-chrome-devtools-mcp/src/index.ts b/packages/experimental/browser-use-chrome-devtools-mcp/src/index.ts
+--- a/packages/experimental/browser-use-chrome-devtools-mcp/src/index.ts
++++ b/packages/experimental/browser-use-chrome-devtools-mcp/src/index.ts
+@@ -24,7 +24,7 @@
+  */
+ export function apply(ctx: Context, config: Config): void {
+   validateBrowserMcpConfig(config)
+-  const cli = fileURLToPath(import.meta.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js'))
++  const cli = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-experimental-browser-use-chrome-devtools-mcp/owner-server'))
+   const args = [cli, '--no-usage-statistics']
+   if (config.mode === 'attach') {
+     args.push(/^wss?:/u.test(config.endpoint) ? '--ws-endpoint' : '--browser-url', config.endpoint)
+@@ -37,6 +37,7 @@
+     exclusive: config.mode === 'attach',
+     command: process.execPath,
+     args,
++    observeBrowserRoot: true,
+     ...config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs },
+   })
+ }
+diff --git a/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-server.ts b/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-server.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-server.ts
+@@ -0,0 +1,85 @@
++/** The pinned upstream stdio server with this Session's root observation/release owner. @module */
++import { readFileSync, writeFileSync, renameSync } from 'node:fs'
++import { createHash } from 'node:crypto'
++import { AsyncLocalStorage } from 'node:async_hooks'
++import { observeBrowserRoot, releaseBrowserRoots, type ObservedBrowser, type ObservedContext } from './owner-state.ts'
++
++const owner = process.env.DSH_BROWSER_RUNTIME_OWNER
++const statePath = process.env.DSH_BROWSER_RUNTIME_STATE
++if (!owner || !statePath) throw new Error('browser runtime owner metadata is required')
++const base = new URL('../', import.meta.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js'))
++const pinned = new Map([
++  ['McpContext.js', '39e41d2e578aa983fa7a3ded08ac9438af7dd8423a29829f746c0fe9e9cb70b3'],
++  ['ToolHandler.js', '49dd8d88257394e778573e3449af6e03fdc2fab73cc8370af26205aeecd8ab7d'],
++  ['index.js', '793dd988623744d46395e586500b5405fd17694cc4bef98d6593bee01563374a'],
++  ['third_party/index.js', 'fc6ae43cb8f6007eba4b0f269290ec8fea6db7670686d17967b4812d90d2cc10'],
++])
++for (const [file, digest] of pinned) {
++  if (createHash('sha256').update(readFileSync(new URL(file, base))).digest('hex') !== digest) throw new Error('pinned Chrome 1.9.0 owner SPI hash mismatch: ' + file)
++}
++const moduleAt = (name: string): Promise<any> => import(new URL(name, base).href)
++const [{ McpServer, logDisclaimers }, { McpContext }, { ToolHandler }, { StdioServerTransport, McpServer: NativeSdkServer, puppeteer }, { parseArguments }, { VERSION }] = await Promise.all([
++  moduleAt('index.js'), moduleAt('McpContext.js'), moduleAt('ToolHandler.js'), moduleAt('third_party/index.js'), moduleAt('config/mcp-options.js'), moduleAt('version.js'),
++])
++if (typeof McpContext.from !== 'function' || typeof ToolHandler.prototype.handle !== 'function' || typeof NativeSdkServer.prototype.registerTool !== 'function') throw new Error('pinned Chrome owner interface is unavailable')
++const args = parseArguments(VERSION)
++const external = Boolean(args.browserUrl || args.wsEndpoint || args.autoConnect)
++if (!external && args.isolated !== true) throw new Error('browser runtime requires an isolated launch owner')
++let context: ObservedContext | undefined, browser: ObservedBrowser | undefined, sequence = 0, attempted = false
++const nativeLaunch = puppeteer.launch, nativeConnect = puppeteer.connect
++puppeteer.launch = function (...args: unknown[]) { attempted = true; return nativeLaunch.apply(this, args) }
++puppeteer.connect = function (...args: unknown[]) { attempted = true; return nativeConnect.apply(this, args) }
++const browsers = new Set<ObservedBrowser>()
++const operation = new AsyncLocalStorage<string>()
++const write = (pageId?: number, released?: boolean, marker?: string) => {
++  const facts = observeBrowserRoot(context, browser, pageId)
++  const row = { owner, sequence: sequence++, ownership: external ? 'external' : 'session', ...facts, neverStarted: !attempted,
++    ...marker ? { operation: marker } : {},
++    ...released === undefined ? {} : { released } }
++  writeFileSync(statePath + '.next', JSON.stringify(row), { mode: 0o600 }); renameSync(statePath + '.next', statePath)
++}
++// Capture the actual browser before context initialization can itself fail.
++const from = McpContext.from
++McpContext.from = async function (actual: ObservedBrowser, ...rest: unknown[]) {
++  browser = actual; browsers.add(actual)
++  const result = await from.call(this, actual, ...rest); context = result; return result
++}
++const handle = ToolHandler.prototype.handle
++ToolHandler.prototype.handle = async function (params: { pageId?: number }) {
++  const marker = operation.getStore()
++  const error = (text: string) => ({ content: [{ type: 'text', text }], isError: true })
++  try {
++    // Let the pinned handler return its existing disabled/argument error unchanged.
++    if (this.disabledReason || this.unknownArgumentNames(params).length) return await handle.call(this, params)
++    // Preserve Session/tools startup, but never scan other processes for DISPLAY.
++    if (!external && process.platform === 'linux' && !args.headless && !process.env.DISPLAY) return error('Missing X server: this pinned Chrome MCP headed launch requires configured DISPLAY')
++    // The native lazy launcher must not silently replace a disconnected or unknown root.
++    if (browser?.connected === false) return error('Browser has been closed; await this Session owner release before replacement')
++    if (attempted && !browser) return error('BROWSER_ROOT_UNVERIFIED: previous launch/connect did not expose a verifiable browser root; no replacement was started')
++    return await handle.call(this, params)
++  }
++  finally { try { write(typeof params.pageId === 'number' ? params.pageId : undefined, undefined, marker) } catch { /* Diagnosis must never alter a completed operation's result. */ } }
++}
++const register = NativeSdkServer.prototype.registerTool
++NativeSdkServer.prototype.registerTool = function (name: string, config: unknown, callback: (...args: any[]) => unknown) {
++  return register.call(this, name, config, (params: unknown, extra: { _meta?: Record<string, unknown> }) => {
++    const meta = extra?._meta
++    const marker = meta?.['lyapunov/browser-owner'] === owner && typeof meta?.['lyapunov/browser-operation'] === 'string' ? meta['lyapunov/browser-operation'] : ''
++    return operation.run(marker, () => callback(params, extra))
++  })
++}
++write()
++const server = await McpServer.from(args)
++await server.connect(new StdioServerTransport())
++logDisclaimers(args)
++let shutdown: Promise<void> | undefined
++const stop = () => {
++  shutdown ??= (async () => {
++    const released = (!attempted || browsers.size > 0) && await releaseBrowserRoots([...browsers], external)
++    write(undefined, released)
++    await server.close()
++    process.exit(released ? 0 : 1)
++  })().catch(() => { try { write(undefined, false) } finally { process.exit(1) } })
++}
++process.stdin.on('end', stop); process.stdin.on('close', stop)
++process.on('SIGTERM', stop); process.on('SIGINT', stop); process.on('SIGHUP', stop)
+diff --git a/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-state.ts b/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-state.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/experimental/browser-use-chrome-devtools-mcp/src/owner-state.ts
+@@ -0,0 +1,68 @@
++/** Structural Chrome owner facts; no URLs, page contents, headers or credentials. @module */
++export interface OwnedBrowserProcess {
++  exitCode: number | null
++  signalCode: string | null
++  once(event: 'exit', listener: () => void): unknown
++  off(event: 'exit', listener: () => void): unknown
++}
++export interface ObservedBrowser {
++  connected: boolean
++  process(): OwnedBrowserProcess | null
++  close(): Promise<void>
++  disconnect(): Promise<void>
++}
++export interface ObservedContext {
++  browser: ObservedBrowser
++  getSelectedMcpPage(): { pptrPage: { isClosed(): boolean } }
++  getPageById(id: number): { pptrPage: { isClosed(): boolean } }
++}
++export function observeBrowserRoot(context: ObservedContext | undefined, browser: ObservedBrowser | undefined, pageId?: number) {
++  let targetAlive: boolean | null = null
++  if (context) {
++    try { const closed = (pageId === undefined ? context.getSelectedMcpPage() : context.getPageById(pageId)).pptrPage.isClosed(); targetAlive = typeof closed === 'boolean' ? !closed : null }
++    catch { targetAlive = null }
++  }
++  let rootConnected: boolean | null = null, processExited: boolean | null = null, exitCode: number | null = null, signalCode: string | null = null
++  try { if (typeof browser?.connected === 'boolean') rootConnected = browser.connected } catch { /* unknown */ }
++  try {
++    const process = browser?.process()
++    if (process) {
++      const code = process.exitCode, signal = process.signalCode
++      if (code === null || typeof code === 'number') exitCode = code
++      if (signal === null || typeof signal === 'string') signalCode = signal
++      if ((code === null || typeof code === 'number') && (signal === null || typeof signal === 'string')) processExited = code !== null || signal !== null
++    }
++  } catch { /* unknown */ }
++  return { rootConnected, targetAlive, processExited, exitCode, signalCode }
++}
++/** Only the captured launch owner may close a process; external roots only disconnect. */
++export async function releaseBrowserRoots(browsers: readonly ObservedBrowser[], external: boolean, timeoutMs = 3500): Promise<boolean> {
++  let timer: ReturnType<typeof setTimeout> | undefined
++  const cleanups: (() => void)[] = []
++  const release = async () => {
++    for (const browser of browsers) {
++      if (external) { await browser.disconnect(); if (browser.connected) return false; continue }
++      const process = browser.process()
++      if (!process) return false
++      if (process.exitCode !== null || process.signalCode !== null) {
++        if (browser.connected) await browser.disconnect()
++        if (browser.connected) return false
++        continue
++      }
++      let done!: () => void
++      const exited = new Promise<void>(resolve => { done = resolve })
++      process.once('exit', done)
++      cleanups.push(() => process.off('exit', done))
++      try {
++        await browser.close()
++        if (process.exitCode === null && process.signalCode === null) await exited
++        if (process.exitCode === null && process.signalCode === null) return false
++        if (browser.connected) await browser.disconnect()
++        if (browser.connected) return false
++      } finally { process.off('exit', done) }
++    }
++    return true
++  }
++  try { return await Promise.race([release(), new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })]) }
++  catch { return false } finally { clearTimeout(timer); for (const cleanup of cleanups) cleanup() }
++}
+diff --git a/packages/experimental/browser-use-runtime/src/mcp.ts b/packages/experimental/browser-use-runtime/src/mcp.ts
+--- a/packages/experimental/browser-use-runtime/src/mcp.ts
++++ b/packages/experimental/browser-use-runtime/src/mcp.ts
+@@ -10,6 +10,7 @@
+ import type { Scope } from '@deepseek-ai/dsh-scope'
+ import { SessionResources } from './index.ts'
+ import type { SessionRebuildHealth } from './index.ts'
++import { BrowserRootObserver, type BrowserRootObservation } from './root-state.ts'
+ import type {} from '@deepseek-ai/dsh-browser-use'
+ import type {} from '@deepseek-ai/dsh-tools'
+ import type {} from '@deepseek-ai/dsh-system-prompt'
+@@ -42,7 +43,7 @@
+ /** A provider-observed browser failure, distinct from model or other tool failures. */
+ export interface BrowserRuntimeFailure {
+   /** The condition actually named by the provider; a closed connection alone is not crash proof. */
+-  kind: 'page-closed' | 'browser-closed' | 'browser-crashed' | 'sandbox-unavailable' | 'display-unavailable' | 'profile-in-use' | 'executable-unavailable' | 'launch-failed' | 'transport-closed' | 'schema-unavailable' | 'release-unverified'
++  kind: 'page-closed' | 'closure-unverified' | 'browser-closed' | 'browser-crashed' | 'sandbox-unavailable' | 'display-unavailable' | 'profile-in-use' | 'executable-unavailable' | 'launch-failed' | 'transport-closed' | 'schema-unavailable' | 'release-unverified'
+   /** Preserve a live browser, rebuild this owner, or wait for the launch condition to be fixed. */
+   recovery: 'select-page' | 'rebuild' | 'blocked'
+   /** Provider message, retained for the existing error result. */
+@@ -55,7 +56,7 @@
+  * @param error - provider throw or tool-error message, including a nested launch cause.
+  * @returns a diagnosed browser condition, otherwise undefined.
+  */
+-export function browserRuntimeFailure(error: unknown): BrowserRuntimeFailure | undefined {
++export function browserRuntimeFailure(error: unknown, root?: BrowserRootObservation): BrowserRuntimeFailure | undefined {
+   const messages: string[] = []
+   const seen = new Set<unknown>()
+   for (let current = error; current !== undefined && !seen.has(current);) {
+@@ -70,12 +71,18 @@
+   if (/Missing X server|cannot open display|could not open display|failed to connect to.*Wayland|ozone.*(?:initializ|display)/iu.test(reason)) return classified('display-unavailable', 'blocked')
+   if (/SingletonLock|ProcessSingleton|profile.*(?:in use|locked)|browser is already running/iu.test(reason)) return classified('profile-in-use', 'blocked')
+   if (/Could not find (?:Chrome|Chromium)|Browser was not found|executable.*(?:does not exist|not found)|spawn .*ENOENT/iu.test(reason)) return classified('executable-unavailable', 'blocked')
+-  if (/browser (?:process )?(?:has )?(?:crashed|exited)|browser.*SIG(?:ABRT|SEGV)/iu.test(reason)) return classified('browser-crashed', 'rebuild')
+   if (/Failed to launch (?:the )?browser|browser launch failed/iu.test(reason)) return classified('launch-failed', 'blocked')
+-  if (/selected page.*closed|No page found|No target with given id|Cannot find (?:context|target)|Execution context was destroyed/iu.test(reason)) return classified('page-closed', 'select-page')
+-  if (/Protocol error \(Target\.setDiscoverTargets\):\s*(?:Target closed|Session closed|Connection closed)|Target page, context or browser has been closed|Browser (?:has been )?closed|browser disconnected/iu.test(reason)) return classified('browser-closed', 'rebuild')
+-  // An unqualified Target closed does not establish that the root browser died.
+-  if (/Target closed/iu.test(reason)) return classified('page-closed', 'select-page')
++  if (/BROWSER_ROOT_UNVERIFIED/iu.test(reason)) return classified('closure-unverified', 'blocked')
++  if (/MCP_PROVIDER_UNAVAILABLE|McpError|MCP error|transport.*closed|server.*exited|ECONNRESET/iu.test(reason)
++    || (/Connection closed/iu.test(reason) && !/Protocol error/iu.test(reason))) return classified('transport-closed', 'blocked')
++  const closed = /selected page.*closed|No page found|No target with given id|Cannot find (?:context|target)|Execution context was destroyed|Target closed|Session closed|Connection closed|Target page, context or browser has been closed|Browser (?:has been )?closed|browser disconnected|browser (?:process )?(?:has )?(?:crashed|exited)|browser.*SIG(?:ABRT|SEGV)/iu.test(reason)
++  if (closed) {
++    if (root?.rootConnected === false && root.ownership === 'session') return classified(root.processExited === true && ((root.exitCode !== undefined && root.exitCode !== null && root.exitCode !== 0) || root.signalCode === 'SIGABRT' || root.signalCode === 'SIGSEGV') ? 'browser-crashed' : 'browser-closed', 'rebuild')
++    if ((root?.rootConnected === true && root.targetAlive === false) || /selected page.*closed|No page found|No target with given id|Cannot find (?:context|target)|Execution context was destroyed/iu.test(reason)) return classified('page-closed', 'select-page')
++    if (root?.ownership === 'external' && root.rootConnected === false) return classified('closure-unverified', 'blocked')
++    if (/MCP_PROVIDER_UNAVAILABLE|transport.*closed|server.*exited|ECONNRESET/iu.test(reason)) return classified('transport-closed', 'blocked')
++    return classified('closure-unverified', 'select-page')
++  }
+   if (/MCP_PROVIDER_UNAVAILABLE|Connection closed|transport.*closed|server.*exited|ECONNRESET/iu.test(reason)) return classified('transport-closed', 'blocked')
+   if (/UNKNOWN_TOOL|ToolNotFoundError|(?:tool|schema).*(?:not found|missing|not registered|unavailable)/iu.test(reason)) return classified('schema-unavailable', 'blocked')
+   return undefined
+@@ -85,6 +92,7 @@
+ export function browserFailureAdvice(failure: BrowserRuntimeFailure): string {
+   switch (failure.kind) {
+     case 'page-closed': return '当前页面或页面句柄已关闭；保留本会话浏览器，先读取页面列表并选择仍存在的页面，再取得新的观察和句柄。'
++    case 'closure-unverified': return '已观察到关闭错误，但浏览器根连接/页面/归属尚未确认；保留当前 owner，先读取当前页面目录取得新事实。未宣称页面刷新成功，也未重建浏览器或重放失败动作；外部连接需由其原 owner 核对后重新激活。'
+     case 'browser-closed':
+     case 'browser-crashed': return '仅恢复本会话自有的浏览器连接；恢复后先读取页面列表，旧 page/uid/context 句柄不能复用，失败操作没有自动重放。'
+     case 'sandbox-unavailable': return '本会话浏览器的 Chromium 沙箱不可用；桌面窗口的沙箱状态不能证明它已就绪，先修复配置的浏览器沙箱，再重新激活本会话。'
+@@ -103,8 +111,8 @@
+  * @param error - value thrown by the provider tool call.
+  * @returns the provider's message when the browser target is gone, otherwise undefined.
+  */
+-export function browserTargetFailureReason(error: unknown): string | undefined {
+-  const failure = browserRuntimeFailure(error)
++export function browserTargetFailureReason(error: unknown, root?: BrowserRootObservation): string | undefined {
++  const failure = browserRuntimeFailure(error, root)
+   return failure?.recovery === 'rebuild' ? failure.reason : undefined
+ }
+ 
+@@ -186,6 +194,8 @@
+   env?: Record<string, string>
+   /** Per-call timeout override; omission retains the MCP client default. */
+   toolCallTimeoutMs?: number
++  /** Read facts only from this generation's decorated Chrome MCP owner. */
++  observeBrowserRoot?: boolean
+ }
+ 
+ interface ClientState {
+@@ -205,7 +215,7 @@
+   const clients = new Map<Agent, ClientState>()
+   // Whether each Session currently has a mounted client, so a rebuild that could
+   // not start is observed as a failure instead of a missing-tool mystery.
+-  const connections = new Map<Agent, { mounted: boolean; failure?: BrowserRuntimeFailure }>()
++  const connections = new Map<Agent, { mounted: boolean; failure?: BrowserRuntimeFailure; observer?: BrowserRootObserver }>()
+   const toolPrefix = `mcp__${options.name}__`
+   const resourceTools = new Set(['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'])
+   let stopping = false
+@@ -238,7 +248,8 @@
+         let cancellation: Promise<void> | undefined
+         const cancel = (): void => { cancellation = scope.dispose() }
+         signal.addEventListener('abort', cancel, { once: true })
+-        const connection: { mounted: boolean; failure?: BrowserRuntimeFailure } = { mounted: false }
++        const observer = options.observeBrowserRoot ? await BrowserRootObserver.create() : undefined
++        const connection: { mounted: boolean; failure?: BrowserRuntimeFailure; observer?: BrowserRootObserver } = { mounted: false, ...observer ? { observer } : {} }
+         connections.set(agent, connection)
+         const clientConfig = McpClient.Config({
+           transport: 'stdio',
+@@ -254,8 +265,12 @@
+         // The MCP client is remounted in place on a dead browser target: the scope,
+         // its namespaced tools, and this Session's ownership entry all stay.
+         let client: (PromiseLike<unknown> & { dispose: () => Promise<void>, ctx: Context }) | undefined
++        let clientOwner: ReturnType<typeof McpClient.connectionHandleOf>
+         let releasing: Promise<void> | undefined
+-        const mountClient = (): void => { client = scope.ctx.plugin(McpClient, clientConfig) as unknown as typeof client }
++        const mountClient = async (): Promise<void> => {
++          const rootEnvironment = await observer?.begin()
++          client = scope.ctx.plugin(McpClient, { ...clientConfig, ...rootEnvironment ? { env: { ...options.env, ...rootEnvironment } } : {} }) as unknown as typeof client
++        }
+         // One shared release: a cancellation awaits it as proof the old process
+         // is gone, and a rebuild reuses it before mounting the replacement. The
+         // client owner is dropped only after the MCP connection handle records a
+@@ -265,9 +280,10 @@
+           if (releasing !== undefined) return releasing
+           const previous = client
+           if (previous === undefined) return Promise.resolve()
+-          const owner = McpClient.connectionHandleOf(previous.ctx)
+-          releasing = previous.dispose().then(() => {
++          const owner = McpClient.connectionHandleOf(previous.ctx) ?? clientOwner
++          releasing = previous.dispose().then(async () => {
+             requireVerifiedRelease(owner?.disposal(), options.name)
++            await observer?.verifyRelease()
+             if (client === previous) {
+               client = undefined
+               connection.mounted = false
+@@ -281,6 +297,7 @@
+         }
+         try {
+           signal.throwIfAborted()
++          if (observer) scope.ctx.on('mcp/tool-call-metadata', exec => exec.agent === agent && exec.name.startsWith(toolPrefix) ? observer.metadata() : undefined)
+           scope.ctx.on('tools/execute', async (exec, next) => {
+             if (!exec.name.startsWith(toolPrefix)) return next()
+             if (exec.agent !== agent) {
+@@ -289,8 +306,9 @@
+             }
+             return next()
+           })
+-          mountClient()
++          await mountClient()
+           await client
++          clientOwner = client === undefined ? undefined : McpClient.connectionHandleOf(client.ctx)
+           signal.throwIfAborted()
+           connection.mounted = true
+           return {
+@@ -301,20 +319,25 @@
+             async recycle() {
+               await releaseClient()
+               if (signal.aborted) return
+-              mountClient()
++              await mountClient()
+               await client
++              clientOwner = client === undefined ? undefined : McpClient.connectionHandleOf(client.ctx)
+               signal.throwIfAborted()
+               connection.mounted = true
+             },
+-            close() {
++            async close() {
+               clients.delete(agent)
+               connection.mounted = false
+-              return scope.dispose()
++              await scope.dispose()
++              requireVerifiedRelease(clientOwner?.disposal(), options.name)
++              await observer?.verifyRelease()
++              await observer?.dispose()
+             },
+           }
+         } catch (error) {
+           connection.mounted = false
+           await (cancellation ?? scope.dispose())
++          await observer?.dispose()
+           throw error
+         } finally {
+           signal.removeEventListener('abort', cancel)
+@@ -387,6 +410,13 @@
+     return resources.run(agent, exec.signal, async (_scope, combined) => {
+       const original = exec.signal
+       exec.signal = combined
++      const observer = connections.get(agent)?.observer
++      const before = await observer?.read()
++      const operation = observer?.beginOperation()
++      const classify = async (error: unknown) => {
++        const fresh = await observer?.readForOperation(operation, before?.sequence ?? -1)
++        return browserRuntimeFailure(error, fresh)
++      }
+       try {
+         if (browserOperation) {
+           const health = resources.health(agent)
+@@ -417,7 +447,7 @@
+         // so a closed target is read from the result as well as from a throw.
+         if (browserOperation) {
+           if (result.isError) {
+-            const failure = browserRuntimeFailure(result.error.message)
++            const failure = await classify(result.error.message)
+             if (failure !== undefined) failBrowser(failure, result.error)
+           } else {
+             // Only a real browser operation proves the resource works: discovery
+@@ -430,7 +460,7 @@
+         return result
+       } catch (error) {
+         if (browserOperation && !(error instanceof BrowserConnectionError)) {
+-          const failure = browserRuntimeFailure(error)
++          const failure = await classify(error)
+           if (failure !== undefined) failBrowser(failure, error)
+         }
+         throw error
+diff --git a/packages/experimental/browser-use-runtime/src/root-state.ts b/packages/experimental/browser-use-runtime/src/root-state.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/experimental/browser-use-runtime/src/root-state.ts
+@@ -0,0 +1,72 @@
++/** Read only facts from this MCP generation's private browser owner. @module */
++import { randomUUID } from 'node:crypto'
++import { mkdtemp, readFile, rm } from 'node:fs/promises'
++import { join } from 'node:path'
++import { tmpdir } from 'node:os'
++
++export interface BrowserRootObservation {
++  owner: string
++  sequence: number
++  operation?: string
++  ownership: 'session' | 'external'
++  rootConnected: boolean | null
++  targetAlive: boolean | null
++  processExited: boolean | null
++  exitCode?: number | null
++  signalCode?: string | null
++  released?: boolean
++  neverStarted?: boolean
++}
++
++/** A missing, malformed or previous-generation record establishes no closure ownership. */
++export function parseBrowserRootObservation(value: unknown, owner: string): BrowserRootObservation | undefined {
++  if (!value || typeof value !== 'object') return undefined
++  const row = value as BrowserRootObservation
++  const fact = (value: unknown) => value === null || typeof value === 'boolean'
++  if (row.owner !== owner || !Number.isSafeInteger(row.sequence) || row.sequence < 0
++    || !['session', 'external'].includes(row.ownership) || !fact(row.rootConnected)
++    || !fact(row.targetAlive) || !fact(row.processExited)
++    || (row.operation !== undefined && typeof row.operation !== 'string')
++    || (row.exitCode !== undefined && row.exitCode !== null && !Number.isInteger(row.exitCode))
++    || (row.signalCode !== undefined && row.signalCode !== null && typeof row.signalCode !== 'string')
++    || (row.released !== undefined && typeof row.released !== 'boolean')) return undefined
++  if (row.neverStarted !== undefined && typeof row.neverStarted !== 'boolean') return undefined
++  return row
++}
++
++export class BrowserRootObserver {
++  private owner = ''
++  private sequence = -1
++  private operation = ''
++  readonly path: string
++  private constructor(private readonly directory: string) { this.path = join(directory, 'owner.json') }
++  static async create(): Promise<BrowserRootObserver> {
++    return new BrowserRootObserver(await mkdtemp(join(tmpdir(), 'dsh-browser-owner-')))
++  }
++  async begin(): Promise<Record<string, string>> {
++    this.owner = randomUUID(); this.sequence = -1
++    await rm(this.path, { force: true })
++    return { DSH_BROWSER_RUNTIME_OWNER: this.owner, DSH_BROWSER_RUNTIME_STATE: this.path }
++  }
++  async read(): Promise<BrowserRootObservation | undefined> {
++    try {
++      const row = parseBrowserRootObservation(JSON.parse(await readFile(this.path, 'utf8')), this.owner)
++      if (row === undefined || row.sequence < this.sequence) return undefined
++      this.sequence = row.sequence
++      return row
++    } catch { return undefined }
++  }
++  beginOperation(): string { return this.operation = randomUUID() }
++  metadata(): Record<string, string> { return { 'lyapunov/browser-owner': this.owner, 'lyapunov/browser-operation': this.operation } }
++  async readForOperation(operation: string | undefined, afterSequence: number): Promise<BrowserRootObservation | undefined> {
++    const row = await this.read()
++    return operation && row?.operation === operation && row.sequence > afterSequence ? row : undefined
++  }
++  async verifyRelease(): Promise<void> {
++    const row = await this.read()
++    if (row?.released !== true || (row.rootConnected !== false && !(row.neverStarted === true && row.rootConnected === null)) || (row.ownership === 'session' && row.processExited !== true && row.neverStarted !== true)) {
++      throw new Error('BROWSER_RELEASE_UNVERIFIED: this generation did not confirm its browser root/process release')
++    }
++  }
++  async dispose(): Promise<void> { await rm(this.directory, { recursive: true, force: true }) }
++}
+diff --git a/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs b/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
+--- a/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
++++ b/packages/experimental/browser-use-runtime/tests/mcp-fixture.mjs
+@@ -7,8 +7,14 @@
+ const record = (event, values = {}) => appendFileSync(join(root, 'events.ndjson'), JSON.stringify({ event, pid: process.pid, ...values }) + '\n')
+ const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
+ let counter = 0
++let sequence = 0
++let operation
++const rootState = (rootConnected = true, released = false) => {
++  if (!process.env.DSH_BROWSER_RUNTIME_STATE) return
++  writeFileSync(process.env.DSH_BROWSER_RUNTIME_STATE, JSON.stringify({ owner: process.env.DSH_BROWSER_RUNTIME_OWNER, sequence: sequence++, operation, ownership: 'session', rootConnected, targetAlive: rootConnected, processExited: !rootConnected, released }))
++}
+ record('start')
+-process.once('exit', () => record('exit'))
++process.once('exit', () => { rootState(false, true); record('exit') })
+ const lines = createInterface({ input: process.stdin })
+ lines.once('close', () => process.exit(0))
+ lines.on('line', line => {
+@@ -47,13 +53,16 @@
+       ] })
+       break
+     case 'tools/call':
++      operation = request.params._meta?.['lyapunov/browser-operation']
+       record('call', { name: request.params.name })
++      rootState()
+       if (request.params.name === 'disconnect') process.exit(0)
+       if (request.params.name === 'visit' && mode === 'hold-call') return
+       if (request.params.name === 'visit' && mode === 'target-closed' && !existsSync(join(root, 'recovered'))) {
+         // The first browser target is already gone: report the provider's own
+         // error once, then recover for every later process in this test.
+         writeFileSync(join(root, 'recovered'), '')
++        rootState(false)
+         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
+           content: [{ type: 'text', text: 'Protocol error (Target.setDiscoverTargets): Target closed' }], isError: true,
+         } }) + '\n')
+@@ -62,6 +71,7 @@
+       if (request.params.name === 'visit' && mode === 'target-closed-until-healthy' && !existsSync(join(root, 'healthy'))) {
+         // Every fresh process reaches an already-closed target until the test
+         // writes `healthy`: a crash loop that no replacement connection escapes.
++        rootState(false)
+         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
+           content: [{ type: 'text', text: 'Protocol error (Target.setDiscoverTargets): Target closed' }], isError: true,
+         } }) + '\n')
+diff --git a/packages/experimental/browser-use-runtime/tests/mcp.spec.ts b/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
+--- a/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
++++ b/packages/experimental/browser-use-runtime/tests/mcp.spec.ts
+@@ -70,7 +70,7 @@
+     ['sessions', Sessions], ['agents', Agents], ['loop', AgentLoop], ['projections', Projections],
+     ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
+     ['browser', { inject: ['browserUse', 'agents', 'tools', 'systemPrompt'], apply(ctx: Context) {
+-      mountSessionMcp(ctx, { name: 'browser-fixture', exclusive, command: process.execPath, args: [fixture, root, ...mode === undefined ? [] : [mode]], ...toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs, env: {} } })
++      mountSessionMcp(ctx, { name: 'browser-fixture', exclusive, command: process.execPath, observeBrowserRoot: true, args: [fixture, root, ...mode === undefined ? [] : [mode]], ...toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs, env: {} } })
+     } }],
+   ])
+   const configPath = join(root, 'cordis.yml')
+diff --git a/packages/mcp/mcp-client/src/tools.ts b/packages/mcp/mcp-client/src/tools.ts
+--- a/packages/mcp/mcp-client/src/tools.ts
++++ b/packages/mcp/mcp-client/src/tools.ts
+@@ -23,6 +23,12 @@
+ import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
+ import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
+ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
++declare module '@deepseek-ai/cordis' {
++  interface Events {
++    /** Provider-owned diagnostic metadata only; never model/user tool arguments. */
++    'mcp/tool-call-metadata'(execution: Readonly<ToolExecution>): Record<string, string> | undefined
++  }
++}
+ 
+ /** Resolved options relevant to tool bridging. */
+ export interface ToolBridgeOptions {
+@@ -135,10 +141,13 @@
+       inputSchema: tool.inputSchema,
+       outputSchema: tool.outputSchema,
+       taskRequired: tool.execution?.taskSupport === 'required',
+-      call: (args, execution) => client.callTool(
+-        { name: tool.name, arguments: args },
+-        { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+-      ),
++      call: (args, execution) => {
++        const metadata = ctx.bail('mcp/tool-call-metadata', execution)
++        return client.callTool(
++          { name: tool.name, arguments: args, ...metadata === undefined ? {} : { _meta: metadata } },
++          { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
++        )
++      },
+     }))
+   }
+ 

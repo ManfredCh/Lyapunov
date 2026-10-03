@@ -1,0 +1,27 @@
+{
+  "packId": "unitree_g1",
+  "version": "2026.09.22",
+  "family": "humanoid",
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/g1.xml" },
+  "pieces": {
+    "asset": { "ref": "ASSET_STAGING_MANIFEST.json#unitree_g1" },
+    "context": "ready",
+    "policy": "ready",
+    "vla": "ready"
+  },
+  "capabilities": {
+    "channels": ["joint", "gait", "control"],
+    "directControl": "requiresPolicy"
+  },
+  "status": "USABLE",
+  "provenance": {
+    "source": "模型：Unitree G1 资产（ASSET_STAGING_MANIFEST.json#unitree_g1 落账）；policy：unitreerobotics/unitree_rl_gym 官方 TorchScript",
+    "commit": "276801e46c5d433564f24658bac64f254b7d2d4b",
+    "author": "Unitree Robotics（硬件、CAD 与官方 TorchScript 策略）；LyapunovDev（context/policy/vla/tests 内容）"
+  },
+  "license": {
+    "model": "以 ASSET_STAGING_MANIFEST.json#unitree_g1 随附 LICENSE 为准（staging 定稿前不声称具体许可证）",
+    "policy": "以 unitreerobotics/unitree_rl_gym@276801e46c5d433564f24658bac64f254b7d2d4b 随附 LICENSE 为准（2026-09-22 未取得 LICENSE 原文，不声称具体许可证）"
+  },
+  "tests": "tests/acceptance.md"
+}
