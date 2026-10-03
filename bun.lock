@@ -124,7 +124,7 @@
     },
     "packages/desktop": {
       "name": "@lyapunov/desktop",
-      "version": "0.1.0-alpha.4",
+      "version": "0.1.0-alpha.3.5",
       "dependencies": {
         "electron-store": "10.1.0",
         "electron-updater": "6.8.3",

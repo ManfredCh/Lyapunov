@@ -1,6 +1,6 @@
 {
   "name": "lyapunov",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.3.5",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.13",
