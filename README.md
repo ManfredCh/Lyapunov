@@ -2,34 +2,42 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-<img src="packages/desktop/icons/lyapunov.png" width="72" height="72" alt="Lyapunov application icon" />
+<p align="center">
+  <img src="packages/desktop/icons/lyapunov.png" width="72" height="72" alt="Lyapunov application icon" />
+</p>
 
-![Alpha](docs/assets/badge-alpha.svg) ![Linux x64](docs/assets/badge-linux-x64.svg) [![Lyapunov Modified MIT](docs/assets/badge-lyapunov-license.svg)](LICENSE)
+<p align="center">
+  <img src="docs/assets/badge-alpha.svg" alt="Alpha" />
+  <img src="docs/assets/badge-linux-x64.svg" alt="Linux x64" />
+  <a href="LICENSE"><img src="docs/assets/badge-lyapunov-license.svg" alt="License: Lyapunov Modified MIT" /></a>
+</p>
 
+<p align="center">
+  To see a World in a Grain of Sand<br />
+  — William Blake, <a href="https://poets.org/poem/auguries-innocence"><em>Auguries of Innocence</em></a>
+</p>
 
 **Linux x64 · 0.1.0α** · **Lyapunov Modified MIT**
 
 | Publication metadata | Value |
 | --- | --- |
-| Application release | 0.1.0α |
 | Technical version / releaseId | `0.1.0-alpha.1` |
 | Documentation edition | 2026-10-03 |
-| Author team | Lyapunov contributors |
-| Produced by | 杭州奇异宇宙人工智能有限公司 |
-| Copyright | © 2026 Lyapunov contributors |
+| Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
+| Produced by | Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司) |
+| Copyright | © 2026 Vorynel Co., Ltd. |
 | Project license | [Lyapunov Modified MIT License](LICENSE) · [Retained notices](NOTICE) |
 | Source repository | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
-| Visual and concept sources | Existing application icon, original approved Source UI screenshot, and local metadata SVG badges; the screenshot is a Source development preview. |
 
-Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, produced by **杭州奇异宇宙人工智能有限公司**. For robotics developers, simulation/research teams and 3D creators, it brings scene construction, robot preparation, controlled simulation and camera data into one workspace. Chat, code, files, the 3D viewer, and physics share one desktop workspace.
+Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, produced by **Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)**. For robotics developers, simulation/research teams and 3D creators, it brings scene construction, robot preparation, controlled simulation and camera data into one workspace. Chat, code, files, the 3D viewer, and physics share one desktop workspace.
+
+Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “everything-is-a-plugin” architecture and uses Cordis's composition mechanism to integrate tools and capabilities. We thank the authors and contributors of DSH and Cordis; the Cordis design is described in [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512).
 
 **Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha's changes and known limits.
 
 [Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/0.1.0-alpha.1.md)
 
-![Source development preview](docs/assets/workbench-source-preview.png)
-
-*Source development preview, original approved capture. Packaged-release UI and task acceptance remain separate.*
+<!-- Workbench screenshot placeholder: add the correct image here when available. -->
 
 **Recommended workflow:** ask the agent to use native product tools, or use workbench controls. For this Alpha, avoid CUA click automation for scene, robot and simulation work.
 
@@ -41,15 +49,13 @@ From a regular terminal in your graphical desktop session:
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-Start Lyapunov explicitly after installation:
+After installation succeeds and reports ready, start Lyapunov separately:
 
 ```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-The default installation prepares **MuJoCo and its Python runtime**, verifies native physics, and creates a per-user launcher and desktop entry. Node.js, Electron, and the pinned DSH runtime are included in the main archive; the default installation downloads MuJoCo and Python into a dedicated environment inside that version. The default installer and packaged launcher do not depend on Node, DSH, or Python from PATH, or on a developer’s source checkout. User sessions and credentials use the product data directory across upgrades. You do not need a system Node.js, DSH, Python, pip, Conda, Bun, or a model key to install it.
-
-The installer requires `sh`, `curl`, `tar`, `sha256sum`, and standard Linux utilities such as `mktemp` and `getconf`. The packaged target is **Linux x86_64 with glibc**. A graphical desktop, Electron's shared libraries, and a working rendering backend are required. The release manifest specifies the minimum glibc version for both the application and MuJoCo companion. Physics can run on CPU; camera rendering and large 3D scenes need the corresponding graphics capabilities and memory. Intel, AMD, and NVIDIA configurations are checked individually; this Alpha does not claim coverage of every GPU or Linux distribution. No native macOS or Windows package is provided; Windows users can follow the WSL2 + WSLg route for the Linux package, with real-machine WSLg acceptance still pending. This Alpha does not promise offline installation.
+The default installation prepares **MuJoCo and its Python runtime**, verifies native physics, and creates a per-user launcher and desktop entry. You can optionally install **Isaac Sim or Newton** as needed; they are not prepared by the default installation. See [Physics engines and optional runtimes](#physics-engines-and-optional-runtimes). Node.js, Electron, and the pinned DSH runtime are included in the main archive; the default installation downloads MuJoCo and Python into a dedicated environment inside that version. The default installer and packaged launcher do not depend on Node, DSH, or Python from PATH, or on a developer’s source checkout. User sessions and credentials use the product data directory across upgrades. You do not need a system Node.js, DSH, Python, pip, Conda, Bun, or a model key to install it.
 
 The installer keeps versions under `~/.local/share/lyapunov/versions/`, switches the `current` link only after its checks pass, and leaves older versions and user data in place. If `~/.local/bin` is on your `PATH`, you can launch with `lyapunov`; otherwise use the absolute command above. See the [installation page](https://vorynel.com/lyapunov/) for download sizes and published release identifiers.
 
@@ -67,11 +73,11 @@ sh lyapunov-install.sh
 ## First run
 
 1. Open Lyapunov. The welcome page lets you choose a language and theme.
-2. Choose **Sign in**, complete website authorization in your browser, and return to the same application window. The workspace opens after the account is verified. Signed-in model calls use **Peiri** and the account's central Credits.
-3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to product servers, including the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri or central Credits.
+2. Choose **Sign in**, complete website authorization in your browser, and return to the same application window. The workspace opens after the account is verified. To use the website's model service, first register an account and top up Credits. Signed-in model calls use **Peiri** and the account's central Credits.
+3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to product servers, including the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri, product billing, or central Credits.
 4. Create or open a project, then add assets from your files or the local resource library. Guest projects remain separate from signed-in projects; export a guest project and explicitly import it after sign-in when you want to move it.
 
-The account page and settings expose the actual connection, model, and engine state. Provider credentials belong to the provider you configure; the application does not supply credentials for external services.
+The account page and settings expose the actual connection, model, and engine state. Provider credentials belong to the provider you configure; the application does not supply credentials for external services, which retain their own usage and billing terms.
 
 ## Work in one place
 
@@ -83,8 +89,6 @@ The account page and settings expose the actual connection, model, and engine st
 | Control a robot | Execute supported joint, gripper, vehicle, lift, gait, or body-wrench controls; stop execution and inspect actual world feedback. |
 | Observe and collect | Use scene cameras, named engine cameras, RGB-D capture, calibration, annotations, recording, and dataset export where the selected engine supports them. |
 | Add external tools | Configure Blender, optional physics engines, policy runtimes, reconstruction, or generation tools as needed. Their own software, models, licenses, and service access still apply. |
-
-Source discovery begins with official project and registry roots. Service-provided source URLs and metadata guide the agent; browser, web-fetch, and terminal work is performed by the client. A source link becomes a usable local resource after the client obtains and checks the required files. It is not an automatic promise that every model or policy will run.
 
 ## Robots and cameras
 
@@ -104,6 +108,7 @@ The [capability matrix](docs/CAPABILITY_MATRIX.md) and [camera guide](docs/SCENE
 
 ### Environment methods
 
+- **World scene generation:** ask the agent in a single sentence to generate a world scene as a 3DGS environment using a world model, and to help prepare GLB collision geometry aligned with it. Current server compute is limited, so availability windows and generation volume are limited; speed and capacity will be evaluated according to demand.
 - **Geometry and scripts:** construct measured floors, walls, openings and assemblies with Blender or parameterized scripts; retain editable sources and derived assets.
 - **Imported environments and Gaussian representations:** inspect scale, axes, orientation and dependencies. A Gaussian visual scene needs separately aligned physical geometry for contact.
 - **Photo, multi-view or drawing reconstruction:** an optional external-method route requiring its own tools, data and output checks. External service connectivity and reconstruction results are not accepted by this Alpha description.
@@ -140,8 +145,6 @@ Choose an input route, not just a filename extension. Visual registration, previ
 | Project open/portable package | scene.json / .scene-package.json / portable project directory | Use the project contract and complete resource closure; arbitrary ZIP files are not guaranteed projects. |
 
 ## Robot sources, compatibility and bounded control
-
-Start from [Franka](https://github.com/frankarobotics/franka_ros), [Unitree](https://github.com/unitreerobotics/unitree_ros), [Universal Robots](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description), or [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) official source roots. Read the selected model's license and obtain its actual files through the client. A source root is not a guarantee for every robot it contains.
 
 Prefer native MJCF/URDF where supported. Keep includes, meshes, textures and actuator definitions together; match axes, units, joint order/limits, actuator mapping, dt/control rate, observation semantics and the chosen engine. Downloads, PREPARED and MATCHED are preparation facts. Execute a requested, bounded action only after readiness, then inspect state and stop confirmation.
 
@@ -186,7 +189,7 @@ For Isaac, read the [NVIDIA Omniverse license](https://docs.omniverse.nvidia.com
 "$HOME/.local/bin/lyapunov" install-provider isaac --accept-omniverse-eula
 ```
 
-An installed SDK, a ready physics world, and a successful robot task are different results. Newton currently provides a smaller set of world and observation functions; it does not have every MuJoCo or Isaac action, contact, or camera interface. Optional models and policy weights are fetched only when selected. Hugging Face Hub access uses `https://hf-mirror.com`; missing mirrored files, revisions, or permissions are reported as blocked.
+An installed SDK, a ready physics world, and a successful robot task are different results. Newton currently provides a smaller set of world and observation functions; it does not have every MuJoCo or Isaac action, contact, or camera interface. Optional models and policy weights are fetched only when selected. Hugging Face Hub access uses `https://hf-mirror.com`; missing mirrored files, revisions, permissions, or failed checksum verification are reported as blocked.
 
 ## Update and troubleshoot
 
@@ -201,9 +204,15 @@ Start with the actual diagnostic output:
 
 If installation stops at a desktop/sandbox check, it prints the exact installed version path and remedy. The verified files are retained without activating that version. When the output requests it, run `sudo /the/reported/version/path/lyapunov setup-sandbox`, then rerun the installer. `CONTEXT_ONLY` means that the current terminal's security context could not establish desktop readiness; repeat the check in a regular desktop terminal. `PROVIDER_UNAVAILABLE` names a missing or incompatible SDK; inspect the selected engine and any saved external Python path. The [installation guide](https://vorynel.com/lyapunov/guide.html) includes log locations and further recovery steps.
 
-## Roadmap and Windows evaluation route
+## TODO
 
-Native macOS (Apple Silicon/x64), a WeChat mini-program for authenticated remote tasks/cameras/stop, Genesis, VR/XR input and coordinates, and pinned DSH companion upgrades are **TODO**. See the [roadmap](docs/ROADMAP.md); these are not implemented or accepted features of this Linux Alpha.
+- [ ] Native macOS (Apple Silicon/x64).
+- [ ] WeChat mini-program / mobile: authenticated remote tasks, cameras, and stop controls.
+- [ ] Genesis.
+- [ ] VR/XR input and coordinates.
+- [ ] DSH companion upgrades (pinned upstream revision).
+
+## Windows evaluation route
 
 Windows is a proposed **Linux package under WSL2 + WSLg** route, not a native Windows executable. [Microsoft's GUI-app prerequisites](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps) specify Windows 10 build 19044+ or Windows 11, WSL2/WSLg and an appropriate GPU driver. In administrator PowerShell:
 
@@ -218,7 +227,7 @@ Complete the distribution setup, then use its Ubuntu/Linux terminal:
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-Start Lyapunov explicitly after installation:
+After installation succeeds and reports ready, start Lyapunov separately:
 
 ```sh
 "$HOME/.local/bin/lyapunov"
@@ -247,12 +256,12 @@ node script/bootstrap.mjs
 
 See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
 
-The top-level Lyapunov project uses the [Lyapunov Modified MIT License](LICENSE), copyright © 2026 Lyapunov contributors. This custom license retains the MIT permission terms. A commercial product or service using the software or a derivative work must prominently credit “Lyapunov” when it reaches 10,000 monthly active users or CNY 1,000,000 in monthly operating revenue (or currency equivalent). Without a UI, attribution belongs in its official documentation or website. These thresholds apply to that product or service; attribution does not require a license fee. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights, and external services retain their respective licenses.
+The top-level Lyapunov project uses the [Lyapunov Modified MIT License](LICENSE), copyright © 2026 Vorynel Co., Ltd. This custom license retains the MIT permission terms. A commercial product or service using the software or a derivative work must prominently credit “Lyapunov” when it reaches 10,000 monthly active users or CNY 1,000,000 in monthly operating revenue (or currency equivalent). Without a UI, attribution belongs in its official documentation or website. These thresholds apply to that product or service; attribution does not require a license fee. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights, and external services retain their respective licenses.
 
 ## 中文快速说明
 
 Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机采集放在同一桌面工作台。当前发行通道为 Linux x64 Alpha；版本标识、下载内容和运行要求以[官网安装页](https://vorynel.com/lyapunov/)为准。
 
-默认安装命令为 `curl -fsSL https://vorynel.com/lyapunov/install.sh | sh`，包含 MuJoCo 运行环境的准备与验证。首次启动可通过官网授权登录并使用 Peiri／中央 Credits，也可显式进入 Guest，使用本地功能并自行配置 provider；游客不连接产品账户或计费后端，没有默认模型。机器人按“准备 → 初始化 → 就绪 → 显式执行”操作；相机可从绑定或保存视角返回主视图，WASD 只用于自由视角导航。
+默认安装命令为 `curl -fsSL https://vorynel.com/lyapunov/install.sh | sh`，包含 MuJoCo 运行环境的准备与验证；Isaac Sim 与 Newton 可按需选择安装。安装成功并报告就绪后，由使用者单独启动 Lyapunov。首次启动可通过官网授权登录，使用官网模型服务需先注册账号并充值 Credits，登录后使用 Peiri／中央 Credits；也可显式进入 Guest，使用本地功能并自行配置 provider。游客不连接产品服务器，包括产品账户与计费后端，没有默认模型，也不使用 Peiri 或中央 Credits。机器人按“准备 → 初始化 → 就绪 → 显式执行”操作；相机可从绑定或保存视角返回主视图，WASD 只用于自由视角导航。
 
 完整中文步骤见[安装、升级、回滚与卸载手册](https://vorynel.com/lyapunov/guide.html)，各引擎与机器人差异见[能力总表](docs/CAPABILITY_MATRIX.md)。
