@@ -131,6 +131,7 @@ export function upstreamPatches(root){
     {file:join(root,'packages/lyapunov-shell/patches/dsh-formal-model-input.patch'),package:'@deepseek-ai/dsh-web-app'},
     {file:join(root,'packages/lyapunov-shell/patches/dsh-formal-model-input.patch'),package:'@deepseek-ai/dsh-session-title-llm'},
     {file:join(root,'packages/desktop/patches/dsh-guest-own-provider.patch'),package:'@deepseek-ai/dsh-llm-pi-ai'},
+    {file:join(root,'packages/lyapunov-shell/patches/dsh-files-directory-flow.patch'),package:'@deepseek-ai/dsh-client-ui-directory-picker-browse'},
   ]
 }
 
@@ -144,7 +145,7 @@ export function applyUpstreamPatches(root,upstream){
   const subjects=log.status===0?new Set(log.stdout.split('\n').map(line=>line.trim())):new Set()
   const patchName=file=>basename(file).replace(/\.patch$/,'')
   for(const patch of patches){
-    if(basename(patch.file)==='dsh-native-files-operations.patch'){results.push(applySignedFilesPatch(root,upstream,patch));continue}
+    if(['dsh-native-files-operations.patch','dsh-files-directory-flow.patch'].includes(basename(patch.file))){results.push(applySignedFilesPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-guest-own-provider.patch'){results.push(applySignedGuestOwnProviderPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-guest-empty-model.patch'){results.push(applySignedGuestPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-public-model-diagnostics.patch'){results.push(applyPublicModelDiagnosticsPatch(root,upstream,patch,sourceProof));continue}

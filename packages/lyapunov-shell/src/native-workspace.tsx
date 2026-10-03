@@ -19,13 +19,14 @@ import {WORKBENCH_CHILDREN} from "./hosting.ts"
 import {appSidePanelHost} from "./app-side.ts"
 import {openExistingHistorySession} from "./history-navigation.ts"
 import type {WorkbenchSlotKeys} from "./work-surface.tsx"
+import {EXECUTION_GRAPH_KIND} from "./execution-graph-client.tsx"
 
 export const SCENE_TAB_KIND="lyapunov.scene"
 const SCENE_TAB_ID="@lyapunov/shell/scene"
 type SceneTabProps=PropsRuntime<"sidebar.right.pane.tab">&PropsRenderSlots<WorkbenchSlotKeys>&PropsLocale<"lyapunov">
 
-type ToolsProps=PropsRuntime<"sidebar.right.surface.actions">&PropsLocale<"lyapunov">&{openScene:()=>void;openFiles:()=>void;openTerminal:()=>void}
-function WorkspaceTools({t,activeTab,openScene,openFiles,openTerminal,sessionId}:ToolsProps){
+type ToolsProps=PropsRuntime<"sidebar.right.surface.actions">&PropsLocale<"lyapunov">&{openScene:()=>void;openFiles:()=>void;openTerminal:()=>void;openGraph:()=>void}
+function WorkspaceTools({t,activeTab,expanded,openScene,openFiles,openTerminal,openGraph,sessionId}:ToolsProps){
  const tr=(zh:string,en:string)=>t("open")==="Scene workbench"?en:zh
  // 引擎切换必须接在**这里**：原生工作台模式下渲染工具轨的就是本组件（`Workbench` 里的那份 rail
  // 只在非原生模式渲染）。此前只接了 Workbench 那一份，于是原生模式下按钮是个**空壳**——
@@ -42,7 +43,7 @@ function WorkspaceTools({t,activeTab,openScene,openFiles,openTerminal,sessionId}
      .catch((error:unknown)=>setEngineNotice(tr("切换失败：","Switch failed: ")+String(error instanceof Error?error.message:error)))
  },[applyEnginePreference,tr])
  return <div className="lya-wb lya-workspace-tools"><style>{workbenchStyle}</style>
-  <ToolRail tr={tr} nativeSceneActive={activeTab?.kind===SCENE_TAB_KIND} revealScene={openScene} openFiles={openFiles} openTerminal={openTerminal} engine={engine} onSwitchEngine={switchEngine}/>
+  <ToolRail tr={tr} nativeSceneActive={activeTab?.kind===SCENE_TAB_KIND} revealScene={openScene} openFiles={openFiles} openTerminal={openTerminal} openGraph={openGraph} graphActive={expanded&&activeTab?.kind===EXECUTION_GRAPH_KIND} engine={engine} onSwitchEngine={switchEngine}/>
   {engineNotice?<p className="lya-rail-engine-notice" role="status">{engineNotice}</p>:null}
  </div>
 }
@@ -108,6 +109,6 @@ export function registerNativeWorkspace(ctx:Context){
   // DEV-017（N114 rev）：曾按"收起后打不开"的假设改成幂等收敛（`openTab("terminal")` 交给上游 Pages 去重，契约见 `ui-sidebar-right/contract/slots.ts:118`），
   // 构建后真机复测**终端仍然打不开**（`xterm`=0、点击前后无任何终端 DOM）⇒ 该假设**未被证实**，阻断点在守卫**上游**（rail 的 `openTerminal` prop 接线/抽屉 key `terminal` 的挂载），故此处**回退**为原守卫。
   // 不用 `replaceTab`（它要的是 TabId，不是布尔；实测传 `true` 会把终端入口整个打没，见回执 ⑩）；这里只做"同 kind 已在前台就不动"。
-  inject:()=>({openScene:()=>ctx.sidebarRight.openTab(SCENE_TAB_KIND),openFiles:()=>ctx.sidebarRight.openTab("files"),openTerminal:()=>{if(ctx.sidebarRight.active()?.kind==="terminal")return;ctx.sidebarRight.openTab("terminal")}}),
+  inject:()=>({openScene:()=>ctx.sidebarRight.openTab(SCENE_TAB_KIND),openFiles:()=>ctx.sidebarRight.openTab("files"),openTerminal:()=>{if(ctx.sidebarRight.active()?.kind==="terminal")return;ctx.sidebarRight.openTab("terminal")},openGraph:()=>ctx.sidebarRight.openTab(EXECUTION_GRAPH_KIND)}),
  },WorkspaceTools)))
 }
