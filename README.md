@@ -21,7 +21,7 @@
 
 | Publication metadata | Value |
 | --- | --- |
-| Technical version / releaseId | `0.1.0-alpha.1` |
+| Technical version / releaseId | `0.1.0-alpha.2` |
 | Documentation edition | 2026-10-03 |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | Produced by | Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司) |
@@ -33,9 +33,9 @@ Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, pr
 
 Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “everything-is-a-plugin” architecture and uses Cordis's composition mechanism to integrate tools and capabilities. We thank the authors and contributors of DSH and Cordis; the Cordis design is described in [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512).
 
-**Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha's changes and known limits.
+**Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/0.1.0-alpha.2.md) describe this Alpha's changes and known limits.
 
-[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/0.1.0-alpha.1.md)
+[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/0.1.0-alpha.2.md)
 
 <!-- Workbench screenshot placeholder: add the correct image here when available. -->
 
@@ -202,7 +202,7 @@ Start with the actual diagnostic output:
 "$HOME/.local/bin/lyapunov" doctor mujoco
 ```
 
-If installation stops at a desktop/sandbox check, it prints the exact installed version path and remedy. The verified files are retained without activating that version. When the output requests it, run `sudo /the/reported/version/path/lyapunov setup-sandbox`, then rerun the installer. `CONTEXT_ONLY` means that the current terminal's security context could not establish desktop readiness; repeat the check in a regular desktop terminal. `PROVIDER_UNAVAILABLE` names a missing or incompatible SDK; inspect the selected engine and any saved external Python path. The [installation guide](https://vorynel.com/lyapunov/guide.html) includes log locations and further recovery steps.
+The same installer prepares missing desktop libraries on supported Ubuntu/Debian systems and configures this version's Chromium sandbox when needed. It requests normal system authorization through the terminal and continues automatically after authorization; no separate setup command is needed. If a desktop/sandbox check remains blocked, it prints the exact installed version path and remedy, retains the verified files, and leaves that version inactive. `CONTEXT_ONLY` means that the current terminal's security context could not establish desktop readiness; repeat the check in a regular desktop terminal. `PROVIDER_UNAVAILABLE` names a missing or incompatible SDK; inspect the selected engine and any saved external Python path. The [installation guide](https://vorynel.com/lyapunov/guide.html) includes log locations and further recovery steps.
 
 ## TODO
 
@@ -254,7 +254,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
+See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha.2.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
 
 The top-level Lyapunov project uses the [Lyapunov Modified MIT License](LICENSE), copyright © 2026 Vorynel Co., Ltd. This custom license retains the MIT permission terms. A commercial product or service using the software or a derivative work must prominently credit “Lyapunov” when it reaches 10,000 monthly active users or CNY 1,000,000 in monthly operating revenue (or currency equivalent). Without a UI, attribution belongs in its official documentation or website. These thresholds apply to that product or service; attribution does not require a license fee. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights, and external services retain their respective licenses.
 

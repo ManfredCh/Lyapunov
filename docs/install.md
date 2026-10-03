@@ -3,7 +3,7 @@
 | 出版信息 | 标记 |
 | --- | --- |
 | 应用发布名称 | 0.1.0α · Linux x64 |
-| 技术版本 / releaseId | `0.1.0-alpha.1` |
+| 技术版本 / releaseId | `0.1.0-alpha.2` |
 | 文档日期 | 2026-10-03 |
 | 作者团队 | Vorynel Co., Ltd. |
 | 版权 | © 2026 Vorynel Co., Ltd. |
@@ -11,7 +11,7 @@
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
 
-本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.1`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.1.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.2`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.2.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
 ## 默认安装
 
@@ -22,6 +22,8 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
 只需执行上面的同一条 `curl` 命令，无须另输入 sudo 或配置命令。如果当前系统需要配置本版本的 Chromium 沙箱，且 doctor 已确认依赖就绪、安装目录支持 helper、当前进程可正规授权，安装器会自动显示一次系统授权提示。密码由控制终端交给系统 sudo，不从 `curl` 管道读取，也不由应用保存。授权完成后，安装会自动继续，重跑正常 doctor 和物理检查，全部通过才激活版本；成功安装不会自动打开 GUI。
+
+在 Ubuntu／Debian 上，若正常 doctor 与实际 ldd 报告可明确映射的桌面共享库缺失，安装器会沿系统包管理器和标准授权准备这些依赖，再重跑正常检查；不添加第三方源或安装完整桌面。
 
 无控制终端、受限的 `CONTEXT_ONLY`／`no_new_privs`、`nosuid`、依赖缺失或授权未完成时，安装器保留已验证版本与旧 `current`，显示具体状态和日志位置。请按提示回到普通交互终端重新运行同一安装命令；安装器不会关闭 AppArmor 或系统沙箱。
 
@@ -265,8 +267,8 @@ mv -- "$lyapunov_prefix" "$lyapunov_prefix.uninstalled-$(date +%Y%m%d-%H%M%S)"
 | 现象 | 操作 |
 | --- | --- |
 | 安装在 manifest／download 阶段阻断 | 查看输出中的固定 URL、对象、字节数或摘要原因；保留 `.partial` 后重试同一版本。版本清单不可用时按具体对象报告阻断。 |
-| `DESKTOP_LIBRARIES_MISSING` | 按 `doctor` 列出的缺失共享库准备对应发行版库，然后重跑安装。 |
-| Chromium helper 未就绪 | 按输出给出的精确版本路径运行 `sudo /that/version/lyapunov setup-sandbox`，再重跑安装。未激活版本不会从旧启动器接收这条修复。 |
+| `DESKTOP_LIBRARIES_MISSING` | 默认安装器会在支持的 Ubuntu／Debian 系统上按实际缺库结果请求正常系统授权并准备对应库，随后自动继续。其他发行版或无法授权时，按日志中的具体缺库处理。 |
+| Chromium helper 未就绪 | 默认安装器在正常系统上按需请求系统授权并配置本版本 helper，随后自动继续。单独运行 `doctor` 时，按其输出给出的精确版本路径执行管理员修复；未激活版本不会从旧启动器接收这条修复。 |
 | `CONTEXT_ONLY` | 当前终端安全上下文不能完成桌面检查；在该桌面的普通终端复查，不将此结果记为机器通过或失败。 |
 | `PROVIDER_UNAVAILABLE` | 核对选择的引擎、环境变量／设置保存的 Python 路径与 SDK；`install-provider` 只准备托管环境，不修复外部 SDK。 |
 | Guest 无法开始 Agent 回合 | 在模型设置显式配置自己的 provider；Guest 初始没有默认模型或 Peiri。 |

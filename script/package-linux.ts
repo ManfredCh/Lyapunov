@@ -242,7 +242,7 @@ for(const [name,node] of rootLinks)await link(join(stage,'node_modules',name),jo
 // 发行产物名（`lyapunov-dsh-<版本>-linux-x64`）、目录名与判定用的都是同一身份串，这里对齐。
 await writeFile(join(stage,'package.json'),JSON.stringify({name:'lyapunov-dsh',version:product.version,license:product.license,private:true,type:'module'},null,2)+'\n')
 await cp(join(root,'UPSTREAM_LOCK.json'),join(stage,'UPSTREAM_LOCK.json'))
-for(const file of ['LICENSE','NOTICE'])await cp(join(root,file),join(stage,file))
+for(const file of ['LICENSE','NOTICE','README.md','README.zh-CN.md'])await cp(join(root,file),join(stage,file))
 await cp(join(upstream,'LICENSE'),join(stage,'DSH-LICENSE'))
 await mkdir(join(stage,lock.directory),{recursive:true})
 await writeFile(join(stage,lock.directory,'package.json'),JSON.stringify({name:'@deepseek-ai/dsh-root',private:true,type:'module',version:lock.version},null,2))

@@ -21,7 +21,7 @@
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 技术版本 / releaseId | `0.1.0-alpha.1` |
+| 技术版本 / releaseId | `0.1.0-alpha.2` |
 | 文档版本日期 | 2026-10-03 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | 杭州奇异宇宙人工智能有限公司 |
@@ -33,9 +33,9 @@
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
 
-**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.1.md)记录本 Alpha 的变化与已知范围。
+**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.2.md)记录本 Alpha 的变化与已知范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.1.md)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.2.md)
 
 <!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
@@ -202,7 +202,7 @@ SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 当前
 "$HOME/.local/bin/lyapunov" doctor mujoco
 ```
 
-安装在桌面／沙盒检查处停止时，会打印实际版本路径和处理方式。已校验文件保留，该版本不会被激活。输出要求时才运行 `sudo /the/reported/version/path/lyapunov setup-sandbox`，然后重跑安装器。`CONTEXT_ONLY` 表示当前终端的安全上下文未能确认桌面就绪，应在图形桌面的普通终端复查。`PROVIDER_UNAVAILABLE` 会点名缺失或不兼容的 SDK；核对选定引擎和已保存的外部 Python 路径。日志位置与恢复步骤见[安装手册](https://vorynel.com/lyapunov/guide.html)。
+同一个安装器会在支持的 Ubuntu／Debian 系统上准备缺失的桌面共享库，并按需配置本版本的 Chromium 沙箱。安装器通过控制终端请求正常系统授权，授权后自动继续，无须另输入配置命令。桌面／沙盒检查仍阻断时，会打印实际版本路径和处理方式，保留已校验文件，该版本不会被激活。`CONTEXT_ONLY` 表示当前终端的安全上下文未能确认桌面就绪，应在图形桌面的普通终端复查。`PROVIDER_UNAVAILABLE` 会点名缺失或不兼容的 SDK；核对选定引擎和已保存的外部 Python 路径。日志位置与恢复步骤见[安装手册](https://vorynel.com/lyapunov/guide.html)。
 
 ## TODO
 
@@ -254,7 +254,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.1.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
+开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.2.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
 
 ## 许可与版权
 
