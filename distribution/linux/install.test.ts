@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto'
 import {dirname,join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {spawnSync} from 'node:child_process'
+import {runInNewContext} from 'node:vm'
 import {checkedRuntimeManifest,releaseManifestTsv,type LinuxReleaseManifest} from './release-manifest.ts'
 import {desktopExecutable} from './install-entry.mjs'
 
@@ -29,7 +30,7 @@ function fixture(){
     if(range){ranges.push(range);const start=Number(/^bytes=(\d+)-$/.exec(range)?.[1]);return new Response(bytes.subarray(start),{status:206,headers:{'Content-Range':`bytes ${start}-${bytes.length-1}/${bytes.length}`,'Content-Length':String(bytes.length-start)}})}
     return new Response(bytes,{headers:{'Content-Length':String(bytes.length)}})
   }})
-  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;entryFails?:boolean;sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
+  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;entryFails?:boolean;desktopLibraries?:'required'|'unknown'|'changed'|'remain'|'sandbox'|'bad-exit';sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
     const archiveRoot='lyapunov-dsh-0.1.0-linux-x64',product=join(root,id,archiveRoot),mode=options.mode??'conda-pack'
     put(join(product,'runtime/node/bin/node'),`#!/bin/sh\nexec ${quote(node)} "$@"\n`,true)
     put(join(product,'RELEASE.json'),JSON.stringify({releaseId:id,version:'0.1.0',platform:'linux-x64',sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',sourceCommitMatchesPayload:true,userDataBundled:false}))
@@ -37,9 +38,11 @@ function fixture(){
     mkdirSync(join(product,'distribution/linux'),{recursive:true});copyFileSync(join(source,'install-entry.mjs'),join(product,'distribution/linux/install-entry.mjs'))
     if(options.entryFails)put(join(product,'distribution/linux/install-entry.mjs'),'export function installEntries(){throw Error("fixture entry write failed")}\n')
     put(join(product,'runtime/electron/chrome-sandbox'),'nonprivileged fixture helper\n',true)
+    put(join(product,'runtime/electron/lyapunov-desktop'),'nonprivileged desktop binary fixture\n',true)
     put(join(product,'distribution/linux/fixture-doctor.mjs'),`import fs from 'node:fs';import p from 'node:path';const [root,mode]=process.argv.slice(2);const helper=p.join(root,'runtime/electron/chrome-sandbox'),s=fs.lstatSync(helper);if(fs.existsSync(p.join(root,'setup.done'))&&mode!=='recheck'){console.log(JSON.stringify({status:'AVAILABLE'}));process.exit(0)}const code=mode==='libraries'?'DESKTOP_LIBRARIES_MISSING':mode==='context'?'SANDBOX_CONTEXT_ONLY':'SANDBOX_SETUP_REQUIRED';console.log(JSON.stringify({status:'BLOCKED',providers:{mujoco:{status:mode==='provider'?'BLOCKED':'AVAILABLE'}},desktop:{status:'BLOCKED',code,missingSystemLibraries:mode==='libraries'?['missing-fixture.so']:[],sandbox:{status:'BLOCKED',code:'SANDBOX_SETUP_REQUIRED',noNewPrivileges:mode==='nnp',nosuid:mode==='nosuid',helper:{path:helper,exists:true,uid:mode==='helper'?s.uid+1:s.uid,mode:s.mode&0o7777}}}}));process.exit(2);\n`)
+    put(join(product,'distribution/linux/fixture-library-doctor.mjs'),`import fs from 'node:fs';const [root,mode]=process.argv.slice(2);if(fs.existsSync(${JSON.stringify(join(root,'dependency-installed'))})&&mode!=='remain'){if(mode==='sandbox'&&!fs.existsSync(root+'/setup.done')){process.argv=[process.argv[0],process.argv[1],root,'required'];await import('./fixture-doctor.mjs')}else{console.log(JSON.stringify({status:'AVAILABLE'}));process.exit(mode==='bad-exit'?7:0)}}else{console.log(JSON.stringify({status:'BLOCKED',providers:{mujoco:{status:'AVAILABLE'}},desktop:{status:'BLOCKED',code:'DESKTOP_LIBRARIES_MISSING',missingSystemLibraries:mode==='unknown'?['libunknown-fixture.so.1 => not found']:['libgtk-3.so.0 => not found','libasound.so.2 => not found','libnss3.so => not found']}}));process.exit(2)}\n`)
     const blocked=`{"status":"BLOCKED","desktop":{"status":"BLOCKED","code":"SANDBOX_CONTEXT_ONLY"},"providers":{"mujoco":{"status":"AVAILABLE"}}}`
-    put(join(product,'lyapunov'),`#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nprintf '%s\\n' "python_path=\${PYTHONPATH-}" "python_home=\${PYTHONHOME-}" "node_path=\${NODE_PATH-}" "no_user_site=\${PYTHONNOUSERSITE-}" > "$root/environment.vars"\ncase "$1" in\ninstall-provider) printf '%s\\n' 'fixture provider progress';${options.pipFails?"printf '%s\\n' 'pip download failed';exit 19":`printf '%s\\n' '${blocked}';exit 2`};;\ndoctor) printf '%s\\n' "$*" >> "$root/doctor.args";${options.sandbox?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-doctor.mjs" "$root" ${quote(options.sandbox)}`:options.doctorBlocked?`printf '%s\\n' '${blocked}';exit 2`:"printf '%s\\n' '{\"status\":\"AVAILABLE\"}';exit 0"};;\nsetup-sandbox) printf '%s\\n' "$*" >> "$root/setup.args"; : > "$root/setup.done";printf '%s\\n' 'fixture setup complete';exit 0;;\nphysics-check) [ "$2" = --managed-sdk ] || exit 99; printf '%s\\n' "$*" > "$root/physics.args";${options.physicsFails?'exit 17':"printf '%s\\n' '{\"status\":\"PASS\"}';exit 0"};;\ndesktop) printf '%s\\n' "$*" > "$root/gui.args";exit 0;;\n*) printf '%s\\n' "$*";;\nesac\n`,true)
+    put(join(product,'lyapunov'),`#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nprintf '%s\\n' "python_path=\${PYTHONPATH-}" "python_home=\${PYTHONHOME-}" "node_path=\${NODE_PATH-}" "no_user_site=\${PYTHONNOUSERSITE-}" > "$root/environment.vars"\ncase "$1" in\ninstall-provider) printf '%s\\n' 'fixture provider progress';${options.pipFails?"printf '%s\\n' 'pip download failed';exit 19":`printf '%s\\n' '${blocked}';exit 2`};;\ndoctor) printf '%s\\n' "$*" >> "$root/doctor.args";${options.desktopLibraries?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-library-doctor.mjs" "$root" ${quote(options.desktopLibraries)}`:options.sandbox?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-doctor.mjs" "$root" ${quote(options.sandbox)}`:options.doctorBlocked?`printf '%s\\n' '${blocked}';exit 2`:"printf '%s\\n' '{\"status\":\"AVAILABLE\"}';exit 0"};;\nsetup-sandbox) printf '%s\\n' "$*" >> "$root/setup.args"; : > "$root/setup.done";printf '%s\\n' 'fixture setup complete';exit 0;;\nphysics-check) [ "$2" = --managed-sdk ] || exit 99; printf '%s\\n' "$*" > "$root/physics.args";${options.physicsFails?'exit 17':"printf '%s\\n' '{\"status\":\"PASS\"}';exit 0"};;\ndesktop) printf '%s\\n' "$*" > "$root/gui.args";exit 0;;\n*) printf '%s\\n' "$*";;\nesac\n`,true)
     const archive=join(root,id+'.tar.gz'),tar=spawnSync('tar',['-czf',archive,'-C',dirname(product),archiveRoot]);if(tar.status!==0)throw Error('fixture tar failed')
     const bytes=readFileSync(archive),archiveFile=`lyapunov-linux-x64-${id}.tar.gz`
     files.set(`releases/${id}/${archiveFile}`,bytes)
@@ -63,6 +66,14 @@ function fixture(){
     // with public QA words; no password or real sudo is involved.
     put(join(sudoBin,'sudo'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(sudoLog)}\nif [ -t 0 ];then printf '%s' true > ${quote(sudoTty)};else exit 97;fi\n[ "$1" = -p ] || exit 95;shift 2\nprintf '%s' '[sudo] QA authorization: ' > /dev/tty\nIFS= read -r answer < /dev/tty\nif [ "$answer" = qa-retry ];then printf '%s\\n' 'Sorry, try again.' > /dev/tty;printf '%s' '[sudo] QA authorization: ' > /dev/tty;IFS= read -r answer < /dev/tty;fi\n${deny?"printf '%s\\n' 'sudo: QA authorization denied' >&2;exit 41":"[ \"$answer\" = qa-approve ] || exit 42;[ \"$1\" = -- ] || exit 96;shift;exec \"$@\""}\n`,true)
   }
+  function fakeDependencies(options:{legacy?:boolean;deny?:boolean;updateFails?:boolean;installFails?:boolean;changed?:boolean;unknown?:boolean;packageMissing?:boolean}={}){
+    const state=join(root,'dependency-installed'),auth=join(root,'dependency-auth'),aptLog=join(root,'apt.args')
+    put(join(sudoBin,'ldd'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(join(root,'ldd.args'))}\n${options.changed?"printf '%s\\n' 'libasound.so.2 => not found'":options.unknown?"printf '%s\\n' 'libunknown-fixture.so.1 => not found'":"printf '%s\\n' 'libgtk-3.so.0 => not found' 'libasound.so.2 => not found' 'libnss3.so => not found'"}\n`,true)
+    put(join(sudoBin,'apt-cache'),`#!/bin/sh\n[ "$1" = policy ] || exit 96\ncase "$2" in ${options.legacy?'libgtk-3-0|libasound2|libnss3':'libgtk-3-0t64|libasound2t64|libnss3'}) printf '%s\\n' '  Candidate: ${options.packageMissing?'(none)':'1.0-qa'}';; *) printf '%s\\n' '  Candidate: (none)';; esac\n`,true)
+    put(join(sudoBin,'apt-get'),`#!/bin/sh\nprintf '%s\\n' CALL "$@" >> ${quote(aptLog)}\ncase " $* " in *' update '*) ${options.updateFails?'exit 51':'exit 0'};; *' install '*) ${options.installFails?'exit 52':`: > ${quote(state)};exit 0`};; *) exit 53;; esac\n`,true)
+    put(join(sudoBin,'sudo'),`#!/bin/sh\nprintf '%s\\n' CALL "$@" >> ${quote(sudoLog)}\n[ -t 0 ] || exit 97\n[ "$1" = -p ] || exit 95;shift 2\nif [ ! -f ${quote(auth)} ];then printf '%s' '[sudo] QA dependency authorization: ' > /dev/tty;IFS= read -r answer < /dev/tty;${options.deny?'exit 41':'[ "$answer" = qa-approve ] || exit 42'}; : > ${quote(auth)};fi\n[ "$1" = -- ] || exit 96;shift;exec "$@"\n`,true)
+    return {aptLog}
+  }
   async function runPty(input='qa-approve\n'){
     const cmd=`cat ${quote(join(source,'install.sh'))} | /bin/sh -s -- --prefix ${quote(prefix)} --bin-dir ${quote(bin)}`
     const child=Bun.spawn(['script','--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
@@ -85,7 +96,7 @@ function fixture(){
     const text=`[Desktop Entry]\nType=Application\nName=Lyapunov联测\nStartupWMClass=lyapunov-desktop\nExec=${desktopExecutable(executable)}\nIcon=${join(old,'packages/desktop/icons/lyapunov.png')}\nTerminal=false\n`
     put(entry,text);return {old,oldData,entry,text,executable}
   }
-  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,stop:()=>server.stop(true)}
+  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
@@ -223,6 +234,55 @@ describe('公开 POSIX 用户安装入口',()=>{
       const log=join(f.prefix,'versions/a08-physics-log/.install/physics-check.log');expect(existsSync(log)).toBe(true);expect(result.out).not.toContain('{"status":"PASS"}')
       expect(result.out+result.err).toContain(log);if(!physicsFails)expect(JSON.parse(readFileSync(log,'utf8'))).toEqual({status:'PASS'})
     }finally{f.stop()}}
+  })
+  test('真实PTY的默认管道按实际缺库选择t64或legacy候选，重验后才激活且不自动打开GUI',async()=>{
+    for(const legacy of [false,true]){const f=fixture();try{f.candidate('a08-libraries',{desktopLibraries:'required'});const {aptLog}=f.fakeDependencies({legacy});const result=await f.runPty()
+      expect(result.status,result.out+result.err).toBe(0);const product=join(f.prefix,'versions/a08-libraries'),args=readFileSync(aptLog,'utf8')
+      expect(args).toContain('update');expect(args).toContain('install\n--yes\n--no-install-recommends\n--no-upgrade\n--no-remove\n')
+      expect(args).toContain(legacy?'libasound2\nlibgtk-3-0\nlibnss3':'libasound2t64\nlibgtk-3-0t64\nlibnss3');expect(args).not.toContain('ubuntu-desktop')
+      expect(readFileSync(join(product,'doctor.args'),'utf8').trim().split('\n')).toHaveLength(2);expect(existsSync(join(product,'physics.args'))).toBe(true)
+      expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-libraries');expect(existsSync(join(product,'gui.args'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('库补齐后显露的真实sandbox阻断仍经原门禁授权与normal doctor，不跳过安全检查',async()=>{
+    const f=fixture();try{f.candidate('a08-deps-sandbox',{desktopLibraries:'sandbox'});f.fakeDependencies();const result=await f.runPty()
+      expect(result.status,result.out+result.err).toBe(0);const product=join(f.prefix,'versions/a08-deps-sandbox')
+      expect(readFileSync(join(product,'doctor.args'),'utf8').trim().split('\n')).toHaveLength(3);expect(readFileSync(join(product,'setup.args'),'utf8').trim()).toBe('setup-sandbox')
+      expect(readFileSync(f.sudoLog,'utf8')).toContain(join(product,'lyapunov')+'\nsetup-sandbox');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-deps-sandbox')
+    }finally{f.stop()}
+  })
+  test('依赖授权拒绝、网络更新失败、包缺候选、安装失败及重验仍缺库均保留旧current与数据',async()=>{
+    for(const failure of ['deny','updateFails','packageMissing','installFails','remain','bad-exit'] as const){const f=fixture();try{f.candidate('a08-before');expect((await f.run()).status).toBe(0);put(join(f.home,'session'),'unchanged user data')
+      f.candidate('a08-deps-failed',{desktopLibraries:failure==='remain'||failure==='bad-exit'?failure:'required'});f.fakeDependencies(failure==='remain'||failure==='bad-exit'?{}:{[failure]:true});const result=await f.runPty()
+      expect(result.status,result.out+result.err).toBe(2);const product=join(f.prefix,'versions/a08-deps-failed')
+      expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-before');expect(readFileSync(join(f.home,'session'),'utf8')).toBe('unchanged user data')
+      expect(existsSync(join(product,'.install/mujoco.sha256'))).toBe(true);expect(existsSync(join(product,'physics.args'))).toBe(false);expect(existsSync(join(product,'gui.args'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('未知SONAME与重读ldd不符时不请求系统权限，不进行猜测安装',async()=>{
+    for(const mode of ['unknown','changed'] as const){const f=fixture();try{f.candidate('a08-unknown',{desktopLibraries:mode});f.fakeDependencies({[mode]:true});const result=await f.runPty('')
+      expect(result.status,result.out+result.err).toBe(2);expect(result.out).toContain(mode==='unknown'?'DESKTOP_LIBRARY_UNMAPPED':'DESKTOP_DEPENDENCY_REPORT_CHANGED')
+      expect(existsSync(f.sudoLog)).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('缺GUI库且无控制终端时明确停止，不从脚本流读取认证输入',async()=>{
+    const f=fixture();try{f.candidate('a08-deps-no-tty',{desktopLibraries:'required'});f.fakeDependencies();const result=await f.runNoTty()
+      expect(result.status,result.out+result.err).toBe(2);expect(result.err).toContain('DESKTOP_DEPENDENCIES_TERMINAL_REQUIRED');expect(existsSync(f.sudoLog)).toBe(false)
+    }finally{f.stop()}
+  })
+})
+describe('与bootstrap同字节的受限依赖计划',()=>{
+  test('未知发行版、provider未ready和注入式SONAME都拒绝；完整Ubuntu/debian报告仅输出固定包候选',()=>{
+    const code=readFileSync(join(source,'install.sh'),'utf8').split('// BEGIN_DESKTOP_DEPENDENCY_PLAN\n')[1]!.split('// END_DESKTOP_DEPENDENCY_PLAN')[0]!
+    function plan(os:string,rows:string[],provider='AVAILABLE'){
+      let exit=0,out='',err='';const report={status:'BLOCKED',providers:{mujoco:{status:provider}},desktop:{status:'BLOCKED',code:'DESKTOP_LIBRARIES_MISSING',missingSystemLibraries:rows}}
+      const context={require:(id:string)=>id==='node:fs'?{readFileSync:(path:string)=>path==='/etc/os-release'?os:JSON.stringify(report)}:id==='node:path'?{join:(...parts:string[])=>parts.join('/')}:id==='node:child_process'?{spawnSync:()=>({status:0,stdout:rows.join('\n')})}:null,process:{argv:['node','report.json','/product','true'],env:{},exit:(value:number)=>{exit=value;throw Error('fixture exit')}},console:{log:(value:string)=>{out=value},error:(value:string)=>{err=value}}}
+      try{runInNewContext(code,context)}catch(error){if((error as Error).message!=='fixture exit')throw error}return {exit,out,err}
+    }
+    const rows=['libgtk-3.so.0 => not found','libasound.so.2 => not found','libnss3.so => not found']
+    for(const os of ['ID=ubuntu\nVERSION_ID="24.04"','ID="ubuntu"\nVERSION_ID="26.04"','ID=debian'])expect(plan(os,rows)).toEqual({exit:0,out:'libasound2t64 libasound2\nlibgtk-3-0t64 libgtk-3-0\nlibnss3',err:''})
+    expect(plan('ID=fedora',rows).err).toBe('DESKTOP_DEPENDENCY_OS_UNSUPPORTED');expect(plan('ID=ubuntu',rows,'BLOCKED').err).toBe('DESKTOP_DEPENDENCY_REPORT_INVALID')
+    expect(plan('ID=ubuntu',['libgtk-3.so.0; touch /tmp/injected => not found']).err).toBe('DESKTOP_DEPENDENCY_REPORT_INVALID')
   })
 })
 describe('发布manifest身份与Desktop规则',()=>{

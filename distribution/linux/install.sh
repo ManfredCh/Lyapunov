@@ -232,7 +232,94 @@ run_doctor() {
     "$product/lyapunov" doctor desktop > "$doctor_log" 2>&1
   fi
 }
+prepare_desktop_libraries() {
+  desktop_doctor_ready=false
+  # The bootstrap also serves already downloaded releases. Keep this bounded
+  # mapping here so a dependency remedy never requires a replacement archive.
+  if dependency_groups=$("$product/runtime/node/bin/node" -e '
+    // BEGIN_DESKTOP_DEPENDENCY_PLAN
+    const f=require("node:fs"),p=require("node:path"),cp=require("node:child_process");
+    const [file,root,withMu]=process.argv.slice(1),blocked=code=>{console.error(code);process.exit(2)};
+    let d;try{d=JSON.parse(f.readFileSync(file,"utf8"))}catch{blocked("DESKTOP_DEPENDENCY_REPORT_INVALID")}
+    if(d?.desktop?.code!=="DESKTOP_LIBRARIES_MISSING")process.exit(3);
+    const rows=d.desktop.missingSystemLibraries;
+    if(d.status!=="BLOCKED"||d.desktop.status!=="BLOCKED"||!Array.isArray(rows)||!rows.length||rows.length>64||withMu==="true"&&d.providers?.mujoco?.status!=="AVAILABLE")blocked("DESKTOP_DEPENDENCY_REPORT_INVALID");
+    const sonames=lines=>lines.map(line=>{const match=/^\s*([A-Za-z0-9.+_-]+\.so(?:\.[0-9]+)*)\s*=>\s*not found\s*$/.exec(line);if(!match)blocked("DESKTOP_DEPENDENCY_REPORT_INVALID");return match[1]}).sort();
+    const reported=sonames(rows),check=cp.spawnSync("ldd",[p.join(root,"runtime/electron/lyapunov-desktop")],{encoding:"utf8",env:{...process.env,LC_ALL:"C"},timeout:15000});
+    if(check.error||check.status!==0)blocked("DESKTOP_LIBRARY_CHECK_UNAVAILABLE");
+    const actual=sonames(check.stdout.split("\n").filter(line=>line.includes("not found")));
+    if(JSON.stringify(actual)!==JSON.stringify(reported))blocked("DESKTOP_DEPENDENCY_REPORT_CHANGED");
+    const groups=[
+      [["libglib-2.0.so.0","libgobject-2.0.so.0","libgio-2.0.so.0","libgmodule-2.0.so.0"],["libglib2.0-0t64","libglib2.0-0"]],
+      [["libnss3.so","libnssutil3.so","libsmime3.so","libssl3.so"],["libnss3"]],
+      [["libnspr4.so","libplc4.so","libplds4.so"],["libnspr4"]],
+      [["libatk-1.0.so.0"],["libatk1.0-0t64","libatk1.0-0"]],
+      [["libatk-bridge-2.0.so.0"],["libatk-bridge2.0-0t64","libatk-bridge2.0-0"]],
+      [["libatspi.so.0"],["libatspi2.0-0t64","libatspi2.0-0"]],
+      [["libcups.so.2"],["libcups2t64","libcups2"]],
+      [["libdbus-1.so.3"],["libdbus-1-3"]],
+      [["libcairo.so.2"],["libcairo2"]],[["libcairo-gobject.so.2"],["libcairo-gobject2"]],
+      [["libgtk-3.so.0","libgdk-3.so.0"],["libgtk-3-0t64","libgtk-3-0"]],
+      [["libpango-1.0.so.0"],["libpango-1.0-0"]],[["libpangocairo-1.0.so.0"],["libpangocairo-1.0-0"]],
+      [["libX11.so.6"],["libx11-6"]],[["libXcomposite.so.1"],["libxcomposite1"]],
+      [["libXdamage.so.1"],["libxdamage1"]],[["libXext.so.6"],["libxext6"]],
+      [["libXfixes.so.3"],["libxfixes3"]],[["libXrandr.so.2"],["libxrandr2"]],
+      [["libgbm.so.1"],["libgbm1"]],[["libdrm.so.2"],["libdrm2"]],
+      [["libexpat.so.1"],["libexpat1"]],[["libxcb.so.1"],["libxcb1"]],
+      [["libxkbcommon.so.0"],["libxkbcommon0"]],[["libudev.so.1"],["libudev1"]],
+      [["libasound.so.2"],["libasound2t64","libasound2"]]
+    ];
+    const packages=[];for(const name of actual){const row=groups.find(group=>group[0].includes(name));if(!row)blocked("DESKTOP_LIBRARY_UNMAPPED: "+name);if(!packages.includes(row[1].join(" ")))packages.push(row[1].join(" "))}
+    let os;try{os=f.readFileSync("/etc/os-release","utf8")}catch{blocked("DESKTOP_DEPENDENCY_OS_UNSUPPORTED")}
+    const id=/^ID=(?:"([a-z0-9_-]+)"|([a-z0-9_-]+))\s*$/m.exec(os);
+    if(!["ubuntu","debian"].includes(id?.[1]??id?.[2]))blocked("DESKTOP_DEPENDENCY_OS_UNSUPPORTED");
+    console.log(packages.join("\n"));
+    // END_DESKTOP_DEPENDENCY_PLAN
+  ' "$doctor_log" "$product" "$with_mujoco"); then :; else
+    dependency_status=$?
+    [ "$dependency_status" -ne 3 ] || return 0
+    fail "DESKTOP_DEPENDENCIES_BLOCKED: no system changes were attempted. Details: $doctor_log"
+  fi
+  stage=desktop-dependencies
+  if ! ( : < /dev/tty ) 2>/dev/null; then
+    fail "DESKTOP_DEPENDENCIES_TERMINAL_REQUIRED: Run the same installer in a normal interactive terminal for OS authorization. Details: $doctor_log"
+  fi
+  for tool in sudo apt-get apt-cache; do command -v "$tool" >/dev/null 2>&1 || fail "DESKTOP_DEPENDENCIES_COMMAND_MISSING: $tool"; done
+  dependency_log="$product/.install/desktop-dependencies.log"
+  log 'Preparing the missing desktop libraries through your OS package manager. Enter a password only at the system prompt; installation will resume automatically.'
+  # Updating package metadata does not upgrade the OS. The distro selects its
+  # own signed packages; never add repositories, a full desktop, or SDK tools.
+  if sudo -p 'Lyapunov desktop dependencies authorization, password for %u: ' -- apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update < /dev/tty > "$dependency_log" 2>&1; then :; else
+    fail "DESKTOP_DEPENDENCIES_UPDATE_FAILED: OS authorization or package metadata download failed. Details: $dependency_log"
+  fi
+  packages=
+  while IFS= read -r candidates; do
+    selected=
+    for package in $candidates; do
+      candidate=$(LC_ALL=C apt-cache policy "$package" 2>/dev/null | sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p')
+      case "$candidate" in ''|'(none)') continue ;; esac
+      selected=$package; break
+    done
+    [ -n "$selected" ] || fail "DESKTOP_DEPENDENCY_PACKAGE_UNAVAILABLE: $candidates. Details: $dependency_log"
+    packages="$packages $selected"
+  done <<DEPENDENCY_GROUPS
+$dependency_groups
+DEPENDENCY_GROUPS
+  log "Installing only the packages selected for missing libraries:$packages"
+  # All words originate in the fixed mapping above, not doctor command text.
+  # apt resolves required dependencies, but removes no installed packages.
+  if sudo -p 'Lyapunov desktop dependencies authorization, password for %u: ' -- apt-get -o Acquire::Retries=3 install --yes --no-install-recommends --no-upgrade --no-remove $packages < /dev/tty >> "$dependency_log" 2>&1; then :; else
+    fail "DESKTOP_DEPENDENCIES_INSTALL_FAILED: required packages were not installed. Details: $dependency_log"
+  fi
+  stage=doctor
+  log 'Rechecking the installed product after desktop dependency preparation.'
+  # A real sandbox block may now become visible. Only the original sandbox
+  # gate below can authorize it; a remaining library failure stays blocked.
+  if run_doctor; then desktop_doctor_ready=true; else log "Desktop dependency preparation finished; checking the normal doctor remedy. Details: $doctor_log"; fi
+}
 if run_doctor; then :; else
+  prepare_desktop_libraries
+  if [ "$desktop_doctor_ready" = true ]; then :; else
   # Only this package's real helper and an otherwise ready doctor may request
   # normal OS authorization. CONTEXT_ONLY is never promoted to readiness.
   if sandbox_code=$("$product/runtime/node/bin/node" -e '
@@ -274,6 +361,7 @@ if run_doctor; then :; else
       *) remedy='Resolve the reported dependency or sandbox condition and rerun the same installer.' ;;
     esac
     fail "$sandbox_code: $remedy Details: $doctor_log"
+  fi
   fi
 fi
 if [ "$with_mujoco" = true ]; then
