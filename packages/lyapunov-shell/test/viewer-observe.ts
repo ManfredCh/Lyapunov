@@ -33,6 +33,7 @@ import { join } from "node:path"
 import { safeSessionKey, sessionNamespace } from "../../lyapunov-contracts/src/session-scope.ts"
 import { deflateSync } from "node:zlib"
 import * as THREE from "three"
+import { TransformControls } from "three/addons/controls/TransformControls.js"
 
 import {applyCameraNavigation} from '../src/camera-navigation-actions.ts'
 import { captureForObserver, createObserverActionGuard, type ObservableViewer } from "../src/workbench-observe.ts"
@@ -560,6 +561,7 @@ class BareViewer {
     }
     viewer.controls = { target: new THREE.Vector3(), update: () => {} }
     viewer.camera = new THREE.PerspectiveCamera()
+    viewer.transformControls = new TransformControls(viewer.camera)
     // 环境光照那一串（`setSceneEnvironment`/`applyEnvironment`/`releaseEnvironmentMap`，58 合入）：没有
     // `components.environment` 的普通场景也会走这条路径（写回组件出现之前那组硬编码读数），
     // 所以这些**构造时就存在**的对象必须在替身里显式给出来——少了 `materialEnvironment.texture`

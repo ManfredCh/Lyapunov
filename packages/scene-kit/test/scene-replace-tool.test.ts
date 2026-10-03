@@ -142,13 +142,19 @@ const groupIds = (value: SceneSnapshot, root: string): string[] =>
 
 describe("scene_replace_resource 的 Tool 接线（真实 ToolRegistry）", () => {
   test("共同物理更新穿过真实Tool/Command，固定/解固定同CAS且拒坏参数",async()=>{
-    await ok("scene_create",{sceneId:"physics"})
+    const created=await ok("scene_create",{sceneId:"physics"})
+    const ground=structuredClone(entityOf(created,created.physics.groundEntityId))
     await ok("scene_edit",{sceneId:"physics",expectedRevision:0,patch:[{op:"add",entity:{entityId:"object",name:"物体",transform:identityTransform(),resources:[],components:{collision:{shape:"box",halfExtents:[.1,.2,.3]},rigidBody:{type:"dynamic",massKg:2}}}}]})
+    expect(entityOf(await snapshot("physics"),ground.entityId)).toEqual(ground)
     const fixed=await ok("scene_physics_update",{sceneId:"physics",entityId:"object",expectedRevision:1,type:"static",gravityEnabled:false,collisionEnabled:false})
-    expect(fixed.snapshot.revision).toBe(2);expect(fixed.snapshot.entities[0].components.rigidBody.type).toBe("static")
+    expect(fixed.snapshot.revision).toBe(2);expect(entityOf(fixed.snapshot,"object").components.rigidBody?.type).toBe("static")
+    expect(entityOf(fixed.snapshot,ground.entityId)).toEqual(ground)
     await bridge("scene_physics_update",{sceneId:"physics",entityId:"object",expectedRevision:2,type:"dynamic"})
-    expect((await snapshot("physics")).entities[0]!.components.rigidBody?.type).toBe("dynamic")
+    const dynamic=await snapshot("physics")
+    expect(entityOf(dynamic,"object").components.rigidBody?.type).toBe("dynamic")
+    expect(entityOf(dynamic,ground.entityId)).toEqual(ground)
     expect(failureOf(await callTool("scene_physics_update",{sceneId:"physics",entityId:"object",expectedRevision:3,type:"fixed"})).error.message).toContain("type")
+    expect(entityOf(await snapshot("physics"),ground.entityId)).toEqual(ground)
   })
   test("正例：纯视觉 GLB 组整体换版；原始副本、位姿/父子/用户组件与无关实体都不变", async () => {
     const sceneId = "scene_tool_ok"
