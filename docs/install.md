@@ -2,8 +2,9 @@
 
 | 出版信息 | 标记 |
 | --- | --- |
-| 说明版本 | 0.1.0 · A08 · Linux x64 Alpha |
-| 文档日期 | 2026-10-02 |
+| 应用发布名称 | 0.1.0α · Linux x64 |
+| 技术版本 / releaseId | `0.1.0-alpha.1` |
+| 文档日期 | 2026-10-03 |
 | 作者团队 | Lyapunov contributors |
 | 版权 | © 2026 Lyapunov contributors |
 | 项目许可 | Lyapunov Modified MIT License；根 LICENSE 为项目自定义全文，根 NOTICE 保留原 OpenCode MIT 声明。 |
@@ -12,7 +13,7 @@
 
 项目自定义许可保留 MIT 通用授权条款；使用本软件或衍生作品的商业产品或服务，月活用户达到 10,000，或月营业收入达到人民币 1,000,000 元（或其他货币等值），任一条件满足时须在界面显著展示“Lyapunov”。没有界面的产品或服务，可在其官方文档或官方网站显著署名。fork、改名、修改、嵌入其他框架或用于后端服务，都不解除仍使用本软件或衍生作品时的义务；门槛针对该产品或服务，不扩及不相关产品或企业全部收入，不涵盖未使用本软件／衍生作品的完全独立重写或单纯使用软件产出。该条件只要求署名，不是自动收费。许可文本模板来源于 MoonshotAI/Kimi-K2 的 LICENSE，名称、版权人与品牌展示名按本项目改写，完整条件以根 LICENSE 为准。各独立包、DSH、Node.js、MuJoCo／Python 运行环境、机器人资产、模型权重与外部工具保留原许可与随附声明。版本下载身份继续以官网 manifest 为准。
 
-本文对应 Linux x64 Alpha 的安装合同。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.1`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.1.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
 ## 默认安装
 
@@ -20,6 +21,11 @@
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+安装完成后，由使用者单独启动：
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
@@ -165,7 +171,15 @@ cp -a -- "$lyapunov_data" "$lyapunov_backup"
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+安装后先检查实际版本，需要时再单独启动：
+
+```sh
 "$HOME/.local/bin/lyapunov" --version
+```
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 

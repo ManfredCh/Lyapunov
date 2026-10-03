@@ -7,12 +7,13 @@
 ![Alpha](docs/assets/badge-alpha.svg) ![Linux x64](docs/assets/badge-linux-x64.svg) [![Lyapunov Modified MIT](docs/assets/badge-lyapunov-license.svg)](LICENSE)
 
 
-**Linux x64 Alpha** · **Lyapunov Modified MIT**
+**Linux x64 · 0.1.0α** · **Lyapunov Modified MIT**
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 应用版本 | 0.1.0 · A08 Alpha |
-| 文档版本日期 | 2026-10-02 |
+| 应用发布名称 | 0.1.0α |
+| 技术版本 / releaseId | `0.1.0-alpha.1` |
+| 文档版本日期 | 2026-10-03 |
 | 作者团队 | Lyapunov contributors |
 | 出品方 | 杭州奇异宇宙人工智能有限公司 |
 | 版权 | © 2026 Lyapunov contributors |
@@ -22,9 +23,9 @@
 
 **杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
 
-**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/2026-10-linux-a08.md)记录本 Alpha 的变化与已知范围。
+**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.1.md)记录本 Alpha 的变化与已知范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/2026-10-linux-a08.md)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.1.md)
 
 ![Source开发预览](docs/assets/workbench-source-preview.png)
 
@@ -38,6 +39,11 @@
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+安装完成后，由使用者单独启动 Lyapunov：
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
@@ -210,6 +216,11 @@ wsl --update
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+安装完成后，由使用者单独启动 Lyapunov：
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
@@ -234,7 +245,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/2026-10-linux-a08.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
+开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.1.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
 
 ## 许可与版权
 

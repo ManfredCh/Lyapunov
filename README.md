@@ -7,12 +7,13 @@
 ![Alpha](docs/assets/badge-alpha.svg) ![Linux x64](docs/assets/badge-linux-x64.svg) [![Lyapunov Modified MIT](docs/assets/badge-lyapunov-license.svg)](LICENSE)
 
 
-**Linux x64 Alpha** · **Lyapunov Modified MIT**
+**Linux x64 · 0.1.0α** · **Lyapunov Modified MIT**
 
 | Publication metadata | Value |
 | --- | --- |
-| Application version | 0.1.0 · A08 Alpha |
-| Documentation edition | 2026-10-02 |
+| Application release | 0.1.0α |
+| Technical version / releaseId | `0.1.0-alpha.1` |
+| Documentation edition | 2026-10-03 |
 | Author team | Lyapunov contributors |
 | Produced by | 杭州奇异宇宙人工智能有限公司 |
 | Copyright | © 2026 Lyapunov contributors |
@@ -22,9 +23,9 @@
 
 Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, produced by **杭州奇异宇宙人工智能有限公司**. For robotics developers, simulation/research teams and 3D creators, it brings scene construction, robot preparation, controlled simulation and camera data into one workspace. Chat, code, files, the 3D viewer, and physics share one desktop workspace.
 
-**Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/2026-10-linux-a08.md) describe this Alpha's changes and known limits.
+**Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha's changes and known limits.
 
-[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/2026-10-linux-a08.md)
+[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/0.1.0-alpha.1.md)
 
 ![Source development preview](docs/assets/workbench-source-preview.png)
 
@@ -38,6 +39,11 @@ From a regular terminal in your graphical desktop session:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+Start Lyapunov explicitly after installation:
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
@@ -210,6 +216,11 @@ Complete the distribution setup, then use its Ubuntu/Linux terminal:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
+```
+
+Start Lyapunov explicitly after installation:
+
+```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
@@ -234,7 +245,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/2026-10-linux-a08.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
+See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha.1.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
 
 The top-level Lyapunov project uses the [Lyapunov Modified MIT License](LICENSE), copyright © 2026 Lyapunov contributors. This custom license retains the MIT permission terms. A commercial product or service using the software or a derivative work must prominently credit “Lyapunov” when it reaches 10,000 monthly active users or CNY 1,000,000 in monthly operating revenue (or currency equivalent). Without a UI, attribution belongs in its official documentation or website. These thresholds apply to that product or service; attribution does not require a license fee. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights, and external services retain their respective licenses.
 
