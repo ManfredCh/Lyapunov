@@ -185,6 +185,9 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
     for(const file of PRODUCT_RUNTIME_FILES)put(file)
     put(join(upstream,'packages/llm/llm-pi-ai/lib/index.js'))
     put(join(upstream,'packages/client/ui-conversation/lib/client.js'),'conversation.hero.headline\n')
+    put(join(upstream,'apps/web/dist/index.html'),'<script type="module" src="./assets/entry.js"></script><link rel="stylesheet" href="./assets/entry.css">')
+    put(join(upstream,'apps/web/dist/assets/entry.js'),'console.log("fixture")\n')
+    put(join(upstream,'apps/web/dist/assets/entry.css'),'body { color: inherit }\n')
     put('packages/asset-bake/requirements-common.txt','numpy>=1.25,<3\nscipy>=1.10,<2\ncoacd==1.0.7\n')
     for(const file of ['packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt'])put(file,'-r requirements-common.txt\n')
     put('packages/desktop/dist/main.js','app.setDesktopName("lyapunov-desktop.desktop")\n')
@@ -203,6 +206,13 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
       const licenseProblems=productRuntimeViolations(stage,upstream)
       expect(licenseProblems).toContain('发行载荷缺少非空项目许可文件：LICENSE')
       expect(licenseProblems).toContain('发行载荷缺少非空项目许可文件：NOTICE')
+      // Alpha2实物曾遗漏整个dist；首页存在也不能替代真实入口与样式资源。
+      const frontendIndex=join(upstream,'apps/web/dist/index.html'),frontendJs=join(upstream,'apps/web/dist/assets/entry.js')
+      rmSync(join(stage,frontendIndex))
+      expect(productRuntimeViolations(stage,upstream)).toContain(`发行载荷缺少非空原生工作台前端首页：${frontendIndex}`)
+      writeFileSync(join(stage,frontendIndex),'<script type="module" src="./assets/entry.js"></script><link rel="stylesheet" href="./assets/entry.css">')
+      rmSync(join(stage,frontendJs))
+      expect(productRuntimeViolations(stage,upstream)).toContain(`发行载荷缺少非空原生工作台前端启动资源：${frontendJs}`)
     }finally{rmSync(stage,{recursive:true,force:true})}
   })
 

@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process'
 import {parseArgs} from 'node:util'
 // 发行载荷结构契约（顶层单一可执行入口 + 随包 Provider 定义）：纯函数在 distribution/linux/payload-contract.ts，
 // 这里只做取数与 fail-closed；守卫/负对照见 distribution/linux/payload-contract.test.ts。
-import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,workspacePayloadDestination,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
+import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,frontendRuntimeViolations,workspacePayloadDestination,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
 // micromamba 许可证的**取件顺序与身份校验**（env 覆盖 → 入库件 → 缓存 → 网络兜底）：
 // 纯逻辑在 distribution/licenses/mamba-license.ts，这里只注入有界取件器并 fail-closed。
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
@@ -115,6 +115,12 @@ if(runtimeInput){const archive=resolve(values['mujoco-runtime-archive']!);if((aw
 // 发行时从同一源码重建插件，避免把上次工作树留下的 dist 当作当前候选。
 const pluginBuild=spawnSync(process.execPath,['run',join(root,'script/build-plugins.ts')],{cwd:root,stdio:'inherit'})
 if(pluginBuild.status!==0)throw new Error('发行插件构建失败，停止打包')
+// 原生Web首页是独立Vite产物，插件构建和Host ready不能替代；收闭/复制前始终走其原build脚本。
+const frontendBuild=spawnSync('pnpm',['--filter','@deepseek-ai/dsh-web-frontend','run','build'],{cwd:upstream,stdio:'inherit',env:{...process.env,DSH_CLIENT_TITLE:'Lyapunov',DSH_TELEMETRY_DISABLED:'1',HF_ENDPOINT:'https://hf-mirror.com'}})
+if(frontendBuild.error)throw frontendBuild.error
+if(frontendBuild.status!==0)throw new Error('原生工作台前端构建失败，停止打包')
+const frontendProblems=frontendRuntimeViolations(upstream,'')
+if(frontendProblems.length)throw new Error(frontendProblems.join('；'))
 // 构建器在 Bun 中运行；Bun 的 builtinModules 包含 ws，Node 并不包含。
 const builtinProbe=spawnSync(values.node!,['-p','JSON.stringify(require("node:module").builtinModules)'],{encoding:'utf8'})
 if(builtinProbe.status!==0)throw new Error('无法读取发行 Node 的内置模块清单')

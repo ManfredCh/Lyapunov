@@ -11,6 +11,24 @@
 import { lstatSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 
+/** 原生工作台首页与它直接引用的本地启动资源必须是真正构建的非空文件。 */
+export function frontendRuntimeViolations(stage:string,upstreamDirectory:string):string[]{
+  const prefix=join(upstreamDirectory,'apps/web/dist'),index=join(prefix,'index.html')
+  const nonempty=(file:string)=>{try{const row=lstatSync(join(stage,file));return row.isFile()&&row.size>0}catch{return false}}
+  if(!nonempty(index))return [`发行载荷缺少非空原生工作台前端首页：${index}`]
+  const html=readFileSync(join(stage,index),'utf8'),violations:string[]=[]
+  const moduleScripts=[...html.matchAll(/<script\b[^>]*\btype\s*=\s*["']module["'][^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi)].map(row=>row[1]!)
+  if(moduleScripts.length===0)violations.push(`原生工作台前端首页缺少构建后的module入口：${index}`)
+  const resources=[...html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>/gi)].map(row=>row[1]!)
+  for(const resource of new Set(resources)){
+    if(/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(resource))continue
+    const path=resource.split(/[?#]/,1)[0]!.replace(/^\//,'')
+    const file=join(prefix,path)
+    if(!nonempty(file))violations.push(`发行载荷缺少非空原生工作台前端启动资源：${file}`)
+  }
+  return violations
+}
+
 /** canonical 来源与载荷逻辑位置分开：借用只读SDK symlink也保持锁定的 .upstream 布局。 */
 export function workspacePayloadDestination(input:{root:string;upstreamReal:string;upstreamDirectory:string;source:string}):string|null{
   const safeRelative=(path:string)=>path!==''&&!isAbsolute(path)&&!path.split('/').some(part=>part==='..'||part===''||part==='.')
@@ -113,7 +131,7 @@ export function productRuntimeViolations(stage:string,upstreamDirectory:string):
     join(upstreamDirectory,'packages/llm/llm-pi-ai/lib/index.js'),
     join(upstreamDirectory,'packages/client/ui-conversation/lib/client.js'),
   ]
-  const violations:string[]=[]
+  const violations:string[]=frontendRuntimeViolations(stage,upstreamDirectory)
   const available=new Set<string>()
   for(const file of files){
     try{
