@@ -150,7 +150,7 @@ describe('打包脚本接线（漂移守卫）', () => {
     expect(packager).toContain("from '../distribution/linux/payload-contract.ts'")
     expect(packager).toContain('entryViolations(topLevel)')
     expect(packager).toContain('bundledProviderViolations({')
-    expect(packager).toContain("for(const file of ['LICENSE','NOTICE'])await cp(join(root,file),join(stage,file))")
+    expect(packager).toContain("for(const file of ['LICENSE','NOTICE','README.md','README.zh-CN.md'])await cp(join(root,file),join(stage,file))")
     expect(packager).toContain('license:product.license')
     expect(packager).not.toContain('providersBundled:[]')
     expect(packager).toContain('providersBundled:bundledProviders.map')
