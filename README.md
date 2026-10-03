@@ -25,7 +25,7 @@
 | releaseId | `0.1.0-alpha3_5` |
 | Documentation edition | 2026-10-04 |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
-| Produced by | Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司) |
+| Produced by | [Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)](https://vorynel.com/?lang=en) |
 | Sponsored by | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | Copyright | © 2026 Vorynel Co., Ltd. |
 | Project license | [Apache License 2.0](LICENSE) · [Retained notices](NOTICE) |
@@ -260,7 +260,7 @@ node script/bootstrap.mjs
 
 See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha3_5.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
 
-The project-owned Lyapunov code is licensed under the [Apache License 2.0](LICENSE), copyright © 2026 Vorynel Co., Ltd. Use, modification and redistribution follow Apache 2.0, without additional monthly-user or revenue thresholds. Existing published archives retain their original bytes and historical license notices; future packages will carry the updated LICENSE and NOTICE. The existing OpenCode MIT copyright and permission notice is retained in [NOTICE](NOTICE). Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights and external services retain their respective licenses.
+The project-owned Lyapunov code is licensed under the [Apache License 2.0](LICENSE), copyright © 2026 Vorynel Co., Ltd. The completed project copyright and license declaration is in [NOTICE](NOTICE); the LICENSE appendix retains Apache's standard example for applying the license. Use, modification and redistribution follow Apache 2.0, without additional monthly-user or revenue thresholds. Existing published archives retain their original bytes and historical license notices; future packages will carry the updated LICENSE and NOTICE. The existing OpenCode MIT copyright and permission notice is retained in NOTICE. Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights and external services retain their respective licenses.
 
 ## 中文快速说明
 
