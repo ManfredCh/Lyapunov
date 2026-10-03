@@ -2165,12 +2165,13 @@ export class SceneViewer {
       if(this.cameraRigGizmoKey===key&&this.cameraRigs.get(key)?.group===group&&this.cameraRigScopeKey===scope&&this.observerState().dirty)throw new ViewerCameraError('VIEWER_CAMERA_EDIT_ACK_REQUIRED','相机安装保存尚未收到确认')
     })
   }
+  /** 丢弃才重投最新权威安装；保存ACK后的可见安装保留到真实Scene/native投影接替，不用旧spec回滚它。 */
   private endCameraRigEditing(discard:boolean,restoreView=true):void {
     const key=this.cameraRigGizmoKey,rig=key!==undefined?this.cameraRigs.get(key):undefined
     if(key===undefined)return
     this.cancellingCameraEdit=true
     const look=this.cameraRigLook
-    try{this.cameraRigGizmoKey=undefined;this.cameraRigEditBaseline=undefined;this.cameraRigEditLens=undefined;this.cameraRigEditError=undefined;this.cameraRigLook=undefined;if(this.cameraRigSave)this.transformControls.enabled=this.cameraRigSave.enabled;if(look){this.transformControls.enabled=look.controlsEnabled;if(this.transformControls.getHelper)this.transformControls.getHelper().visible=true}this.cameraRigSave=undefined;this.editing=false;this.transformControls.dragging=false;this.transformControls.detach();if(discard&&rig)this.placeCameraRig(rig,rig.spec);if(look){this.setCaptureGate(undefined);if(restoreView)this.setViewState(look.returnView,{focus:false});this.navigationPreference=look.returnView.navigation??this.freeNavigation()}if(rig)this.setCameraRigs([...this.cameraRigs.values()].map(r=>r.spec))}
+    try{this.cameraRigGizmoKey=undefined;this.cameraRigEditBaseline=undefined;this.cameraRigEditLens=undefined;this.cameraRigEditError=undefined;this.cameraRigLook=undefined;if(this.cameraRigSave)this.transformControls.enabled=this.cameraRigSave.enabled;if(look){this.transformControls.enabled=look.controlsEnabled;if(this.transformControls.getHelper)this.transformControls.getHelper().visible=true}this.cameraRigSave=undefined;this.editing=false;this.transformControls.dragging=false;this.transformControls.detach();if(discard&&rig)this.placeCameraRig(rig,rig.spec);if(look){this.setCaptureGate(undefined);if(restoreView)this.setViewState(look.returnView,{focus:false});this.navigationPreference=look.returnView.navigation??this.freeNavigation()}if(rig&&discard)this.setCameraRigs([...this.cameraRigs.values()].map(r=>r.spec))}
     finally{this.cancellingCameraEdit=false;this.firstPerson?.clearInput?.();this.syncObserverControls()}
   }
   private emitCameraRigEdit(): Promise<void> {

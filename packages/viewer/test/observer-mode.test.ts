@@ -198,14 +198,18 @@ describe('A08统一观察模式与全部出口',()=>{
 })
 
 describe('A08稳定视锥、编辑草稿与异步ACK',()=>{
-  test('跨连续更新复用group/pick/几何与gizmo；仅镜头变化替换几何，真实删除释放',()=>{
+  test('跨连续更新复用group/pick/几何与gizmo；保持镜头草稿，退出采用新元数据，真实删除释放',()=>{
     const {viewer}=harness();viewer.setCameraRigs([spec()]);const rig=viewer.cameraRigs.get('camera-a'),geometry=rig.lines.geometry,pickGeometry=rig.pick.geometry
     viewer.attachCameraRigGizmo('camera-a');rig.group.position.x=9;viewer.publishObserverState()
     const detaches=viewer.transformControls.detaches
     for(let i=0;i<8;i++)viewer.setCameraRigs([spec('camera-a',[i,20,30])])
     expect(viewer.cameraRigs.get('camera-a')).toBe(rig);expect(rig.lines.geometry).toBe(geometry);expect(rig.pick.geometry).toBe(pickGeometry);expect(viewer.transformControls.object).toBe(rig.group);expect(viewer.transformControls.detaches).toBe(detaches);expect(rig.group.position.x).toBe(9);expect(viewer.observerState().dirty).toBe(true)
     let disposed=0;geometry.addEventListener('dispose',()=>disposed++)
-    viewer.setCameraRigs([spec('camera-a',[1,2,3],{...K,fx:900})]);expect(disposed).toBe(1);expect(viewer.cameraRigs.get('camera-a')).toBe(rig);expect(viewer.transformControls.object).toBe(rig.group)
+    viewer.setCameraRigs([spec('camera-a',[1,2,3],{...K,fx:900})])
+    expect(disposed).toBe(0);expect(rig.lines.geometry).toBe(geometry);expect(viewer.cameraRigs.get('camera-a')).toBe(rig);expect(viewer.transformControls.object).toBe(rig.group)
+    expect(rig.spec.intrinsics.fx).toBe(900);expect(viewer.cameraRigEditLens).toEqual(K);expect(rig.group.position.x).toBe(9)
+    viewer.finishCameraRigEditing({discard:true})
+    expect(disposed).toBe(1);expect(rig.lines.geometry).not.toBe(geometry);expect(rig.group.position.toArray()).toEqual([1,2,3]);expect(viewer.cameraRigEditLens).toBeUndefined();expect(viewer.observerState().mode).toBe('free')
     const next=rig.lines.geometry;next.addEventListener('dispose',()=>disposed++);viewer.setCameraRigs([])
     expect(disposed).toBe(2);expect(rig.group.parent).toBeNull();expect(viewer.transformControls.object).toBeUndefined();expect(viewer.observerState().mode).toBe('free')
   })
