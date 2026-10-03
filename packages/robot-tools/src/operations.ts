@@ -27,7 +27,12 @@ export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks:
     sim_open: async (input: { sceneId: string; options?: WorldOptions }, signal?: AbortSignal) => {
       signal?.throwIfAborted()
       let snapshot=await scene.snapshot(input.sceneId)
-      if(hooks.prepareWorld&&!(await sim.listWorlds()).some(world=>world.sceneId===input.sceneId&&world.status!=='closed'))snapshot=await hooks.prepareWorld(snapshot,input.options,signal)
+      if(hooks.prepareWorld){
+        // 已交付世界由 Provider owner 自己记账；后台轮询必须继续报告旧启动终态，
+        // 不能让这次轮询挡住显式 open 的既有恢复入口，也不能替它自动重启。
+        const existing=sim.hasSceneWorld?sim.hasSceneWorld(input.sceneId):(await sim.listWorlds()).some(world=>world.sceneId===input.sceneId&&world.status!=='closed')
+        if(!existing)snapshot=await hooks.prepareWorld(snapshot,input.options,signal)
+      }
       signal?.throwIfAborted()
       return sim.open(snapshot,input.options,signal)
     },

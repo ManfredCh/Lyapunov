@@ -213,8 +213,11 @@ describe.skipIf(PYTHON === undefined)('ISAAC-02 生命周期：未 ready 的等�
     applyIsaacPlugin(host.ctx as never, { pythonPath: PYTHON, workerPath, physicsDevice: 'cpu', rendering: 'none' })
     const provider = (host.provided.sim as { forSession(key: string): IsaacProvider }).forSession(SESSION)
     try {
+      expect(provider.hasSceneWorld('w3-scene')).toBe(false)
       const delivered = await bounded(provider.open(scene(), { worldId: 'ok-a' }))
       expect(delivered.worldId).toBe('ok-a')
+      expect(provider.hasSceneWorld('w3-scene')).toBe(true)
+      expect(provider.hasSceneWorld('other-scene')).toBe(false)
       await until(() => provider.lifecyclePhases('ok-a').some(phase => phase.name === 'ready'), 'A 的 ready 阶段')
       // B 卡在启动期：等到它自己的阶段轨迹已出现，再取消。
       const controller = new AbortController()
@@ -246,6 +249,7 @@ describe.skipIf(PYTHON === undefined)('ISAAC-02 生命周期：未 ready 的等�
     try {
       const pending = rejection(provider.open(scene(), { worldId: 'hang-c' }, controller.signal))
       await until(() => provider.lifecyclePhases('hang-c').length > 0, 'C 已被交给传输层')
+      expect(provider.hasSceneWorld('w3-scene')).toBe(false)
       const error = await rejection(Promise.resolve().then(() => provider.close('hang-c')))
       expect(error.code as string).toBe('WORLD_STARTING')
       expect(error.message).toContain('hang-c')
@@ -265,7 +269,9 @@ describe.skipIf(PYTHON === undefined)('ISAAC-02 生命周期：未 ready 的等�
     const provider = (host.provided.sim as { forSession(key: string): IsaacProvider }).forSession(SESSION)
     try {
       await bounded(provider.open(scene(), { worldId: 'ok-d' }))
+      expect(provider.hasSceneWorld('w3-scene')).toBe(true)
       await bounded(provider.close('ok-d'))
+      expect(provider.hasSceneWorld('w3-scene')).toBe(false)
       // 世界真的没了：再次 close 不能"成功"（旧实现把已结算的 closing promise 又返回一次），
       // 后续寻址也不能报成"世界正在关闭"。`close` 对已不存在/正在关闭的世界是同步抛出（既有形态），
       // 所以这里显式包一层再断言，避免同步异常绕过 rejection 帮助函数。

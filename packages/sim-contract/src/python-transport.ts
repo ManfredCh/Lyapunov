@@ -640,6 +640,10 @@ export class ProcessSimProvider implements SimWorlds {
    * 一律不动；回滚按写入顺序的逆序做，`before` 为空表示这次写之前该键本来不存在。
    */
   protected revertOwnWrites(_writes: { key: string; after: unknown; before: unknown }[]): void {}
+  hasSceneWorld(sceneId: string): boolean {
+    if (this.closed) throw new SimError('PROVIDER_CLOSED', 'Provider 已释放')
+    return [...this.handles.values()].some(handle => handle.sceneId === sceneId && handle.status !== 'closed')
+  }
   async listWorlds(): Promise<WorldHandle[]> {
     if(this.closed)throw new SimError('PROVIDER_CLOSED','Provider 已释放')
     if(!this.process)return []

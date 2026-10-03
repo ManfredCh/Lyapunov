@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {} from '../../sim-contract/src/index.ts'
 import { SessionSimFactory } from '../../sim-contract/src/session-provider.ts'
+import { SessionWorldProjectionCache } from '../../lyapunov-contracts/src/session-world-projection.ts'
 import { MuJoCoProvider } from '../../sim-mujoco/src/provider.ts'
 import * as scenePlugin from '../../scene-kit/src/plugin.ts'
 import * as robotTools from '../src/plugin.ts'
@@ -48,7 +49,12 @@ function simWithFakeMuJoCoWorker() {
     name: 'test-sim-mujoco-fake-worker',
     apply(ctx: Context) {
       if (ctx.get('sim')) throw new Error('同一 realm 只能启用一个模拟 Provider')
-      const sim = new SessionSimFactory({ create: () => new MuJoCoProvider({ pythonPath: PYTHON!, workerPath: FAKE_WORKER }) })
+      // 走真实会话投影 Proxy，归属查询仍由同一 Provider owner 回答。
+      const sim = new SessionSimFactory({
+        create: () => new MuJoCoProvider({ pythonPath: PYTHON!, workerPath: FAKE_WORKER }),
+        projectionCache: new SessionWorldProjectionCache(),
+        projectionIdentity: sessionId => ({ sessionId, formatVersion: 'test', cwd: base, isSeeded: false, inheritedEventCount: 0 }),
+      })
       ctx.reflect.provide('sim', sim)
       ctx.effect(() => () => sim.dispose())
     },
@@ -92,6 +98,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await (ctx.get('sim') as SessionSimFactory).dispose()
   for (const [key, value] of Object.entries(savedEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value }
   await rm(base, { recursive: true, force: true })
 })
@@ -129,8 +136,8 @@ async function callTool(name: string, input: unknown, signal: AbortSignal): Prom
 }
 
 /** 真实场景（临时 dataRoot 上的 SceneStore）：sim_open 要读的是真 Scene 文档，不是测试造的替身。 */
-async function newScene(sceneId: string): Promise<string> {
-  const created = await callTool('scene_create', { sceneId }, new AbortController().signal)
+async function newScene(sceneId: string, template?: 'blank'): Promise<string> {
+  const created = await callTool('scene_create', { sceneId, ...(template ? { template } : {}) }, new AbortController().signal)
   if (created.isError) throw new Error(`创建夹具场景失败：${created.error.message}`)
   return (created.value as { sceneId: string }).sceneId
 }
@@ -178,6 +185,35 @@ describe.skipIf(PYTHON === undefined)('sim_open 的取消接线（真实 ToolReg
     if (restarted.isError) throw new Error(`期望显式重开成功：${restarted.error.message}`)
     expect((restarted.value as { worldId: string }).worldId).toBe('world-after-cancel')
     expect(startedPids().length).toBe(2)
+  }, 20_000)
+
+  test('取消后的后台轮询仍报告终态，新空白 Scene 的显式 open 才准备地面并启动新 worker', async () => {
+    const firstSceneId = await newScene('scene-cancel-before-switch')
+    const controller = new AbortController()
+    const pending = callTool('sim_open', { sceneId: firstSceneId, options: { worldId: 'world-cancel-before-switch' } }, controller.signal)
+    await until(() => transportPhases().includes('kit-app-start'), '取消前真实启动阶段')
+    const [pid] = startedPids()
+    controller.abort()
+    expect((await pending).isError).toBe(true)
+    await until(() => !alive(pid!), '旧 worker 退出')
+    const listed = await callTool('sim_world_list', {}, new AbortController().signal)
+    expect(listed.isError).toBe(true)
+    if (!listed.isError) throw new Error('后台轮询不得替用户恢复失败的启动')
+    expect(listed.error.message).toContain('PROVIDER_START_CANCELLED')
+    expect(startedPids()).toEqual([pid])
+
+    const nextSceneId = await newScene('scene-explicit-open-after-switch', 'blank')
+    process.env.FAKE_SCENARIO = scenario({ ready: 'ok', phases: true })
+    const reopened = await callTool('sim_open', { sceneId: nextSceneId, options: { worldId: 'world-after-switch' } }, new AbortController().signal)
+    if (reopened.isError) throw new Error(`期望新 Scene 显式重开成功：${reopened.error.message}`)
+    expect((reopened.value as { worldId: string }).worldId).toBe('world-after-switch')
+    expect(startedPids().length).toBe(2)
+    expect(startedPids()[1]).not.toBe(pid)
+    const inspected = await callTool('scene_inspect', { sceneId: nextSceneId }, new AbortController().signal)
+    if (inspected.isError) throw new Error(`读取准备后的 Scene 失败：${inspected.error.message}`)
+    const snapshot = inspected.value as { physics?: { groundState?: string }; entities: Array<{ components: { collision?: { shape?: string; infinite?: boolean } } }> }
+    expect(snapshot.physics?.groundState).toBe('present')
+    expect(snapshot.entities.filter(entity => entity.components.collision?.shape === 'plane' && entity.components.collision?.infinite === true).length).toBe(1)
   }, 20_000)
 
   test('命令面取消（HTTP 桥同一条路径）：调用方立刻拿到取消，本次尚未 ready 的 worker 同样被结束', async () => {
@@ -244,6 +280,7 @@ describe.skipIf(PYTHON === undefined)('MuJoCo sim_open 的取消接线（同一�
     expect(await worldList()).toEqual(['world-a'])
     expect(startedPids()).toEqual([pid])
     await call('sim_close', { worldId: 'world-a' }, new AbortController().signal)
+    await (mujoco.get('sim') as SessionSimFactory).dispose()
   }, 20_000)
 })
 

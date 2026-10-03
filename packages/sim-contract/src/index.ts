@@ -303,6 +303,11 @@ export interface SimWorlds {
   /** 只读发现当前Provider世界；供Viewer刷新/重连，不启动未使用的SDK。 */
   listWorlds(): Promise<WorldHandle[]>
   /**
+   * 只读当前 owner 已交付且尚未关闭的 Scene 归属，不请求或启动 worker。
+   * 显式 open 的 Scene 准备可用它检查既有世界，避免后台 listWorlds 的旧终态阻断恢复入口。
+   */
+  hasSceneWorld?(sceneId: string): boolean
+  /**
    * 可选只读投影：Provider 若拥有该世界的原生 Scene 文档（例如官方编译模型），按 worldId 返回快照。
    * 只有该活动世界自己拥有这份文档；消费者不得据此写入任何持久 Scene owner，也不得编辑它。
    */

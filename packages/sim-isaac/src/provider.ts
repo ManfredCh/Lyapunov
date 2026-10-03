@@ -278,6 +278,7 @@ export class IsaacProvider implements SimWorlds {
   /** 把已记录的真实采集导出为自包含数据集（samples.jsonl+标定+标注+真实 PNG/NPY 副本）。 */
   exportCameraDataset(worldId:string,options:CameraDatasetExportOptions){return this.instance(worldId).process.exportCameraDataset(worldId,options)}
   assist(worldId:string,options:{mode:'attach'|'release';expectedGeneration:number;objectId:string;robotId?:string;anchorBody?:string}){return this.instance(worldId).process.assist(worldId,options)}
+  hasSceneWorld(sceneId:string){if(this.closed)throw new SimError('PROVIDER_CLOSED','Provider已关闭');return [...this.instances.values()].some(i=>i.process.hasSceneWorld(sceneId))}
   async listWorlds(){if(this.closed)throw new SimError('PROVIDER_CLOSED','Provider已关闭');const worlds=await Promise.all([...this.instances.values()].map(i=>i.process.listWorlds()));return worlds.flat()}
   close(worldId:string):Promise<void>{
     const existing=this.closing.get(worldId);if(existing)return existing
