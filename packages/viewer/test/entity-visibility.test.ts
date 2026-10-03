@@ -1,5 +1,6 @@
 import {describe,expect,test} from "bun:test"
 import * as THREE from "three"
+import {TransformControls} from "three/addons/controls/TransformControls.js"
 import {SceneViewer} from "../src/index.ts"
 import {FrameProjection} from "../src/projection.ts"
 import {SCENE_COORDINATES,identityTransform,type Entity,type SceneSnapshot} from "../../lyapunov-contracts/src/types.ts"
@@ -10,6 +11,7 @@ function viewer(){
  value.options={onError:(error:Error)=>{throw error}};value.scene=new THREE.Scene();value.objects=new Map();value.mixers=new Map();value.splatRuntime=new Map();value.visualWarnings=new Map();value.loadingErrors=new Map();value.projection=new FrameProjection()
  // Object.create不运行构造字段；保留真实setScene/setCameraRigs路径。
  value.cameraRigs=new Map();value.cameraRigRoot=new THREE.Group();value.scene.add(value.cameraRigRoot)
+ value.camera=new THREE.PerspectiveCamera();value.transformControls=new TransformControls(value.camera)
  value.sun=new THREE.DirectionalLight();value.generation=0;value.geometryRevision=0;value.sceneLightsVisible=true
  for(const method of ["setSceneEnvironment","trackAnimation","applyDisplay","updateAnnotationMarkers","syncEnvironmentMap"])value[method]=()=>{}
  let loads=0
@@ -36,11 +38,19 @@ describe("节点显隐独立于资源加载与全局灯开关",()=>{
   await value.setScene(snapshot(5,[{...parent,transform:{position:[20,30,40],quaternion:[1,0,0,0],scale:[1,1,1]}},child,other]))
   expect(loads()).toBe(3);expect(value.objects.get("parent")).toBe(loaded)
   expect(loaded.group.position.toArray()).toEqual([20,30,40])
-  value.options.commitEdit=()=>{};value.transformControls={attach:()=>{},detach:()=>{}}
+  value.options.commitEdit=()=>{}
   value.select("parent");value.select("child")
+  expect(value.transformControls.object).toBe(childLoaded.group)
   expect(loads()).toBe(3)
   await value.setScene(snapshot(6,[{...parent,components:{...parent.components,collision:{shape:"box",halfExtents:[1,1,1]}}},child,other]))
   expect(loads()).toBe(3);expect(value.objects.get("parent")).toBe(loaded)
+  value.select("parent");expect(value.transformControls.object).toBe(loaded.group)
+  await value.setScene(snapshot(7,[{...parent,locked:true},child,other]))
+  expect(value.transformControls.object).toBeUndefined();expect(value.transformControls.getHelper().visible).toBe(false)
+  await value.setScene(snapshot(8,[parent,child,other]))
+  expect(value.transformControls.object).toBe(loaded.group);expect(value.transformControls.getHelper().visible).toBe(true)
+  await value.setScene({...snapshot(0,[]),sceneId:"another-scene"})
+  expect(value.transformControls.object).toBeUndefined();expect(value.transformControls.getHelper().visible).toBe(false)
  })
 
  test("资源相关visual改变仍重新加载，排除的只有visible",async()=>{

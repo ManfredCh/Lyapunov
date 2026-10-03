@@ -34,6 +34,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import * as THREE from "three"
+import { TransformControls } from "three/addons/controls/TransformControls.js"
 
 import { matchResourceToken, projectPathsOnly, resourceToken, RESOURCE_TOKEN_PREFIX, type ProductPathRoots } from "../../lyapunov-contracts/src/product-paths.ts"
 import type { Entity } from "../../lyapunov-contracts/src/types.ts"
@@ -496,6 +497,7 @@ class BareViewer {
     }
     viewer.controls = { target: new THREE.Vector3(), update: () => {} }
     viewer.camera = new THREE.PerspectiveCamera()
+    viewer.transformControls = new TransformControls(viewer.camera)
     viewer.materialEnvironment = { texture: new THREE.Texture() }
     viewer.grid = new THREE.Object3D()
     viewer.axes = new THREE.Object3D()

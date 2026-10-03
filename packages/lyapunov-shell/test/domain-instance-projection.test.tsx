@@ -5,6 +5,7 @@ import {cp,mkdtemp,readFile,rm,stat,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import * as THREE from 'three'
+import {TransformControls} from 'three/addons/controls/TransformControls.js'
 import {AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,AssetPhysicsStatus,type AssetDomain,type AssetPlacement} from '../src/asset-library-panel.tsx'
 import {workbenchAPI,type AssetRecord} from '../src/workbench-api.ts'
 import {identityTransform,SCENE_COORDINATES,type SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
@@ -108,6 +109,7 @@ function sceneViewerFixture(){
  viewer.options={onError:(error:Error)=>{throw error}};viewer.scene=new THREE.Scene();viewer.objects=new Map();viewer.mixers=new Map();viewer.splatRuntime=new Map();viewer.visualWarnings=new Map();viewer.loadingErrors=new Map();viewer.projection=new FrameProjection()
  // Object.create不运行构造字段；保留真实setScene/setCameraRigs路径。
  viewer.cameraRigs=new Map();viewer.cameraRigRoot=new THREE.Group();viewer.scene.add(viewer.cameraRigRoot)
+ viewer.camera=new THREE.PerspectiveCamera();viewer.transformControls=new TransformControls(viewer.camera)
  viewer.sun=new THREE.DirectionalLight();viewer.generation=0;viewer.geometryRevision=0;viewer.sceneLightsVisible=true
  for(const method of ['setSceneEnvironment','trackAnimation','applyDisplay','updateAnnotationMarkers','syncEnvironmentMap'])viewer[method]=()=>{}
  let loads=0

@@ -19,6 +19,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import * as THREE from "three"
+import { TransformControls } from "three/addons/controls/TransformControls.js"
 
 import { SceneViewer } from "../src/index.ts"
 import { FrameProjection } from "../src/projection.ts"
@@ -120,6 +121,7 @@ class BareViewer {
     }
     viewer.controls = { target: new THREE.Vector3(), update: () => {} }
     viewer.camera = new THREE.PerspectiveCamera()
+    viewer.transformControls = new TransformControls(viewer.camera)
     viewer.materialEnvironment = { texture: new THREE.Texture() }
     viewer.grid = new THREE.Object3D()
     viewer.axes = new THREE.Object3D()
