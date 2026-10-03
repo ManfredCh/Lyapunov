@@ -52,7 +52,9 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 安装器下载版本清单，校验归档字节数与 SHA-256，并核对包内 `RELEASE.json` 的版本、平台和源码提交。默认 MuJoCo 以 `conda-pack` 伴随包在最终版本路径解包并运行 relocation；随后执行托管 SDK 的 `doctor` 与原生 `physics-check`。这些检查通过后，安装器才原子切换 `current` 并创建用户命令与桌面入口。
 
-安装器不自动执行 `sudo`。若桌面共享库或 Chromium 沙盒检查阻断，已校验的版本目录与 SDK 会保留，原 `current` 保持不变；按输出中的具体路径与修复动作处理，再重跑原安装命令。已下载的正确归档可复用，中断下载保留为 `.partial`。
+正常系统沙箱授权会按上面的同一安装流程自动完成；其他桌面共享库或受限沙箱条件阻断时，已校验的版本目录与 SDK 会保留，原 `current` 保持不变。按短状态与日志说明处理后重跑原安装命令，已下载的正确归档可复用，中断下载保留为 `.partial`。
+
+如果固定桌面文件已经是旧 Lyapunov 入口，安装器会核对窗口类、旧产品包身份与启动目标。身份成立时，旧文件精确保存在 `<安装根>/entry-backups/lyapunov-desktop.original`，并保留可启动的 `lyapunov-desktop.legacy.desktop`；其原 Exec、旧 wrapper 和数据路径不改。新受管入口仍使用固定 `lyapunov-desktop.desktop`，与应用桌面身份保持一致。未知 foreign 文件不会覆盖；后续生成或激活失败会恢复旧标准入口，重复安装不追加旧入口副本。
 
 ## 先查看脚本或选择版本
 
@@ -281,4 +283,4 @@ mv -- "$lyapunov_prefix" "$lyapunov_prefix.uninstalled-$(date +%Y%m%d-%H%M%S)"
 "$HOME/.local/bin/lyapunov" doctor mujoco --managed-sdk
 ```
 
-安装输出可以保存到自己选择的文件；`<版本目录>/.install/release.tsv`、`archive.sha256`、MuJoCo 回执记录安装身份。以 `install-provider` 准备 SDK 的路径还保留 `.install/provider.log` 与 `.install/provider.exit`。桌面事件在实际用户数据根的 `desktop-incidents.jsonl`；从终端启动时的 Host／Provider 日志显示具体运行错误。需要反馈问题时附版本、源码提交、失败命令与关键报错，删除模型 Key、登录会话和私有工程内容。
+安装输出可以保存到自己选择的文件；`<版本目录>/.install/release.tsv`、`archive.sha256`、MuJoCo 回执记录安装身份。physics 的详细 JSON 与错误输出保存在 `.install/physics-check.log`，终端显示简短结果和日志路径，非零退出状态原样保留。以 `install-provider` 准备 SDK 的路径还保留 `.install/provider.log` 与 `.install/provider.exit`。桌面事件在实际用户数据根的 `desktop-incidents.jsonl`；从终端启动时的 Host／Provider 日志显示具体运行错误。需要反馈问题时附版本、源码提交、失败命令与关键报错，删除模型 Key、登录会话和私有工程内容。

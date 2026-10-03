@@ -11,8 +11,20 @@ stage=arguments
 incoming=
 lock=
 link_pending=
+legacy_pending=
+desktop_entry=
+entry_transaction=
 cleanup() {
   status=$?
+  if [ -n "$entry_transaction" ] && [ -f "$entry_transaction" ]; then
+    legacy_pending=$(cat "$entry_transaction")
+  fi
+  if [ -n "$legacy_pending" ] && [ "$legacy_pending" = "$desktop_entry.lyapunov-upgrade-pending" ] && [ -f "$legacy_pending" ]; then
+    if [ "$status" -eq 0 ]; then rm -f -- "$legacy_pending"; else
+      "$product/runtime/node/bin/node" -e 'const fs=require("node:fs");const [pending,entry]=process.argv.slice(1);if(fs.existsSync(entry)&&!fs.readFileSync(entry,"utf8").split("\n").includes(process.env.LYAPUNOV_ENTRY_MARKER))throw Error("Entry changed concurrently; original preserved at "+pending);fs.renameSync(pending,entry);' "$legacy_pending" "$desktop_entry" || printf '%s\n' "Original desktop entry retained at $legacy_pending; automatic restoration was blocked." >&2
+    fi
+    [ -f "$legacy_pending" ] || rm -f -- "$entry_transaction"
+  fi
   [ -z "$incoming" ] || rm -rf -- "$incoming"
   [ -z "$link_pending" ] || rm -f -- "$link_pending"
   [ -z "$lock" ] || rmdir -- "$lock" 2>/dev/null || :
@@ -266,7 +278,14 @@ if run_doctor; then :; else
 fi
 if [ "$with_mujoco" = true ]; then
   stage=physics
-  "$product/lyapunov" physics-check --managed-sdk || fail 'Native MuJoCo physics check failed; the previous version remains current.'
+  physics_log="$product/.install/physics-check.log"
+  if "$product/lyapunov" physics-check --managed-sdk > "$physics_log" 2>&1; then
+    log "PASS: native MuJoCo physics. Details: $physics_log"
+  else
+    physics_exit=$?
+    printf '%s\n' "Native MuJoCo physics check failed (exit $physics_exit); the previous version remains current. Details: $physics_log" >&2
+    exit "$physics_exit"
+  fi
 fi
 stage=entry
 previous=
@@ -281,7 +300,56 @@ if [ -e "$prefix/previous" ] || [ -L "$prefix/previous" ]; then
   case "$previous_saved" in versions/*) old=${previous_saved#versions/}; safe_token "$old" || fail 'Unsafe rollback link.' ;; *) fail 'Rollback link points outside the version directory.' ;; esac
 fi
 # Generate stable wrapper and XDG entry with the packaged Node, after all checks.
-"$product/runtime/node/bin/node" "$product/distribution/linux/install-entry.mjs" "$prefix" "$bin_dir" "$data_home" "$with_desktop" || fail 'Could not prepare the per-user launcher or desktop entry.'
+desktop_entry="$data_home/applications/lyapunov-desktop.desktop"
+entry_transaction="$product/.install/legacy-desktop-pending"
+export LYAPUNOV_ENTRY_MARKER=$("$product/runtime/node/bin/node" -e 'console.log("X-Lyapunov-Install-Root="+process.argv[1].replaceAll("\\","\\\\"))' "$prefix")
+if "$product/runtime/node/bin/node" --input-type=module -e '
+  import fs from "node:fs";import p from "node:path";import {pathToFileURL} from "node:url";
+  const [root,bin,data,desktop,product]=process.argv.slice(1),entry=p.join(data,"applications/lyapunov-desktop.desktop"),pending=entry+".lyapunov-upgrade-pending",transaction=p.join(product,".install/legacy-desktop-pending");
+  const marker=process.env.LYAPUNOV_ENTRY_MARKER,launcher=p.join(bin,"lyapunov"),launcherMarker="# Lyapunov managed launcher root: "+root;
+  const present=file=>{try{return fs.lstatSync(file)}catch(e){if(e.code==="ENOENT")return null;throw e}};
+  const read=file=>fs.readFileSync(file,"utf8"),regular=file=>present(file)?.isFile()===true;
+  // Foreign launchers are checked before any legacy desktop transaction.
+  if(present(launcher)&&(!regular(launcher)||!read(launcher).split("\n").includes(launcherMarker))){console.error("Refusing to replace an unmanaged entry: "+launcher);process.exit(2)}
+  const decode=value=>value.replace(/\\([\\snrt])/g,(_,c)=>({"\\":"\\",s:" ",n:"\n",r:"\r",t:"\t"}[c]));
+  const fields=text=>{let active=false;const out={};for(const line of text.split(/\r?\n/)){if(line.startsWith("[")){active=line==="[Desktop Entry]";continue}const match=active&&/^([A-Za-z][A-Za-z0-9-]*)=(.*)$/.exec(line);if(match){if(match[1] in out)throw Error("Duplicate desktop identity field");out[match[1]]=decode(match[2])}}return out};
+  const sameProduct=text=>{
+    try{
+      const row=fields(text);if(row.Type!=="Application"||!/^Lyapunov(?:\s|[\u3400-\u9fff]|$)/.test(row.Name??"")||row.StartupWMClass!=="lyapunov-desktop")return false;
+      const suffix=p.join("packages","desktop","icons","lyapunov.png");if(!p.isAbsolute(row.Icon??"")||!row.Icon.endsWith("/"+suffix))return false;
+      const alias=row.Icon.slice(0,-suffix.length-1),old=fs.realpathSync(alias),release=JSON.parse(read(p.join(old,"RELEASE.json"))),pkg=JSON.parse(read(p.join(old,"package.json")));
+      if(release.product!=="LyapunovDSH"||release.platform!=="linux-x64"||typeof release.version!=="string"||pkg.name!=="lyapunov-dsh"||!regular(row.Icon))return false;
+      const exec=(row.Exec??"").trim(),quoted=exec.startsWith("\""),match=quoted?/^"((?:\\.|[^"\\])*)"(?:\s|$)/.exec(exec):/^(\S+)/.exec(exec);if(!match)return false;
+      const executable=fs.realpathSync(match[1].replace(/\\([\\"`$])/g,"$1")),direct=fs.realpathSync(p.join(old,"lyapunov"));
+      if(executable===direct)return true;
+      if(!regular(executable)||present(executable).size>65536)return false;
+      const body=read(executable);if(!/\bexec\s+\.\/lyapunov\s+desktop\b/.test(body))return false;
+      for(const assignment of body.matchAll(/(?:^|\n)\s*([A-Za-z_][A-Za-z0-9_]*)=(["\x27])([^"\x27\n]+)\2/g)){
+        try{if(fs.realpathSync(assignment[3])===old&&body.includes("cd \"$"+assignment[1]+"\""))return true}catch{}
+      }
+    }catch{}return false;
+  };
+  let migrated=false;
+  if(desktop==="true"&&present(entry)&&(!regular(entry)||!read(entry).split("\n").includes(marker))){
+    if(!regular(entry)||!sameProduct(read(entry)))throw Error("Refusing to replace an unmanaged entry: "+entry);
+    if(present(pending))throw Error("Previous desktop upgrade is pending: "+pending);
+    const original=fs.readFileSync(entry),legacy=p.join(p.dirname(entry),"lyapunov-desktop.legacy.desktop");
+    if(present(legacy)&&(!regular(legacy)||!fs.readFileSync(legacy).equals(original)))throw Error("Refusing to replace a different legacy desktop entry: "+legacy);
+    const backup=p.join(root,"entry-backups","lyapunov-desktop.original");fs.mkdirSync(p.dirname(backup),{recursive:true,mode:0o700});
+    if(present(backup)){if(!regular(backup)||!fs.readFileSync(backup).equals(original))throw Error("Legacy desktop backup conflict: "+backup)}else fs.writeFileSync(backup,original,{flag:"wx",mode:0o600});
+    if(!present(legacy))fs.writeFileSync(legacy,original,{flag:"wx",mode:0o644});
+    fs.renameSync(entry,pending);migrated=true;fs.writeFileSync(transaction,pending,{flag:"wx",mode:0o600});
+    console.log("Previous Lyapunov entry retained at "+legacy+"; exact backup: "+backup);
+  }
+  const {installEntries}=await import(pathToFileURL(p.join(product,"distribution/linux/install-entry.mjs")).href);
+  try{console.log(JSON.stringify(installEntries(root,bin,data,desktop==="true")))}catch(error){
+    if(migrated){if(present(entry)&&!read(entry).split("\n").includes(marker))throw Error("Original entry preserved at "+pending+"; destination changed");fs.renameSync(pending,entry);fs.unlinkSync(transaction)}throw error;
+  }
+' "$prefix" "$bin_dir" "$data_home" "$with_desktop" "$product"; then :; else
+  entry_exit=$?
+  printf '%s\n' 'Could not prepare the per-user launcher or desktop entry; the previous entry is preserved.' >&2
+  exit "$entry_exit"
+fi
 stage=activate
 if [ -n "$previous" ] && [ "$previous" != "versions/$release_id" ]; then
   link_pending="$prefix/.previous.$$"; ln -s -- "$previous" "$link_pending"; mv -Tf -- "$link_pending" "$prefix/previous"; link_pending=

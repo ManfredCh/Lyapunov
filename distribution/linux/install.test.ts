@@ -1,5 +1,5 @@
 import {afterAll,describe,expect,test} from 'bun:test'
-import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,readlinkSync,rmSync,writeFileSync} from 'node:fs'
+import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,readlinkSync,rmSync,writeFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import {dirname,join} from 'node:path'
 import {tmpdir} from 'node:os'
@@ -29,12 +29,13 @@ function fixture(){
     if(range){ranges.push(range);const start=Number(/^bytes=(\d+)-$/.exec(range)?.[1]);return new Response(bytes.subarray(start),{status:206,headers:{'Content-Range':`bytes ${start}-${bytes.length-1}/${bytes.length}`,'Content-Length':String(bytes.length-start)}})}
     return new Response(bytes,{headers:{'Content-Length':String(bytes.length)}})
   }})
-  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
+  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;entryFails?:boolean;sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
     const archiveRoot='lyapunov-dsh-0.1.0-linux-x64',product=join(root,id,archiveRoot),mode=options.mode??'conda-pack'
     put(join(product,'runtime/node/bin/node'),`#!/bin/sh\nexec ${quote(node)} "$@"\n`,true)
     put(join(product,'RELEASE.json'),JSON.stringify({releaseId:id,version:'0.1.0',platform:'linux-x64',sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',sourceCommitMatchesPayload:true,userDataBundled:false}))
     put(join(product,'packages/desktop/icons/lyapunov.png'),'fixture icon')
     mkdirSync(join(product,'distribution/linux'),{recursive:true});copyFileSync(join(source,'install-entry.mjs'),join(product,'distribution/linux/install-entry.mjs'))
+    if(options.entryFails)put(join(product,'distribution/linux/install-entry.mjs'),'export function installEntries(){throw Error("fixture entry write failed")}\n')
     put(join(product,'runtime/electron/chrome-sandbox'),'nonprivileged fixture helper\n',true)
     put(join(product,'distribution/linux/fixture-doctor.mjs'),`import fs from 'node:fs';import p from 'node:path';const [root,mode]=process.argv.slice(2);const helper=p.join(root,'runtime/electron/chrome-sandbox'),s=fs.lstatSync(helper);if(fs.existsSync(p.join(root,'setup.done'))&&mode!=='recheck'){console.log(JSON.stringify({status:'AVAILABLE'}));process.exit(0)}const code=mode==='libraries'?'DESKTOP_LIBRARIES_MISSING':mode==='context'?'SANDBOX_CONTEXT_ONLY':'SANDBOX_SETUP_REQUIRED';console.log(JSON.stringify({status:'BLOCKED',providers:{mujoco:{status:mode==='provider'?'BLOCKED':'AVAILABLE'}},desktop:{status:'BLOCKED',code,missingSystemLibraries:mode==='libraries'?['missing-fixture.so']:[],sandbox:{status:'BLOCKED',code:'SANDBOX_SETUP_REQUIRED',noNewPrivileges:mode==='nnp',nosuid:mode==='nosuid',helper:{path:helper,exists:true,uid:mode==='helper'?s.uid+1:s.uid,mode:s.mode&0o7777}}}}));process.exit(2);\n`)
     const blocked=`{"status":"BLOCKED","desktop":{"status":"BLOCKED","code":"SANDBOX_CONTEXT_ONLY"},"providers":{"mujoco":{"status":"AVAILABLE"}}}`
@@ -75,7 +76,16 @@ function fixture(){
     const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
-  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,sudoLog,sudoTty,files,ranges,manifests,stop:()=>server.stop(true)}
+  function legacyDesktop(wrapper=true){
+    const old=join(root,'legacy application'),oldData=join(root,'legacy user data'),entry=join(data,'applications/lyapunov-desktop.desktop')
+    put(join(old,'RELEASE.json'),JSON.stringify({product:'LyapunovDSH',platform:'linux-x64',version:'0.0.9'}));put(join(old,'package.json'),JSON.stringify({name:'lyapunov-dsh'}))
+    put(join(old,'packages/desktop/icons/lyapunov.png'),'old product icon');put(join(old,'lyapunov'),'#!/bin/sh\nexit 93\n',true);put(join(oldData,'session'),'keep old data')
+    const executable=wrapper?join(root,'legacy launcher.sh'):join(old,'lyapunov')
+    if(wrapper)put(executable,`#!/bin/sh\nprevious_package=${quote(old)}\nexport LYAPUNOV_DESKTOP_DATA_DIR=${quote(oldData)}\ncd "$previous_package"\nexec ./lyapunov desktop "$@"\n`,true)
+    const text=`[Desktop Entry]\nType=Application\nName=Lyapunov联测\nStartupWMClass=lyapunov-desktop\nExec=${desktopExecutable(executable)}\nIcon=${join(old,'packages/desktop/icons/lyapunov.png')}\nTerminal=false\n`
+    put(entry,text);return {old,oldData,entry,text,executable}
+  }
+  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
@@ -93,7 +103,7 @@ describe('公开 POSIX 用户安装入口',()=>{
     const f=fixture();try{f.candidate('a08-one');expect((await f.run()).status).toBe(0)
       const sentinel=join(f.home,'user-data/session');put(sentinel,'用户数据保持')
       f.candidate('a08-two');expect((await f.run()).status).toBe(0);expect(readlinkSync(join(f.prefix,'previous'))).toBe('versions/a08-one')
-      f.candidate('a08-three',{physicsFails:true});const result=await f.run();expect(result.status).toBe(2);expect(result.err).toContain('Native MuJoCo physics check failed')
+      f.candidate('a08-three',{physicsFails:true});const result=await f.run();expect(result.status).toBe(17);expect(result.err).toContain('Native MuJoCo physics check failed')
       expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-two');expect(readFileSync(sentinel,'utf8')).toBe('用户数据保持')
       expect(existsSync(join(f.prefix,'versions/a08-one/RELEASE.json'))).toBe(true)
     }finally{f.stop()}
@@ -176,8 +186,42 @@ describe('公开 POSIX 用户安装入口',()=>{
   })
   test('sudo替身成功仍须正常doctor与physics通过，任一失败不激活',async()=>{
     for(const [mode,physicsFails] of [['recheck',false],['required',true]] as const){const f=fixture();try{f.candidate('a08-after-auth',{sandbox:mode,physicsFails});f.fakeSudo();const result=await f.runPty()
-      expect(result.status).toBe(2);expect(result.out).toContain(physicsFails?'Native MuJoCo physics check failed':'SANDBOX_RECHECK_FAILED');expect(existsSync(join(f.prefix,'current'))).toBe(false)
+      expect(result.status).toBe(physicsFails?17:2);expect(result.out).toContain(physicsFails?'Native MuJoCo physics check failed':'SANDBOX_RECHECK_FAILED');expect(existsSync(join(f.prefix,'current'))).toBe(false)
       expect(readFileSync(join(f.prefix,'versions/a08-after-auth/doctor.args'),'utf8').trim().split('\n')).toHaveLength(2)
+    }finally{f.stop()}}
+  })
+  test('旧同产品direct或自定义wrapper入口先保留再生成canonical，数据不变且重复不累积',async()=>{
+    for(const wrapper of [false,true]){const f=fixture();try{f.candidate('a08-upgrade-entry');const old=f.legacyDesktop(wrapper);const before=readFileSync(old.executable,'utf8');let result=await f.run()
+      expect(result.status,result.err).toBe(0);expect(readFileSync(old.entry,'utf8')).toContain('X-Lyapunov-Install-Root=')
+      expect(readFileSync(join(f.data,'applications/lyapunov-desktop.legacy.desktop'),'utf8')).toBe(old.text)
+      expect(readFileSync(join(f.prefix,'entry-backups/lyapunov-desktop.original'),'utf8')).toBe(old.text)
+      expect(readFileSync(join(old.oldData,'session'),'utf8')).toBe('keep old data');expect(readFileSync(old.executable,'utf8')).toBe(before)
+      result=await f.run();expect(result.status,result.err).toBe(0);expect(readdirSync(join(f.prefix,'entry-backups'))).toEqual(['lyapunov-desktop.original'])
+      expect(readdirSync(join(f.data,'applications')).sort()).toEqual(['lyapunov-desktop.desktop','lyapunov-desktop.legacy.desktop'])
+    }finally{f.stop()}}
+  })
+  test('unknown foreign或只伪WMClass的desktop保原样，不创建legacy/backup/current',async()=>{
+    for(const identity of [false,true]){const f=fixture();try{f.candidate('a08-foreign-entry');const old=f.legacyDesktop();const text=identity?old.text.replace(desktopExecutable(old.executable),desktopExecutable('/bin/true')):'[Desktop Entry]\nName=Foreign app\nExec=/bin/true\n'
+      put(old.entry,text);const result=await f.run();expect(result.status).not.toBe(0);expect(readFileSync(old.entry,'utf8')).toBe(text)
+      expect(existsSync(join(f.prefix,'entry-backups'))).toBe(false);expect(existsSync(join(f.data,'applications/lyapunov-desktop.legacy.desktop'))).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('legacy保留名字已被foreign占用则两入口都不覆盖',async()=>{
+    const f=fixture();try{f.candidate('a08-legacy-conflict');const old=f.legacyDesktop();const saved=join(f.data,'applications/lyapunov-desktop.legacy.desktop');put(saved,'foreign retained entry')
+      const result=await f.run();expect(result.status).not.toBe(0);expect(readFileSync(old.entry,'utf8')).toBe(old.text);expect(readFileSync(saved,'utf8')).toBe('foreign retained entry')
+    }finally{f.stop()}
+  })
+  test('新入口生成失败或后续activation失败恢复旧canonical并保数据',async()=>{
+    for(const entryFails of [true,false]){const f=fixture();try{f.candidate('a08-restore-entry',{entryFails});const old=f.legacyDesktop();const denyBin=join(f.root,'activation failure')
+      put(join(denyBin,'mv'),'#!/bin/sh\nfor part in "$@";do case "$part" in *.current.*) exit 23;;esac;done\nexec /bin/mv "$@"\n',true)
+      const result=await f.run([],entryFails?{}:{PATH:denyBin+':'+process.env.PATH});expect(result.status).not.toBe(0);expect(readFileSync(old.entry,'utf8')).toBe(old.text)
+      expect(readFileSync(join(old.oldData,'session'),'utf8')).toBe('keep old data');expect(existsSync(old.entry+'.lyapunov-upgrade-pending')).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('physics详细JSON进产品日志，终端短PASS；真实失败exit保留',async()=>{
+    for(const physicsFails of [false,true]){const f=fixture();try{f.candidate('a08-physics-log',{physicsFails});const result=await f.run();expect(result.status).toBe(physicsFails?17:0)
+      const log=join(f.prefix,'versions/a08-physics-log/.install/physics-check.log');expect(existsSync(log)).toBe(true);expect(result.out).not.toContain('{"status":"PASS"}')
+      expect(result.out+result.err).toContain(log);if(!physicsFails)expect(JSON.parse(readFileSync(log,'utf8'))).toEqual({status:'PASS'})
     }finally{f.stop()}}
   })
 })
