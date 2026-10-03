@@ -22,13 +22,13 @@
 | 出版信息 | 内容 |
 | --- | --- |
 | 技术版本 / releaseId | `0.1.0-alpha.4` |
-| 文档版本日期 | 2026-10-03 |
+| 文档版本日期 | 2026-10-04 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
-| 出品方 | 杭州奇异宇宙人工智能有限公司 |
+| 出品方 | [杭州奇异宇宙人工智能有限公司](https://vorynel.com/?lang=zh) |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | 版权 | © 2026 Vorynel Co., Ltd. |
 | 项目许可 | [Apache License 2.0](LICENSE) · [保留的版权与许可声明](NOTICE) |
-| 源码仓库 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
+| 源码仓库 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov/blob/main/README.zh-CN.md) |
 
 感谢 [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) 的支持，使 Lyapunov 的开发得以实现。
 
@@ -261,6 +261,6 @@ node script/bootstrap.mjs
 
 ## 许可与版权
 
-Lyapunov 项目自有代码采用 [Apache License 2.0](LICENSE)，版权 **© 2026 Vorynel Co., Ltd.**。使用、修改和分发遵循 Apache 2.0，不再附加月活或营业收入门槛。已发布归档保留原始字节和其中的历史许可声明，后续发行包将携带更新后的 LICENSE 与 NOTICE。
+Lyapunov 项目自有代码采用 [Apache License 2.0](LICENSE)，版权 **© 2026 Vorynel Co., Ltd.**。项目已填写的版权和许可适用声明见 [NOTICE](NOTICE)；LICENSE 附录保留 Apache 官方用于演示如何应用许可的标准示例。使用、修改和分发遵循 Apache 2.0，不再附加月活或营业收入门槛。已发布归档保留原始字节和其中的历史许可声明，后续发行包将携带更新后的 LICENSE 与 NOTICE。
 
 原 OpenCode MIT 版权与授权通知完整保留在 [NOTICE](NOTICE)。各独立包、随附 DSH／Node／MuJoCo 组件、机器人资产、模型权重和外部服务保留自己的许可。
