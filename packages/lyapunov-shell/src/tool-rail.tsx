@@ -19,7 +19,7 @@ import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
  * 按钮里那行可见标签。中文本来就短；英文在 60px 宽的按钮里换成公认缩写，
  * 完整词始终留在 tooltip/可访问名称里，任何宽度都不横向溢出。
  */
-type RailEntry={id:ToolId|"engine"|"file"|"terminal"|"deliverable"|"graph";zh:string;en:string;shortEn:string;group:"tool"|"work"}
+type RailEntry={id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work"}
 
 // 工具轨按存储分域列入口：场景（worlds/scenes）、物件（assets）、环境（worlds/environments）、
 // 机器人（robots）、素材（聚合库）。五个入口与磁盘上的域目录一一对应，避免“只有素材看得到”。
@@ -38,11 +38,10 @@ const ENTRIES:RailEntry[]=[
   {id:"file",zh:"文件",en:"Files",shortEn:"Files",group:"work"},
   {id:"terminal",zh:"终端",en:"Terminal",shortEn:"Term",group:"work"},
   {id:"deliverable",zh:"产物",en:"Outputs",shortEn:"Outputs",group:"work"},
-  {id:"graph",zh:"执行图",en:"Execution graph",shortEn:"Graph",group:"work"},
 ]
 
 
-export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,openGraph,graphActive=false,engine,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;openGraph?:()=>void;graphActive?:boolean;engine?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
+export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,engine,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;engine?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
   const ui=useWorkbenchUI()
   const state=ui.getSnapshot()
   const render=(entry:RailEntry)=>{
@@ -52,7 +51,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
     // 每个入口都渲染自己的标签——此前只有引擎按钮渲染，会让其余按钮看起来是空按钮。
     const label=entry.id==="engine"?tr(`物理引擎：${currentEngine}（点击切换）`,`Physics engine: ${currentEngine} (click to switch)`):tr(entry.zh,entry.en)
     const shortLabel=entry.id==="engine"?currentEngine:tr(entry.zh,entry.shortEn)
-    const active=entry.id==="graph"?graphActive:(nativeSceneActive??(state.mode!=="chat"))&&(entry.group==="tool"?state.tool===entry.id
+    const active=(nativeSceneActive??(state.mode!=="chat"))&&(entry.group==="tool"?state.tool===entry.id
       :entry.id==="file"?state.centre==="file"
       :entry.id==="engine"?false
       :state.drawer===entry.id)
@@ -68,7 +67,6 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         if(entry.id==="engine"){onSwitchEngine?.(engine==="isaac"?"mujoco":"isaac");return}
         if(entry.id==="file"&&openFiles){openFiles();return}
         if(entry.id==="terminal"&&openTerminal){openTerminal();return}
-        if(entry.id==="graph"){openGraph?.();return}
         revealScene?.()
         if(entry.group==="tool"){
           if(nativeSceneActive===false)ui.openTool(entry.id as ToolId)
@@ -78,7 +76,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         else ui.toggleDrawer(entry.id==="terminal"?"terminal":"deliverable")
       }}
     >
-      <WorkbenchIcon id={entry.id==="graph"?"deliverable":entry.id} size={16}/>
+      <WorkbenchIcon id={entry.id} size={16}/>
       <span className="lya-rail-label">{shortLabel}</span>
     </button>
   }
@@ -86,6 +84,6 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
   // 分组本身与按钮顺序不变，aria-label/title/aria-pressed 仍由上面每个入口各自提供。
   return <nav className="lya-rail" data-compact={compact||undefined} aria-label={tr("工作台工具","Workbench tools")}>
     <div className="lya-rail-group" data-group-label={tr("工具","Tools")}>{ENTRIES.filter(item=>item.group==="tool").map(render)}</div>
-    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("工作面","Surfaces")}>{ENTRIES.filter(item=>item.group==="work"&&(item.id!=="graph"||openGraph)).map(render)}</div>
+    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("工作面","Surfaces")}>{ENTRIES.filter(item=>item.group==="work").map(render)}</div>
   </nav>
 }

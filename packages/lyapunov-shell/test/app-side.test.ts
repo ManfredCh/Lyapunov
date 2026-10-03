@@ -60,7 +60,7 @@ test('执行图只注册原生标签，不新增整高 surface action 或默认�
  expect(opened).toBe(0)
 })
 
-test('执行图与场景工具共享一个rail；文件页只在用户确认目录后请求切工作区',async()=>{
+test('默认保留一个原产品rail且没有执行图按钮；文件页只在用户确认目录后请求切工作区',async()=>{
  const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'})
  const saved=new Map<string,PropertyDescriptor|undefined>()
@@ -69,7 +69,7 @@ test('执行图与场景工具共享一个rail；文件页只在用户确认目�
  const React=await import('react'),{createRoot}=await import('react-dom/client'),{act}=React
  const {ToolRail}=await import('../src/tool-rail.tsx'),{FilesNavigationActions}=await import('../src/files-navigation-client.tsx')
  const host=document.getElementById('root')!,root=createRoot(host),controller=new AbortController()
- let graphOpened=0,sceneOpened=0
+ let sceneOpened=0
  const adopted:string[]=[]
  type Flow=import('@deepseek-ai/dsh-client-ui-slots').PropsRuntime<'sidebar.right.tab.files.directoryFlow'>
  let flow:Flow|undefined
@@ -78,15 +78,15 @@ test('执行图与场景工具共享一个rail；文件页只在用户确认目�
  const dictionary={browse:'浏览电脑目录',workspace:'当前工作区',hint:'浏览按电脑用户权限；确认后打开工作区。',unavailable:'目录选择不可用',error:'无法打开工作区：'}
  try{
   await act(async()=>{root.render(React.createElement(React.Fragment,null,
-   React.createElement(ToolRail,{tr:zh=>zh,nativeSceneActive:false,openGraph:()=>{graphOpened++},revealScene:()=>{sceneOpened++}}),
+   React.createElement(ToolRail,{tr:zh=>zh,nativeSceneActive:false,revealScene:()=>{sceneOpened++}}),
    // 这条DOM夹具不读取框架提供的全局Session/Workspace hooks，直接驱动实际使用的owner份额。
    React.createElement(FilesNavigationActions,{sessionId:'current',absolutePath:'/tmp/private/child',rootPath:'/tmp/private',signal:controller.signal,openResource:()=>{},renderSlot,t:(key:string)=>dictionary[key as keyof typeof dictionary]??key,openWorkspaceDirectory:async(path:string)=>{adopted.push(path)}} as unknown as Parameters<typeof FilesNavigationActions>[0]),
   ))})
-  const graph=host.querySelector<HTMLButtonElement>('button[aria-label="执行图"]')!
-  expect(graph.closest('nav[aria-label="工作台工具"]')).not.toBeNull()
+  expect(host.querySelector('button[aria-label="执行图"]')).toBeNull()
   expect(host.querySelectorAll('nav[aria-label="工作台工具"]')).toHaveLength(1)
-  await act(async()=>{graph.click()})
-  expect(graphOpened).toBe(1);expect(sceneOpened).toBe(0)
+  expect(host.querySelectorAll('nav[aria-label="工作台工具"] button')).toHaveLength(11)
+  expect(host.querySelector('button[aria-label="场景"]')).not.toBeNull()
+  expect(sceneOpened).toBe(0)
   expect(host.textContent).toContain('/tmp/private')
   expect(flow?.open).toBe(false);expect(adopted).toEqual([])
   await act(async()=>{[...host.querySelectorAll('button')].find(button=>button.textContent==='浏览电脑目录')!.click()})
