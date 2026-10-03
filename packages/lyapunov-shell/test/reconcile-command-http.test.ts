@@ -6,6 +6,7 @@ import JobsLocal from '@deepseek-ai/dsh-jobs-local'
 import Sessions,{SessionId} from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
+import {ToolCallId} from '@deepseek-ai/dsh-llm'
 import {createScope} from '@deepseek-ai/dsh-scope'
 import type {Agent} from '@deepseek-ai/dsh-agent'
 import {createServer} from 'node:http'
@@ -62,5 +63,32 @@ test('registered HTTP command回机器Scene/CAS结果；原生Scope隔离和未�
   expect((await projection(new Request('http://localhost/api/lyapunov/resource-physics?sessionId=other&resourceId=progress&version=1'))).status).toBe(400)
   expect((await projection(new Request('http://localhost/api/lyapunov/resource-physics?sessionId=missing&resourceId=progress&version=1'))).status).toBe(400)
   expect((await projection(new Request('http://localhost/api/lyapunov/resource-physics?sessionId=owned&resourceId=progress'))).status).toBe(400)
+  // 真正的SDK工具注册与执行：当前value-schema DSL不支持数组长度关键字，
+  // 3/4分量、有限数值及非零四元数仍由实际安装执行侧拒绝，拒绝不得落Scene CAS。
+  const nativeCameraTool=ctx.tools.get('camera_scene_save',agents.get('owned'));expect(nativeCameraTool).toBeDefined()
+  let cameraCall=0
+  const invokeCamera=async(input:unknown)=>ctx.tools.execute({callId:ToolCallId('camera-schema-'+String(++cameraCall)),name:'camera_scene_save',agent:agents.get('owned'),arguments:{input},signal:new AbortController().signal})
+  const valid={sceneId:'s',expectedRevision:(await operations.scene.snapshot('s')).revision,entityId:'camera-registry',name:'registry camera',mode:'install',installation:{referenceFrame:'world',positionM:[1,2,3],normal:[0,0,-1],up:[0,1,0],fovYDeg:65}}
+  const installed=await invokeCamera(valid);expect(installed.isError).toBe(false)
+  const installedQuaternion=await invokeCamera({...valid,expectedRevision:(await operations.scene.snapshot('s')).revision,entityId:'camera-registry-quaternion',installation:{referenceFrame:'world',positionM:[4,5,6],quaternionXyzw:[0,0,0,2],fovYDeg:50}})
+  expect(installedQuaternion.isError).toBe(false)
+  const saved=await operations.scene.snapshot('s'),camera=saved.entities.find(row=>row.entityId==='camera-registry')!
+  expect(camera.transform.position).toEqual([1,2,3]);expect(camera.components.camera).toMatchObject({name:'registry camera',fovYDeg:65})
+  expect(saved.entities.find(row=>row.entityId==='camera-registry-quaternion')!.transform.quaternion).toEqual([0,0,0,1])
+  const invalidInstallations=[
+   {positionM:[1,2]},{positionM:[1,2,3,4]},
+   {normal:[0,-1]},{normal:[0,0,-1,0]},
+   {up:[0,1]},{up:[0,1,0,0]},
+   {normal:undefined,up:undefined,quaternionXyzw:[0,0,1]},
+   {normal:undefined,up:undefined,quaternionXyzw:[0,0,0,1,0]},
+   {normal:undefined,up:undefined,quaternionXyzw:[0,0,0,0]},
+   {positionM:[NaN,2,3]},
+  ]
+  for(const invalid of invalidInstallations){
+   const installation={...valid.installation,...invalid};for(const key of ['normal','up'] as const)if(installation[key]===undefined)delete installation[key]
+   const rejected=await invokeCamera({...valid,expectedRevision:saved.revision,entityId:'must-not-save-'+String(cameraCall),installation})
+   expect(rejected.isError).toBe(true);expect((await operations.scene.snapshot('s')).revision).toBe(saved.revision)
+   expect((await operations.scene.snapshot('s')).entities.map(row=>row.entityId)).toEqual(saved.entities.map(row=>row.entityId))
+  }
  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await ctx.fiber.dispose();await rm(root,{recursive:true,force:true})}
 },15000)
