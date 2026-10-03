@@ -29,14 +29,16 @@ function fixture(){
     if(range){ranges.push(range);const start=Number(/^bytes=(\d+)-$/.exec(range)?.[1]);return new Response(bytes.subarray(start),{status:206,headers:{'Content-Range':`bytes ${start}-${bytes.length-1}/${bytes.length}`,'Content-Length':String(bytes.length-start)}})}
     return new Response(bytes,{headers:{'Content-Length':String(bytes.length)}})
   }})
-  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean}={}){
+  function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
     const archiveRoot='lyapunov-dsh-0.1.0-linux-x64',product=join(root,id,archiveRoot),mode=options.mode??'conda-pack'
     put(join(product,'runtime/node/bin/node'),`#!/bin/sh\nexec ${quote(node)} "$@"\n`,true)
     put(join(product,'RELEASE.json'),JSON.stringify({releaseId:id,version:'0.1.0',platform:'linux-x64',sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',sourceCommitMatchesPayload:true,userDataBundled:false}))
     put(join(product,'packages/desktop/icons/lyapunov.png'),'fixture icon')
     mkdirSync(join(product,'distribution/linux'),{recursive:true});copyFileSync(join(source,'install-entry.mjs'),join(product,'distribution/linux/install-entry.mjs'))
+    put(join(product,'runtime/electron/chrome-sandbox'),'nonprivileged fixture helper\n',true)
+    put(join(product,'distribution/linux/fixture-doctor.mjs'),`import fs from 'node:fs';import p from 'node:path';const [root,mode]=process.argv.slice(2);const helper=p.join(root,'runtime/electron/chrome-sandbox'),s=fs.lstatSync(helper);if(fs.existsSync(p.join(root,'setup.done'))&&mode!=='recheck'){console.log(JSON.stringify({status:'AVAILABLE'}));process.exit(0)}const code=mode==='libraries'?'DESKTOP_LIBRARIES_MISSING':mode==='context'?'SANDBOX_CONTEXT_ONLY':'SANDBOX_SETUP_REQUIRED';console.log(JSON.stringify({status:'BLOCKED',providers:{mujoco:{status:mode==='provider'?'BLOCKED':'AVAILABLE'}},desktop:{status:'BLOCKED',code,missingSystemLibraries:mode==='libraries'?['missing-fixture.so']:[],sandbox:{status:'BLOCKED',code:'SANDBOX_SETUP_REQUIRED',noNewPrivileges:mode==='nnp',nosuid:mode==='nosuid',helper:{path:helper,exists:true,uid:mode==='helper'?s.uid+1:s.uid,mode:s.mode&0o7777}}}}));process.exit(2);\n`)
     const blocked=`{"status":"BLOCKED","desktop":{"status":"BLOCKED","code":"SANDBOX_CONTEXT_ONLY"},"providers":{"mujoco":{"status":"AVAILABLE"}}}`
-    put(join(product,'lyapunov'),`#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nprintf '%s\\n' "python_path=\${PYTHONPATH-}" "python_home=\${PYTHONHOME-}" "node_path=\${NODE_PATH-}" "no_user_site=\${PYTHONNOUSERSITE-}" > "$root/environment.vars"\ncase "$1" in\ninstall-provider) printf '%s\\n' 'fixture provider progress';${options.pipFails?"printf '%s\\n' 'pip download failed';exit 19":`printf '%s\\n' '${blocked}';exit 2`};;\ndoctor) printf '%s\\n' "$*" >> "$root/doctor.args";${options.doctorBlocked?`printf '%s\\n' '${blocked}';exit 2`:"printf '%s\\n' '{\"status\":\"AVAILABLE\"}';exit 0"};;\nphysics-check) [ "$2" = --managed-sdk ] || exit 99; printf '%s\\n' "$*" > "$root/physics.args";${options.physicsFails?'exit 17':"printf '%s\\n' '{\"status\":\"PASS\"}';exit 0"};;\n*) printf '%s\\n' "$*";;\nesac\n`,true)
+    put(join(product,'lyapunov'),`#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nprintf '%s\\n' "python_path=\${PYTHONPATH-}" "python_home=\${PYTHONHOME-}" "node_path=\${NODE_PATH-}" "no_user_site=\${PYTHONNOUSERSITE-}" > "$root/environment.vars"\ncase "$1" in\ninstall-provider) printf '%s\\n' 'fixture provider progress';${options.pipFails?"printf '%s\\n' 'pip download failed';exit 19":`printf '%s\\n' '${blocked}';exit 2`};;\ndoctor) printf '%s\\n' "$*" >> "$root/doctor.args";${options.sandbox?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-doctor.mjs" "$root" ${quote(options.sandbox)}`:options.doctorBlocked?`printf '%s\\n' '${blocked}';exit 2`:"printf '%s\\n' '{\"status\":\"AVAILABLE\"}';exit 0"};;\nsetup-sandbox) printf '%s\\n' "$*" >> "$root/setup.args"; : > "$root/setup.done";printf '%s\\n' 'fixture setup complete';exit 0;;\nphysics-check) [ "$2" = --managed-sdk ] || exit 99; printf '%s\\n' "$*" > "$root/physics.args";${options.physicsFails?'exit 17':"printf '%s\\n' '{\"status\":\"PASS\"}';exit 0"};;\ndesktop) printf '%s\\n' "$*" > "$root/gui.args";exit 0;;\n*) printf '%s\\n' "$*";;\nesac\n`,true)
     const archive=join(root,id+'.tar.gz'),tar=spawnSync('tar',['-czf',archive,'-C',dirname(product),archiveRoot]);if(tar.status!==0)throw Error('fixture tar failed')
     const bytes=readFileSync(archive),archiveFile=`lyapunov-linux-x64-${id}.tar.gz`
     files.set(`releases/${id}/${archiveFile}`,bytes)
@@ -54,7 +56,26 @@ function fixture(){
     const child=Bun.spawn(['/bin/sh',join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin,...flags],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,LYAPUNOV_MUJOCO_PYTHON:'/outside/python',...overrides},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
-  return {root,prefix,bin,data,home,candidate,run,files,ranges,manifests,stop:()=>server.stop(true)}
+  const sudoBin=join(root,'sudo fixture'),sudoLog=join(root,'sudo.args'),sudoTty=join(root,'sudo.stdin-tty')
+  function fakeSudo(deny=false){
+    // This is a nonprivileged test command. It imitates terminal prompt/retry
+    // with public QA words; no password or real sudo is involved.
+    put(join(sudoBin,'sudo'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(sudoLog)}\nif [ -t 0 ];then printf '%s' true > ${quote(sudoTty)};else exit 97;fi\n[ "$1" = -p ] || exit 95;shift 2\nprintf '%s' '[sudo] QA authorization: ' > /dev/tty\nIFS= read -r answer < /dev/tty\nif [ "$answer" = qa-retry ];then printf '%s\\n' 'Sorry, try again.' > /dev/tty;printf '%s' '[sudo] QA authorization: ' > /dev/tty;IFS= read -r answer < /dev/tty;fi\n${deny?"printf '%s\\n' 'sudo: QA authorization denied' >&2;exit 41":"[ \"$answer\" = qa-approve ] || exit 42;[ \"$1\" = -- ] || exit 96;shift;exec \"$@\""}\n`,true)
+  }
+  async function runPty(input='qa-approve\n'){
+    const cmd=`cat ${quote(join(source,'install.sh'))} | /bin/sh -s -- --prefix ${quote(prefix)} --bin-dir ${quote(bin)}`
+    const child=Bun.spawn(['script','--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
+    child.stdin.write(input);child.stdin.end()
+    const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
+  }
+  async function runNoTty(){
+    // A new session with no controlling terminal, even when CI was launched
+    // from a terminal. The actual installer still reads a curl-style pipe.
+    const code='import subprocess,sys;raise SystemExit(subprocess.run(["/bin/sh","-s","--",*sys.argv[2:]],input=open(sys.argv[1],"rb").read(),start_new_session=True).returncode)'
+    const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
+    const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
+  }
+  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,sudoLog,sudoTty,files,ranges,manifests,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
@@ -125,6 +146,39 @@ describe('公开 POSIX 用户安装入口',()=>{
       const actual=spawnSync(join(product,'lyapunov'),['doctor','mujoco','--managed-sdk'],{encoding:'utf8',env:{...process.env,PATH:dummy+':'+process.env.PATH,PYTHONPATH:injection,NODE_OPTIONS:'--require '+quote(join(injection,'preload.cjs')),NODE_PATH:injection}})
       expect(actual.status,actual.stderr).toBe(0);expect(JSON.parse(actual.stdout)).toEqual({pythonPath:null,nodePath:null,noUserSite:'1'});expect(existsSync(marker)).toBe(false)
     }finally{f.stop()}
+  })
+  test('真实PTY下curl管道只由系统sudo替身从控制终端prompt/retry一次调用，doctor重验后才physics与激活',async()=>{
+    const f=fixture();try{f.candidate('a08-auth',{sandbox:'required'});f.fakeSudo();const result=await f.runPty('qa-retry\nqa-approve\n')
+      expect(result.status,result.out+result.err).toBe(0);expect(result.out).toContain('Sorry, try again.');expect(result.out).toContain('Installation will resume automatically')
+      expect(readFileSync(f.sudoTty,'utf8')).toBe('true');const product=join(f.prefix,'versions/a08-auth')
+      expect(readFileSync(f.sudoLog,'utf8').trim().split('\n')).toEqual(['-p','Lyapunov one-time sandbox authorization, password for %u: ','--',join(product,'lyapunov'),'setup-sandbox'])
+      expect(readFileSync(join(product,'doctor.args'),'utf8').trim().split('\n')).toHaveLength(2)
+      expect(readFileSync(join(product,'setup.args'),'utf8').trim().split('\n')).toEqual(['setup-sandbox'])
+      expect(readFileSync(join(product,'physics.args'),'utf8')).toContain('--managed-sdk');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-auth')
+      expect(existsSync(join(product,'gui.args'))).toBe(false)
+    }finally{f.stop()}
+  })
+  test('PTY拒绝授权保留旧current和partial版本，不启动physics或GUI',async()=>{
+    const f=fixture();try{f.candidate('a08-before');expect((await f.run()).status).toBe(0);f.candidate('a08-denied',{sandbox:'required'});f.fakeSudo(true)
+      const result=await f.runPty();expect(result.status).toBe(2);expect(result.out).toContain('SANDBOX_AUTHORIZATION_FAILED');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-before')
+      expect(existsSync(join(f.prefix,'versions/a08-denied/.install/mujoco.sha256'))).toBe(true);expect(existsSync(join(f.prefix,'versions/a08-denied/physics.args'))).toBe(false)
+    }finally{f.stop()}
+  })
+  test('实际无控制终端的curl管道不请求sudo，给可重试终端说明',async()=>{
+    const f=fixture();try{f.candidate('a08-no-tty',{sandbox:'required'});f.fakeSudo();const result=await f.runNoTty()
+      expect(result.status).toBe(2);expect(result.err).toContain('SANDBOX_TERMINAL_REQUIRED');expect(existsSync(f.sudoLog)).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}
+  })
+  test('PTY中的NNP/nosuid/库缺失/SDK缺失/错误helper均不请求sudo',async()=>{
+    for(const mode of ['context','nnp','nosuid','libraries','provider','helper'] as const){const f=fixture();try{f.candidate('a08-ineligible',{sandbox:mode});f.fakeSudo();const result=await f.runPty('')
+      expect(result.status,result.out).toBe(2);expect(existsSync(f.sudoLog)).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}}
+  })
+  test('sudo替身成功仍须正常doctor与physics通过，任一失败不激活',async()=>{
+    for(const [mode,physicsFails] of [['recheck',false],['required',true]] as const){const f=fixture();try{f.candidate('a08-after-auth',{sandbox:mode,physicsFails});f.fakeSudo();const result=await f.runPty()
+      expect(result.status).toBe(2);expect(result.out).toContain(physicsFails?'Native MuJoCo physics check failed':'SANDBOX_RECHECK_FAILED');expect(existsSync(join(f.prefix,'current'))).toBe(false)
+      expect(readFileSync(join(f.prefix,'versions/a08-after-auth/doctor.args'),'utf8').trim().split('\n')).toHaveLength(2)
+    }finally{f.stop()}}
   })
 })
 describe('发布manifest身份与Desktop规则',()=>{

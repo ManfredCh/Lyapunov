@@ -212,13 +212,61 @@ if [ "$with_mujoco" = true ]; then
 fi
 stage=doctor
 log 'Checking the installed product with its normal doctor.'
+doctor_log="$product/.install/doctor.log"
+run_doctor() {
+  if [ "$with_mujoco" = true ]; then
+    "$product/lyapunov" doctor mujoco --managed-sdk > "$doctor_log" 2>&1
+  else
+    "$product/lyapunov" doctor desktop > "$doctor_log" 2>&1
+  fi
+}
+if run_doctor; then :; else
+  # Only this package's real helper and an otherwise ready doctor may request
+  # normal OS authorization. CONTEXT_ONLY is never promoted to readiness.
+  if sandbox_code=$("$product/runtime/node/bin/node" -e '
+    const fs=require("node:fs"),p=require("node:path");const [log,root,mu]=process.argv.slice(1);
+    const blocked=code=>{console.log(code);process.exit(2)};let d;
+    try{d=JSON.parse(fs.readFileSync(log,"utf8"))}catch{blocked("DOCTOR_REPORT_INVALID")}
+    const desktop=d?.desktop,s=desktop?.sandbox;
+    if(d?.status!=="BLOCKED"||desktop?.status!=="BLOCKED")blocked("DOCTOR_CHECK_FAILED");
+    if(desktop.code!=="SANDBOX_SETUP_REQUIRED")blocked(desktop.code??"DOCTOR_CHECK_FAILED");
+    if(!d.providers||mu==="true"&&d.providers.mujoco?.status!=="AVAILABLE"||Object.values(d.providers).some(row=>row.status!=="AVAILABLE"))blocked("PROVIDER_UNAVAILABLE");
+    if(!Array.isArray(desktop.missingSystemLibraries)||desktop.missingSystemLibraries.length)blocked("DESKTOP_LIBRARIES_MISSING");
+    if(s?.status!=="BLOCKED"||s.code!=="SANDBOX_SETUP_REQUIRED")blocked("SANDBOX_STATE_UNCONFIRMED");
+    if(s.noNewPrivileges!==false)blocked("SANDBOX_NO_NEW_PRIVILEGES");
+    if(s.nosuid!==false)blocked(s.nosuid===true?"SANDBOX_NOSUID":"SANDBOX_MOUNT_UNCONFIRMED");
+    const helper=p.join(root,"runtime/electron/chrome-sandbox");let actual;
+    try{actual=fs.lstatSync(helper)}catch{blocked("SANDBOX_HELPER_MISSING")}
+    if(s.helper?.path!==helper||s.helper.exists!==true||!actual.isFile()||actual.isSymbolicLink()||actual.size===0||s.helper.uid!==actual.uid||s.helper.mode!==(actual.mode&0o7777))blocked("SANDBOX_HELPER_INVALID");
+    console.log("SANDBOX_SETUP_REQUIRED");
+  ' "$doctor_log" "$product" "$with_mujoco"); then
+    stage=sandbox
+    if ! ( : < /dev/tty ) 2>/dev/null; then
+      fail "SANDBOX_TERMINAL_REQUIRED: Run the same installer in a regular interactive terminal so your OS can authorize this package. Details: $doctor_log"
+    fi
+    command -v sudo >/dev/null 2>&1 || fail "SANDBOX_SUDO_MISSING: This OS needs sudo for this package's sandbox setup. Install it through your system administrator, then rerun this installer."
+    log 'Completing installation: your OS needs one-time sandbox setup authorization. Installation will resume automatically; enter your password only at the system prompt.'
+    # curl|sh owns stdin. sudo and its command receive the controlling terminal,
+    # never the script stream; only the existing setup-sandbox command is elevated.
+    if sudo -p 'Lyapunov one-time sandbox authorization, password for %u: ' -- "$product/lyapunov" setup-sandbox < /dev/tty > "$product/.install/sandbox-setup.log"; then :; else
+      fail "SANDBOX_AUTHORIZATION_FAILED: OS authorization or sandbox setup did not complete. The verified version is preserved; rerun the same installer when authorization is available."
+    fi
+    stage=doctor
+    log 'Sandbox setup finished; checking the product again.'
+    run_doctor || fail "SANDBOX_RECHECK_FAILED: The normal doctor still blocks activation. Details: $doctor_log"
+  else
+    log "$sandbox_code: the verified version remains pending."
+    case "$sandbox_code" in
+      SANDBOX_CONTEXT_ONLY|SANDBOX_NO_NEW_PRIVILEGES) remedy='Rerun the same installer from a normal authorized terminal; this process cannot confirm or configure the desktop sandbox.' ;;
+      SANDBOX_NOSUID) remedy='Choose a local Linux installation directory on a filesystem that supports the sandbox helper, then rerun the installer.' ;;
+      *) remedy='Resolve the reported dependency or sandbox condition and rerun the same installer.' ;;
+    esac
+    fail "$sandbox_code: $remedy Details: $doctor_log"
+  fi
+fi
 if [ "$with_mujoco" = true ]; then
-  "$product/lyapunov" doctor mujoco --managed-sdk || fail "Doctor blocked activation; the verified SDK and version remain at $product. Follow its reported remedy and rerun this installer."
   stage=physics
   "$product/lyapunov" physics-check --managed-sdk || fail 'Native MuJoCo physics check failed; the previous version remains current.'
-else
-  # Explicitly slim installs still check desktop and sandbox, with no provider.
-  "$product/lyapunov" doctor desktop || fail "Desktop doctor blocked activation; follow its reported remedy for $product."
 fi
 stage=entry
 previous=
