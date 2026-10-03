@@ -32,6 +32,9 @@ export function centralSplatBounds(count:number, read:(index:number)=>{center:TH
 export class FirstPersonNavigation {
   active=false
   speed=3
+  /** 相机安装镜式调姿复用同一输入 owner，只允许转头，不能平移安装原点。 */
+  rotationOnly=false
+  onRotate?:()=>void
   private keys=new Set<string>()
   private shiftHeld=false
   private lastTime=0
@@ -80,6 +83,7 @@ export class FirstPersonNavigation {
     this.camera.up.set(0,1,0).applyQuaternion(this.camera.quaternion).normalize()
     this.target.copy(this.camera.position).addScaledVector(this.camera.getWorldDirection(new THREE.Vector3()),distance)
     start.x=event.clientX;start.y=event.clientY
+    this.onRotate?.()
   }
   private up=(event:PointerEvent)=>{if(!this.pointer)return;this.pointer=undefined;if(this.canvas.hasPointerCapture(event.pointerId))this.canvas.releasePointerCapture(event.pointerId)}
   private contextMenu=(event:Event)=>{if(this.active)event.preventDefault()}
@@ -87,6 +91,7 @@ export class FirstPersonNavigation {
     if(!this.active||!this.ownsInput()||event.isComposing||event.ctrlKey||event.altKey||event.metaKey)return
     if(event.code==="Escape"){event.preventDefault();this.exit();return}
     if(!["KeyW","KeyA","KeyS","KeyD","KeyQ","KeyE","ShiftLeft","ShiftRight"].includes(event.code))return
+    if(this.rotationOnly){event.preventDefault();event.stopPropagation();return}
     event.preventDefault();event.stopPropagation();this.keys.add(event.code)
     // Shift 可先于画布获得焦点按下，移动键携带的修饰状态同样生效。
     this.shiftHeld=Boolean(event.shiftKey)
@@ -97,7 +102,7 @@ export class FirstPersonNavigation {
     // 隐藏/拆卸画布或表单接管输入时不依赖blur是否已投递，下一帧即释放旧held键。
     if(!this.active||!this.ownsInput()){this.blur();return}
     const dt=this.lastTime?Math.min(.05,(time-this.lastTime)/1000):0;this.lastTime=time
-    if(!this.keys.size)return
+    if(this.rotationOnly||!this.keys.size)return
     const up=this.worldUp(),forward=this.horizontalForward(up)
     const right=new THREE.Vector3().crossVectors(forward,up).normalize(),delta=new THREE.Vector3()
     delta.addScaledVector(forward,Number(this.keys.has("KeyW"))-Number(this.keys.has("KeyS")))

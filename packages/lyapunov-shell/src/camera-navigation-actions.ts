@@ -18,10 +18,11 @@ export function enterSavedCameraView(viewer:Pick<CameraAuthoringViewer,'sampleCa
   if(!named.carrier||!named.cameras.some(row=>row.name===name))throw Error('CAMERA_NAVIGATION_SAVED_VIEW_MISSING: 当前Scene没有所选保存视角')
   viewer.pilotCameraRig(`${named.carrier}/${name}`,true)
 }
-export interface CameraNavigationInput {action:CameraNavigationAction;clientId?:string;sceneId?:string;entityId?:string}
+export interface CameraNavigationInput {action:CameraNavigationAction;clientId?:string;sceneId?:string;entityId?:string;cameraId?:string}
 export interface CameraNavigationPorts {
   clientId:string;ownsSurface():boolean;viewerVisible():boolean;scene():SceneSnapshot|undefined
   viewer():Partial<CameraAuthoringViewer>|undefined
+  readOnly?():boolean
   ui:Pick<WorkbenchUIStore,'showCentre'|'openTool'>;selectEntity(entityId:string):void
 }
 /** 手工与NL共同消费入口：定位改共享工具栏，退出改观察位及画布焦点，均属于前台工作面。 */
@@ -35,6 +36,13 @@ export function applyCameraNavigation(input:CameraNavigationInput,ports:CameraNa
     if(typeof viewer.exitCameraMode!=='function')throw Error('CAMERA_NAVIGATION_EXIT_UNSUPPORTED: 当前Viewer不支持统一退出接口')
     ports.ui.showCentre('canvas')
     viewer.exitCameraMode({restoreView:true,focus:true})
+  }else if(input.action==='aimCameraView'){
+    if(ports.readOnly?.())throw Error('CAMERA_NAVIGATION_READ_ONLY')
+    const entity=input.entityId?scene?.entities.find(e=>e.entityId===input.entityId&&e.components.camera):undefined
+    const key=input.cameraId??(entity?`${entity.entityId}/${(entity.components.camera as {name?:string}).name??entity.name}`:undefined)
+    if(!key)throw Error('CAMERA_NAVIGATION_CAMERA_REQUIRED: choose an actual cameraId or Scene camera entityId')
+    if(typeof viewer.aimCameraRig!=='function')throw Error('CAMERA_NAVIGATION_AIM_UNSUPPORTED')
+    ports.ui.showCentre('canvas');ports.ui.openTool('camera');viewer.selectCameraRig?.(key);viewer.aimCameraRig(key)
   }else{
     if(!input.entityId||!scene?.entities.some(entity=>entity.entityId===input.entityId))throw Error('CAMERA_NAVIGATION_ENTITY_MISSING: 在当前场景选择真实机器人实例')
     if(typeof viewer.focusRobotAnchor!=='function')throw Error('ROBOT_ANCHOR_FOCUS_UNAVAILABLE: 当前Viewer不支持原生标记定位')

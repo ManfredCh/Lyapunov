@@ -7,9 +7,10 @@ import { sceneCameraCommit, sceneCameraDraftOf, normalizeDraftLens, type CameraM
 
 export interface CameraSceneSaveInput {
   sceneId: string; expectedRevision: number; entityId?: string; name?: string; clientId?: string
-  mode: 'current-view' | 'draft' | 'native-preset' | 'restore'
+  mode: 'current-view' | 'draft' | 'install' | 'native-preset' | 'restore'
   mount?: { entityId: string; bodyName: string }; draft?: SceneCameraDraft
   worldId?: string; expectedGeneration?: number; presetId?: string
+  installation?: import('./camera-installation-input.ts').CameraInstallationInput
 }
 function entityMatrix(scene:SceneSnapshot,entity:Entity,visited=new Set<string>()):Matrix4{
   if(visited.has(entity.entityId))throw new Error('CAMERA_PARENT_CYCLE')

@@ -451,11 +451,13 @@ describe("PRIV-04/05 字段分级与目录最小化：内部字段零穿透", ()
     expectNoLeak(browserFace(projected));expect(projected).not.toHaveProperty('privateDiagnostic')
     expect(uiCommandFields('scene_reconcile_bogus',receipt,ROOTS,false)).toBeNull()
   })
-  test('标准物理工作区/世界配置精确命令保Scene字段，不给未知newname通配',()=>{
-    const input={sceneId:'s',revision:14,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[],physics:{gravityWorldMps2:[0,0,-9.81],template:'physics-workspace',groundEntityId:'ground'},privateDiagnostic:MARKER_TOKEN}
-    for(const name of ['scene_prepare_workspace','scene_configure_physics']){
-      const machine=uiCommandFields(name,input,ROOTS,false)
-      expect(machine).toMatchObject({sceneId:'s',revision:14,coordinates:input.coordinates,entities:[],physics:input.physics})
+  test('标准物理工作区/首次建世界/世界配置精确命令保Scene字段，不给未知newname通配',()=>{
+    const input={sceneId:'s',revision:14,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'ground',locked:true,components:{collision:{shape:'plane',infinite:true}}}],physics:{gravityWorldMps2:[0,0,-9.81],template:'physics-workspace-v2',groundEntityId:'ground',groundState:'present'},privateDiagnostic:MARKER_TOKEN}
+    for(const name of ['scene_prepare_workspace','scene_prepare_world','scene_configure_physics']){
+      const response=commandRouteResponse(name,{kind:'success',text:JSON.stringify(input)},'guest',ROOTS)
+      const machine=response.ui
+      expect(response.kind).toBe('success')
+      expect(machine).toMatchObject({sceneId:'s',revision:14,coordinates:input.coordinates,entities:input.entities,physics:input.physics})
       expectNoLeak(browserFace(machine));expect(machine).not.toHaveProperty('privateDiagnostic')
     }
     expect(uiCommandFields('scene_prepare_custom_unknown',input,ROOTS,false)).toBeNull()

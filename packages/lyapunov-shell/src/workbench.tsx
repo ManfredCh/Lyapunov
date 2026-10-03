@@ -44,13 +44,13 @@ import type {RobotSetBaseInput,RobotSetTcpInput} from "../../lyapunov-contracts/
 import {FlightControlPanel} from "./flight-control-panel.tsx"
 import {RecordingPanel} from "./recording-panel.tsx"
 import {CapturePanel,cameraRigSpecs} from "./capture-panel.tsx"
-import {CameraReturnControl,SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
+import {CameraAimControl,CameraReturnControl,SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
 import {AnnotationPanel,type AnnotatedCapture} from "./annotation-panel.tsx"
 import {annotationPromptText,annotationRows,createAnnotation,readAnnotations,writeAnnotations} from "./annotation-store.ts"
 import {ToolRail} from "./tool-rail.tsx"
 import {WorkbenchIcon} from "./vendor/tabler/icons.tsx"
 import {AssetLibraryPanel,AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,type AssetPlacement} from "./asset-library-panel.tsx"
-import {SceneNodeVisibility,SceneRemovalConfirmation,assetSceneInstances,removeSceneNodeCommit,sceneSubtreeIds,visibilityCommit,type SceneRemovalTarget} from "./scene-node-controls.tsx"
+import {SceneNodeLock,sceneNodeName,infiniteGround,lockCommit,SceneNodeVisibility,SceneRemovalConfirmation,assetSceneInstances,removeSceneNodeCommit,sceneSubtreeIds,visibilityCommit,type SceneRemovalTarget} from "./scene-node-controls.tsx"
 import {PackLibraryPanel} from "./pack-library-panel.tsx"
 import {PolicyLibraryPanel} from "./policy-library-panel.tsx"
 import {EnvironmentPanel,type EnvironmentPatch,type EnvironmentStatus} from "./environment-panel.tsx"
@@ -398,6 +398,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  /** 原生输入插入动作（注册项经 inject 传入）：把请求追加到**指定会话**的原生输入框草稿。 */
 }){
  const tr:Translate=(cn,en)=>t("open")==="Scene workbench"?en:cn,api=useMemo(()=>workbenchAPI(sessionId??""),[sessionId]),cacheKey="lyapunov.workbench."+sessionId
+ const cameraTranslateRef=useRef(tr);cameraTranslateRef.current=tr
  // 物理引擎状态：**从 Host 读运行中的值**（`runtime-info.engine` 由启动参数回写），不是客户端猜的。
  // 切换只写偏好文件（唯一 owner：`script/engine-preference.ts`），**不重启 Host**——
  // 引擎在启动时装配 Provider，运行中换不了；重启会打断活动会话与运行中的动作。
@@ -542,7 +543,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const observerState=useSyncExternalStore(subscribeObserver,observerSnapshot,()=>undefined)
  const cameraExitBridge=typeof window!=='undefined'?window.lyapunovDesktop as unknown as CameraExitBridge|undefined:undefined
  useEffect(()=>cameraExitBridge?.registerExitParticipant?.('camera-gizmo:'+api.clientId,{summary:()=>({dirtyDrafts:observerOwner?.observerState?.().dirty?1:0,runningActions:0}),flush:async()=>{const state=observerOwner?.observerState?.();if(state?.dirty||state?.saving){if(!observerOwner?.finishCameraRigEditing)throw Error('CAMERA_EDIT_FINISH_UNAVAILABLE');await observerOwner.finishCameraRigEditing({discard:false})}}}),[cameraExitBridge,api.clientId,observerOwner])
- const cameraNavigation=(input:CameraNavigationInput)=>applyCameraNavigation(input,{clientId:api.clientId,ownsSurface:()=>ownsSurfaceRef.current,viewerVisible:()=>viewerVisibleRef.current,scene:()=>sceneRef.current,viewer:()=>viewer.current as unknown as CameraAuthoringViewer|undefined,ui,selectEntity:entityId=>{selectedRef.current=entityId;setSelected(entityId)}})
+ const cameraNavigation=(input:CameraNavigationInput)=>applyCameraNavigation(input,{clientId:api.clientId,ownsSurface:()=>ownsSurfaceRef.current,viewerVisible:()=>viewerVisibleRef.current,readOnly:()=>cameraReadOnlyRef.current,scene:()=>sceneRef.current,viewer:()=>viewer.current as unknown as CameraAuthoringViewer|undefined,ui,selectEntity:entityId=>{selectedRef.current=entityId;setSelected(entityId)}})
  const exitCameraView=()=>cameraNavigation({action:'exitCameraView',clientId:api.clientId,sceneId:sceneRef.current?.sceneId})
  const locateRobotAnchor=(entityId:string,kind:'tcp'|'base')=>cameraNavigation({action:kind==='tcp'?'locateTcp':'locateBase',clientId:api.clientId,sceneId:sceneRef.current?.sceneId,entityId})
  // 批注的"最新值"同样要有 ref：创建 effect 只在 open/可见性变化时跑，不能把它的依赖拖成批注数组。
@@ -687,7 +688,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
     else if(item.action==="enterSceneCenter"){ui.showCentre("canvas");viewer.current?.enterSceneCenter(entityId)}
     else if(isCameraNavigationAction(item.action)){
      try{
-      const receipt=cameraNavigation({action:item.action,...directedClient?{clientId:directedClient}:{},...sceneId?{sceneId}:{},...entityId?{entityId}:{}})
+      const receipt=cameraNavigation({action:item.action,...typeof item.args?.cameraId==='string'?{cameraId:item.args.cameraId}:{},...directedClient?{clientId:directedClient}:{},...sceneId?{sceneId}:{},...entityId?{entityId}:{}})
       if(!receipt.applied)continue
      }catch(error){failed(item.id,error);setError(error instanceof Error?error.message:String(error))}
     }
@@ -880,7 +881,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 资源也按会话取（`api.mediaURL` 会带上本窗口的会话标识）：同一个 sceneId/uri 在两个会话里
   // 指向各自那份存储，Viewer 不会用别的会话的资源字节拼这一版场景。走 apiRef 是因为这个
   // 效应不随 api 重建，闭包里直接捕 api 会在换会话后继续用旧身份。
-  instance=createViewer({container:host,splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>setPlacingPoint(point),onError:value=>setError(String(value)),
+  instance=createViewer({container:host,translate:(zh,en)=>cameraTranslateRef.current(zh,en),splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>setPlacingPoint(point),onError:value=>setError(String(value)),
    // 新批注只在这里生成 id/编号：编号是显示序号（面板、标记、截图三处必须同一个），身份始终是 annotationId。
    onAnnotationCreate:anchor=>{const created=createAnnotation(anchor,annotationIds.current.length+1,new Date().toISOString());setAnnotations(old=>[...old,created]);setActiveAnnotation(created.annotationId)},
    onAnnotationSelect:annotationId=>setActiveAnnotation(annotationId),
@@ -950,7 +951,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const wantsTopology=viewerVisible&&display.collision===true&&['mujoco','isaac'].includes(world.engineId)&&ids.length>0&&scene?.sceneId===world.sceneId&&scene?.revision===world.appliedSceneRevision
   const poll=async()=>{if(busy)return;busy=true;try{
    // 新 Viewer/选择的图层可能没有几何；轮询闭包的“曾收到”不能代替当前图层的持有事实。
-   const current=await api.frame(world.worldId,wantsTopology?{entityIds:ids,includeGeometry:!geometryReceived||viewer.current?.collisionStatus().needsGeometry===true}:undefined)
+   const current=await api.frame(world.worldId,wantsTopology?{entityIds:ids,includeGeometry:!geometryReceived||viewer.current?.collisionStatus().needsGeometry===true}:undefined,uiState.tool==='camera'||uiState.tool==='annotation'||annotating||observerState?.mode==='camera-edit'?{cameraAuthoring:true}:undefined)
    if(!alive||apiRef.current!==api||worldRef.current?.worldId!==world.worldId)return
    if(current.generation!==worldRef.current.worldGeneration){await refreshState(sceneRef.current?.sceneId);return}
    if(current.sceneRevision!==worldRef.current.appliedSceneRevision||worldRef.current.engineId!==world.engineId){await refreshState(sceneRef.current?.sceneId);return}
@@ -961,7 +962,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())
   }catch(value){if(alive&&worldRef.current?.worldId===world.worldId){setReconnecting(true);setError(String(value));try{const refreshed=await refreshState(sceneRef.current?.sceneId);if(!refreshed.worlds.some(item=>item.worldId===world.worldId)){setReconnecting(false);setError("")}}catch{}}}finally{busy=false}}
   void poll();const timer=setInterval(poll,120);return()=>{alive=false;clearInterval(timer)}
- },[open,viewerVisible,renderRetry,world?.worldId,world?.engineId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady,sessionId,selected,scene?.sceneId,scene?.revision,display.collision])
+ },[open,viewerVisible,renderRetry,world?.worldId,world?.engineId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady,sessionId,selected,scene?.sceneId,scene?.revision,display.collision,uiState.tool,annotating,observerState?.mode])
  // 未装配世界的派生件只读加载也要更新状态；不发送 Frame、Commands 或另一份物理状态。
  useEffect(()=>{if(!open||!viewerVisible||!selected||frameWorldReady)return
   const read=()=>{const current=viewer.current?.collisionStatus();if(current)setCollisionStatus(previous=>JSON.stringify(previous)===JSON.stringify(current)?previous:current)}
@@ -1074,7 +1075,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const chosen=sceneRef.current,host=hostId.current,requestAPI=api
   if(!chosen||!host||!sessionId||readOnly)return
   const worldAtStart=worldRef.current?.worldId
-  const w=await automaticWorld.ensure(sessionId,host,chosen,{reconcile:async(snapshot,signal)=>{signal.throwIfAborted();const result=await api.command<{snapshot:SceneSnapshot;pending:boolean;issues:Array<{entityId:string;resourceId?:string;version?:number;reason:string}>}>('scene_reconcile_physics',{sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,retryFailed:false,waitForPending:true});signal.throwIfAborted();return result},acceptScene:snapshot=>{if(apiRef.current===requestAPI&&sceneRef.current?.sceneId===snapshot.sceneId)applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)},list:async()=>{const worlds=(await api.state({sceneId:chosen.sceneId})).worlds;return worldAtStart&&worlds.some(w=>w.worldId===worldAtStart&&w.sceneId===chosen.sceneId)?worlds.filter(w=>w.worldId===worldAtStart):worlds},open:openWorld,setPaused:(bound,paused,signal)=>api.command<WorldHandle>('sim_set_paused',{worldId:bound.worldId,paused,expectedGeneration:bound.worldGeneration},{sceneId:bound.sceneId,worldId:bound.worldId},signal),sync:(snapshot,bound,signal)=>api.command<WorldHandle>('sim_sync',{sceneId:snapshot.sceneId,worldId:bound.worldId},{sceneId:snapshot.sceneId,worldId:bound.worldId},signal),observe:id=>api.frame(id),close:id=>api.command('sim_close',{worldId:id},{sceneId:chosen.sceneId,worldId:id})},explicit)
+  const w=await automaticWorld.ensure(sessionId,host,chosen,{reconcile:async(snapshot,signal)=>{signal.throwIfAborted();const result=await api.command<{snapshot:SceneSnapshot;pending:boolean;issues:Array<{entityId:string;resourceId?:string;version?:number;reason:string}>}>('scene_reconcile_physics',{sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,retryFailed:false,waitForPending:true});signal.throwIfAborted();return result},acceptScene:snapshot=>{if(apiRef.current===requestAPI&&sceneRef.current?.sceneId===snapshot.sceneId)applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)},prepareWorld:async(snapshot,signal)=>{signal.throwIfAborted();return api.command<SceneSnapshot>('scene_prepare_world',{sceneId:snapshot.sceneId,expectedRevision:snapshot.revision},undefined,signal)},list:async()=>{const worlds=(await api.state({sceneId:chosen.sceneId})).worlds;return worldAtStart&&worlds.some(w=>w.worldId===worldAtStart&&w.sceneId===chosen.sceneId)?worlds.filter(w=>w.worldId===worldAtStart):worlds},open:openWorld,setPaused:(bound,paused,signal)=>api.command<WorldHandle>('sim_set_paused',{worldId:bound.worldId,paused,expectedGeneration:bound.worldGeneration},{sceneId:bound.sceneId,worldId:bound.worldId},signal),sync:(snapshot,bound,signal)=>api.command<WorldHandle>('sim_sync',{sceneId:snapshot.sceneId,worldId:bound.worldId},{sceneId:snapshot.sceneId,worldId:bound.worldId},signal),observe:id=>api.frame(id),close:id=>api.command('sim_close',{worldId:id},{sceneId:chosen.sceneId,worldId:id})},explicit)
   if(!w||apiRef.current!==requestAPI||hostId.current!==host||sceneRef.current?.sceneId!==chosen.sceneId||(worldRef.current?.worldId!==worldAtStart&&worldRef.current?.worldId!==w.worldId))return
   if(w.appliedSceneRevision!==sceneRef.current?.revision)return
   const adopted=adoptWorldHandle(w,worldRef.current)!
@@ -1274,7 +1275,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
     }
     return chain.length?chain.join(" › "):self.name
    }
-   const rows=annotationRows(annotationsRef.current,nameOf)
+   const rows=annotationRows(value.annotations??annotationsRef.current,nameOf)
    // 说明里带的是**每条批注的像素/归一化坐标 + 实体与局部坐标 + 相机位姿**：模型看图只知道"第 3 个圈在哪块像素"，
    // 不知道它对应场景里哪个实体、什么视角；这几行补上，并且默认直接投进当前会话（用户不必再打一句"看一下"）。
    const prompt=annotationPromptText({sceneId:sceneRef.current?.sceneId,sceneRevision:sceneRef.current?.revision,pins:value.pins.map(pin=>({...pin,entityName:nameOf(pin.entityId)})),pose:value.pose,imagePath:undefined,imageURL:undefined})
@@ -1290,8 +1291,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   },
  }
  const chooseSceneEntity=(id:string)=>{const current=sceneRef.current;if(!current)return;if(!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);ui.showCentre('canvas')}
- const nodeRoleLabel=(item:Entity)=>({robot:tr('机器人装配','Robot assembly'),animated:tr('动画装配','Animated assembly'),physics:tr('物理实例','Physics instance'),group:tr('组','Group'),child:tr('子节点','Child node'),entity:tr('独立实体','Entity')}[sceneNodeRole(item)])
- const tree=(parent?:string,depth=0):any=>scene?.entities.filter(item=>item.parentId===parent).map(item=>{const children=scene.entities.some(child=>child.parentId===item.entityId),robot=robotEntity(item);return <div key={item.entityId}><div className="lya-tree-row" aria-selected={selected===item.entityId} style={{paddingLeft:depth*12}}><button aria-label={tr("展开或收起 ","Expand or collapse ")+item.name} onClick={()=>setCollapsed(old=>{const next=new Set(old);next.has(item.entityId)?next.delete(item.entityId):next.add(item.entityId);return next})}>{children?(collapsed.has(item.entityId)?"▸":"▾"):"·"}</button><button className="lya-tree-name" title={item.entityId} onClick={()=>chooseSceneEntity(item.entityId)}>{robot?"⚙ ":""}{item.name}</button><small>{nodeRoleLabel(item)}{children?` · ${scene.entities.filter(child=>child.parentId===item.entityId).length} ${tr('子节点','children')}`:''}</small><SceneNodeVisibility entity={item} scene={scene} tr={tr} disabled={readOnly||removing} onChange={visible=>perform(()=>setNodeVisibility(item.entityId,visible))}/><button type="button" className="lya-icon-button" disabled={readOnly||removing} aria-label={tr("移除节点 ","Remove node ")+item.name} title={tr("移除当前场景实例；素材与原文件保留。","Remove this scene instance; library assets and originals remain.")} onClick={()=>requestRemoval(item.entityId)}>×</button>{robot&&<input type="checkbox" aria-label={tr("批量选择 ","Batch select ")+item.name} checked={batchIds.includes(item.entityId)} onChange={event=>{setBatchIds(old=>event.target.checked?[...old,item.entityId]:old.filter(id=>id!==item.entityId));if(event.target.checked&&world)perform(()=>describe(item.entityId))}}/>}</div>{children&&!collapsed.has(item.entityId)&&tree(item.entityId,depth+1)}</div>})
+ const nodeRoleLabel=(item:Entity)=>infiniteGround(item)?tr('无限碰撞平面 · 零厚度','Infinite collider · Zero thickness'):({robot:tr('机器人装配','Robot assembly'),animated:tr('动画装配','Animated assembly'),physics:tr('物理实例','Physics instance'),group:tr('组','Group'),child:tr('子节点','Child node'),entity:tr('独立实体','Entity')}[sceneNodeRole(item)])
+ const tree=(parent?:string,depth=0):any=>scene?.entities.filter(item=>item.parentId===parent).map(item=>{const children=scene.entities.some(child=>child.parentId===item.entityId),robot=robotEntity(item);return <div key={item.entityId}><div className="lya-tree-row" aria-selected={selected===item.entityId} style={{paddingLeft:depth*12}}><button aria-label={tr("展开或收起 ","Expand or collapse ")+sceneNodeName(item,tr)} onClick={()=>setCollapsed(old=>{const next=new Set(old);next.has(item.entityId)?next.delete(item.entityId):next.add(item.entityId);return next})}>{children?(collapsed.has(item.entityId)?"▸":"▾"):"·"}</button><button className="lya-tree-name" title={item.entityId} onClick={()=>chooseSceneEntity(item.entityId)}>{robot?"⚙ ":""}{sceneNodeName(item,tr)}</button><small>{nodeRoleLabel(item)}{children?` · ${scene.entities.filter(child=>child.parentId===item.entityId).length} ${tr('子节点','children')}`:''}</small><SceneNodeLock entity={item} tr={tr} disabled={readOnly||removing} onChange={locked=>perform(()=>setNodeLock(item.entityId,locked))}/><SceneNodeVisibility entity={item} scene={scene} tr={tr} disabled={readOnly||removing} onChange={visible=>perform(()=>setNodeVisibility(item.entityId,visible))}/><button type="button" className="lya-icon-button" disabled={readOnly||removing} aria-label={tr("移除节点 ","Remove node ")+sceneNodeName(item,tr)} title={tr("移除当前场景实例；素材与原文件保留。","Remove this scene instance; library assets and originals remain.")} onClick={()=>requestRemoval(item.entityId)}>×</button>{robot&&<input type="checkbox" aria-label={tr("批量选择 ","Batch select ")+sceneNodeName(item,tr)} checked={batchIds.includes(item.entityId)} onChange={event=>{setBatchIds(old=>event.target.checked?[...old,item.entityId]:old.filter(id=>id!==item.entityId));if(event.target.checked&&world)perform(()=>describe(item.entityId))}}/>}</div>{children&&!collapsed.has(item.entityId)&&tree(item.entityId,depth+1)}</div>})
 
  // ---- 环境面板：检索 → 核对 → 下载导入。面板**不提供生成入口**：生成由域指针（router）命中后走 asset-generation 技能选路。 ----
  const searchEnvironment=async()=>{
@@ -1335,7 +1336,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(!current||!sessionId||readOnlyRef.current)return
   const node=current.entities.find(value=>value.entityId===entityId)
   if(!node)return
-  setError("");setRemoval({sessionId,sceneId:current.sceneId,revision:current.revision,entityId,name:node.name,nodeCount:sceneSubtreeIds(current,entityId).length})
+  setError("");setRemoval({sessionId,sceneId:current.sceneId,revision:current.revision,entityId,name:sceneNodeName(node,tr),nodeCount:sceneSubtreeIds(current,entityId).length,ground:infiniteGround(node)})
  }
  const confirmRemoval=async()=>{
   const target=removal,current=sceneRef.current
@@ -1348,6 +1349,11 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    if(sceneRef.current?.sceneId===target.sceneId){if(selectedRef.current&&removed.has(selectedRef.current))setSelected(undefined);setBatchIds(old=>old.filter(id=>!removed.has(id)))}
    setRemoval(undefined);setNotice(tr(`已从场景移除「${target.name}」（rev ${next.revision}），素材保留。`,`“${target.name}” removed from the scene (rev ${next.revision}); the asset is preserved.`))
   }finally{if(apiRef.current===api)setRemoving(false)}
+ }
+ const setNodeLock=async(entityId:string,locked:boolean)=>{
+  const current=sceneRef.current
+  if(!current||readOnlyRef.current)throw new Error('SCENE_READ_ONLY')
+  return updateScene(lockCommit(current,entityId,locked))
  }
  const setNodeVisibility=async(entityId:string,visible:boolean)=>{
   const current=sceneRef.current
@@ -1662,7 +1668,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 
  const editableEntity=scene&&selected?sceneEditTarget(scene,selected):undefined
  const objectPanel=<>
-  {entity&&scene&&<div className="lya-help" data-testid="scene-edit-target"><strong>{entity.name}</strong> · {nodeRoleLabel(entity)}{editableEntity&&editableEntity.entityId!==entity.entityId&&<span> · {tr('编辑实例：','Editing instance: ')}{editableEntity.name} <button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('选择编辑实例','Select editing instance')}</button></span>}{entity.parentId&&<span> · {tr('父节点：','Parent: ')}{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId} <button type="button" onClick={()=>chooseSceneEntity(entity.parentId!)}>{tr('选择父实例','Select parent instance')}</button></span>}<button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button></div>}
+  {entity&&scene&&<div className="lya-help" data-testid="scene-edit-target"><strong>{sceneNodeName(entity,tr)}</strong> · {nodeRoleLabel(entity)}{editableEntity&&editableEntity.entityId!==entity.entityId&&<span> · {tr('编辑实例：','Editing instance: ')}{editableEntity.name} <button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('选择编辑实例','Select editing instance')}</button></span>}{entity.parentId&&<span> · {tr('父节点：','Parent: ')}{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId} <button type="button" onClick={()=>chooseSceneEntity(entity.parentId!)}>{tr('选择父实例','Select parent instance')}</button></span>}<button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button></div>}
   {entity&&scene&&!readOnly
    ?<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene}/>
    :<p className="lya-help">{!sessionId?tr("先在左侧选择工作区，再编辑对象。","Choose a workspace on the left to edit objects."):readOnly?tr("当前世界是只读投影，不能编辑。","The current world is a read-only projection."):tr("先选择一个对象：在场景层级里点它的名字，或在画布上点它。","Select an object first: click its name in the scene tree or click it on the canvas.")}</p>}
@@ -1774,7 +1780,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    }
    if(!live||live.sceneId!==current.sceneId||live.appliedSceneRevision!==current.revision||edit.sceneId!==current.sceneId||edit.revision!==current.revision||edit.worldId!==live.worldId||edit.generation!==live.worldGeneration)throw Error('CAMERA_RIG_EDIT_WORLD_STALE')
    const body=cameraAdjustFromDrag(spec.key,spec.parentBodyName,edit)
-   const result=await requestAPI.command<any>('camera_adjust_ui',{sceneId:current.sceneId,worldId:live.worldId,cameraName:body.cameraName,expectedGeneration:live.worldGeneration,clear:false,referenceFrame:body.referenceFrame,positionM:body.positionM,quaternionXyzw:body.quaternionXyzw})
+   const result=await requestAPI.command<any>('camera_adjust_ui',{sceneId:current.sceneId,worldId:live.worldId,expectedGeneration:live.worldGeneration,clear:false,...body})
    if(apiRef.current===requestAPI&&sceneRef.current?.sceneId===current.sceneId&&worldRef.current?.worldGeneration===live.worldGeneration){
     const updated=frustumFromReceipt({cameraName:key,worldFromCamera:result.worldFromCamera,intrinsics:result.calibration?.intrinsics??result.intrinsicsAtReferenceResolution,fovyDeg:result.fovyDeg,intrinsicsSource:result.calibration?.intrinsicsSource??result.intrinsicsSource??spec.intrinsicsSource,parentBodyName:result.parentBodyName??spec.parentBodyName,referenceFrame:result.referenceFrame,override:result.override})
     if(updated.ok)viewer.current?.updateCameraRig(updated.spec)
@@ -1791,7 +1797,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const cameraPanel=<>
   <div className="lya-row"><button disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture")}</button><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("进入场景中心","Enter scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦选中","Focus selected")}</button></div>
   {replayActive&&<p className="lya-help">{tr("录制回放为只读，返回实时视图后才能采集。","Recorded replay is read-only; return to the live view before capturing.")}</p>}
-  <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} returnView={()=>{exitCameraView();}} piloted={observerState?.mode==='pilot'?observerState.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} selectedRobotEntityId={robotSelected?entity?.entityId:undefined} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge}/>
+  <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} aim={key=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:key})} returnView={()=>{exitCameraView();}} piloted={observerState?.mode!=='free'?observerState?.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} selectedRobotEntityId={robotSelected?entity?.entityId:undefined} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge}/>
+  <CameraAimControl positionLocked={observerState?.positionLocked} spec={rigSpec} tr={tr} setFov={value=>perform(async()=>viewer.current?.setCameraRigAimFov(value))}/>
   {observerState?.mode==='camera-edit'&&<div className="lya-row"><span>{tr('正在编辑相机安装','Editing camera installation')}{observerState.dirty?tr(' · 未保存',' · unsaved'):''}</span><button onClick={()=>perform(async()=>{const source=viewer.current as unknown as CameraAuthoringViewer;if(!source.finishCameraRigEditing)throw Error('CAMERA_EDIT_FINISH_UNAVAILABLE');await source.finishCameraRigEditing({discard:false})})}>{tr('保存并结束编辑','Save and finish editing')}</button><button onClick={()=>perform(async()=>{const source=viewer.current as unknown as CameraAuthoringViewer;await source.finishCameraRigEditing?.({discard:true})})}>{tr('放弃草稿','Discard draft')}</button></div>}
   <fieldset className="lya-property-editor"><legend>{tr("相机预设","Camera presets")}</legend>
    <div className="lya-row">{(["perspective","top","front","side"] as const).map((value,index)=><button key={value} disabled={!viewerVisible} onClick={()=>viewer.current?.cameraPreset(value)}>{[tr("透视","Perspective"),tr("顶视","Top"),tr("前视","Front"),tr("侧视","Side")][index]}</button>)}</div>
@@ -1799,7 +1806,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   <details className="lya-advanced"><summary>{tr("视锥与镜头参数","Frustums and lens parameters")}</summary>
   <fieldset className="lya-property-editor"><legend>{tr("相机视锥","Camera frustums")}</legend>
    <label><input type="checkbox" checked={rigVisible} onChange={()=>{const next=!rigVisible;setRigVisible(next);viewer.current?.setCameraRigsVisible(next)}}/>{tr("在 3D 里显示相机视锥","Show camera frustums in 3D")}</label>
-   {rigSpec&&<div className="lya-row"><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,true)}>{tr("透过该相机看","Look through this camera")}</button><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,false)}>{tr("对齐机位","Align view to this camera")}</button><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera&&!(entity.components.camera as any).mount)))} onClick={()=>viewer.current?.attachCameraRigGizmo(rigSpec.key)}>{tr("gizmo 调整安装位姿","Adjust mount pose with gizmo")}</button></div>}
+   {rigSpec&&<div className="lya-row"><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,true)}>{tr("透过该相机看","Look through this camera")}</button><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,false)}>{tr("对齐机位","Align view to this camera")}</button><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera&&!(entity.components.camera as any).mount)))} onClick={()=>viewer.current?.attachCameraRigGizmo(rigSpec.key)}>{tr("gizmo 调整安装位姿","Adjust mount pose with gizmo")}</button><button disabled={!viewerVisible||replayActive||readOnly} onClick={()=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:rigSpec.key})}>{tr("在安装原点调朝向","Aim from installation origin")}</button></div>}
    {rigSpec&&<div className="lya-row"><input type="number" aria-label={tr("焦距 mm","Focal length mm")} value={lensFocal} onChange={event=>setLensFocal(event.target.value)} style={{width:60}}/><input type="number" aria-label={tr("传感器宽 mm","Sensor width mm")} value={lensSensor} onChange={event=>setLensSensor(event.target.value)} style={{width:60}}/><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera)))} onClick={applyLensFov}>{tr("按摄影口径设 FOV","Set FOV from lens")}</button></div>}
    {rigSpec
     ?<p className="lya-help">{rigSpec.key} · {rigSpec.intrinsics.width}×{rigSpec.intrinsics.height} · fx {rigSpec.intrinsics.fx.toFixed(2)} / fy {rigSpec.intrinsics.fy.toFixed(2)} · cx {rigSpec.intrinsics.cx.toFixed(1)} / cy {rigSpec.intrinsics.cy.toFixed(1)} · K={rigSpec.intrinsicsSource}{rigSpec.parentBodyName?` · ${tr("挂载","mount")} ${rigSpec.parentBodyName} (${rigSpec.referenceFrame??"—"})`:""}{rigSpec.override?` · ${tr("临时 override","temporary override")}`:""}<br/>{tr("来源","Source")}={rigSpec.source} · {rigSpec.clipPlanesSource==="engine-global"?tr("near/far 为引擎全局实际值","near/far from engine-global clipping"):rigSpec.nearFarSource==="declared"?tr("near/far 为声明值","near/far declared"):tr("near/far 为显示默认（仅显示参数）","near/far display default (display-only)")}{rigSpec.notes?.length?` · ${rigSpec.notes.join("；")}`:""}</p>

@@ -1,4 +1,4 @@
-"""两引擎共用Scene参数解析；不创建世界或补地面，不导入SDK。"""
+"""三引擎共用Scene参数解析；不创建世界或补地面，不导入SDK。"""
 import math
 
 def scene_gravity(scene,error):
@@ -12,12 +12,18 @@ def declared_ground_ids(scene):
 
 def explicit_ground_requested(scene,options):
     # 不再有default=true。显式兼容参数也不能叠Scene-owned支持面。
-    return options.get('ground')is True and not declared_ground_ids(scene)and (scene.get('physics')or{}).get('template')not in ('blank','physics-workspace-v1')
+    physics=scene.get('physics')or{}
+    return options.get('ground')is True and not declared_ground_ids(scene)and physics.get('template')not in ('blank','physics-workspace-v1','physics-workspace-v2')and physics.get('groundState')not in ('removed','disabled')
 
 def replaceable_standard_ground(scene,entity):
     """只允许未编辑的具名模板支持面让位给已验证原生plane；不是按名称/bbox猜。"""
     c=entity.get('components')or{};s=c.get('supportSurface')or{};p=scene.get('physics')or{}
-    return p.get('template')=='physics-workspace-v1'and p.get('groundEntityId')==entity.get('entityId')and s.get('source')=='scene-template'and s.get('template')=='physics-workspace-v1'and not entity.get('parentId')and entity.get('transform')=={'position':[0,0,-.05],'quaternion':[0,0,0,1],'scale':[1,1,1]}and c.get('collision')=={'shape':'box','halfExtents':[10,10,.05],'friction':[1.2,.08,.01]}and c.get('rigidBody')=={'type':'static'}
+    if p.get('groundEntityId')!=entity.get('entityId')or s.get('source')!='scene-template'or s.get('template')!=p.get('template')or entity.get('parentId')or c.get('rigidBody')!={'type':'static'}:return False
+    if p.get('template')=='physics-workspace-v1':
+        return entity.get('transform')=={'position':[0,0,-.05],'quaternion':[0,0,0,1],'scale':[1,1,1]}and c.get('collision')=={'shape':'box','halfExtents':[10,10,.05],'friction':[1.2,.08,.01]}
+    if p.get('template')=='physics-workspace-v2':
+        return entity.get('transform')=={'position':[0,0,0],'quaternion':[0,0,0,1],'scale':[1,1,1]}and c.get('collision')=={'shape':'plane','infinite':True,'size':[0,0,.1],'friction':[1.2,.08,.01]}
+    return False
 
 def standard_support_plane(position,normal):
     """已验证静态原生plane只有顶面z=0、法向+Z才与未编辑标准支持面重合。"""

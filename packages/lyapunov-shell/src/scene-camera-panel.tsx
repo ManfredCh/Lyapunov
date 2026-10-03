@@ -5,6 +5,8 @@ import {adoptableReceipt,cameraWorldKey,receiptMatchesWorld,usableCameraSpec,typ
 import {cameraMountBodies,cameraMountLabel,recommendedCameraMount,sceneCameraDraftOf,sceneCamerasOfScene,type SceneCameraDraft} from "./workbench-camera.ts"
 import {cameraDraftFromSample,type CameraAuthoringSnapshot,type CameraExitBridge} from './camera-authoring.ts'
 import {cameraDraftOfScene,type CameraSceneSaveInput} from './camera-installation.ts'
+import {cameraQuaternionFromNormal,installationVector} from './camera-installation-input.ts'
+import {cameraForward,fovYFromIntrinsics} from '../../viewer/src/camera-view.ts'
 import {nativeCameraPreset,registeredCameraPresets,type RobotCameraPreset} from '../../robot-tools/src/presets.ts'
 import {cameraListFingerprint,queryNativeCameraList} from "./camera-ui-query.ts"
 import type {SceneWorldState} from "./scene-world-lifecycle.ts"
@@ -13,8 +15,15 @@ import {workbenchAPI} from "./workbench-api.ts"
 
 /** 出口只消费Viewer-owned mode；原生读回或清单刷新不决定用户能否返回主视图。 */
 export function CameraReturnControl({mode,returnView,tr}:{mode?:'free'|'pilot'|'camera-edit';returnView:()=>void;tr:Translate}){
- if(mode!=='pilot')return null
+ if(!mode||mode==='free')return null
  return <div className="lya-row"><button type="button" aria-label={tr('返回主视图','Return to main view')} onClick={returnView}>{tr('返回主视图','Return to main view')}</button></div>
+}
+
+export function CameraAimControl({positionLocked,spec,tr,setFov}:{positionLocked?:boolean;spec?:FrustumSpec;tr:Translate;setFov:(value:number)=>void}){
+ const [fov,setValue]=useState('50')
+ useEffect(()=>{if(spec)setValue(String(fovYFromIntrinsics(spec.intrinsics)))},[spec?.key,positionLocked])
+ if(!positionLocked)return null
+ return <div data-testid="camera-origin-aim"><p className="lya-help">{tr('安装原点已锁定。右键拖动调整视线；移动按键不会改变位置。运动时仍跟随真实连杆。保存并结束编辑后返回主视图，Esc 放弃草稿并返回。','The installation origin is locked. Right-drag to aim; movement keys keep the position fixed. The camera follows the real body during motion. Save and finish returns to the main view; Esc discards the draft and returns.')}</p><div className="lya-row"><label>{tr('竖直 FOV 度','Vertical FOV deg')}<input type="number" min="0.01" max="179.99" aria-label={tr('原点调姿 FOV','Aim camera FOV')} value={fov} onChange={e=>setValue(e.target.value)}/></label><button onClick={()=>setFov(Number(fov))}>{tr('预览 FOV','Preview FOV')}</button></div></div>
 }
 
 /** 现有 camera_list 的当前作用域投影，两个相机面板共享；不会创建或保存第二份相机。 */
@@ -53,10 +62,10 @@ export function useNativeCameraList({api,scene,world,active}:{api:ReturnType<typ
  return {receipt:readback?.key===key&&readback.api===api?readback.receipt:undefined,error:failure?.key===key&&failure.api===api?failure.message:undefined,refresh,ready,key}
 }
 
-export function SceneCameraPanel({api,scene,world,receipt,error,readOnly,tr,perform,commit,sampleCurrent,saveInstallation,pilot,returnView,piloted,selectCamera,selectedCameraEntityId,selectedRobotEntityId,prepareWorld,worldState,sceneSpecs,refresh,exitBridge}:{
+export function SceneCameraPanel({api,scene,world,receipt,error,readOnly,tr,perform,commit,sampleCurrent,saveInstallation,pilot,aim,returnView,piloted,selectCamera,selectedCameraEntityId,selectedRobotEntityId,prepareWorld,worldState,sceneSpecs,refresh,exitBridge}:{
  api:ReturnType<typeof workbenchAPI>;scene?:SceneSnapshot;world?:WorldHandle;receipt?:any;error?:string;readOnly:boolean;tr:Translate;
  perform:(fn:()=>Promise<unknown>)=>void;commit:(input:SceneCommit)=>Promise<SceneSnapshot>;sampleCurrent:()=>CameraAuthoringSnapshot;saveInstallation:(input:CameraSceneSaveInput)=>Promise<{snapshot:SceneSnapshot;entityId:string}>;
- pilot:(key:string)=>void;returnView:()=>void;piloted?:string;selectCamera:(key:string)=>void;selectedCameraEntityId?:string;selectedRobotEntityId?:string;
+ pilot:(key:string)=>void;aim?:(key:string)=>void;returnView:()=>void;piloted?:string;selectCamera:(key:string)=>void;selectedCameraEntityId?:string;selectedRobotEntityId?:string;
  prepareWorld:(sceneId:string)=>Promise<WorldHandle|undefined>;worldState?:SceneWorldState;sceneSpecs:readonly FrustumSpec[];refresh:()=>Promise<any>
  exitBridge?:CameraExitBridge
 }){
@@ -64,6 +73,10 @@ export function SceneCameraPanel({api,scene,world,receipt,error,readOnly,tr,perf
  const [draftMode,setDraftMode]=useState<'current-view'|'draft'>('current-view'),[draftDirty,setDraftDirty]=useState(false),[presetId,setPresetId]=useState('')
  const [preview,setPreview]=useState<any>(),[previewError,setPreviewError]=useState(""),[livePreview,setLivePreview]=useState(true),[previewBusy,setPreviewBusy]=useState(false)
  const [preparing,setPreparing]=useState(false),[prepareError,setPrepareError]=useState(""),[saving,setSaving]=useState(false)
+ const [normalInput,setNormalInput]=useState(''),[upInput,setUpInput]=useState('')
+ const normalOfDraft=()=>{try{return cameraForward(draft.quaternion.trim().split(/[\s,]+/).map(Number) as [number,number,number,number]).map(v=>Number(v.toFixed(6))).join(' ')}catch{return ''}}
+ const applyNormal=()=>{const normal=installationVector(normalInput.trim().split(/[\s,]+/).map(Number),'normal'),up=upInput.trim()?installationVector(upInput.trim().split(/[\s,]+/).map(Number),'up'):undefined;const base=draftMode==='current-view'?cameraDraftFromSample(scene!,sampleCurrent(),{name:draft.name,world,mount:draft.parentEntityId?{entityId:draft.parentEntityId,bodyName:draft.bodyName}:undefined}):draft;setDraft({...base,quaternion:cameraQuaternionFromNormal(normal,base.quaternion.trim().split(/[\s,]+/).map(Number) as [number,number,number,number],up).join(' ')});setDraftMode('draft');setDraftDirty(true)}
+ useEffect(()=>{setNormalInput('');setUpInput('')},[editing,scene?.sceneId])
  const pendingSave=useRef<Promise<void>>()
  const previewInFlight=useRef(false),previewController=useRef<AbortController>(),prepareInFlight=useRef<Promise<WorldHandle|undefined>>()
  const identity:CameraWorldIdentity={sceneId:scene?.sceneId,sceneRevision:scene?.revision,worldId:world?.worldId,worldGeneration:world?.worldGeneration},key=cameraWorldKey(identity)
@@ -196,7 +209,7 @@ export function SceneCameraPanel({api,scene,world,receipt,error,readOnly,tr,perf
   {previews.length>0&&<><p className="lya-help">{tr('下列相机正在临时试拍，原件安装预设待清除试拍后重新读取。','These cameras have temporary preview overrides. Clear them to reread their original installations.')}</p><div className="lya-row" style={{flexWrap:'wrap'}}>{previews.map(row=><button key={row.cameraName} disabled={readOnly||!ready||saving} onClick={()=>perform(async()=>{if(!scene||!world)throw Error('CAMERA_WORLD_REQUIRED');const requested=key;await api.command('camera_adjust_ui',{sceneId:scene.sceneId,worldId:world.worldId,expectedGeneration:world.worldGeneration,cameraName:row.cameraName,clear:true});if(current.current.key===requested&&current.current.api===api)await refresh()})}>{tr('清除试拍：','Clear preview: ')}{row.localName??row.cameraName}</button>)}</div></>}
   {selected&&<>
    <p className="lya-help" role="status">{native?.available===false?`${tr("此相机暂不可用","Camera unavailable")}：${native.reason??tr("引擎未提供原因","No reason reported")}`:nativeSpec?tr("原生相机已就绪，可进入视角。","Native camera ready; enter its view."):spec&&!selected.component.mount?tr("机位已保存，可进入视角；原生采集需物理世界就绪。","View saved; enter it now. Native capture requires a ready physical world."):!ready?tr("绑定已保存，正在等待物理世界同步。","Mount saved; awaiting physical world synchronization."):tr("绑定已保存，正在读取原生相机。","Mount saved; reading the native camera.")}</p>
-   <div className="lya-row"><button className="lya-primary" disabled={!spec||readOnly||Boolean(selected.component.mount&&!ready)} onClick={()=>spec&&pilot(spec.key)}>{selected.component.mount?tr("进入并跟随相机视角","Enter and follow camera"):tr("进入相机视角","Enter camera")}</button><button disabled={!piloted} onClick={returnView}>{tr("返回主视图","Return to main view")}</button><button disabled={!nativeSpec||!ready||previewBusy} onClick={()=>perform(capturePreview)}>{tr("刷新画面","Refresh image")}</button></div>
+   <div className="lya-row"><button className="lya-primary" disabled={!spec||readOnly||Boolean(selected.component.mount&&!ready)} onClick={()=>spec&&pilot(spec.key)}>{selected.component.mount?tr("进入并跟随相机视角","Enter and follow camera"):tr("进入相机视角","Enter camera")}</button><button disabled={!spec||readOnly||!aim||Boolean(selected.component.mount&&!ready)} onClick={()=>spec&&aim?.(spec.key)}>{tr('在安装原点调朝向','Aim from installation origin')}</button><button disabled={!piloted} onClick={returnView}>{tr("返回主视图","Return to main view")}</button><button disabled={!nativeSpec||!ready||previewBusy} onClick={()=>perform(capturePreview)}>{tr("刷新画面","Refresh image")}</button></div>
    <label><input type="checkbox" aria-label={tr("选中相机实时预览","Selected camera live preview")} checked={livePreview} disabled={!nativeSpec||!ready} onChange={event=>setLivePreview(event.target.checked)}/>{tr("实时预览","Live preview")}</label>
   </>}
   {previewBusy&&<p className="lya-help" role="status">{tr("正在采集相机画面…","Capturing camera image…")}</p>}
@@ -208,6 +221,9 @@ export function SceneCameraPanel({api,scene,world,receipt,error,readOnly,tr,perf
    <p className="lya-help">{draft.parentEntityId?tr("位姿为连杆局部系，单位米、四元数 xyzw。","Pose in the link's local frame, meters and xyzw."):tr("位姿为右手 Z-up 世界系，单位米、四元数 xyzw。","Pose in the right-handed Z-up world frame, meters and xyzw.")} {tr("相机 +X 右 / +Y 上 / -Z 前。","Camera axes: +X right / +Y up / -Z forward.")}</p>
    <label className="lya-field-label">{tr("相机位置 XYZ 米","Camera position XYZ m")}<input aria-label={tr("相机位置 XYZ 米","Camera position XYZ m")} value={draft.position} disabled={readOnly} onChange={event=>field("position",event.target.value)}/></label>
    <label className="lya-field-label">{tr("相机旋转 xyzw","Camera rotation xyzw")}<input aria-label={tr("相机旋转 xyzw","Camera rotation xyzw")} value={draft.quaternion} disabled={readOnly} onChange={event=>field("quaternion",event.target.value)}/></label>
+   <p className="lya-help">{tr('当前视线法向：','Current viewing normal: ')}{normalOfDraft()||'—'}</p>
+   <label className="lya-field-label">{tr('视线法向 XYZ','Viewing normal XYZ')}<input aria-label={tr('视线法向 XYZ','Viewing normal XYZ')} value={normalInput} placeholder={normalOfDraft()} disabled={readOnly} onChange={e=>setNormalInput(e.target.value)}/></label>
+   <label className="lya-field-label">{tr('向上方向 XYZ（可选）','Up direction XYZ (optional)')}<input aria-label={tr('向上方向 XYZ（可选）','Up direction XYZ (optional)')} value={upInput} disabled={readOnly} onChange={e=>setUpInput(e.target.value)}/></label><button disabled={readOnly||!normalInput.trim()} onClick={()=>perform(async()=>applyNormal())}>{tr('按法向调朝向','Aim along normal')}</button>
    <div className="lya-row">{([['fovYDeg','竖直 FOV 度','Vertical FOV deg'],['width','相机宽度像素','Camera width px'],['height','相机高度像素','Camera height px'],['near','near 裁剪声明米','Declared near clip m'],['far','far 裁剪声明米','Declared far clip m']] as const).map(([name,zh,en])=><label key={name}>{tr(zh,en)}<input type="number" aria-label={tr(zh,en)} value={draft[name]} disabled={readOnly} onChange={event=>field(name,event.target.value)} style={{width:78}}/></label>)}</div>
    {native?.clipPlanesPerCameraSupported===false&&<p className="lya-help">{tr("当前引擎使用全局裁剪；实际范围","This engine uses global clipping; actual range")}：{native.nearM??"—"} / {native.farM??"—"} m。</p>}
    {draft.intrinsics&&<p className="lya-help" data-testid="camera-lens-k">K：fx {draft.intrinsics.fx.toFixed(3)} · fy {draft.intrinsics.fy.toFixed(3)} · cx {draft.intrinsics.cx.toFixed(3)} · cy {draft.intrinsics.cy.toFixed(3)} · {draft.intrinsics.width} × {draft.intrinsics.height}</p>}

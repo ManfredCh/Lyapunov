@@ -1,5 +1,5 @@
 import { listSceneSummaries } from "./list-scenes.ts"
-import {physicsWorkspaceSettings,standardGroundEntity,standardGroundPath,STANDARD_GROUND_RESOURCE,type SceneTemplate} from './scene-template.ts'
+import {physicsWorkspaceSettings,standardGroundEntity,type SceneTemplate} from './scene-template.ts'
 import {validateScenePhysics,DEFAULT_WORLD_GRAVITY} from '../../lyapunov-contracts/src/world-physics.ts'
 import { randomUUID } from "node:crypto"
 import { readFile, realpath } from "node:fs/promises"
@@ -240,9 +240,7 @@ export class SceneOperations {
     })
   }
   private async templateGround(){
-    const record=await this.resources.import({path:standardGroundPath(this.resources.options.productRoot),name:'标准地面',resourceId:STANDARD_GROUND_RESOURCE,
-      category:'object',tags:['standard-ground','scene-template'],source:{units:'m',upAxis:'Z',handedness:'right',metersPerUnit:1},storage:'reference',physicalizationRequest:false})
-    return standardGroundEntity(record.ref)
+    return standardGroundEntity()
   }
   async create(input: { sceneId?: string; name?: string; template?:SceneTemplate } = {}): Promise<SceneSnapshot> {
     if(input.template!==undefined&&!['blank','physics-workspace'].includes(input.template))throw Error('SCENE_TEMPLATE_INVALID')
@@ -264,11 +262,19 @@ export class SceneOperations {
   async prepareWorkspace(input:{sceneId:string;expectedRevision:number}):Promise<SceneSnapshot>{
     const current=await this.scene.snapshot(input.sceneId)
     if(current.revision!==input.expectedRevision)throw new SceneConflict(input.sceneId,input.expectedRevision,current.revision)
-    if(current.physics?.template==='physics-workspace-v1')return current
-    const existing=current.entities.filter(e=>(e.components.supportSurface as {kind?:string}|undefined)?.kind==='ground')
+    if(['physics-workspace-v1','physics-workspace-v2'].includes(current.physics?.template??'')||['removed','disabled'].includes(current.physics?.groundState??''))return current
+    const existing=current.entities.filter(e=>(e.components.supportSurface as {kind?:string}|undefined)?.kind==='ground'&&e.components.collision?.shape==='plane'&&e.components.collision?.infinite===true)
     if(existing.length>1)throw Error('SCENE_GROUND_SELECTION_REQUIRED: 已有多个明确地面，请选择支持面')
     const ground=existing[0]??await this.templateGround(),physics={...physicsWorkspaceSettings(),gravityWorldMps2:current.physics?.gravityWorldMps2??[...DEFAULT_WORLD_GRAVITY],groundEntityId:ground.entityId}
     return this.scene.commit({sceneId:current.sceneId,expectedRevision:current.revision,patch:existing.length?[]:[{op:'add',entity:ground}],physics})
+  }
+  /** 首次创建物理世界才准备；明确ground=false记录禁用选择，不偷偷补Collider。 */
+  async prepareWorld(input:{sceneId:string;expectedRevision:number;ground?:boolean}):Promise<SceneSnapshot>{
+    const current=await this.scene.snapshot(input.sceneId)
+    if(current.revision!==input.expectedRevision)throw new SceneConflict(input.sceneId,input.expectedRevision,current.revision)
+    if(['physics-workspace-v1','physics-workspace-v2'].includes(current.physics?.template??'')||['removed','disabled'].includes(current.physics?.groundState??''))return current
+    if(input.ground===false)return this.scene.commit({sceneId:current.sceneId,expectedRevision:current.revision,patch:[],physics:{...current.physics,gravityWorldMps2:current.physics?.gravityWorldMps2??[...DEFAULT_WORLD_GRAVITY],template:'physics-workspace-v2',groundState:'disabled'}})
+    return this.prepareWorkspace(input)
   }
   async configurePhysics(input:{sceneId:string;expectedRevision:number;gravityWorldMps2:Vec3}):Promise<SceneSnapshot>{
     const current=await this.scene.snapshot(input.sceneId),physics={...current.physics,gravityWorldMps2:input.gravityWorldMps2}

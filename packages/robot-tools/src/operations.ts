@@ -18,12 +18,19 @@ export interface SceneReader { snapshot(sceneId: string): Promise<SceneSnapshot>
  */
 export interface RobotOperationHooks {
   walk?: (input: { worldId: string; sceneId: string; action: SimAction }, signal?: AbortSignal) => Promise<unknown>
+  prepareWorld?: (snapshot:SceneSnapshot,options?:WorldOptions,signal?:AbortSignal)=>Promise<SceneSnapshot>
 }
 export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks: RobotOperationHooks = {}) {
   return {
     // 取消信号必须传进 open：worker 启动（Isaac Kit 冷启动可达数十秒、偶发挂住）与建世界
     // 都在这一条调用里，只有把调用方的 signal 交下去，取消才能真正结束本次尚未交付的操作。
-    sim_open: async (input: { sceneId: string; options?: WorldOptions }, signal?: AbortSignal) => sim.open(await scene.snapshot(input.sceneId), input.options, signal),
+    sim_open: async (input: { sceneId: string; options?: WorldOptions }, signal?: AbortSignal) => {
+      signal?.throwIfAborted()
+      let snapshot=await scene.snapshot(input.sceneId)
+      if(hooks.prepareWorld&&!(await sim.listWorlds()).some(world=>world.sceneId===input.sceneId&&world.status!=='closed'))snapshot=await hooks.prepareWorld(snapshot,input.options,signal)
+      signal?.throwIfAborted()
+      return sim.open(snapshot,input.options,signal)
+    },
     sim_world_list: () => sim.listWorlds(),
     sim_set_paused: async(input:{worldId:string;paused:boolean;expectedGeneration:number})=>{
       if(!sim.setPaused)throw new SimError('CLOCK_CONTROL_UNSUPPORTED','当前Provider未提供暂停/继续接口')

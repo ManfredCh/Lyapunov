@@ -13,7 +13,7 @@
 | `describe` | ✅ | 关节名/类型/单位/限位 + 引擎侧 PD 增益回读；`capabilities` 按合同 `RobotCapability.kind` 的**封闭 6 元组**（joint/thrust/vehicle/gripper/lift/control）逐项给 `available=false` + 原因，原因前缀就是 `execute` 实际返回的码 `ACTION_UNSUPPORTED`（判定与拒绝同源）；`controlMetadata` 如实说明 `controlledJointNames` 为何恒为空（本 Provider 没有动作/控制通道，不是"关节都被动"） |
 | realtime 时钟真步进 | ✅ | `options.timestepS`（默认 1/500 s）与 `options.realtimeFactor` 生效，按 `frameRateHz` 发 `frame` 事件；**冷缓存下首个 tick 会阻塞十几秒（负载高时二十几秒）**（首个内核的 JIT，不是卡死 —— 用户会以为卡住的就是这一格，见「Warp 内核缓存」） |
 | MJCF / URDF 原生源 | ✅ | 复用 `components.mujoco.sourcePath/xml` 与 mjcf/urdf resource（与 sim-mujoco 同一解析口径） |
-| 地面 | ✅ | `options.ground !== false` ⇒ 铺 `__ground` 平面（与 sim-mujoco 同语义） |
+| 地面 | ✅ | 消费 Scene 管理的零厚度无限 plane；用户入口首次建世界先沿 Scene CAS 保存默认地面。隐藏只改变显示，删除/禁用选择重开后保留；原生同位置静态 plane 去重。仅旧无模板 Scene 的显式 `ground:true` 可请求兼容地面。 |
 | Scene collision（普通 GLB 派生） | ✅（有明确边界） | 消费真实 `box/shapes`、sphere、cylinder、capsule、静态 plane 与 OBJ parts；与原生源共用 ModelBuilder、CollisionPipeline、世界与实体映射。collision、rigidBody、physicsBinding 与碰撞表示变更进入物理签名，`sync` 重建同一世界的新代次 |
 | 环境与动态 OBJ | ✅（按用途消费） | 静态 OBJ 保留原始三角面与空腔；动态 OBJ 仅按明确凸件策略逐 part 装配凸件，动态 triangle_mesh/环境绑定明确拒绝。派生几何已经是 Z-up 米制，不重复应用视觉 GLB 的源坐标转换 |
 | 碰撞变换与质量 | ✅（有明确边界） | OBJ 顶点消费完整父链仿射变换，镜像会修正面朝向；primitive 支持保持形状的缩放/旋转，剪切与球/胶囊非均匀缩放明确拒绝。动态体须有正 `massKg`，`massScalePolicy=density` 乘真实变换行列式；惯性和质心从实际几何计算 |
@@ -137,7 +137,7 @@ mujoco-warp 3.12.0 + warp-lang 1.17.0 + numpy 2.5.3），默认路径由 `Newton
 - **不驱动任何执行器**：导入的 MJCF 执行器目标保持模型初值（与 MuJoCo 里 `ctrl=0` 的语义一致）。
 - **MJCF 根的摆放**：实体 MJCF 用 `xform = Scene 世界位姿` 导入，与 MJCF 自身内部姿态**复合**
   （`add_mjcf` 的默认语义，与 sim-mujoco 的 `spec.attach` 一致）；实体 `scale != [1,1,1]` 明确拒绝。
-- **两处地面**：默认铺的 `__ground` 与 MJCF 自带 `floor` 会共面重合（物理无害）；要单一地面传 `ground:false`。
+- **单一地面来源**：未编辑的默认模板 Collider 让位给实测同位置的原生静态 plane；`groundSources` 记录真实来源，不叠不可管理的隐式地面。无限 plane 由 `add_shape_plane(width=0,length=0)` 表达；有限用户 plane 仍保留明确的宽/长。
 - **mesh 资产需要 Newton 的 importers extra**：Newton 1.6.0 把 `trimesh>=4.6.8`（以及 `scipy`/`meshio`/`coacd`/`usd-core`…）
   列为 `importers` 可选依赖，最小环境（只有 `newton`+`warp-lang`）装不了带 `<mesh>` 的 MJCF。
   **本机 `.runtime/newton-env` 已装（实测 `trimesh 5.1.0`）⇒ 带 `<mesh>` 的 MJCF/URDF 真的能导入**

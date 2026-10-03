@@ -12,6 +12,7 @@
  * 不因为一条坏数据把整份批注清空，也不把未校验的对象直接喂给 viewer。
  */
 import type {ViewerAnnotation,ViewerAnnotationAnchor} from "@lyapunov/viewer/client"
+import {annotationAnchorOf} from '../../viewer/src/annotations.ts'
 
 const PREFIX="lyapunov.annotations."
 /** 单场景批注上限：够用且能挡住坏数据/脚本刷写把 localStorage 撑爆。 */
@@ -19,14 +20,7 @@ const MAX_ANNOTATIONS=200
 const MAX_TEXT=2000
 
 function anchor(value:unknown):ViewerAnnotationAnchor|undefined{
-  if(!value||typeof value!=="object")return undefined
-  const raw=value as Record<string,unknown>
-  if(typeof raw.entityId!=="string"||!raw.entityId)return undefined
-  const triple=(input:unknown):[number,number,number]|undefined=>Array.isArray(input)&&input.length===3&&input.every(item=>typeof item==="number"&&Number.isFinite(item))?[input[0] as number,input[1] as number,input[2] as number]:undefined
-  const local=triple(raw.local),world=triple(raw.world)
-  if(!local||!world)return undefined
-  const normal=triple(raw.normal)
-  return {entityId:raw.entityId,local,world,...normal?{normal}:{}}
+  return annotationAnchorOf(value)
 }
 
 /** 读一条场景的批注；坏数据丢弃并按需返回 undefined（不是空数组）以外的旧值一律不猜。 */

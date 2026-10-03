@@ -6,16 +6,16 @@ import { mountLocalFrom, rigidPoseOf, type RigidPose } from '../../viewer/src/ca
 import { fovYFromIntrinsics, normalizeIntrinsics, type ViewerCameraIntrinsics } from '../../viewer/src/camera-view.ts'
 
 export interface RobotCameraPreset {
-  id: string; name: string; source: 'mjcf' | 'usd' | 'scene-baseline'; sourceCameraName?: string
+  id: string; name: string; source: 'mjcf' | 'urdf' | 'usd' | 'scene-baseline'; sourceCameraName?: string
   pose: RigidPose; mount?: { entityId: string; bodyName: string }
   intrinsics: ViewerCameraIntrinsics; fovYDeg: number; width: number; height: number; near: number; far: number
 }
 /** 只读当前原生声明。临时override不作原件preset；局部安装要有同帧唯一body。 */
 export function nativeCameraPreset(row: any, receipt: any, entities: readonly Entity[]): RobotCameraPreset {
-  if (!row || row.available === false || !['mjcf', 'usd'].includes(row.cameraSource) || row.override || row.positionOverridden || row.quaternionOverridden || row.fovyOverridden) throw new Error('CAMERA_NATIVE_PRESET_UNAVAILABLE: 需要未覆盖的模型原生相机')
+  if (!row || row.available === false || !['mjcf', 'urdf', 'usd'].includes(row.cameraSource) || row.override || row.positionOverridden || row.quaternionOverridden || row.fovyOverridden) throw new Error('CAMERA_NATIVE_PRESET_UNAVAILABLE: 需要未覆盖的模型原生相机')
   if (!receipt?.frameId || row.frameId !== receipt.frameId || row.stepIndex !== receipt.stepIndex || row.generation !== receipt.generation || row.sceneRevision !== receipt.sceneRevision || row.worldId !== receipt.worldId) throw new Error('CAMERA_PRESET_FRAME_STALE: 原生相机不是当前清单的同一帧')
-  const worldPose = rigidPoseOf(row.worldFromCamera), k = normalizeIntrinsics(row.intrinsics)
-  const near = row.nearM, far = row.farM
+  const worldPose = rigidPoseOf(row.worldFromCamera), k = normalizeIntrinsics(row.cameraSource==='urdf'?row.declaredIntrinsicsPx??row.intrinsics:row.intrinsics)
+  const near = row.cameraSource==='urdf'?row.declaredNearM??row.nearM:row.nearM, far = row.cameraSource==='urdf'?row.declaredFarM??row.farM:row.farM
   if (!worldPose || !(near > 0 && far > near) || !Number.isFinite(far)) throw new Error('CAMERA_PRESET_METADATA_MISSING: 原件缺少真实位姿、镜头或裁剪面')
   let pose = worldPose, mount: RobotCameraPreset['mount']
   if (row.parentBodyName && row.parentBodyName !== 'world') {
@@ -43,7 +43,7 @@ export function robotPresetProjection(snapshot: SceneSnapshot, description: Robo
   const entity = snapshot.entities.find(entity => entity.entityId === description.entityId)!
   const native: RobotCameraPreset[] = [], unavailable: Array<{ id: string; reason: string }> = []
   for (const row of receipt?.cameras ?? []) {
-    if (!['mjcf', 'usd'].includes(row.cameraSource) || row.entityId !== entity.entityId && row.parentEntityId !== entity.entityId) continue
+    if (!['mjcf', 'urdf', 'usd'].includes(row.cameraSource) || row.entityId !== entity.entityId && row.parentEntityId !== entity.entityId) continue
     try { native.push(nativeCameraPreset(row, receipt, snapshot.entities)) } catch (error) { unavailable.push({ id: row.cameraName, reason: String(error instanceof Error ? error.message : error) }) }
   }
   const current = entity.components.controller?.tcp as RobotTcpDefinition | undefined

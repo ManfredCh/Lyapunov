@@ -191,13 +191,13 @@ describe.skipIf(!available)('DEV-008：supported 面逐键「声明 ↔ 现实�
   beforeAll(() => {
     run = drive([
       { id: 'capabilities', method: 'capabilities', args: {} },
-      { id: 'arm-open', method: 'open', args: { snapshot: fileSnapshot('ss-arm', 'arm-a', ARM), options: { worldId: 'w-ss', timestepS: 0.002, clock: 'manual' } } },
+      { id: 'arm-open', method: 'open', args: { snapshot: fileSnapshot('ss-arm', 'arm-a', ARM), options: { worldId: 'w-ss', timestepS: 0.002, clock: 'manual', ground: true } } },
       { id: 'arm-list-worlds', method: 'list_worlds', args: {} },
       { id: 'arm-describe', method: 'describe', args: { worldId: 'w-ss', entityId: 'arm-a' } },
       { id: 'arm-observe', method: 'observe', args: { worldId: 'w-ss', selection: {} } },
       // 同一 scene 的新 revision：签名未变 ⇒ 只推进 appliedSceneRevision，不重编译（worldGeneration 不变）。
       { id: 'arm-sync', method: 'sync', args: { worldId: 'w-ss', snapshot: fileSnapshot('ss-arm', 'arm-a', ARM, 2) } },
-      // groundPlane 的反面：显式 ground:false（与默认那次的 groundGeomNames 成对）。
+      // groundPlane 的反面：显式 ground:false（与显式兼容 ground:true 的 groundGeomNames 成对）。
       { id: 'ground-off-open', method: 'open', args: { snapshot: fileSnapshot('ss-noground', 'arm-a', ARM), options: { worldId: 'w-ss-noground', clock: 'manual', ground: false } } },
       // urdf：仓里真实的 URDF 资产（含 STL 网格引用），走 `add_urdf`。
       { id: 'urdf-open', method: 'open', args: { snapshot: fileSnapshot('ss-urdf', 'go1', GO1_URDF), options: { worldId: 'w-ss-urdf', clock: 'manual' } } },

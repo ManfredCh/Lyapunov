@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot name="calibrated_camera_fixture">
+  <link name="base">
+    <inertial><mass value="1"/><inertia ixx="0.1" iyy="0.1" izz="0.1" ixy="0" ixz="0" iyz="0"/></inertial>
+    <visual><geometry><box size="0.1 0.1 0.1"/></geometry></visual>
+    <collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>
+  </link>
+  <link name="sensor_link">
+    <inertial><mass value="0.1"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
+    <visual><geometry><box size="0.02 0.02 0.02"/></geometry></visual>
+  </link>
+  <joint name="pivot" type="revolute"><parent link="base"/><child link="sensor_link"/><origin xyz="0 0 0.5"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+  <gazebo reference="sensor_link">
+    <sensor name="calibrated_eye" type="camera">
+      <pose>0.05 0 0.1 0 0 0</pose>
+      <camera>
+        <pose>0.01 0.02 0.03 0 0 0</pose>
+        <image><width>384</width><height>256</height><format>R8G8B8</format></image>
+        <clip><near>0.03</near><far>42</far></clip>
+        <lens><intrinsics><fx>344.5</fx><fy>355.7</fy><cx>173</cx><cy>132</cy><s>0</s></intrinsics></lens>
+      </camera>
+    </sensor>
+  </gazebo>
+</robot>

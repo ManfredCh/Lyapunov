@@ -2,10 +2,9 @@
 
 | 出版信息 | 标记 |
 | --- | --- |
-| 应用发布名称 | 0.1.0α（Alpha3_5） · Linux x64 |
-| 技术版本（SemVer） | `0.1.0-alpha.3.5` |
-| releaseId | `0.1.0-alpha3_5` |
-| 文档日期 | 2026-10-04 |
+| 应用发布名称 | 0.1.0α · Linux x64 |
+| 技术版本 / releaseId | `0.1.0-alpha.4` |
+| 文档日期 | 2026-10-03 |
 | 作者团队 | Vorynel Co., Ltd. |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | 版权 | © 2026 Vorynel Co., Ltd. |
@@ -13,7 +12,7 @@
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
 
-本文对应 Lyapunov 0.1.0α（Alpha3_5；技术版本为 `0.1.0-alpha.3.5`，releaseId 为 `0.1.0-alpha3_5`）的 Linux x64 安装合同。当前发布说明见[0.1.0α（Alpha3_5）](releases/0.1.0-alpha3_5.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.4`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.4.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
 ## 默认安装
 

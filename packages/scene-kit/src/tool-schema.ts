@@ -8,7 +8,7 @@ export const scenePhysicsUpdateParameters:ParameterSchemaSpec={input:{type:'obje
 export const sceneReconcilePhysicsParameters:ParameterSchemaSpec={input:{type:'object',required:true,additionalProperties:false,properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer'},retryFailed:{type:'boolean',description:"Explicitly retry failed derivation. Default false only reconciles terminal state without rebaking large assets."},waitForPending:{type:'boolean',description:"Wait for existing work or cold-cache recovery; default false reports actual pending state."}}}}
 const entityId={type:'string',required:true,description:"Stable entityId of an existing entity from scene_inspect or the current 3D selection."} as const
 const edits:ValueSchemaSpec={type:'array',description:"Atomic edit array; use an array even when changing only one field.",items:{oneOf:[
-  {type:'object',additionalProperties:false,properties:{op:{type:'string',const:'update',required:true},entityId,changes:{type:'object',required:true,additionalProperties:false,properties:{name:{type:'string'},transform:{type:'json',description:"Complete position[3], quaternion[4] and scale[3]; metres, Z-up, xyzw."},resources:{type:'array',items:{type:'json'}},components:{type:'json'}}}}},
+  {type:'object',additionalProperties:false,properties:{op:{type:'string',const:'update',required:true},entityId,changes:{type:'object',required:true,additionalProperties:false,properties:{name:{type:'string'},locked:{type:'boolean',description:"Lock or unlock transform editing. Submit unlocking separately before transform/reparent edits. Visibility and explicit deletion remain available."},transform:{type:'json',description:"Complete position[3], quaternion[4] and scale[3]; metres, Z-up, xyzw."},resources:{type:'array',items:{type:'json'}},components:{type:'json'}}}}},
   {type:'object',additionalProperties:false,properties:{op:{type:'string',const:'add',required:true},entity:{type:'json',required:true,description:"Complete Entity: entityId, name, transform(position/quaternion/scale), resources array and components object, with optional parentId."}}},
   {type:'object',additionalProperties:false,properties:{op:{type:'string',const:'remove',required:true},entityId,cascade:{type:'boolean'}}},
   {type:'object',additionalProperties:false,properties:{op:{type:'string',const:'reparent',required:true},entityId,parentId:{type:'string',description:"Omit to move to the Scene root."}}},
@@ -22,11 +22,13 @@ export const sceneEditParameters:ParameterSchemaSpec={input:{
 
 export const sceneCreateParameters:ParameterSchemaSpec={input:{
   type:'object',required:true,additionalProperties:false,
-  description:"Create a Scene. Omitted template preserves blank compatibility. physics-workspace prepares editable bounded ground and world gravity once; blank intentionally avoids a cold physics startup.",
+  description:"Create a Scene. The default physics-workspace includes a locked zero-thickness infinite ground plane and gravity. blank is editing only; starting its first physics world prepares ground through Scene CAS.",
   properties:{sceneId:{type:'string',description:"Optional stable Scene ID."},name:{type:'string',description:"Optional display name."},template:{type:'string',enum:['blank','physics-workspace'],description:"Explicitly choose blank or a standard physics workspace; do not automatically append it to old scenes."}},
 }}
 export const scenePrepareWorkspaceParameters:ParameterSchemaSpec={input:{type:'object',required:true,additionalProperties:false,
  properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true}}}}
+export const scenePrepareWorldParameters:ParameterSchemaSpec={input:{type:'object',required:true,additionalProperties:false,
+ properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},ground:{type:'boolean',description:"Default true prepares ground once. Explicit false records disabled ground on an unprepared Scene."}}}}
 export const sceneConfigurePhysicsParameters:ParameterSchemaSpec={input:{type:'object',required:true,additionalProperties:false,
  properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},gravityWorldMps2:{type:'array',required:true,items:{type:'number'},description:"Three finite world-gravity components in m/s²; a zero vector is valid."}}}}
 

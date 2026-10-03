@@ -6,6 +6,8 @@ describe("按当前会话只读碰撞帧请求",()=>{
  test('实际位置/末端/接触请求同world帧且拒绝模糊开关',()=>{
   expect(worldFrameSelection(new URLSearchParams({sensors:'1',contacts:'1',entityId:'selected'}))).toEqual({sensors:true,contacts:true,entityIds:['selected']})
   expect(()=>worldFrameSelection(new URLSearchParams({sensors:'maybe'}))).toThrow('WORLD_OBSERVATION_SELECTION_INVALID')
+  expect(worldFrameSelection(new URLSearchParams({cameraAuthoring:'1'}))).toEqual({cameraAuthoring:true})
+  expect(()=>worldFrameSelection(new URLSearchParams({cameraAuthoring:'guess'}))).toThrow('WORLD_OBSERVATION_SELECTION_INVALID')
  })
  test("默认无拓扑，限定实体/是否读取静态几何，并拒绝空目标",()=>{
   expect(collisionFrameSelection(new URLSearchParams({worldId:"w"}))).toBeUndefined()
@@ -21,10 +23,12 @@ describe("按当前会话只读碰撞帧请求",()=>{
    const api=workbenchAPI("session-isolated")
    await api.frame("world",{entityIds:["parent","child"],includeGeometry:true})
    await api.frame("world",{entityIds:["parent","child"],includeGeometry:false})
-   expect(calls.length).toBe(2)
+   await api.frame('world',undefined,{cameraAuthoring:true})
+   expect(calls.length).toBe(3)
    const first=new URL(calls[0]!,"http://localhost"),second=new URL(calls[1]!,"http://localhost")
    expect(first.pathname).toBe("/api/lyapunov/frame");expect(first.searchParams.get("sessionId")).toBe("session-isolated");expect(first.searchParams.getAll("collisionEntityId")).toEqual(["parent","child"])
    expect(first.searchParams.get("collisionGeometry")).toBe("1");expect(second.searchParams.get("collisionGeometry")).toBe("0")
+   expect(new URL(calls[2]!,'http://localhost').searchParams.get('cameraAuthoring')).toBe('1')
   }finally{globalThis.fetch=original}
  })
 })

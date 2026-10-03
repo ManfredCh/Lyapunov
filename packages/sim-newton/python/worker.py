@@ -29,6 +29,8 @@ import uuid
 from urllib.parse import unquote, urlparse
 
 import numpy as np
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+from world_physics import scene_gravity,declared_ground_ids,explicit_ground_requested,coverage,replaceable_standard_ground,standard_support_plane
 
 # 协议通道保护：先占住真实 stdout，再把 sys.stdout 指向 stderr。
 # Warp 在 init/finalize 时会往 stdout 打印初始化横幅与内核装载日志，若混进 NDJSON 通道
@@ -304,6 +306,19 @@ def collision_mesh(uri, linear, eid, dynamic):
         raise SimError('COLLISION_MESH_INVALID', eid + ' 的 OBJ 碰撞件无效: ' + path + ': ' + str(exc)) from exc
 
 
+def world_fixed_body(builder,body):
+    """原生builder的真实固定关节链；质量、名字和视觉边界不证明world固定。"""
+    seen=set()
+    while body>=0:
+        if body in seen:return False
+        seen.add(body)
+        if builder.body_flags[body]&int(newton.BodyFlags.KINEMATIC):return True
+        joints=[joint for joint,child in enumerate(builder.joint_child)if child==body]
+        if len(joints)!=1 or int(builder.joint_type[joints[0]])!=int(newton.JointType.FIXED):return False
+        body=builder.joint_parent[joints[0]]
+    return True
+
+
 def scene_collision(builder, entity, pose, linear):
     """复用当前 ModelBuilder 装配一个 Scene 刚体；几何已是 Z-up 米制，不重复转换 GLB 原件。"""
     eid = entity['entityId']
@@ -395,11 +410,15 @@ def scene_collision(builder, entity, pose, linear):
         local = wp.transform(wp.vec3(*[float(v) for v in linear @ vec3(c.get('center', [0, 0, 0]), eid + ' 的 center')]), rotation)
         size = c.get('halfExtents', c.get('size'))
         if kind == 'plane':
-            if not isinstance(size, (list, tuple)) or len(size) < 2:
+            if c.get('infinite') is True:
+                width,length=0.,0.
+            elif not isinstance(size, (list, tuple)) or len(size) < 2:
                 raise SimError('INVALID_ARGUMENT', eid + ' 的 plane 缺 size[0..1]')
+            else:
+                width=positive(size[0],eid+' 的 plane.size[0]')*float(scale[0]);length=positive(size[1],eid+' 的 plane.size[1]')*float(scale[1])
             # Newton 1.6 的 finite-plane support function 将 width/length 当半宽/半长。
-            builder.add_shape_plane(body=body, xform=local, width=positive(size[0], eid + ' 的 plane.size[0]') * float(scale[0]),
-                                    length=positive(size[1], eid + ' 的 plane.size[1]') * float(scale[1]), cfg=cfg, label=eid + '/plane')
+            # width=length=0是引擎真正的无限碰撞合同，不能用极大有限尺寸替代。
+            builder.add_shape_plane(body=body, xform=local, width=width,length=length,cfg=cfg,label=eid+'/plane')
         else:
             radius = c.get('radiusM')
             if radius is None:
@@ -560,7 +579,7 @@ class World:
         self.dt = positive(options.get('timestepS', 1.0 / 500.0), 'timestepS')
         self.factor = positive(options.get('realtimeFactor', 1), 'realtimeFactor')
         self.frame_hz = positive(options.get('frameRateHz', 30), 'frameRateHz')
-        self.ground = options.get('ground', True) is not False
+        self.ground = explicit_ground_requested(scene,options)
         device, kind, degraded, note = resolve_device(options.get('device'))
         self.device = device
         self.device_kind = kind
@@ -611,6 +630,7 @@ class World:
             # 用于标识世界里的地面几何，不参与任何接触过滤。
             'groundGeomNames': list(self.ground_names),
             'warnings': [dict(w) for w in self.warnings],
+            **({'worldPhysics':self.world_physics()}if self.model is not None else{}),
             # 以下是本 Provider 的加法字段（sim-mujoco 没有），如实交代真实设备与求解器。
             'device': self.device,
             'deviceKind': self.device_kind,
@@ -663,6 +683,7 @@ class World:
         payload = {
             'sceneId': scene.get('sceneId'),
             'ground': self.ground,
+            'physics':scene.get('physics'),
             'timestepS': self.dt,
             'device': self.device,
             'entities': [],
@@ -719,25 +740,34 @@ class World:
 
     def compile(self, scene):
         """把 Scene 编译成真实的 Newton 模型；失败即抛结构化错误，不产出半成品世界。"""
-        builder = newton.ModelBuilder()
+        builder = newton.ModelBuilder(gravity=wp.vec3(*scene_gravity(scene,SimError)))
         ground_names = []
         skipped = []
-        if self.ground:
-            builder.add_ground_plane(label='__ground')
-            ground_names.append('__ground')
         poses = world_poses(scene)
         frames = collision_frame_maps(scene, poses)
         maps = {}
-        for e in scene['entities']:
+        native_planes=[];replaced=[]
+        # 原生资产先真实导入；之后才决定未编辑模板地面是否让位，不按名字或bbox猜。
+        ordered=sorted(scene['entities'],key=lambda entity:0 if native_source(entity)else 1)
+        for e in ordered:
             eid = e['entityId']
             cfg = native_source(e)
             if cfg:
                 bodies = self._import_entity(builder, eid, e, cfg, poses[eid])
+                for sid in range(bodies[4],bodies[5]):
+                    if int(builder.shape_type[sid])!=int(newton.GeoType.PLANE)or not builder.shape_flags[sid]&int(newton.ShapeFlags.COLLIDE_SHAPES):continue
+                    owner=builder.shape_body[sid]
+                    if not world_fixed_body(builder,owner):continue
+                    transform=builder.shape_transform[sid]
+                    if owner>=0:transform=wp.transform_multiply(builder.body_q[owner],transform)
+                    point=wp.transform_get_translation(transform);normal=wp.transform_vector(transform,wp.vec3(0,0,1))
+                    if standard_support_plane(list(point),list(normal)):native_planes.append((eid,builder.shape_label[sid]))
                 source = cfg.get('sourcePath') or 'inline-xml'
                 if e.get('components', {}).get('collision'):
                     skipped.append({'code': 'SCENE_COLLISION_IGNORED_NATIVE_SOURCE', 'entityId': eid,
                                     'message': eid + ' 的原生 MJCF/URDF 碰撞优先，Scene collision 未参与装配'})
             elif e.get('components', {}).get('collision') is not None:
+                if native_planes and replaceable_standard_ground(scene,e):replaced.append(eid);continue
                 bodies = scene_collision(builder, e, poses[eid], frames[eid])
                 source = 'scene-collision'
             else:
@@ -747,6 +777,8 @@ class World:
                 continue
             maps[eid] = {'bodyStart': bodies[0], 'bodyEnd': bodies[1], 'jointStart': bodies[2], 'jointEnd': bodies[3],
                          'shapeStart': bodies[4], 'shapeEnd': bodies[5], 'source': source, 'entity': e}
+        if explicit_ground_requested(scene,self.options)and not native_planes:
+            builder.add_ground_plane(label='__ground');ground_names.append('__ground')
         model = builder.finalize(device=self.device)
         states = (model.state(), model.state())
         control = model.control()
@@ -809,19 +841,17 @@ class World:
                     free_joints.append(entry)
             entity_maps[eid] = {
                 'entity': copy.deepcopy(m['entity']),
-                'rootBody': root,
+                'rootBody': root if m['bodyEnd']>m['bodyStart']else None,
                 'bodyLabels': body_labels[m['bodyStart']:m['bodyEnd']],
                 'joints': joints,
                 'freeJoints': free_joints,
                 'shapeLabels': shape_labels[m['shapeStart']:m['shapeEnd']],
+                'shapeStart':m['shapeStart'],'shapeEnd':m['shapeEnd'],
                 'source': m['source'],
             }
             for label in shape_labels[m['shapeStart']:m['shapeEnd']]:
                 if is_ground_shape_name(label):
                     ground_names.append(label)
-        # 与 sim-mujoco 同语义：options.ground !== false 时总是铺一块 __ground 平面。
-        # 导入的 MJCF 自带 floor 平面时会与它共面重合（同一高程的两层平面，物理上无害）；
-        # 需要单一地面时由调用方传 ground:false，本 Provider 不替调用方猜。
         for s in range(model.shape_count):
             if int(shape_types[s]) == int(newton.GeoType.PLANE) and shape_labels[s] not in ground_names:
                 ground_names.append(shape_labels[s])
@@ -829,7 +859,7 @@ class World:
             print('[sim-newton] WARNING ' + w['message'], file=sys.stderr, flush=True)
         return {'builder': builder, 'model': model, 'states': states, 'control': control, 'solver': solver,
                 'solverName': solver_name, 'pipeline': pipeline, 'contacts': contacts, 'ik_q': ik_q, 'ik_qd': ik_qd,
-                'entities': entity_maps, 'ground': ground_names, 'warnings': skipped}
+                'entities': entity_maps, 'ground': ground_names, 'warnings': skipped,'nativeGround':native_planes,'replacedGround':replaced}
 
     def sync(self, scene, force=False, initial=False):
         if self.scene and scene['sceneId'] != self.scene['sceneId']:
@@ -865,6 +895,7 @@ class World:
         self.ik_q, self.ik_qd = compiled['ik_q'], compiled['ik_qd']
         self.entities = compiled['entities']
         self.ground_names = compiled['ground']
+        self.native_ground=compiled['nativeGround'];self.replaced_ground=compiled['replacedGround']
         self.warnings = compiled['warnings']
         self.scene = copy.deepcopy(scene)
         self.signature = signature
@@ -878,6 +909,21 @@ class World:
         self.status_reason = None
         gc.collect()
         return self.handle()
+
+    def world_physics(self):
+        key=(id(self.model),self.applied_revision)
+        if getattr(self,'_physics_layout_key',None)!=key:
+            physical=[];sources=[];enabled=self.model.shape_flags.numpy();ground_ids=set(declared_ground_ids(self.scene))
+            for eid,info in self.entities.items():
+                names=[self.model.shape_label[sid]for sid in range(info['shapeStart'],info['shapeEnd'])if int(enabled[sid])&int(newton.ShapeFlags.COLLIDE_SHAPES)]
+                if names:physical.append(eid)
+                if eid in ground_ids and names:sources.append({'source':'scene','entityId':eid,'geomNames':names})
+            sources.extend({'source':'native-plane','entityId':eid,'geomNames':[name]}for eid,name in self.native_ground)
+            if '__ground'in self.ground_names:sources.append({'source':'explicit-legacy','geomNames':['__ground']})
+            self._physics_layout=(sources,coverage(self.scene,physical,self.replaced_ground));self._physics_layout_key=key
+        sources,collision_coverage=self._physics_layout
+        gravity=self.model.gravity.numpy()[0].tolist()
+        return {'gravityWorldMps2':gravity,'gravityEnabled':True,'units':'m/s^2','source':'newton-model','groundSources':sources,'collisionCoverage':collision_coverage}
 
     # -- 观测 ---------------------------------------------------------------
     def _read_joint_arrays(self):
@@ -907,7 +953,7 @@ class World:
             if only and eid not in only:
                 continue
             info = self.entities.get(eid)
-            if not info:
+            if not info or info['rootBody']is None:
                 if scene_poses is None:
                     scene_poses = world_poses(self.scene)
                 p, q, scale = scene_poses[eid]
@@ -947,6 +993,7 @@ class World:
         frame['executionMode'] = 'physical-contact'
         frame['assistAdvanceCount'] = 0
         frame['device'] = self.device
+        frame['worldPhysics']=self.world_physics()
         return frame
 
     def _free_base(self, joint, body_q, body_qd):

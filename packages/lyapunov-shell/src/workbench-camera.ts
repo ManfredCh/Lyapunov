@@ -20,7 +20,7 @@
 import type { ViewerViewState } from "@lyapunov/viewer/client"
 import type { Entity, SceneCameraComponent, SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { intrinsicsFromFovy, mountLocalFrom, rigidPoseOf, type RigidPose } from "../../viewer/src/camera-frustum.ts"
-import { cameraForward, cameraRequestFromState, cameraUpAxis, MAX_CAMERA_NAME, normalizeIntrinsics, scaleIntrinsics, type NamedCamera, type ViewerCameraRequest, type ViewerQuat } from "../../viewer/src/camera-view.ts"
+import { cameraForward, cameraRequestFromState, cameraUpAxis, fovYFromIntrinsics, MAX_CAMERA_NAME, normalizeIntrinsics, scaleIntrinsics, type NamedCamera, type ViewerCameraRequest, type ViewerQuat } from "../../viewer/src/camera-view.ts"
 /**
  * 命名相机的**格式面**原样再导出给界面用：界面（`workbench.tsx`）与工具（本模块）读写的是同一份
  * 解析/合成/增删函数，于是"界面存的"和"工具读的"不可能是两种形状。这里只是转口，不二次加工。
@@ -94,6 +94,7 @@ const cameraNumbers = (text: string, size: number): number[] => {
 export function normalizeDraftLens(draft: SceneCameraDraft, width: number, height: number, fovYDeg: number) {
   if(!draft.intrinsics)return undefined
   const scaled=scaleIntrinsics(normalizeIntrinsics(draft.intrinsics),width,height)
+  if(Math.abs(fovYFromIntrinsics(scaled)-fovYDeg)<1e-10)return scaled
   const fy=height/(2*Math.tan(fovYDeg*Math.PI/360)),ratio=fy/scaled.fy
   return {...scaled,fx:scaled.fx*ratio,fy}
 }

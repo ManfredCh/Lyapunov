@@ -13,6 +13,7 @@ import {SCENE_COORDINATES,identityTransform,type Entity,type SceneSnapshot} from
 import {uiCommandFields} from "../../lyapunov-contracts/src/command-privacy.ts"
 import {assetSceneInstances,entityEffectivelyVisible,removeSceneNodeCommit,sceneSubtreeIds,visibilityCommit} from "../src/scene-node-controls.tsx"
 import {sceneEditTarget,sceneNodeRole} from '../../lyapunov-contracts/src/scene-edit-target.ts'
+import {modelSceneView} from '../../scene-kit/src/model-view.ts'
 
 test('共用资源的不同物体保持独立编辑；物理叶/机器人/动画装配按真实父子归到各自owner',()=>{
  const ref={resourceId:'shared',version:1,original:{uri:'/fixture/box.glb',mimeType:'model/gltf-binary'},representations:[],source:{units:'m',upAxis:'Y' as const,handedness:'right' as const}}
@@ -49,7 +50,7 @@ beforeEach(async()=>{
 })
 afterEach(async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true})})
 async function fixture(agent:Agent){
- await command(agent,"scene_create",{sceneId:"same-scene"})
+ await command(agent,"scene_create",{sceneId:"same-scene",template:"blank"})
  const file=join(root,"source.glb");await writeFile(file,glb())
  const imported=await command<{resource:{ref:{resourceId:string;version:number}}}>(agent,"scene_import",{path:file,resourceId:"same-resource",physicalize:false})
  const mounted=await command<{snapshot:SceneSnapshot;entityId:string}>(agent,"scene_mount",{sceneId:"same-scene",resourceId:imported.resource.ref.resourceId,entityId:"environment"})
@@ -59,6 +60,15 @@ async function fixture(agent:Agent){
 }
 
 describe("场景节点删除/显隐的真实原生命令与持久读回",()=>{
+ test('011：用户命令默认创建无限地面；模型投影可读到锁定与删除选择',async()=>{
+  const scene=await command<SceneSnapshot>(a,'scene_create',{sceneId:'default-ground'}),ground=scene.entities[0]!
+  expect(ground).toMatchObject({locked:true,components:{collision:{shape:'plane',infinite:true}}})
+  const projection=modelSceneView(scene)as {entities:Array<{locked?:boolean}>}
+  expect(projection.entities[0]!.locked).toBe(true)
+  const removed=await command<SceneSnapshot>(a,'scene_edit',removeSceneNodeCommit(scene,ground.entityId))
+  expect(removed.physics?.groundState).toBe('removed')
+  expect(await command<SceneSnapshot>(a,'scene_prepare_world',{sceneId:scene.sceneId,expectedRevision:removed.revision})).toEqual(removed)
+ })
  test("修前不带cascade删除导入根被拒；正确子树删除保留重复名兄弟、素材、源文件及另一会话",async()=>{
   const before=await fixture(a),other=await fixture(b),ops=ctx.scene.forSession(a.id)
   await expect(command(a,"scene_edit",{sceneId:before.sceneId,expectedRevision:before.revision,patch:[{op:"remove",entityId:"environment"}]})).rejects.toThrow("PARENT_NOT_FOUND")

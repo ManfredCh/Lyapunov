@@ -31,8 +31,8 @@ test('A08 物理模板一次准备、保存重力与版本；用户删除地面�
  try{
   const ops=new SceneOperations(root),created=await ops.create({sceneId:'standard',template:'physics-workspace'})
   expect(created.entities).toHaveLength(1);expect(created.physics?.gravityWorldMps2).toEqual([0,0,-9.81])
-  expect(created.entities[0]!.components.collision).toMatchObject({shape:'box',halfExtents:[10,10,.05]})
-  expect(created.entities[0]!.resources[0]!.source).toMatchObject({units:'m',upAxis:'Z',handedness:'right'})
+  expect(created.entities[0]!.components.collision).toMatchObject({shape:'plane',infinite:true,size:[0,0,.1]})
+  expect(created.entities[0]!.locked).toBe(true);expect(created.entities[0]!.resources).toEqual([])
   expect((await ops.prepareWorkspace({sceneId:created.sceneId,expectedRevision:0})).revision).toBe(0)
   const changed=await ops.configurePhysics({sceneId:created.sceneId,expectedRevision:0,gravityWorldMps2:[0,0,-3]})
   expect((await new SceneStore(root).snapshot(created.sceneId)).physics).toEqual(changed.physics)

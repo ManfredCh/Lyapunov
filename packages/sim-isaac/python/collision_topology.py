@@ -28,6 +28,7 @@ def cooked_mesh(stage,prim,scale):
     return result or [unsupported('PHYSX_COOKED_TOPOLOGY_EMPTY: 无已编译凸件')]
 
 def geometry(stage,prim,scale):
+    if str(prim.GetTypeName())=='Plane':return [{'kind':'plane','sizeM':[0.,0.,0.],'infinite':True,'axis':str(prim.GetAttribute('axis').Get()or'Z')}]
     if prim.IsA(UsdGeom.Cube):
         size=float(UsdGeom.Cube(prim).GetSizeAttr().Get());return [{'kind':'box','sizeM':[size*abs(s)/2 for s in scale]}]
     if prim.IsA(UsdGeom.Sphere):

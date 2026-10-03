@@ -15,6 +15,8 @@ export interface SceneWorldPort {
  /** 自动同步新自由根前先暂停既有 owner，仍按原代次核对；不会创建另一世界。 */
  setPaused?(world:WorldHandle,paused:boolean,signal:AbortSignal):Promise<WorldHandle>
  reconcile?(scene:SceneSnapshot,signal:AbortSignal):Promise<SceneWorldReconciliation>
+ /** 仅首次建立世界；地面准备必须由Scene CAS持久化，并返回实际新revision。 */
+ prepareWorld?(scene:SceneSnapshot,signal:AbortSignal):Promise<SceneSnapshot>
  acceptScene?(scene:SceneSnapshot):void
 }
 /** 只检查已有声明；不会补坐标、派生碰撞或搜索本地文件。 */
@@ -120,6 +122,12 @@ export class SceneWorldLifecycle {
      this.publish(worldLifecycleState(w,frame));return w
     }
     if(!explicit&&intentionalBlankScene(scene)){this.publish({phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision,detail:'空白/相机场景可编辑；未请求创建物理世界。'});return}
+    if(port.prepareWorld){
+     const prepared=await port.prepareWorld(scene,controller.signal)
+     if(!current())return
+     if(prepared.sceneId!==scene.sceneId||prepared.revision<scene.revision)throw Error('WORLD_GROUND_PREPARATION_BINDING_MISMATCH')
+     if(prepared.revision!==scene.revision){scene=prepared;const preparedKey=JSON.stringify([key,scene.revision]);this.attempted.add(preparedKey);if(this.attempt?.controller===controller)this.attempt.attemptKey=preparedKey;port.acceptScene?.(prepared)}
+    }
     const issue=sceneWorldPreflight(scene,{allowEmpty:explicit&&intentionalBlankScene(scene)})
     if(issue){this.publish({phase:'blocked',sceneId:scene.sceneId,sceneRevision:scene.revision,...issue});return}
     this.publish({phase:'initializing',sceneId:scene.sceneId,sceneRevision:scene.revision})

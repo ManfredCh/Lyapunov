@@ -2866,6 +2866,38 @@
       "markers": [],
       "decision": "include",
       "reason": "d756后继七源/二十文件完整Own/Root合法增量与二次幂等、源码改字/旧组合改字/缺件/签名/混合态拒；仅复制自有源至临时目录，无Host或网络"
+    },
+    {
+      "path": "packages/scene-kit/test/infinite-ground.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "011：Scene无限地面创建、锁定、显隐、CAS删除与历史、首次物理入口和UI locale的离线检查。"
+    },
+    {
+      "path": "packages/sim-contract/test/infinite-ground-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要明确指定已有MuJoCo/Newton CPU解释器；逐引擎实测无限地面远域接触、隐藏、删除及重开负对照和原生去重。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/robot-camera-installation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A09-010：既有Scene安装操作的结构化位置/normal/up/FOV、真实命中祖先与同帧body FK锚点、局部安装不改机器人、Viewer原点锁位/朝向/FOV草稿/ACK/退出和readonly导航检查；使用Three实际数学/场景图与原型，不联网、不启动SDK或GPU。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/urdf-camera-installation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A09-010外部相机验收：需明确LYAPUNOV_MUJOCO_PYTHON与离屏GL；实际MuJoCo3.13解析URDF Gazebo sensor、完整原件标定、Scene body相机共存、RGB-D像素/深度及FOV恢复。缺环境明确失败、不skip；主控需独立执行，默认离线不计通过。"
     }
   ]
 }

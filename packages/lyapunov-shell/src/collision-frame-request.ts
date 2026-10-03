@@ -12,7 +12,7 @@ export function collisionFrameSelection(query:URLSearchParams):ObservationSelect
 /** 位置/任务能力预检用同一物理帧；可选读取真实site和接触，不推算或填零。 */
 export function worldFrameSelection(query:URLSearchParams):ObservationSelection|undefined {
  const collision=collisionFrameSelection(query),selection:ObservationSelection={...collision}
- for(const field of ['sensors','contacts'] as const){const value=query.get(field);if(value!==null){if(value!=='0'&&value!=='1')throw new Error('WORLD_OBSERVATION_SELECTION_INVALID');selection[field]=value==='1'}}
+ for(const field of ['sensors','contacts','cameraAuthoring'] as const){const value=query.get(field);if(value!==null){if(value!=='0'&&value!=='1')throw new Error('WORLD_OBSERVATION_SELECTION_INVALID');selection[field]=value==='1'}}
  const ids=[...new Set(query.getAll('entityId'))]
  if(ids.length){if(ids.length>512||ids.some(id=>!id||id.length>256))throw new Error('WORLD_OBSERVATION_SELECTION_INVALID');selection.entityIds=ids}
  return Object.keys(selection).length?selection:undefined

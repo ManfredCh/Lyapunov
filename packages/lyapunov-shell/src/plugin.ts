@@ -3,6 +3,8 @@ import {worldFrameSelection} from "./collision-frame-request.ts"
 import {CameraUIReadCache} from "./camera-ui-query.ts"
 import {cameraDraftFromSample,cameraSampleBodies,type CameraAuthoringSnapshot} from './camera-authoring.ts'
 import {cameraInstallationCommit,restoredCameraDraft,type CameraSceneSaveInput} from './camera-installation.ts'
+import {cameraDraftFromInstallation} from './camera-installation-input.ts'
+import {annotationAnchorOf} from '../../viewer/src/annotations.ts'
 import {cameraMountBodies,type SceneCameraDraft} from './workbench-camera.ts'
 import {nativeCameraPreset,registeredCameraPresets} from '../../robot-tools/src/presets.ts'
 import {isCameraNavigationAction} from './camera-navigation-actions.ts'
@@ -484,7 +486,7 @@ export async function apply(ctx:Context,config:Config={}){
   if(!sim)throw new Error("PROVIDER_UNAVAILABLE: 当前 Profile 未启用模拟 Provider")
   return sim
  }
- const uiActionNames=["openTool","openFiles","openTerminal","openResource","showCanvas","selectEntity","focus","enterSceneCenter","selectScene","exitCameraView","locateTcp","locateBase"] as const
+ const uiActionNames=["openTool","openFiles","openTerminal","openResource","showCanvas","selectEntity","focus","enterSceneCenter","selectScene","exitCameraView","aimCameraView","locateTcp","locateBase"] as const
  /**
   * 主动观察：`viewer_observe` 让"当前会话里那个真实 3D 窗口现在拍一张"。
   *
@@ -899,7 +901,7 @@ export async function apply(ctx:Context,config:Config={}){
  }})
  ctx.tools.register(defineTool({
   name:"viewer_annotation_read",
-  description:"Read annotations made by the user in the workbench 3D viewport: return an image attachment with numbered marks, each text note, and its anchored entity and entity-local coordinates in meters. Anchors stay on the entity when the view changes. By default, read the latest annotated capture for the selected scene, or specify sceneId. If none exists, return found=false and explain how the user can create annotations.",
+  description:"Read the user's 3D viewport annotations, numbered image, annotationId/captureId, text, entity-local and world coordinates, surface normal, and Scene/world/generation/frame provenance. A robot anchor includes bodyName/body-local point and normal only when an actual hit and same-frame native FK established them. Use that body with camera_scene_save mode=install; never infer a link, center or TCP from a model name. By default read the latest annotated capture for the selected scene. If absent return found=false.",
   parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Annotation read request.",properties:{sceneId:{type:"string",description:"Optional scene; defaults to the scene in the current selection."}}}},
   output:{schema:{type:"json"},render:(_args,value)=>{
    const {__annotationImage,...visible}=(value??{}) as Record<string,unknown>
@@ -923,19 +925,20 @@ export async function apply(ctx:Context,config:Config={}){
    const prompt=typeof (latest as {prompt?:unknown}).prompt==="string"&&(latest as {prompt:string}).prompt.trim()
      ? (latest as {prompt:string}).prompt
      : ["【3D 视口批注】", ...(latest.annotations??[]).map(row=>`第 ${String(row.index)} 条：${row.text.trim()||"（未填写说明）"}；位置=${row.entity??row.entityId}（entityId ${row.entityId}）；实体局部坐标=(${row.anchor.local.map(value=>value.toFixed(3)).join(", ")}) m`)].join("\n")
-   return {found:true,sceneId,captureId:latest.captureId,capturedAt:latest.capturedAt,prompt,imagePath:latest.imagePath,pose:derivedPose(latest),...originalFrameNote(latest),...latest.worldId?{worldId:latest.worldId,stepIndex:latest.stepIndex}:{},image:{attached:Boolean(attachment),...(attachment?captureImageFace(attachment,latest):{path:latest.imagePath,reason:"截图文件不可读或附件服务拒绝，锚点与文字仍照常返回"})},annotations:latest.annotations!.map(row=>({index:row.index,entity:row.entity??row.entityId,entityId:row.entityId,text:row.text,anchorLocalM:row.anchor.local,anchorWorldM:row.anchor.world})),note:"编号与截图里的圈点一一对应；anchorLocalM 是实体局部坐标，移动/带动实体后仍有效。",...attachment?{__annotationImage:attachment}:{}} as any
+   return {found:true,sceneId,sceneRevision:latest.sceneRevision,captureId:latest.captureId,capturedAt:latest.capturedAt,prompt,imagePath:latest.imagePath,pose:derivedPose(latest),...originalFrameNote(latest),...latest.worldId?{worldId:latest.worldId,generation:latest.generation,frameId:latest.frameId,stepIndex:latest.stepIndex}:{},image:{attached:Boolean(attachment),...(attachment?captureImageFace(attachment,latest):{path:latest.imagePath,reason:"The image is unavailable; annotation coordinates and notes are still returned."})},annotations:latest.annotations!.map(row=>({index:row.index,annotationId:row.annotationId,entity:row.entity??row.entityId,entityId:row.entityId,text:row.text,anchorLocalM:row.anchor.local,anchorWorldM:row.anchor.world,normalWorld:row.anchor.normal,sceneId:row.anchor.sceneId,sceneRevision:row.anchor.sceneRevision,body:row.anchor.body})),note:"Numbers match the image marks. body.localM and body.normalLocal are fixed in the identified native body; a missing body anchor requires a new same-frame surface annotation or explicit body-local position.",...attachment?{__annotationImage:attachment}:{}} as any
   },
  }))
 ctx.tools.register(defineTool({
   name:"ui_action",
-  description:"Control the Lyapunov workbench interface. openTool opens a panel; openFiles/openTerminal/showCanvas switch the working surface. openResource takes path and target=preview|source and returns after a window in the current session actually displays that file. selectEntity selects an object. focus frames it from outside; enterSceneCenter moves the camera to a robust center of the subject. Neither moves the model or requires traversing the raw 3DGS bbox. selectScene switches to an existing scene. exitCameraView exits camera viewing/editing. locateTcp/locateBase open the robot panel and show current native markers; if readback is missing, provide the real configuration entry. Change model position with the complete transform in scene_edit. Except for openResource, acknowledgement only establishes that an action was queued; verify the displayed result with viewer_observe.",
-  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","object","camera","asset","annotation"],description:"Target panel for openTool."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
+  description:"Control the Lyapunov workbench interface. openTool opens a panel; openFiles/openTerminal/showCanvas switch the working surface. openResource takes path and target=preview|source and returns after a window in the current session actually displays that file. selectEntity selects an object. focus frames it from outside; enterSceneCenter moves the camera to a robust center of the subject. Neither moves the model or requires traversing the raw 3DGS bbox. selectScene switches to an existing scene. aimCameraView enters the actual cameraId (or Scene camera entityId) at its locked installation origin for orientation/FOV editing while retaining body FK. exitCameraView discards a pending installation draft and restores the main view. locateTcp/locateBase open the robot panel and show current native markers; if readback is missing, provide the real configuration entry. Change model position with the complete transform in scene_edit. Except for openResource, acknowledgement only establishes that an action was queued; verify the displayed result with viewer_observe.",
+  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","object","camera","asset","annotation"],description:"Target panel for openTool."},cameraId:{type:"string",description:"Exact current camera_list cameraName or Scene rig key for aimCameraView; never infer a camera name."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase/aimCameraView. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
   output:{schema:{type:"json"},render:(_args,value)=>[{type:"text",text:uiActionModelText(value)}]},
   execute:async(args,exec)=>{
-   const input=(args.input??args) as {action?:string;tool?:string;entityId?:string;sceneId?:string;clientId?:string;path?:string;target?:string}
+   const input=(args.input??args) as {action?:string;tool?:string;entityId?:string;sceneId?:string;clientId?:string;path?:string;target?:string;cameraId?:string}
    if(!input.action||!(uiActionNames as readonly string[]).includes(input.action))throw new Error("UI_ACTION_INVALID")
    if(input.action==="openTool"&&!input.tool)throw new Error("UI_ACTION_TOOL_REQUIRED")
    if(['selectEntity','locateTcp','locateBase'].includes(input.action)&&!input.entityId)throw new Error("UI_ACTION_ENTITY_REQUIRED")
+   if(input.action==='aimCameraView'&&!input.entityId&&!input.cameraId)throw new Error('UI_ACTION_CAMERA_REQUIRED')
    if(input.clientId!==undefined&&(typeof input.clientId!=="string"||!input.clientId))throw new Error("UI_ACTION_CLIENT_INVALID: clientId 应为非空字符串")
    const key=sessionKeyOf((exec as {agent?:unknown}).agent)
    if(input.action==="selectScene"){
@@ -968,7 +971,7 @@ ctx.tools.register(defineTool({
     if(!outcome.ok)throw new Error(outcome.error)
     return {opened:true,action:"openResource",path:openPath,target:openTarget,expectation:{address:expectation.address,kind:expectation.expectedKind??null,...(expectation.forbiddenKind?{forbiddenKind:expectation.forbiddenKind}:{})},...outcome.value}
    }
-   const entry:UiAction={id:randomUUID(),action:input.action,args:{...target?{clientId:target}:{},...input.tool?{tool:input.tool}:{},...input.entityId?{entityId:input.entityId}:{},...input.sceneId?{sceneId:input.sceneId}:{}},enqueuedAt:new Date().toISOString()}
+   const entry:UiAction={id:randomUUID(),action:input.action,args:{...target?{clientId:target}:{},...input.tool?{tool:input.tool}:{},...input.entityId?{entityId:input.entityId}:{},...input.cameraId?{cameraId:input.cameraId}:{},...input.sceneId?{sceneId:input.sceneId}:{}},enqueuedAt:new Date().toISOString()}
    uiActionQueue.set(key,[...uiActionQueue.get(key)??[],entry].slice(-20))
    return {queued:entry.id,action:entry.action,...target?{target}:{},...input.action==="selectScene"?{note:"这条回执只表示动作已排进本会话的界面动作队列,不代表任何窗口已经切换或已经显示该场景;窗口真的切过去、资源也加载完成的证据,用 viewer_observe(sceneId + expectedRevision)按原生采集核对。"}:{}}
   },
@@ -1817,14 +1820,13 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   if(value===undefined)return []
   if(!Array.isArray(value)||value.length===0||value.length>200)throw new Error("ANNOTATION_ROWS_INVALID")
   return value.map((row,index)=>{
-   const item=(row??{}) as {index?:unknown;annotationId?:unknown;entityId?:unknown;entity?:unknown;text?:unknown;anchor?:{local?:unknown;world?:unknown;normal?:unknown}}
-   const triple=(input:unknown):[number,number,number]|undefined=>Array.isArray(input)&&input.length===3&&input.every(entry=>typeof entry==="number"&&Number.isFinite(entry))?[input[0] as number,input[1] as number,input[2] as number]:undefined
-   const local=triple(item.anchor?.local),world=triple(item.anchor?.world),normal=triple(item.anchor?.normal)
+   const item=(row??{}) as {index?:unknown;annotationId?:unknown;entityId?:unknown;entity?:unknown;text?:unknown;anchor?:unknown}
+   const anchor=annotationAnchorOf(item.anchor)
    if(typeof item.annotationId!=="string"||!item.annotationId)throw new Error(`ANNOTATION_ID_REQUIRED:${index}`)
    if(typeof item.entityId!=="string"||!entityIds.has(item.entityId))throw new Error(`ANNOTATION_ENTITY_NOT_IN_SCENE:${String(item.entityId)}`)
-   if(!local||!world)throw new Error(`ANNOTATION_ANCHOR_INVALID:${item.annotationId}`)
+   if(!anchor||anchor.entityId!==item.entityId)throw new Error(`ANNOTATION_ANCHOR_INVALID:${item.annotationId}`)
    if(typeof item.text!=="string"||item.text.length>2000)throw new Error(`ANNOTATION_TEXT_INVALID:${item.annotationId}`)
-   return {index:index+1,annotationId:item.annotationId,sceneId,entityId:item.entityId,...typeof item.entity==="string"?{entity:item.entity}:{},text:item.text,anchor:{entityId:item.entityId,local,world,...normal?{normal}:{}}}
+   return {index:index+1,annotationId:item.annotationId,sceneId,entityId:item.entityId,...typeof item.entity==="string"?{entity:item.entity}:{},text:item.text,anchor}
   })
  }
  ctx.commands.register({name:"viewer_capture",description:"Save the client's current Three/Spark image as a native DSH attachment and record camera and scene/world/frame provenance.",input:{hint:"Image and camera parameters as JSON."},recordInput:false,handler:async invocation=>{
@@ -2041,7 +2043,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
  /** 侧栏与模型共用一条持久安装操作。当前画面由指定Viewer只读采样；保存不进入pilot、不创建World。 */
  const saveSceneCamera=async(agent:unknown,input:CameraSceneSaveInput,signal:AbortSignal)=>{
   requireWritableScene(ctx,agent,'camera_scene_save')
-  if(!input||typeof input.sceneId!=='string'||!Number.isInteger(input.expectedRevision)||input.expectedRevision<0||!['current-view','draft','native-preset','restore'].includes(input.mode))throw new Error('CAMERA_SAVE_INPUT_REQUIRED: 指定sceneId/expectedRevision/mode')
+  if(!input||typeof input.sceneId!=='string'||!Number.isInteger(input.expectedRevision)||input.expectedRevision<0||!['current-view','draft','install','native-preset','restore'].includes(input.mode))throw new Error('CAMERA_SAVE_INPUT_REQUIRED: 指定sceneId/expectedRevision/mode')
   signal.throwIfAborted()
   const sessionKey=sessionKeyOf(agent)
   if(await officialSceneFor(sessionKey,input.sceneId))throw new Error('CAMERA_SAVE_OFFICIAL_READ_ONLY')
@@ -2053,6 +2055,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   if(existing&&!existing.components.camera)throw new Error('CAMERA_SAVE_ENTITY_NOT_CAMERA: 不覆盖其他实体')
   let draft:SceneCameraDraft,source:import('../../lyapunov-contracts/src/types.ts').SceneCameraInstallation['source']='manual',sourceCameraName:string|undefined,bodies:ReturnType<typeof cameraMountBodies>=[]
   let sampled:CameraAuthoringSnapshot|undefined
+  let installationSample:{sceneId:string;sceneRevision:number;worldId?:string;generation?:number;frameId?:string;stepIndex?:number}|undefined
   const installationWorld=async()=>{
    if(!Number.isInteger(input.expectedGeneration)||(input.expectedGeneration??0)<1)throw new Error('CAMERA_SAVE_GENERATION_REQUIRED')
    const scope=await liveCameraWorld(sessionKey,input.worldId!,input.sceneId,input.expectedGeneration)
@@ -2069,6 +2072,23 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
    draft=cameraDraftFromSample(snapshot,sampled,{name:input.name??existing?.name,world,mount:input.mount})
    if(input.mount)bodies=cameraSampleBodies(snapshot,world,sampled)
    source='current-view'
+  }else if(input.mode==='install'){
+   if(!input.installation)throw new Error('CAMERA_INSTALL_INPUT_REQUIRED')
+   const mount=input.mount??(existing?.components.camera as import('../../lyapunov-contracts/src/types.ts').SceneCameraComponent|undefined)?.mount
+   const scope=mount?await installationWorld():undefined,receipt=scope?await scope.sim.listCameras(scope.world.worldId):undefined
+   if(scope&&(!receipt||receipt.worldId!==scope.world.worldId||receipt.generation!==scope.world.worldGeneration||receipt.sceneRevision!==snapshot.revision||typeof receipt.frameId!=='string'||!Number.isInteger(receipt.stepIndex)))throw new Error('CAMERA_INSTALL_BODY_SOURCE_STALE')
+   if(receipt)bodies=cameraMountBodies(receipt,snapshot.entities)
+   let annotation:import('./camera-installation-input.ts').CameraInstallationAnnotation|undefined
+   if(input.installation.annotationId!==undefined){
+    if(typeof input.installation.annotationId!=='string'||!input.installation.annotationId||typeof input.installation.captureId!=='string'||!input.installation.captureId)throw new Error('CAMERA_INSTALL_ANNOTATION_ID_REQUIRED: use the annotationId and captureId returned by viewer_annotation_read')
+    const capture=await readCapture(sessionKey,input.installation.captureId) as FeedbackCapture
+    if(capture.sessionKey!==sessionKey||capture.sceneId!==snapshot.sceneId||capture.sceneRevision!==snapshot.revision)throw new Error('CAMERA_INSTALL_ANNOTATION_CAPTURE_STALE')
+    const row=capture.annotations?.find(a=>a.annotationId===input.installation!.annotationId)
+    if(!row)throw new Error('CAMERA_INSTALL_ANNOTATION_NOT_FOUND')
+    annotation={...row,sceneId:capture.sceneId,sceneRevision:capture.sceneRevision}
+   }
+   draft=cameraDraftFromInstallation(snapshot,input.installation,{existing,name:input.name,mount,bodies,worldId:scope?.world.worldId,generation:scope?.world.worldGeneration,frameId:receipt?.frameId as string|undefined,stepIndex:receipt?.stepIndex as number|undefined,annotation})
+   installationSample={sceneId:snapshot.sceneId,sceneRevision:snapshot.revision,...receipt?{worldId:receipt.worldId as string,generation:receipt.generation as number,frameId:receipt.frameId as string,stepIndex:receipt.stepIndex as number}:{}}
   }else{
    if(input.mode==='restore'){
     if(!existing)throw new Error('CAMERA_BASELINE_ENTITY_REQUIRED')
@@ -2095,10 +2115,10 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   signal.throwIfAborted()
   if(draft.parentEntityId)await installationWorld()
   const saved=await sceneFor(sessionKey).scene.commit(cameraInstallationCommit(snapshot,draft,bodies,entityId,source,sourceCameraName))
-  return {status:'SAVED',snapshot:saved,entityId,source,worldNeedsSync:Boolean(draft.parentEntityId||existingSimFor(sessionKey)),...(sampled?{sample:{sceneId:sampled.sceneId!,sceneRevision:sampled.sceneRevision!,...sampled.worldId!==undefined?{worldId:sampled.worldId}:{},...sampled.generation!==undefined?{generation:sampled.generation}:{},...sampled.frameId!==undefined?{frameId:sampled.frameId}:{},...sampled.stepIndex!==undefined?{stepIndex:sampled.stepIndex}:{}}}:{}),note:'安装已保存到Scene；世界同步与当前原生Frame由现有World owner读取。保存没有进入相机视角。'}
+  return {status:'SAVED',snapshot:saved,entityId,source,worldNeedsSync:Boolean(draft.parentEntityId||existingSimFor(sessionKey)),...(sampled?{sample:{sceneId:sampled.sceneId!,sceneRevision:sampled.sceneRevision!,...sampled.worldId!==undefined?{worldId:sampled.worldId}:{},...sampled.generation!==undefined?{generation:sampled.generation}:{},...sampled.frameId!==undefined?{frameId:sampled.frameId}:{},...sampled.stepIndex!==undefined?{stepIndex:sampled.stepIndex}:{}}}:installationSample?{sample:installationSample}:{}),note:'Installation saved in Scene. The existing World owner handles synchronization and native frame readback. Saving does not enter camera view.'}
  }
- ctx.tools.register(defineTool({name:'camera_scene_save',description:"Use the same Scene CAS operation as the camera sidebar. current-view saves the complete current camera (K/resolution/clipping/world pose) from the specified window without entering camera view or starting a World first. A mount uses the body and camera from the same actually displayed Frame to compute local installation and requires worldId/expectedGeneration. draft explicitly selects local or world installation. native-preset uses a real ID from robot_presets; restore uses the Scene's saved installation baseline. A temporary camera_adjust is not a persistent save.",parameters:{input:{type:'object',required:true,additionalProperties:false,properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},mode:{type:'string',enum:['current-view','draft','native-preset','restore'],required:true},entityId:{type:'string'},name:{type:'string'},clientId:{type:'string'},worldId:{type:'string'},expectedGeneration:{type:'integer'},presetId:{type:'string'},mount:{type:'object',additionalProperties:false,properties:{entityId:{type:'string',required:true},bodyName:{type:'string',required:true}}},draft:{type:'object',additionalProperties:true,description:"Human installation form: name/position/quaternion/fovYDeg/width/height/near/far/parentEntityId/bodyName are strings; intrinsics contains fx/fy/cx/cy/width/height."}}}},output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>await saveSceneCamera((exec as {agent?:unknown}).agent,(args.input??args) as unknown as CameraSceneSaveInput,exec.signal) as any}))
- ctx.commands.register({name:'camera_scene_save',description:"Use the same persistent Scene camera save/mount/preset/restore operation as the natural-language Tool.",input:{hint:'{sceneId,expectedRevision,mode,entityId?,name?,clientId?,worldId?,expectedGeneration?,mount?,draft?,presetId?}'},recordInput:false,handler:async invocation=>({kind:'success',text:JSON.stringify(await saveSceneCamera(invocation.agent,JSON.parse(invocation.rawInput||'{}'),invocation.signal??new AbortController().signal))})})
+ ctx.tools.register(defineTool({name:'camera_scene_save',description:"Persist a camera using the sidebar's Scene CAS. install accepts typed installation: positionM in explicit referenceFrame=world|parent (parent is the selected real body origin, meters), normal as the viewing direction (-Z optical axis), optional up to define roll, or quaternionXyzw; fovYDeg is vertical degrees. Direction without up preserves the prior roll by shortest rotation. Use annotationId/captureId from viewer_annotation_read with the exact bodyName and optional body-local offsetM to install at its surface point/normal. A mount requires worldId/expectedGeneration and same-frame camera_list FK. Read real bodies or robot_presets; never guess a link/TCP/center from robot names. If a requested center is undefined, ask for a declared frame/offset or surface annotation. current-view samples complete K/resolution/clipping/pose from the specified window. draft uses the full human form. native-preset loads actual registered/native calibration; URDF has no implicit cameras, use declared sensor calibration. restore retains the original installation baseline. Editing never moves the robot. A temporary camera_adjust is not a persistent save.",parameters:{input:{type:'object',required:true,additionalProperties:false,properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},mode:{type:'string',enum:['current-view','draft','install','native-preset','restore'],required:true},entityId:{type:'string'},name:{type:'string'},clientId:{type:'string'},worldId:{type:'string'},expectedGeneration:{type:'integer'},presetId:{type:'string'},mount:{type:'object',additionalProperties:false,properties:{entityId:{type:'string',required:true},bodyName:{type:'string',required:true}}},installation:{type:'object',additionalProperties:false,properties:{referenceFrame:{type:'string',enum:['world','parent']},positionM:{type:'array',items:{type:'number'},minItems:3,maxItems:3},annotationId:{type:'string'},captureId:{type:'string'},offsetM:{type:'array',items:{type:'number'},minItems:3,maxItems:3},normal:{type:'array',items:{type:'number'},minItems:3,maxItems:3},up:{type:'array',items:{type:'number'},minItems:3,maxItems:3},quaternionXyzw:{type:'array',items:{type:'number'},minItems:4,maxItems:4},fovYDeg:{type:'number'},width:{type:'integer'},height:{type:'integer'},near:{type:'number'},far:{type:'number'},intrinsics:{type:'object',additionalProperties:false,properties:{fx:{type:'number',required:true},fy:{type:'number',required:true},cx:{type:'number',required:true},cy:{type:'number',required:true},width:{type:'integer',required:true},height:{type:'integer',required:true}}}}},draft:{type:'object',additionalProperties:true,description:"Human installation form: name/position/quaternion/fovYDeg/width/height/near/far/parentEntityId/bodyName are strings; intrinsics contains fx/fy/cx/cy/width/height."}}}},output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>await saveSceneCamera((exec as {agent?:unknown}).agent,(args.input??args) as unknown as CameraSceneSaveInput,exec.signal) as any}))
+ ctx.commands.register({name:'camera_scene_save',description:"Use the same persistent Scene camera save/install/mount/preset/restore operation as the natural-language Tool.",input:{hint:'{sceneId,expectedRevision,mode,entityId?,name?,clientId?,worldId?,expectedGeneration?,mount?,installation?,draft?,presetId?}'},recordInput:false,handler:async invocation=>({kind:'success',text:JSON.stringify(await saveSceneCamera(invocation.agent,JSON.parse(invocation.rawInput||'{}'),invocation.signal??new AbortController().signal))})})
  ctx.effect(()=>()=>cameraListCache.dispose(),"lyapunov-shell: UI camera query cache")
  // 自动轮询只读 UI 路由，不激活 Agent、不写 commandResult/Session 消息。
  register("camera-list",["GET"],async request=>{

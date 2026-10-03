@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { mkdirSync, watch } from "node:fs"
 import { readdir } from "node:fs/promises"
+import {isDeepStrictEqual} from 'node:util'
 import type { Entity, SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { SCENE_COORDINATES } from "../../lyapunov-contracts/src/types.ts"
 import {validateScenePhysics} from '../../lyapunov-contracts/src/world-physics.ts'
@@ -48,6 +49,7 @@ export function validateSnapshot(snapshot: SceneSnapshot): void {
     safeId(entity.entityId)
     if (ids.has(entity.entityId)) throw new Error(`DUPLICATE_ENTITY: ${entity.entityId}`)
     if (typeof entity.name !== "string" || !entity.name.trim()) throw new Error(`INVALID_ENTITY_NAME: ${entity.entityId}`)
+    if(entity.locked!==undefined&&typeof entity.locked!=='boolean')throw new Error(`INVALID_ENTITY_LOCK: ${entity.entityId}`)
     for (const [key, count] of [["position", 3], ["quaternion", 4], ["scale", 3]] as const) {
       const values = entity.transform?.[key]
       if (!Array.isArray(values) || values.length !== count || values.some(x => !Number.isFinite(x))) throw new Error(`INVALID_TRANSFORM: ${entity.entityId}.${key}`)
@@ -173,6 +175,9 @@ export class SceneStore {
         if (op.op === "add") { draft.entities.push(structuredClone(op.entity)); continue }
         const index = draft.entities.findIndex(entity => entity.entityId === op.entityId)
         if (index < 0) throw new Error(`ENTITY_NOT_FOUND: ${op.entityId}`)
+        const target=draft.entities[index]!
+        // 解锁必须是单独的明确编辑；不能在同一个update里夹带变换绕过锁。
+        if(target.locked&&(op.op==='reparent'||op.op==='update'&&op.changes.transform!==undefined&&!isDeepStrictEqual(op.changes.transform,target.transform)))throw new Error(`ENTITY_LOCKED: ${op.entityId}`)
         if (op.op === "update") {
           if ("entityId" in op.changes || "parentId" in op.changes) throw new Error("INVALID_UPDATE: 使用 reparent 修改父节点")
           draft.entities[index] = { ...draft.entities[index]!, ...structuredClone(op.changes) }
@@ -190,6 +195,11 @@ export class SceneStore {
           }
           draft.entities = draft.entities.filter(entity => !remove.has(entity.entityId))
         } else throw new Error("INVALID_PATCH_OPERATION")
+      }
+      if(draft.physics?.groundEntityId&&draft.physics.groundState!==undefined){
+        const ground=draft.entities.find(entity=>entity.entityId===draft.physics!.groundEntityId)
+        if(ground)draft.physics.groundState=ground.components.collision?.enabled===false?'disabled':'present'
+        else if(draft.physics.groundState==='present'||current.entities.some(entity=>entity.entityId===draft.physics!.groundEntityId))draft.physics.groundState='removed'
       }
       draft.revision++
       validateSnapshot(draft)

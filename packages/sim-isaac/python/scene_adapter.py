@@ -7,7 +7,7 @@ import json
 import math
 import uuid
 import numpy as np
-from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdPhysics, PhysxSchema, UsdShade
+from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdPhysics, PhysxSchema, UsdShade,PhysicsSchemaTools
 from isaacsim.asset.importer.mjcf import MJCFImporter,MJCFImporterConfig
 from isaacsim.asset.importer.urdf import URDFImporter,URDFImporterConfig
 from glb_visual import convert_glb
@@ -92,9 +92,21 @@ def poses(scene):
 def verified_native_ground_names(stage,entry):
     """源静态plane、实际ColliderAPI与完整安装位姿共同证明标准支持面；名字不作资格。"""
     from world_physics import standard_support_plane
+    if not entry.get('nativePhysicsSource'):return []
     root=stage.GetPrimAtPath(entry['path'])
     if not root.IsValid():return []
     matrix=UsdGeom.XformCache().GetLocalToWorldTransform(root);result=[]
+    # USD原生世界无需MJCF元数据也能凭实际static Plane Collider证明；有限mesh/盒不作资格。
+    cache=UsdGeom.XformCache()
+    for prim in Usd.PrimRange(root,Usd.TraverseInstanceProxies()):
+        if str(prim.GetTypeName())!='Plane'or not prim.HasAPI(UsdPhysics.CollisionAPI)or UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get()is False:continue
+        ancestor=prim;dynamic=False
+        while ancestor and ancestor.IsValid():
+            if ancestor.HasAPI(UsdPhysics.RigidBodyAPI)and UsdPhysics.RigidBodyAPI(ancestor).GetRigidBodyEnabledAttr().Get()is not False:dynamic=True;break
+            ancestor=ancestor.GetParent()
+        if dynamic:continue
+        world=cache.GetLocalToWorldTransform(prim);axis=str(prim.GetAttribute('axis').Get()or'Z');normal=world.TransformDir(Gf.Vec3d(*{'X':(1,0,0),'Y':(0,1,0),'Z':(0,0,1)}[axis])).GetNormalized()
+        if standard_support_plane(world.Transform(Gf.Vec3d(0,0,0)),normal):result.append(str(prim.GetPath()))
     for name,definition in (entry.get('metadata',{}).get('geoms')or{}).items():
         if definition.get('geomKind')!='mjGEOM_PLANE' or definition.get('sourceBodyId')!=0:continue
         q=definition.get('quaternionWxyz');position=definition.get('positionM')
@@ -104,9 +116,9 @@ def verified_native_ground_names(stage,entry):
         if not standard_support_plane(point,normal):continue
         for path in definition.get('nativePaths',[]):
             prim=stage.GetPrimAtPath(path)
-            if prim.IsValid()and any(p.HasAPI(UsdPhysics.CollisionAPI)and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()for p in Usd.PrimRange(prim,Usd.TraverseInstanceProxies())):
+            if prim.IsValid()and any(str(p.GetTypeName())=='Plane'and p.HasAPI(UsdPhysics.CollisionAPI)and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()is not False for p in Usd.PrimRange(prim,Usd.TraverseInstanceProxies())):
                 result.append(name);break
-    return sorted(result)
+    return sorted(set(result))
 
 def collision_pose_rejection(matrix,where):
     """Scene 实体的世界矩阵能否原样交给 PhysX collider：None=可以，否则返回可定位的原因。
@@ -772,7 +784,7 @@ class SceneAdapter:
         direction=[v/magnitude for v in gravity]if magnitude else[0,0,-1]
         physics=UsdPhysics.Scene.Define(stage,'/World/PhysicsScene');physics.CreateGravityDirectionAttr(Gf.Vec3f(*direction));physics.CreateGravityMagnitudeAttr(magnitude)
         physx=PhysxSchema.PhysxSceneAPI.Apply(physics.GetPrim());physx.CreateEnableCCDAttr(True);physx.CreateEnableStabilizationAttr(True);physx.CreateSolverTypeAttr('TGS')
-        if explicit_ground_requested(scene,options):self.primitive(stage,'/World/ground',{'shape':'box','halfExtents':[50,50,.05],'friction':[1.2,.08,.01]},{'type':'static'},Gf.Matrix4d(1).SetTranslate(Gf.Vec3d(0,0,-.05)))
+        if explicit_ground_requested(scene,options):self.primitive(stage,'/World/ground',{'shape':'plane','infinite':True,'size':[0,0,.1],'friction':[1.2,.08,.01]},{'type':'static'},Gf.Matrix4d(1))
         result={}
         for i,e in enumerate(scene['entities']):
             eid=e['entityId'];path=f'/World/entities/e{i}';source,cfg,metadata=sources[eid];components=e.get('components',{});root=UsdGeom.Xform.Define(stage,path)
@@ -855,6 +867,7 @@ class SceneAdapter:
             cameras=native_cameras(stage,prim,metadata)
             native_collision_names=collision_names(prim,metadata)
             result[eid]={'entity':e,'path':path,'articulation':articulation,'pose':runtime_pose,
+                         'nativePhysicsSource':bool(source and not metadata.get('visualOnly',False)),
                          'metadata':metadata,'config':cfg,'controller':components.get('controller',{}),
                          'rigidPaths':[str(p.GetPath()) for p in rigid],
                          'collisionNames':native_collision_names,
@@ -870,6 +883,7 @@ class SceneAdapter:
             entry['metadata']['verifiedNativeGroundNames']=verified_native_ground_names(stage,entry)
             verified_planes.extend((eid,name)for name in entry['metadata']['verifiedNativeGroundNames'])
         if verified_planes:
+            if stage.GetPrimAtPath('/World/ground').IsValid():stage.RemovePrim('/World/ground')
             for entity in scene['entities']:
                 if not replaceable_standard_ground(scene,entity):continue
                 entry=result[entity['entityId']]
@@ -917,8 +931,12 @@ class SceneAdapter:
             if shape=='box':
                 declarations=[{'shape':'box','center':center,'size':collision_vector(size,path+' 的 collision.'+('halfExtents' if 'halfExtents' in collision else 'size'),positive=True)}]
             elif shape=='plane':
-                if not isinstance(size,(list,tuple)) or len(size)<2:raise SceneError('INVALID_ARGUMENT',path+' 的 plane 碰撞缺 size[0..1]，不按默认尺寸造面')
-                declarations=[{'shape':'plane','center':center,'size':[collision_scalar(size[0],path+' 的 collision.size[0]'),collision_scalar(size[1],path+' 的 collision.size[1]')]}]
+                if collision.get('infinite')is True:
+                    if rigid.get('type','static')!='static':raise SceneError('UNSUPPORTED_CAPABILITY',path+' 的无限plane只支持静态体')
+                    declarations=[{'shape':'plane','infinite':True,'center':center,'size':[0.,0.]}]
+                else:
+                    if not isinstance(size,(list,tuple)) or len(size)<2:raise SceneError('INVALID_ARGUMENT',path+' 的 plane 碰撞缺 size[0..1]，不按默认尺寸造面')
+                    declarations=[{'shape':'plane','center':center,'size':[collision_scalar(size[0],path+' 的 collision.size[0]'),collision_scalar(size[1],path+' 的 collision.size[1]')]}]
             elif shape in ('sphere','cylinder','capsule'):
                 radius=collision.get('radiusM')
                 if radius is None:
@@ -958,7 +976,14 @@ class SceneAdapter:
             if kind=='box':
                 geom=UsdGeom.Cube.Define(stage,geompath);geom.CreateSizeAttr(2);geom.AddTranslateOp().Set(Gf.Vec3f(*declaration['center']));geom.AddScaleOp().Set(Gf.Vec3f(*declaration['size']))
             elif kind=='plane':
-                geom=UsdGeom.Cube.Define(stage,geompath);geom.CreateSizeAttr(2);geom.AddTranslateOp().Set(Gf.Vec3f(*declaration['center']));geom.AddScaleOp().Set(Gf.Vec3f(declaration['size'][0],declaration['size'][1],.002))
+                if declaration.get('infinite'):
+                    # 官方helper建立PhysX Plane Collider；20只供有限视觉参考，绝不造厚盒。
+                    PhysicsSchemaTools.addGroundPlane(stage,geompath,'Z',20.,Gf.Vec3f(*declaration['center']),Gf.Vec3f(.35,.4,.45))
+                    planes=[p for p in Usd.PrimRange(stage.GetPrimAtPath(geompath))if str(p.GetTypeName())=='Plane'and p.HasAPI(UsdPhysics.CollisionAPI)]
+                    if len(planes)!=1:raise SceneError('UNSUPPORTED_CAPABILITY',path+' 的SDK未生成单一真实Plane Collider')
+                    geom=UsdGeom.Xformable(planes[0])
+                else:
+                    geom=UsdGeom.Cube.Define(stage,geompath);geom.CreateSizeAttr(2);geom.AddTranslateOp().Set(Gf.Vec3f(*declaration['center']));geom.AddScaleOp().Set(Gf.Vec3f(declaration['size'][0],declaration['size'][1],.002))
             elif kind=='sphere':
                 geom=UsdGeom.Sphere.Define(stage,geompath);geom.CreateRadiusAttr(declaration['radius']);geom.AddTranslateOp().Set(Gf.Vec3f(*declaration['center']))
             elif kind=='mesh':

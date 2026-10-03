@@ -45,7 +45,7 @@ export type {CollisionTopologyStatus} from "./collision-topology.ts"
 import { chooseDerivedNode, derivedNodeMatrix, fileNodeChain, LOD_BASE, primaryResource, rawLodLevel, resolveLodPlan, selectLodLevel, type DerivedNodeCandidate, type LodPlan } from "./lod.ts"
 import {
   ANNOTATION_ROOT_NAME, applyAnnotationSelection, buildAnnotationMarker, disposeAnnotationMarker, drawAnnotationPins,
-  liftAnchor, projectToCapture, refreshAnnotationMarker, resolveAnnotationWorld, updateAnnotationMarker,
+  annotationAnchorAtHit, annotationAtCapture, projectToCapture, refreshAnnotationMarker, resolveAnnotationWorld, updateAnnotationMarker,
   type ViewerAnnotation, type ViewerAnnotationAnchor,
 } from "./annotations.ts"
 import {
@@ -72,6 +72,7 @@ export interface ViewerOptions {
   onAnnotationCreate?: (anchor: ViewerAnnotationAnchor) => void
   /** 用户点了某条批注标记（用来编辑它的文字）。 */
   onAnnotationSelect?: (annotationId: string) => void
+  translate?: (zh:string,en:string)=>string
 }
 export interface ViewerDisplaySettings { grid: boolean; axes: boolean; background: string; wireframe: boolean; splats: boolean; collision?: boolean;splatQuality?:SplatQuality }
 /**
@@ -98,6 +99,7 @@ export interface ViewerObserverState {
   dirty: boolean
   saving: boolean
   error?: string
+  positionLocked?: boolean
   scope: { sceneId?: string; sceneRevision?: number; worldId?: string; generation?: number }
 }
 export interface ViewerCameraAuthoringSample {
@@ -450,7 +452,9 @@ export class SceneViewer {
   private cameraRigScopeKey?: string
   /** 实际已经应用到场景图的Frame，接收未显示的Frame不得冒充authoring采样。 */
   private displayedFrame?: Frame
-  private cameraRigEditBaseline?: { key: string; position: number[]; quaternion: number[] }
+  private cameraRigEditBaseline?: { key: string; position: number[]; quaternion: number[]; intrinsics?: ViewerCameraIntrinsics }
+  private cameraRigEditLens?: ViewerCameraIntrinsics
+  private cameraRigLook?: { returnView:ViewerViewState; sceneId?:string; distance:number; controlsEnabled:boolean }
   private cameraRigSave?: { key: string; group: THREE.Group; scope?: string; enabled: boolean; promise?: Promise<void> }
   private cameraRigEditError?: string
   private cancellingCameraEdit = false
@@ -633,8 +637,8 @@ export class SceneViewer {
     this.controls.enableDamping=false;this.controls.autoRotate=false;this.controls.update()
     try{
       // 传感器观察锁定时只写完整光学姿态；Orbit的极点makeSafe不能挪动真实顶视相机。
-      if(this.cameraRigPilot)this.controls.target.set(...view.target)
-      const verification = writeViewToCamera(this.camera, this.cameraRigPilot?undefined:this.controls, view, size)
+      if(this.cameraRigPilot||this.cameraRigLook)this.controls.target.set(...view.target)
+      const verification = writeViewToCamera(this.camera, this.cameraRigPilot||this.cameraRigLook?undefined:this.controls, view, size)
       this.appliedIntrinsics = view.intrinsics
       if (!verification.ok) throw new ViewerCameraError("VIEWER_CAMERA_APPLY_MISMATCH", `相机没有按请求复现（应用后当场测量）：${verification.errors.join("；")}`)
     }finally{this.controls.enableDamping=damping;this.controls.autoRotate=autoRotate}
@@ -659,7 +663,8 @@ export class SceneViewer {
     const frame = !this.editing ? this.projection.consume() : undefined
     if (frame) this.applyFrame(frame)
     this.firstPerson?.update()
-    if(!this.cameraRigPilot&&!this.firstPerson?.active)this.controls.update()
+    if(this.cameraRigLook)this.applyCameraRigLook()
+    if(!this.cameraRigPilot&&!this.cameraRigLook&&!this.firstPerson?.active)this.controls.update()
     // 取景框只对"当时那台相机、那份投影"成立：用户一导航（OrbitControls 每帧都可能改相机）/预设/全景/
     // 换相机，旧的框就不再代表当前画面，立即收起。检查点放在 controls.update() 之后，读的就是将要渲染的那台相机。
     if (this.captureGateSpec && this.captureGateStale()) { this.captureGateSpec = undefined; this.captureGateView = undefined; this.updateCaptureGate() }
@@ -795,6 +800,8 @@ export class SceneViewer {
     const environment = this.syncEnvironmentMap()
     if (environment) await environment
     if (generation === this.generation) {
+      // Scene锁更新只刷新实体gizmo，命名相机安装编辑仍保留其当前gizmo owner。
+      if(this.cameraRigGizmoKey===undefined)this.setEditCommit(this.options.commitEdit)
       if (this.projection.current()) this.applyFrame(this.projection.current()!)
       this.setCameraRigs([])
     }
@@ -882,6 +889,12 @@ export class SceneViewer {
     const splatLoadStarted = visual?.kind === "splat" ? performance.now() : 0
     const requestedSceneId = this.snapshot?.sceneId, requestedSignature = loaded.signature
     if (!visual || visual.kind === "group" || visual.kind === "source") return
+    if (visual.kind === 'infinite-ground') {
+      // 有限视觉参考面是零厚度平面，不是物理碰撞边界；Collider由Scene交给引擎。
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshStandardMaterial({color:0x596574,roughness:1,side:THREE.DoubleSide,transparent:true,opacity:.28,depthWrite:false}))
+      plane.receiveShadow=true;plane.userData.infiniteGroundReference=true
+      return plane
+    }
     if (visual.kind === "robot") {
       if (!visual.robot) throw new Error(`ROBOT_VISUAL_DESCRIPTION_REQUIRED: ${entity.entityId}`)
       const robotInput=visual.robot as Record<string,unknown>
@@ -1316,7 +1329,8 @@ export class SceneViewer {
   setEditCommit(commit: ViewerOptions["commitEdit"]): void {
     this.options.commitEdit = commit
     if (!commit) { this.transformControls.detach(); return }
-    if (this.selected && this.objects.has(this.selected)) this.transformControls.attach(this.objects.get(this.selected)!.group)
+    if (this.selected && this.objects.has(this.selected)&&this.snapshot?.entities.find(entity=>entity.entityId===this.selected)?.locked!==true) this.transformControls.attach(this.objects.get(this.selected)!.group)
+    else this.transformControls.detach()
   }
   /**
    * 开关 Scene 里作者打的灯。硬编码的环境灯（Hemisphere/Directional）**不归它管**——
@@ -1775,7 +1789,7 @@ export class SceneViewer {
     this.selected = entityId
     this.syncRobotAnchors()
     const targetId=entityId&&this.snapshot?sceneEditTarget(this.snapshot,entityId)?.entityId:entityId
-    if (targetId && this.options.commitEdit && this.objects.has(targetId)) this.transformControls.attach(this.objects.get(targetId)!.group)
+    if (targetId && this.options.commitEdit && this.objects.has(targetId)&&this.snapshot?.entities.find(entity=>entity.entityId===targetId)?.locked!==true) this.transformControls.attach(this.objects.get(targetId)!.group)
     else this.transformControls.detach()
     this.syncCollisionTopology()
     this.options.onSelection?.(entityId)
@@ -1846,7 +1860,7 @@ export class SceneViewer {
     else if (frame?.cameras && specs.some(spec => spec.measured?.stepIndex !== frame.stepIndex || spec.measured?.generation !== frame.generation || spec.measured?.sceneRevision !== frame.sceneRevision)) return
     const scope=this.snapshot?JSON.stringify([this.snapshot.sceneId,this.snapshot.revision,this.world?.worldId,this.world?.worldGeneration]):undefined
     if(this.cameraRigScopeKey!==undefined&&scope!==this.cameraRigScopeKey){
-      const pilot=this.cameraRigPilot,sameScene=pilot?.sceneId===this.snapshot?.sceneId
+      const pilot=this.cameraRigPilot,sameScene=(pilot?.sceneId??this.cameraRigLook?.sceneId)===this.snapshot?.sceneId
       // 命名机位属于Scene元数据，不因世界代次或同场景保存而变成传感器；安装编辑仍严格结束旧scope。
       const keepNamed=pilot?.source==='named-view'&&sameScene&&specs.some(spec=>spec.key===pilot.key&&spec.source==='named-view')
       if(!keepNamed&&(pilot||this.cameraRigGizmoKey!==undefined))this.exitCameraMode({restoreView:sameScene,focus:false})
@@ -1860,15 +1874,19 @@ export class SceneViewer {
     }
     if(options.visible!==undefined)this.cameraRigRoot.visible=options.visible
     for(const spec of specs){
-      const geometryKey=JSON.stringify([spec.intrinsics,spec.nearM,spec.farM,options.truncationM??null])
+      const lens=this.cameraRigGizmoKey===spec.key&&this.cameraRigEditLens?this.cameraRigEditLens:spec.intrinsics
+      const geometryKey=JSON.stringify([lens,spec.nearM,spec.farM,options.truncationM??null])
       let rig=this.cameraRigs.get(spec.key)
       if(!rig){
         const geometry=frustumGeometry(spec.intrinsics,{nearM:spec.nearM,farM:spec.farM,...options.truncationM===undefined?{}:{truncationM:options.truncationM}})
         const lines=new THREE.LineSegments(rigLineGeometry(geometry),new THREE.LineBasicMaterial({color:0x6cb6ff,transparent:true,opacity:.9})),pick=rigPickMesh(geometry),group=new THREE.Group()
         pick.userData.cameraRigKey=spec.key;group.name=`camera-rig:${spec.key}`;group.add(lines,pick)
+        const origin=new THREE.Mesh(new THREE.SphereGeometry(.012,12,8),new THREE.MeshBasicMaterial({color:0xffbb35,depthTest:false}));origin.name='camera-install-origin'
+        const normal=new THREE.ArrowHelper(new THREE.Vector3(0,0,-1),new THREE.Vector3(),.18,0x69e5ae,.04,.025);normal.name='camera-view-normal'
+        group.add(origin,normal)
         rig={spec,group,lines,pick,geometryKey};this.cameraRigs.set(spec.key,rig)
       }else if(rig.geometryKey!==geometryKey){
-        const geometry=frustumGeometry(spec.intrinsics,{nearM:spec.nearM,farM:spec.farM,...options.truncationM===undefined?{}:{truncationM:options.truncationM}}),pick=rigPickMesh(geometry)
+        const geometry=frustumGeometry(lens,{nearM:spec.nearM,farM:spec.farM,...options.truncationM===undefined?{}:{truncationM:options.truncationM}}),pick=rigPickMesh(geometry)
         rig.lines.geometry.dispose();rig.lines.geometry=rigLineGeometry(geometry)
         rig.pick.geometry.dispose();rig.pick.geometry=pick.geometry
         for(const material of Array.isArray(pick.material)?pick.material:[pick.material])material.dispose()
@@ -1880,6 +1898,7 @@ export class SceneViewer {
     }
     if(keep!==undefined){if(this.cameraRigs.has(keep))this.selectCameraRig(keep);else{this.cameraRigSelected=undefined;this.onCameraRigSelect?.(undefined)}}
     if(this.cameraRigPilot){const current=this.cameraRigs.get(this.cameraRigPilot.key);if(current&&current.spec.source===this.cameraRigPilot.source)this.applyCameraRigPilot(current.spec);else this.exitCameraMode({focus:false})}
+    if(this.cameraRigLook)this.applyCameraRigLook()
     this.publishObserverState()
   }
   private placeCameraRig(rig:CameraRigRecord,spec:FrustumSpec):void {
@@ -1935,22 +1954,24 @@ export class SceneViewer {
   observerState(): ViewerObserverState {
     const mode=this.cameraRigPilot?"pilot":this.cameraRigGizmoKey!==undefined?"camera-edit":"free",cameraId=this.cameraRigPilot?.key??this.cameraRigGizmoKey
     const baseline=this.cameraRigEditBaseline,group=baseline?this.cameraRigs.get(baseline.key)?.group:undefined
-    const dirty=Boolean(baseline&&group&&(group.position.toArray().some((v,i)=>Math.abs(v-baseline.position[i]!)>1e-9)||1-Math.abs(group.quaternion.dot(new THREE.Quaternion(...baseline.quaternion as [number,number,number,number])))>1e-9))
-    const next:ViewerObserverState={mode,...cameraId?{cameraId}:{},navigation:this.freeNavigation(),dirty,saving:Boolean(this.cameraRigSave),...this.cameraRigEditError?{error:this.cameraRigEditError}:{},scope:{...this.snapshot?{sceneId:this.snapshot.sceneId,sceneRevision:this.snapshot.revision}:{},...this.world?{worldId:this.world.worldId,generation:this.world.worldGeneration}:{}}}
+    const dirty=Boolean(baseline&&group&&(group.position.toArray().some((v,i)=>Math.abs(v-baseline.position[i]!)>1e-9)||1-Math.abs(group.quaternion.dot(new THREE.Quaternion(...baseline.quaternion as [number,number,number,number])))>1e-9||baseline.intrinsics&&JSON.stringify(this.cameraRigEditLens)!==JSON.stringify(baseline.intrinsics)))
+    const next:ViewerObserverState={mode,...cameraId?{cameraId}:{},navigation:this.freeNavigation(),dirty,saving:Boolean(this.cameraRigSave),...this.cameraRigLook?{positionLocked:true}:{},...this.cameraRigEditError?{error:this.cameraRigEditError}:{},scope:{...this.snapshot?{sceneId:this.snapshot.sceneId,sceneRevision:this.snapshot.revision}:{},...this.world?{worldId:this.world.worldId,generation:this.world.worldGeneration}:{}}}
     if(!this.observerSnapshot||JSON.stringify(next)!==JSON.stringify(this.observerSnapshot))this.observerSnapshot=Object.freeze({...next,scope:Object.freeze(next.scope)})
     return this.observerSnapshot
   }
   subscribeObserverState(listener:()=>void):()=>void { (this.observerListeners??=new Set()).add(listener);return()=>this.observerListeners?.delete(listener) }
   private publishObserverState():void {
     const previous=this.observerSnapshot,current=this.observerState()
-    if(this.observerLabel)this.observerLabel.textContent=current.mode==="pilot"?`查看相机（锁定） · ${current.cameraId}`:current.mode==="camera-edit"?`编辑相机安装${current.saving?" · 保存中":current.error?` · ${current.error}`:current.dirty?" · 未保存":""}`:current.navigation==="first-person"?"自由漫游 · WASD/QE":"自由环绕"
+    const tr=this.options?.translate??((zh:string,_en:string)=>zh)
+    if(this.observerLabel)this.observerLabel.textContent=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 右键拖动调朝向','Origin locked · right-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit')
     if(this.observerExitButton)this.observerExitButton.hidden=current.mode==="free"
     if(previous!==current)for(const listener of this.observerListeners??[])listener()
   }
   private syncObserverControls():void {
-    const mode=this.freeNavigation(),active=!this.cameraRigPilot&&!this.editing&&mode==="first-person"
+    const mode=this.freeNavigation(),active=!this.cameraRigPilot&&!this.editing&&(Boolean(this.cameraRigLook)||mode==="first-person")
+    if(this.firstPerson){this.firstPerson.rotationOnly=Boolean(this.cameraRigLook);this.firstPerson.onRotate=this.cameraRigLook?()=>this.captureCameraRigLook():undefined}
     if(this.firstPerson&&this.firstPerson.active!==active)this.firstPerson.setActive(active)
-    if(this.controls)this.controls.enabled=!this.cameraRigPilot&&!this.editing&&mode==="orbit"
+    if(this.controls)this.controls.enabled=!this.cameraRigPilot&&!this.cameraRigLook&&!this.editing&&mode==="orbit"
     this.publishObserverState()
   }
   private observerKeyDown=(event:KeyboardEvent)=>this.handleObserverKey(event)
@@ -1962,7 +1983,7 @@ export class SceneViewer {
   exitCameraMode(options:{restoreView?:boolean;focus?:boolean}={}):boolean {
     const pilot=this.cameraRigPilot,editing=this.cameraRigGizmoKey!==undefined
     this.cameraRigPilot=undefined
-    if(editing)this.finishCameraRigEditing({discard:true})
+    if(editing)this.endCameraRigEditing(true,options.restoreView!==false)
     this.firstPerson?.clearInput?.()
     if(pilot){this.setCaptureGate(undefined);if(options.restoreView!==false)this.setViewState(pilot.returnView,{focus:false});this.navigationPreference=pilot.returnView.navigation??this.freeNavigation()}
     this.syncObserverControls()
@@ -2078,9 +2099,51 @@ export class SceneViewer {
     this.exitCameraMode()
     this.cameraRigGizmoKey = key
     this.cameraRigEditError=undefined
-    this.cameraRigEditBaseline={key,position:rig.group.position.toArray(),quaternion:rig.group.quaternion.toArray()}
+    this.cameraRigEditLens=structuredClone(rig.spec.intrinsics)
+    this.cameraRigEditBaseline={key,position:rig.group.position.toArray(),quaternion:rig.group.quaternion.toArray(),intrinsics:structuredClone(rig.spec.intrinsics)}
     this.transformControls.attach(rig.group)
     this.syncObserverControls()
+  }
+  /** 在同一安装编辑 session 进入相机原点。body 子节点与局部偏移继续跟 FK，不冻结世界点。 */
+  aimCameraRig(key:string):void {
+    const rig=this.cameraRigs.get(key)
+    if(!rig)throw new ViewerCameraError('VIEWER_CAMERA_RIG_UNAVAILABLE',`Camera ${key} is unavailable`)
+    if(rig.spec.source==='named-view')throw new ViewerCameraError('VIEWER_CAMERA_INSTALLATION_REQUIRED','Save this view as a Scene camera before editing its installation')
+    if(rig.spec.parentBodyName&&rig.group.userData.mountMissing)throw new ViewerCameraError('VIEWER_CAMERA_MOUNT_REQUIRED','The actual mount body is unavailable')
+    if(rig.spec.parentBodyName&&rig.spec.parentBodyName!=='world'&&this.snapshot){
+      const frame=currentRobotFrame(this.snapshot,this.world,this.displayedFrame),owner=rig.spec.parentEntityId??rig.spec.entityId
+      const poses=frame?.entities.find(e=>e.entityId===owner)?.sensors?.bodyWorldPoses as Record<string,unknown>|undefined
+      const pose=owner?rigidPoseOf(poses?.[localBodyName(rig.spec.parentBodyName,owner)]):undefined
+      if(!frame||!pose||rig.spec.measured?.frameId!==frame.frameId)throw new ViewerCameraError('VIEWER_CAMERA_BODY_FRAME_REQUIRED','Wait for the current same-frame camera and native body observation before aiming')
+    }
+    const returnView=this.cameraRigPilot?.returnView??this.cameraRigLook?.returnView??this.getViewState()
+    this.attachCameraRigGizmo(key)
+    this.cameraRigLook={returnView,sceneId:this.snapshot?.sceneId,distance:Math.max(.1,Math.hypot(...returnView.target.map((v,i)=>v-returnView.position[i]!))),controlsEnabled:this.transformControls.enabled}
+    this.transformControls.enabled=false;if(this.transformControls.getHelper)this.transformControls.getHelper().visible=false
+    this.firstPerson?.clearInput?.();this.syncObserverControls();this.applyCameraRigLook();this.renderer?.domElement?.focus?.({preventScroll:true})
+  }
+  private applyCameraRigLook():void {
+    const key=this.cameraRigGizmoKey,look=this.cameraRigLook,rig=key===undefined?undefined:this.cameraRigs.get(key)
+    if(!look||!rig)return
+    rig.group.updateWorldMatrix(true,false)
+    const position=new THREE.Vector3(),q=new THREE.Quaternion();rig.group.getWorldPosition(position);rig.group.getWorldQuaternion(q)
+    const spec={...rig.spec,positionM:position.toArray() as ViewerVec3,quaternionXyzw:q.toArray() as [number,number,number,number],intrinsics:this.cameraRigEditLens??rig.spec.intrinsics}
+    this.applyCameraView({...cameraRequestFromRig(spec,look.distance,{lens:true}),near:rig.spec.nearM,far:rig.spec.farM},{keepObserverMode:true});this.setCaptureGate({intrinsics:spec.intrinsics})
+  }
+  private captureCameraRigLook():void {
+    const key=this.cameraRigGizmoKey,rig=key===undefined?undefined:this.cameraRigs.get(key)
+    if(!this.cameraRigLook||!rig||this.cameraRigSave)return
+    const parent=rig.group.parent,parentQ=new THREE.Quaternion();parent?.updateWorldMatrix(true,false);parent?.getWorldQuaternion(parentQ)
+    // 移动只由 FK 决定；鼠标改变相机世界朝向后，立即反解到这台 rig 的 body-local 旋转。
+    rig.group.quaternion.copy(parentQ.invert().multiply(this.camera.quaternion)).normalize()
+    this.publishObserverState()
+  }
+  setCameraRigAimFov(fovYDeg:number):void {
+    if(!this.cameraRigLook||!this.cameraRigEditLens||this.cameraRigSave)throw new ViewerCameraError('VIEWER_CAMERA_AIM_REQUIRED','Enter the locked camera origin before changing its draft FOV')
+    if(!Number.isFinite(fovYDeg)||fovYDeg<=0||fovYDeg>=180)throw new ViewerCameraError('VIEWER_CAMERA_FOV_INVALID','Vertical FOV must be between 0 and 180 degrees')
+    const k=this.cameraRigEditLens,fy=k.height/(2*Math.tan(fovYDeg*Math.PI/360))
+    this.cameraRigEditLens={...k,fx:k.fx*fy/k.fy,fy}
+    this.setCameraRigs([...this.cameraRigs.values()].map(r=>r.spec));this.publishObserverState()
   }
   detachCameraRigGizmo(): void {
     this.finishCameraRigEditing()
@@ -2102,11 +2165,12 @@ export class SceneViewer {
       if(this.cameraRigGizmoKey===key&&this.cameraRigs.get(key)?.group===group&&this.cameraRigScopeKey===scope&&this.observerState().dirty)throw new ViewerCameraError('VIEWER_CAMERA_EDIT_ACK_REQUIRED','相机安装保存尚未收到确认')
     })
   }
-  private endCameraRigEditing(discard:boolean):void {
+  private endCameraRigEditing(discard:boolean,restoreView=true):void {
     const key=this.cameraRigGizmoKey,rig=key!==undefined?this.cameraRigs.get(key):undefined
     if(key===undefined)return
     this.cancellingCameraEdit=true
-    try{this.cameraRigGizmoKey=undefined;this.cameraRigEditBaseline=undefined;this.cameraRigEditError=undefined;if(this.cameraRigSave)this.transformControls.enabled=this.cameraRigSave.enabled;this.cameraRigSave=undefined;this.editing=false;this.transformControls.dragging=false;this.transformControls.detach();if(discard&&rig)this.placeCameraRig(rig,rig.spec)}
+    const look=this.cameraRigLook
+    try{this.cameraRigGizmoKey=undefined;this.cameraRigEditBaseline=undefined;this.cameraRigEditLens=undefined;this.cameraRigEditError=undefined;this.cameraRigLook=undefined;if(this.cameraRigSave)this.transformControls.enabled=this.cameraRigSave.enabled;if(look){this.transformControls.enabled=look.controlsEnabled;if(this.transformControls.getHelper)this.transformControls.getHelper().visible=true}this.cameraRigSave=undefined;this.editing=false;this.transformControls.dragging=false;this.transformControls.detach();if(discard&&rig)this.placeCameraRig(rig,rig.spec);if(look){this.setCaptureGate(undefined);if(restoreView)this.setViewState(look.returnView,{focus:false});this.navigationPreference=look.returnView.navigation??this.freeNavigation()}if(rig)this.setCameraRigs([...this.cameraRigs.values()].map(r=>r.spec))}
     finally{this.cancellingCameraEdit=false;this.firstPerson?.clearInput?.();this.syncObserverControls()}
   }
   private emitCameraRigEdit(): Promise<void> {
@@ -2125,7 +2189,7 @@ export class SceneViewer {
       localPose: { positionM: rig.group.position.toArray() as ViewerVec3, quaternionXyzw: rig.group.quaternion.toArray() as [number, number, number, number] },
       ...this.snapshot?{sceneId:this.snapshot.sceneId,sceneRevision:this.snapshot.revision,revision:this.snapshot.revision}:{},...this.world?{worldId:this.world.worldId,generation:this.world.worldGeneration}:{},...frame?{frameId:frame.frameId,stepIndex:frame.stepIndex}:{},
       parentEntityId:rig.spec.parentEntityId??rig.spec.entityId,parentBodyName:rig.spec.parentBodyName,
-      intrinsics:rig.spec.intrinsics,width:rig.spec.intrinsics.width,height:rig.spec.intrinsics.height,near:rig.spec.nearM,far:rig.spec.farM,
+      intrinsics:this.cameraRigEditLens??rig.spec.intrinsics,width:rig.spec.intrinsics.width,height:rig.spec.intrinsics.height,near:rig.spec.nearM,far:rig.spec.farM,
     }
     const save:NonNullable<SceneViewer['cameraRigSave']>={key:rig.spec.key,group:rig.group,scope:this.cameraRigScopeKey,enabled:this.transformControls.enabled}
     this.cameraRigSave=save;this.cameraRigEditError=undefined;this.editing=true;this.transformControls.enabled=false;this.syncObserverControls()
@@ -2133,7 +2197,7 @@ export class SceneViewer {
       const acknowledgment=this.onCameraRigEdit?.(rig.spec.key,edit)
       if(acknowledgment&&typeof acknowledgment.then==='function'){
         await acknowledgment
-        if(this.cameraRigSave===save&&this.cameraRigGizmoKey===save.key&&this.cameraRigs.get(save.key)?.group===save.group&&this.cameraRigScopeKey===save.scope)this.cameraRigEditBaseline={key:save.key,position:save.group.position.toArray(),quaternion:save.group.quaternion.toArray()}
+        if(this.cameraRigSave===save&&this.cameraRigGizmoKey===save.key&&this.cameraRigs.get(save.key)?.group===save.group&&this.cameraRigScopeKey===save.scope)this.cameraRigEditBaseline={key:save.key,position:save.group.position.toArray(),quaternion:save.group.quaternion.toArray(),intrinsics:structuredClone(edit.intrinsics)}
       }
     }catch(error){if(this.cameraRigSave===save)this.cameraRigEditError=error instanceof Error?error.message:String(error);throw error}
     finally{if(this.cameraRigSave===save){this.cameraRigSave=undefined;this.editing=false;this.transformControls.enabled=save.enabled;this.syncObserverControls()}}})()
@@ -2258,10 +2322,9 @@ export class SceneViewer {
     if (typeof entityId !== "string") return
     const carrier = this.objects.get(entityId)
     if (!carrier) return
-    const normal = hit.face?.normal.clone().transformDirection(hit.object.matrixWorld)
-    const local = liftAnchor(carrier, hit.point, normal)
-    const world = carrier.group.localToWorld(new THREE.Vector3(...local))
-    this.options.onAnnotationCreate?.({ entityId, local, world: world.toArray(), ...(normal ? { normal: normal.toArray() as [number, number, number] } : {}) })
+    if(!this.snapshot)return
+    const normal = hit.face?.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
+    this.options.onAnnotationCreate?.(annotationAnchorAtHit(entityId,carrier,hit.object,hit.point,normal,this.snapshot,currentRobotFrame(this.snapshot,this.world,this.displayedFrame)))
   }
   /** 面板可能改锚点（例如换实体）——锚点变了必须重建标记位置，否则显示与实际不一致。 */
   setAnnotationAnchor(annotationId: string, anchor: ViewerAnnotationAnchor): void {
@@ -2647,12 +2710,16 @@ export class SceneViewer {
    * 和画面里的东西对上；坐标回执同时保留，供后续工具做反投影或二次对齐。
    * 屏幕坐标按 `canvas.width/height`（着色缓冲＝device 像素）给出，与 PNG 的实际像素一一对应。
    */
-  async captureAnnotated(): Promise<ReturnType<SceneViewer["capture"]> & { pose: ReturnType<SceneViewer["pose"]>; pins: Array<{ annotationId: string; index: number; text: string; entityId: string; entityName?: string; point: [number, number]; normalized: [number, number]; local: [number, number, number]; world: [number, number, number] }> }> {
+  async captureAnnotated(): Promise<ReturnType<SceneViewer["capture"]> & { pose: ReturnType<SceneViewer["pose"]>; annotations:ViewerAnnotation[]; pins: Array<{ annotationId: string; index: number; text: string; entityId: string; entityName?: string; point: [number, number]; normalized: [number, number]; local: [number, number, number]; world: [number, number, number] }> }> {
     const snapshot = this.capture()
     const pose = this.pose()
     const size = { width: pose.imageWidth, height: pose.imageHeight }
     const carriers = this.carriers
-    const placed = this.annotations.flatMap(annotation => {
+    const capturedAnnotations=this.annotations.map(annotation=>{
+      const world=resolveAnnotationWorld(annotation,carriers),carrier=carriers.get(annotation.anchor.entityId)
+      return world&&carrier&&this.snapshot?annotationAtCapture(annotation,carrier,world,this.snapshot,currentRobotFrame(this.snapshot,this.world,this.displayedFrame)):structuredClone(annotation)
+    })
+    const placed = capturedAnnotations.flatMap(annotation => {
       const world = resolveAnnotationWorld(annotation, carriers)
       if (!world) return []
       const point = projectToCapture(world, this.camera, size)
@@ -2663,7 +2730,7 @@ export class SceneViewer {
       ? await drawAnnotationPins(snapshot.dataURL, placed.map(item => ({ index: item.annotation.index, point: item.point, text: item.annotation.text })), this.renderer.getPixelRatio())
       : snapshot.dataURL
     return {
-      ...snapshot, dataURL, pose,
+      ...snapshot, dataURL, pose, annotations:capturedAnnotations,
       pins: placed.map(item => ({
         annotationId: item.annotation.annotationId,
         index: item.annotation.index,

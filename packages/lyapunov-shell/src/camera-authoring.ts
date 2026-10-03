@@ -14,10 +14,13 @@ export interface CameraAuthoringSnapshot {
 export interface CameraAuthoringViewer {
   sampleCameraAuthoring(): CameraAuthoringSnapshot
   focusRobotAnchor?(entityId: string, kind: 'tcp' | 'base'): unknown
-  observerState?(): { mode: 'free' | 'pilot' | 'camera-edit'; cameraId?: string; navigation: 'orbit' | 'first-person'; dirty: boolean; saving?:boolean;error?:string; scope: {sceneId?:string;sceneRevision?:number;worldId?:string;generation?:number} }
+  observerState?(): { mode: 'free' | 'pilot' | 'camera-edit'; cameraId?: string; navigation: 'orbit' | 'first-person'; dirty: boolean; saving?:boolean;error?:string; positionLocked?:boolean; scope: {sceneId?:string;sceneRevision?:number;worldId?:string;generation?:number} }
   subscribeObserverState?(listener:()=>void):()=>void
   exitCameraMode?(options?:{restoreView?:boolean;focus?:boolean}):unknown
   finishCameraRigEditing?(options?:{discard?:boolean}):unknown
+  aimCameraRig?(key:string):void
+  selectCameraRig?(key:string):void
+  setCameraRigAimFov?(fovYDeg:number):void
 }
 export interface CameraExitBridge {
   registerExitParticipant?(id:string,participant:{summary():{dirtyDrafts:number;runningActions:number};flush():Promise<void>}):()=>void

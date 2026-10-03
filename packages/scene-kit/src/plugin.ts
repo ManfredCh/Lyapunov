@@ -27,7 +27,7 @@ import {assetListParameters,assetVerifyParameters,resourceAuthorityParameters,sc
 import {modelSceneView} from './model-view.ts'
 import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import {sceneBindPhysicsParameters,scenePhysicsUpdateParameters,sceneReconcilePhysicsParameters} from './tool-schema.ts'
-import {scenePrepareWorkspaceParameters,sceneConfigurePhysicsParameters} from './tool-schema.ts'
+import {scenePrepareWorkspaceParameters,scenePrepareWorldParameters,sceneConfigurePhysicsParameters} from './tool-schema.ts'
 import {physicalizationBudgets} from './physicalization-parameters.ts'
 import {resourcePhysicalizationProgress,publicPhysicalizationFacts} from './physicalization-progress.ts'
 
@@ -289,8 +289,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // 每个定义都接收**本次调用会话**的 operations（不是 Host 级那一套）：同名工具在两个会话里
   // 各自读写自己的场景存储与资源索引。定义表本身与会话无关，只有调用时才解析归属。
   const definitions: Array<{ name: string; description: string; /** 用户请求的持久修改：read-only 会话里在真正执行前被拒（`requireWritableScene`），读/预览不标。 */ persists?: true; operation: (operations: SceneOperations, input: any, signal?: AbortSignal, scope?: SessionScope) => Promise<any> }> = [
-    { name: "scene_create", description: "Create a Scene. Preserve blank defaults for compatibility; template=physics-workspace prepares actual bounded ground and gravity once, while blank intentionally leaves it empty.", persists: true, operation: (operations, input) => operations.create(input) },
-    {name:'scene_prepare_workspace',description:"Explicitly prepare the current Scene as a standard physics workspace, adding actual bounded ground once through Scene CAS. An already-prepared workspace does not reset edits or recreate deleted ground; purely visual models still report missing collision.",persists:true,operation:(operations,input)=>operations.prepareWorkspace(input)},
+    { name: "scene_create", description: "Create a Scene. The default physics-workspace includes a locked, manageable zero-thickness infinite ground plane at z=0 and world gravity. Explicit blank is an editing scene; starting its first physics world prepares ground through Scene CAS. Hidden ground still collides; deletion removes physics and persists across reopening.", persists: true, operation: (operations, input) => operations.create({...input,template:input?.template??'physics-workspace'}) },
+    {name:'scene_prepare_workspace',description:"Prepare the current Scene as a physics workspace through Scene CAS, adding a locked zero-thickness infinite ground plane once. Preserve gravity preferences, edited or removed ground, and existing v1 workspaces. Verified native ground replaces the untouched template collider during engine compilation; visual-only assets still lack their own collisions.",persists:true,operation:(operations,input)=>operations.prepareWorkspace(input)},
+    {name:'scene_prepare_world',description:"Persist preparation before the first physics world is created. Add manageable infinite ground once through Scene CAS, preserving existing workspaces and explicit removed/disabled ground choices. ground=false records an explicit disabled choice on an unprepared Scene; it never deletes an existing ground entity. Supply the observed expectedRevision.",persists:true,operation:(operations,input)=>operations.prepareWorld(input)},
     {name:'scene_configure_physics',description:"Persist world gravityWorldMps2 through Scene CAS as three finite components in m/s². Synchronize the world and read native values; saving does not prove activation and does not change body gravity switches or fixed constraints.",persists:true,operation:(operations,input)=>operations.configurePhysics(input)},
     { name: "scene_inspect", description: "Read Scene structure, entity summaries and ResourceRefs. Supply sceneId; read original models/geometry from returned resource URIs and use robot_state for live robot state. resourcePhysicalization exposes per-resourceId@version collision receipts: status (pending/ok/failed/skipped) and usage/strategy/nodes/parts/boxes/primitives/interiorPreserved/selection/routed/voxelResolutionM/volumeRatios/cavityLostNodes/policy/attempts. Cavity preservation is inferred from actual unfilled surface voxel boxes (fillInterior=false) or a measured hull-equivalent source surface; a strategy name alone does not prove preserved cavities. Actual pitch limits clearance; passageVerified remains false until a separate spatial check. routed identifies default-strategy reroutes/reasons; cavityLostNodes identifies losses from explicit strategies in the consumer; voxelResolutionM reports actual pitch, volumeRatios decomposition volume ratios, and failures include error. asset_list exposes full records.", operation: async (operations, input) => {
       const snapshot = await operations.inspect(input.sceneId)
@@ -385,6 +386,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ? {}
       : definition.name==='scene_create'?sceneCreateParameters
       : definition.name==='scene_prepare_workspace'?scenePrepareWorkspaceParameters
+      : definition.name==='scene_prepare_world'?scenePrepareWorldParameters
       : definition.name==='scene_configure_physics'?sceneConfigurePhysicsParameters
       : definition.name==='scene_inspect'?sceneInspectParameters
       : definition.name==='scene_bind_physics'?sceneBindPhysicsParameters

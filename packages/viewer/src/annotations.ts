@@ -15,6 +15,8 @@
  * 编号标签、可拾取）用 three 自带能力约百行即可，且能直接复用本包既有的拾取与可见性判据。
  */
 import * as THREE from "three"
+import type { Frame } from '../../lyapunov-contracts/src/types.ts'
+import { rigidPoseOf } from './camera-frustum.ts'
 
 /**
  * 一条批注的真实锚点。
@@ -31,6 +33,13 @@ export interface ViewerAnnotationAnchor {
   world: [number, number, number]
   /** 命中面的世界法线（可选）；用于把标记抬离表面，避免与自身网格 z-fighting。 */
   normal?: [number, number, number]
+  sceneId?: string
+  sceneRevision?: number
+  /** 真实命中节点与同帧 native body FK 求出的局部锚点；不能由 mesh 名猜连杆。 */
+  body?: {
+    bodyName: string; localM: [number,number,number]; surfaceLocalM?: [number,number,number]; normalLocal?: [number,number,number]
+    worldId: string; generation: number; frameId: string; stepIndex: number
+  }
 }
 export interface ViewerAnnotation {
   annotationId: string
@@ -41,7 +50,50 @@ export interface ViewerAnnotation {
   createdAt?: string
 }
 /** 载体：能在世界点落标记的 three 对象（实体 group）。 */
-export interface AnnotationCarrier { group: THREE.Object3D }
+export interface AnnotationCarrier { group: THREE.Object3D; robot?: {bodyNode(bodyName:string):THREE.Object3D|undefined} }
+
+/** 现有批注 wire/storage 的共同窄面校验，旧锚点仍可读取，坏 body provenance 不降级为 root。 */
+export function annotationAnchorOf(value:unknown):ViewerAnnotationAnchor|undefined {
+  if(!value||typeof value!=='object'||Array.isArray(value))return undefined
+  const row=value as Record<string,any>
+  const vec=(v:unknown):v is [number,number,number]=>Array.isArray(v)&&v.length===3&&v.every(n=>typeof n==='number'&&Number.isFinite(n))
+  if(typeof row.entityId!=='string'||!row.entityId||!vec(row.local)||!vec(row.world)||row.normal!==undefined&&!vec(row.normal))return undefined
+  if(row.sceneId!==undefined&&(typeof row.sceneId!=='string'||!row.sceneId)||row.sceneRevision!==undefined&&(!Number.isInteger(row.sceneRevision)||row.sceneRevision<0))return undefined
+  if(row.body!==undefined){const b=row.body;if(!b||typeof b.bodyName!=='string'||!b.bodyName||!vec(b.localM)||b.surfaceLocalM!==undefined&&!vec(b.surfaceLocalM)||b.normalLocal!==undefined&&!vec(b.normalLocal)||typeof b.worldId!=='string'||!b.worldId||!Number.isInteger(b.generation)||b.generation<1||typeof b.frameId!=='string'||!b.frameId||!Number.isInteger(b.stepIndex)||b.stepIndex<0||!row.sceneId||!Number.isInteger(row.sceneRevision))return undefined}
+  return {entityId:row.entityId,local:[...row.local],world:[...row.world],...row.normal?{normal:[...row.normal] as [number,number,number]}:{},...row.sceneId?{sceneId:row.sceneId}:{},...row.sceneRevision!==undefined?{sceneRevision:row.sceneRevision}:{},...row.body?{body:{bodyName:row.body.bodyName,localM:[...row.body.localM] as [number,number,number],...row.body.surfaceLocalM?{surfaceLocalM:[...row.body.surfaceLocalM] as [number,number,number]}:{},...row.body.normalLocal?{normalLocal:[...row.body.normalLocal] as [number,number,number]}:{},worldId:row.body.worldId,generation:row.body.generation,frameId:row.body.frameId,stepIndex:row.body.stepIndex}}:{}}
+}
+
+/** 在真实表面命中时取同帧 FK；选择最深的真实 body 祖先，不根据名字或整机器人根推测。 */
+export function annotationAnchorAtHit(entityId:string,carrier:AnnotationCarrier,hitObject:THREE.Object3D,point:THREE.Vector3,normal:THREE.Vector3|undefined,scene:{sceneId:string;revision:number},frame?:Frame):ViewerAnnotationAnchor {
+  const local=liftAnchor(carrier,point,normal),world=carrier.group.localToWorld(new THREE.Vector3(...local))
+  const anchor:ViewerAnnotationAnchor={entityId,local,world:world.toArray(),...normal?{normal:normal.toArray()}: {},sceneId:scene.sceneId,sceneRevision:scene.revision}
+  const poses=frame?.entities.find(e=>e.entityId===entityId)?.sensors?.bodyWorldPoses
+  if(!frame||frame.sceneRevision!==scene.revision||!poses||!carrier.robot)return anchor
+  const nodes=new Map<THREE.Object3D,Array<{name:string;pose:NonNullable<ReturnType<typeof rigidPoseOf>>}>>()
+  for(const [name,value] of Object.entries(poses)){const pose=rigidPoseOf(value),node=carrier.robot.bodyNode(name);if(pose&&node)nodes.set(node,[...(nodes.get(node)??[]),{name,pose}])}
+  for(let node:THREE.Object3D|null=hitObject;node;node=node.parent){
+    const matches=nodes.get(node)
+    if(!matches)continue
+    if(matches.length!==1)return anchor
+    const {name,pose}=matches[0]!,q=new THREE.Quaternion(...pose.quaternionXyzw).invert()
+    anchor.body={bodyName:name,localM:world.clone().sub(new THREE.Vector3(...pose.positionM)).applyQuaternion(q).toArray(),surfaceLocalM:point.clone().sub(new THREE.Vector3(...pose.positionM)).applyQuaternion(q).toArray(),...normal?{normalLocal:normal.clone().applyQuaternion(q).normalize().toArray()}: {},worldId:frame.worldId,generation:frame.generation,frameId:frame.frameId,stepIndex:frame.stepIndex}
+    return anchor
+  }
+  return anchor
+}
+
+/** 截图行与像素 pin 同时采当前锚点；不能把落点时的 world 字段拼到关节运动后的图上。 */
+export function annotationAtCapture(annotation:ViewerAnnotation,carrier:AnnotationCarrier,world:THREE.Vector3,scene:{sceneId:string;revision:number},frame?:Frame):ViewerAnnotation {
+  const anchor=structuredClone(annotation.anchor)
+  anchor.world=world.toArray();anchor.local=carrier.group.worldToLocal(world.clone()).toArray()
+  if(anchor.body){
+    const body=anchor.body,poses=frame?.entities.find(e=>e.entityId===anchor.entityId)?.sensors?.bodyWorldPoses as Record<string,unknown>|undefined,pose=rigidPoseOf(poses?.[body.bodyName])
+    if(!frame||!pose||frame.sceneRevision!==scene.revision||anchor.sceneId!==scene.sceneId||anchor.sceneRevision!==scene.revision||frame.worldId!==body.worldId||frame.generation!==body.generation)throw Error('CAMERA_ANNOTATION_FRAME_REQUIRED: a robot annotation capture needs the current same-generation native body frame')
+    if(body.normalLocal)anchor.normal=new THREE.Vector3(...body.normalLocal).applyQuaternion(new THREE.Quaternion(...pose.quaternionXyzw)).normalize().toArray()
+    anchor.body={...body,frameId:frame.frameId,stepIndex:frame.stepIndex}
+  }
+  return {...annotation,anchor}
+}
 
 /** 批注标记在场景里的父节点；单独一层，不与实体 group 混，实体重建时不连带删除。 */
 export const ANNOTATION_ROOT_NAME = "lyapunov-annotations"
@@ -73,6 +125,7 @@ interface MarkerEntry {
 export function resolveAnnotationWorld(annotation: ViewerAnnotation, carriers: ReadonlyMap<string, AnnotationCarrier>): THREE.Vector3 | undefined {
   const carrier = carriers.get(annotation.anchor.entityId)
   if (!carrier) return undefined
+  if(annotation.anchor.body){const node=carrier.robot?.bodyNode(annotation.anchor.body.bodyName);if(!node)return undefined;node.updateWorldMatrix(true,false);return node.localToWorld(new THREE.Vector3(...annotation.anchor.body.localM))}
   return carrier.group.localToWorld(new THREE.Vector3(...annotation.anchor.local))
 }
 

@@ -137,7 +137,7 @@ export const name = 'lyapunov-robot-tools'
 export const inject = ['tools', 'commands', 'scene', 'sim']
 const descriptions: Record<string, string> = {
   sim_set_paused:"Pause or resume the current world's actual physics clock without closing the world, editing the Scene, or rebuilding generation. paused=true pauses and false resumes; supply the exact expectedGeneration. Use sim_stop to stop actions.",
-  sim_open: "Create a real simulation world from the Scene document and return worldId and model generation.",
+  sim_open: "Create a real simulation world from the Scene document and return worldId and model generation. Before the first world, persist manageable infinite ground through Scene CAS, preserving removed/disabled choices and existing workspaces. Verified native ground avoids duplicate template colliders. ground=false records explicit disabled ground only on an unprepared Scene.",
   sim_world_list: "Read all currently open simulation worlds. Each entry includes worldId, engineId/engineVersion, worldGeneration, sceneId/appliedSceneRevision, status/clock/timestepS. Other already-open worlds, including UI-created worlds, are discoverable. Do not implicitly select a Viewer world. Return an empty list when none exist; a world disappears after sim_close.",
   sim_sync: "Synchronize the specified Scene revision into a world and return the revision actually loaded.",
   sim_reset: "Stop all actions in the current world, then rebuild that same world from the current Scene declarations and initial source joint state, updating generation. Do not edit the Scene. Reset all instances and free bases together. Require the exact current revision/generation, preserve existing world options, and return the corresponding native Frame.",
@@ -238,7 +238,12 @@ export function apply(ctx: Context, config: Config = {}) {
     const existing = sessionOperations.get(key)
     if (existing) return existing
     const sceneOps = sceneOperationsFor(ctx, agent, `机器人工具 ${key}`)
-    const created = createRobotOperations(simWorldsFor(ctx, agent), sceneOps.scene as SceneReader, walkHooks(ctx, agent, sceneOps.scene as SceneReader))
+    const created = createRobotOperations(simWorldsFor(ctx, agent), sceneOps.scene as SceneReader, {...walkHooks(ctx, agent, sceneOps.scene as SceneReader),prepareWorld:async(snapshot,options,signal)=>{
+      signal?.throwIfAborted()
+      if(['physics-workspace-v1','physics-workspace-v2'].includes(snapshot.physics?.template??'')||['removed','disabled'].includes(snapshot.physics?.groundState??''))return snapshot
+      requireWritableScene(ctx,agent,'sim_open ground preparation')
+      return sceneOps.prepareWorld({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,ground:options?.ground})
+    }})
     sessionOperations.set(key, created)
     return created
   }

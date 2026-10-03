@@ -17,13 +17,12 @@
   ——陆游《冬夜读书示子聿》
 </p>
 
-**Linux x64 · 0.1.0α（Alpha3_5）** · **Apache-2.0**
+**Linux x64 · 0.1.0α** · **Apache-2.0**
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 技术版本（SemVer） | `0.1.0-alpha.3.5` |
-| releaseId | `0.1.0-alpha3_5` |
-| 文档版本日期 | 2026-10-04 |
+| 技术版本 / releaseId | `0.1.0-alpha.4` |
+| 文档版本日期 | 2026-10-03 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | 杭州奇异宇宙人工智能有限公司 |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
@@ -37,9 +36,9 @@
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
 
-**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha3_5.md)记录本 Alpha 的变化与已知范围。
+**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.4.md)记录本 Alpha 的变化与已知范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha3_5.md)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.4.md)
 
 <!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
@@ -258,7 +257,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha3_5.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
+开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.4.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
 
 ## 许可与版权
 

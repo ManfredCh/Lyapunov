@@ -213,11 +213,12 @@ export function frustumGeometry(k: ViewerCameraIntrinsics, options: FrustumGeome
  * 挂载相机（`parentBodyName` 在场）提交**局部安装位姿**（`parent`，随 FK）；自由相机提交世界位姿（`world`，钉住）。
  * 本函数只做这一判定；写回本身走 Shell 侧既有 `camera_adjust_ui`（过期 `expectedGeneration` 由 Provider 明确拒）。
  */
-export function cameraAdjustFromDrag(cameraName: string, parentBodyName: string | undefined, edit: { worldPose: RigidPose; localPose: RigidPose }):
-  { cameraName: string; referenceFrame: "world" | "parent"; positionM: ViewerVec3; quaternionXyzw: ViewerQuat } {
+export function cameraAdjustFromDrag(cameraName: string, parentBodyName: string | undefined, edit: { worldPose: RigidPose; localPose: RigidPose; intrinsics?: ViewerCameraIntrinsics }):
+  { cameraName: string; referenceFrame: "world" | "parent"; positionM: ViewerVec3; quaternionXyzw: ViewerQuat; fovyDeg?: number } {
   const referenceFrame = parentBodyName ? "parent" : "world"
   const pose = referenceFrame === "parent" ? edit.localPose : edit.worldPose
-  return { cameraName, referenceFrame, positionM: pose.positionM, quaternionXyzw: pose.quaternionXyzw }
+  return { cameraName, referenceFrame, positionM: pose.positionM, quaternionXyzw: pose.quaternionXyzw,
+    ...(edit.intrinsics === undefined ? {} : { fovyDeg: fovYFromIntrinsics(normalizeIntrinsics(edit.intrinsics)) }) }
 }
 
 /**

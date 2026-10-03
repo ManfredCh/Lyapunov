@@ -79,7 +79,7 @@ export type EntityMotion = GaitMotion | JointTrajectory | JointTarget | VehicleD
 export type SimAction = { actionId: string; expectedGeneration: number; startStep?: number } & (EntityMotion | { kind: 'batch'; motions: EntityMotion[] })
 /** 当前 realm 的模拟 Provider 由 Profile/DSH 插件选择，open 不切换引擎。 */
 export interface WorldOptions { worldId?: string; timestepS?: number; realtimeFactor?: number; frameRateHz?: number; ground?: boolean; clock?: 'realtime' | 'manual'; /** 在首个对外物理步之前原子暂停；不改变时钟、重力或模型。省略保持原默认行为。 */ startPaused?: boolean }
-export interface ObservationSelection { entityIds?: string[]; contacts?: boolean; sensors?: boolean;collisionTopology?:{entityIds?:string[];includeGeometry?:boolean} }
+export interface ObservationSelection { entityIds?: string[]; contacts?: boolean; sensors?: boolean; cameraAuthoring?: boolean;collisionTopology?:{entityIds?:string[];includeGeometry?:boolean} }
 export interface StopSelection { entityIds?: string[]; actionId?: string; expectedGeneration?: number }
 export interface JointDescription { name: string; type: 'hinge' | 'slide'; unit: 'rad' | 'm'; range?: [number, number]; actuator?: string; /** 只报源元数据声明的执行器模式；源未声明时该字段不出现（不默认 position），此时 prepare(kind:'control') 对该关节明确拒绝。 */ controlMode?: 'position' | 'velocity' | 'torque'; /** 引擎侧该关节 drive 的力限回读（N·m / N，视关节类型）；无有限限值的关节不出现该字段。 */ driveMaxEffort?: number; /** 引擎侧该关节 drive 的刚度回读（位置 drive 的 kp，力矩执行器=controller.jointKp/kp）；无有限值时不出现。 */ driveStiffness?: number; /** 引擎侧该关节 drive 的阻尼回读（位置 drive 的 kd，力矩执行器=controller.jointKd/kd）；无有限值时不出现。 */ driveDamping?: number; /** 驱动该关节的源 tendon 执行器名；该关节没有关节级执行器，只是被肌腱带动。 */ tendonActuators?: string[] }
 /**

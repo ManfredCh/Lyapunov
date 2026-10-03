@@ -6,7 +6,7 @@ export interface Transform { position: Vec3; quaternion: Quaternion; scale: Vec3
 export interface SceneCameraMount { entityId: string; bodyName: string; positionM: Vec3; quaternionXyzw: Quaternion }
 /** 安装基线随Scene保存；来源说明不替代引擎实际读回。 */
 export interface SceneCameraInstallation {
-  source: 'current-view' | 'manual' | 'mjcf' | 'usd' | 'scene-baseline'
+  source: 'current-view' | 'manual' | 'mjcf' | 'urdf' | 'usd' | 'scene-baseline'
   sourceCameraName?: string
   baseline: { positionM: Vec3; quaternionXyzw: Quaternion; mount?: SceneCameraMount; fovYDeg: number; width: number; height: number; near: number; far: number; intrinsics: NonNullable<SceneCameraComponent['intrinsics']> }
 }
@@ -29,6 +29,8 @@ export interface Entity {
   entityId: string
   parentId?: string
   name: string
+  /** 锁定只阻止变换和重挂父节点；显隐、解锁与明确删除仍可提交。 */
+  locked?: boolean
   transform: Transform
   resources: ResourceRef[]
   components: {
@@ -44,14 +46,16 @@ export interface Entity {
 /** 世界物理配置属于Scene版本；参数以世界米/秒表达，不属于Viewer本地设置。 */
 export interface ScenePhysicsSettings {
   gravityWorldMps2: Vec3
-  template?: 'blank' | 'physics-workspace-v1'
+  template?: 'blank' | 'physics-workspace-v1' | 'physics-workspace-v2'
   groundEntityId?: string
+  /** 删除/禁用是持久选择，首次建世界及重开不得暗中恢复地面。 */
+  groundState?: 'present' | 'removed' | 'disabled'
 }
 export interface WorldPhysicsSnapshot {
   gravityWorldMps2: Vec3
   gravityEnabled: boolean
   units: 'm/s^2'
-  source: 'mujoco-model' | 'isaac-physics-scene'
+  source: 'mujoco-model' | 'isaac-physics-scene' | 'newton-model'
   groundSources: Array<{ source: 'scene' | 'native-plane' | 'explicit-legacy'; entityId?: string; geomNames: string[] }>
   collisionCoverage: { status: 'NONE' | 'PARTIAL' | 'COMPLETE'; physicalEntityIds: string[]; visualOnlyEntityIds: string[] }
 }

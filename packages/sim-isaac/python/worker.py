@@ -1808,7 +1808,7 @@ class World:
         if selection.get('sensors') is False:return
         from robot_authoring import authoring_observation
         authoring_observation(self,frame)
-        if not any(camera.get('mount') for e in self.entities.values() for camera in e.get('cameras',{}).values()):return
+        if not selection.get('cameraAuthoring') and not any(camera.get('mount') for e in self.entities.values() for camera in e.get('cameras',{}).values()):return
         readback=self.camera_list()
         if any(readback[key]!=frame[key] for key in ('worldId','generation','sceneRevision','stepIndex','frameId','simTime')):
             raise SceneError('CLOCK_CONFLICT','相机标定与机器人观察不属于同一原生帧')

@@ -462,7 +462,7 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
     case "policy_metadata": case "policy_verify": case "policy_match": case "policy_execute": case "policy_stop":
       pick("status", "valid", "reason", "stopped", "stepIndex", "actionId", "taskAchieved", "execution")
       return out
-    case "scene_create": case "scene_prepare_workspace": case "scene_configure_physics": case "scene_edit": case "scene_inspect": case "scene_list": case "scene_history":
+    case "scene_create": case "scene_prepare_workspace": case "scene_prepare_world": case "scene_configure_physics": case "scene_edit": case "scene_inspect": case "scene_list": case "scene_history":
     case "scene_restore": case "scene_save": case "scene_mount": case "scene_align":
       pick("sceneId", "revision", "snapshot", "resource", "missing", "changed", "history", "entityId", "entities", "physics", "coordinates")
       return out

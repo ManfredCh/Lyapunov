@@ -339,6 +339,16 @@ describe("S3（判据 4 数学层）：cameraAdjustFromDrag 的参考系判定�
     expect(free.positionM).toBe(worldPose.positionM)
     expect(free.quaternionXyzw).toBe(worldPose.quaternionXyzw)
   })
+  it("原生相机锁位调姿的镜头沿同一命令提交；缺少镜头的旧拖拽不新增 FOV", () => {
+    const intrinsics = { fx: 411, fy: 300, cx: 173, cy: 132, width: 384, height: 256 }
+    const aimed = cameraAdjustFromDrag("robot/calibrated_eye", "robot/sensor_link", { worldPose, localPose, intrinsics })
+    expect(aimed.fovyDeg).toBeCloseTo(2 * Math.atan(256 / 600) * 180 / Math.PI, 10)
+    expect(aimed.positionM).toBe(localPose.positionM)
+    expect(aimed.referenceFrame).toBe("parent")
+    expect(cameraAdjustFromDrag("wrist", "robot/link6", { worldPose, localPose }).fovyDeg).toBeUndefined()
+    expect(intrinsics).toEqual({ fx: 411, fy: 300, cx: 173, cy: 132, width: 384, height: 256 })
+    expect(() => cameraAdjustFromDrag("wrist", "robot/link6", { worldPose, localPose, intrinsics: { ...intrinsics, fy: 0 } })).toThrow()
+  })
 })
 
 describe("S2.5 Pilot：cameraRequestFromRig（透过该相机看／对齐机位）", () => {

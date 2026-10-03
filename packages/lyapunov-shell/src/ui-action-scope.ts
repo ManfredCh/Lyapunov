@@ -1,5 +1,5 @@
 /** 动作效果的纯目录；宿主与前端共用，不建立UI/Session状态。 */
-export const CAMERA_NAVIGATION_ACTIONS=['exitCameraView','locateTcp','locateBase'] as const
+export const CAMERA_NAVIGATION_ACTIONS=['exitCameraView','aimCameraView','locateTcp','locateBase'] as const
 export type CameraNavigationAction=typeof CAMERA_NAVIGATION_ACTIONS[number]
 export const isCameraNavigationAction=(action:string):action is CameraNavigationAction=>
   (CAMERA_NAVIGATION_ACTIONS as readonly string[]).includes(action)

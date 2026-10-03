@@ -27,6 +27,6 @@ export function createSceneCreationAction(run:(template:SceneCreationTemplate)=>
 export function SceneCreationActions({create,disabled,busy,tr,initial=false}:{create:(template:SceneCreationTemplate)=>void;disabled:boolean;busy?:SceneCreationTemplate;tr:Translate;initial?:boolean}){
  return <div className="lya-row" aria-busy={Boolean(busy)} data-testid={initial?'scene-empty-create-actions':'scene-library-create-actions'}>
   <button className={initial?'lya-primary':undefined} disabled={disabled||Boolean(busy)} onClick={()=>create('physics-workspace')}>{busy==='physics-workspace'?tr('正在创建…','Creating…'):initial?tr('创建物理工作区','Create physics workspace'):tr('新建物理场景','New physics scene')}</button>
-  <button disabled={disabled||Boolean(busy)} onClick={()=>create('blank')}>{busy==='blank'?tr('正在创建…','Creating…'):tr('空白制作','Blank scene')}</button>
+  <button title={tr('只创建编辑场景；首次开始物理时将加入可管理的无限地面。','Create an editing scene. Starting its first physics world adds manageable infinite ground.')} disabled={disabled||Boolean(busy)} onClick={()=>create('blank')}>{busy==='blank'?tr('正在创建…','Creating…'):tr('空白制作','Blank editing scene')}</button>
  </div>
 }

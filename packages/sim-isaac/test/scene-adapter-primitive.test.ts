@@ -74,10 +74,13 @@ def make_stub_pxr():
             self.ops = []
 
         def IsA(self, schema):return self.type_name==schema.type_name
+        def GetTypeName(self):return self.type_name
+        def HasAPI(self,schema):return schema.schema in self.schemas
 
     class _Stage(object):
         def __init__(self):
             self.prims = {}
+        def GetPrimAtPath(self,path):return self.prims[path]
 
         def define(self, path, type_name):
             if path not in self.prims:
@@ -193,7 +196,7 @@ def make_stub_pxr():
     pxr = {
         'Gf': _Gf,
         'UsdGeom': SimpleNamespace(Xform=_Define('Xform'), Mesh=_Define('Mesh'), Cube=_Define('Cube'), Sphere=_Define('Sphere'),
-                                   Cylinder=_Define('Cylinder'), Capsule=_Define('Capsule')),
+                                   Cylinder=_Define('Cylinder'), Capsule=_Define('Capsule'),Xformable=_Geom),
         'UsdPhysics': SimpleNamespace(
             CollisionAPI=_Api('PhysicsCollisionAPI', {'CreateCollisionEnabledAttr':'physics:collisionEnabled'}),
             MeshCollisionAPI=_Api('PhysicsMeshCollisionAPI', {'CreateApproximationAttr':'physics:approximation'}),
@@ -220,6 +223,20 @@ def make_stub_pxr():
             MaterialBindingAPI=type('MaterialBindingAPI', (), {'Apply': staticmethod(lambda prim: _Binding(prim))}),
             Tokens=SimpleNamespace(weakerThanDescendants='weakerThanDescendants')),
     }
+    helper_calls=[]
+    def add_ground_plane(stage,path,axis,size,position,color):
+        helper_calls.append({'path':path,'axis':axis,'visualSize':size,'position':position})
+        stage.define(path,'Xform')
+        plane=stage.define(path+'/CollisionPlane','Plane');plane.attrs['axis']=axis
+        pxr['UsdPhysics'].CollisionAPI.Apply(plane)
+        return plane
+    pxr['PhysicsSchemaTools']=SimpleNamespace(addGroundPlane=add_ground_plane)
+    pxr['Usd']=SimpleNamespace(PrimRange=lambda root:[prim for path,prim in stage_for_range[0].prims.items()if path==root.path or path.startswith(root.path+'/')])
+    # 记录型遍历严格指向本次stage；不把它当作Kit或PhysX步进。
+    stage_for_range=[None]
+    original_stage_init=_Stage.__init__
+    def stage_init(stage):original_stage_init(stage);stage_for_range[0]=stage
+    _Stage.__init__=stage_init
 
     def root_matrix(translation, scale):
         rows = [[scale[0], 0.0, 0.0, 0.0],
@@ -237,7 +254,7 @@ def make_stub_pxr():
                           'rels': {k: list(v) for k, v in prim.rels.items()},
                           'ops': [{'name': op.name, 'value': dump_value(op.value)} for op in prim.ops],
                           'world': None})
-        return {'mode': 'stub-stage', 'prims': prims}
+        return {'mode': 'stub-stage', 'prims': prims,'groundHelperCalls':list(helper_calls)}
 
     return pxr, _Stage, root_matrix, dump
 
@@ -396,6 +413,9 @@ def main():
         run('material-without-friction', {'shape': 'box', 'halfExtents': [.1, .1, .1], 'material': 'rubber'}, {'type': 'static'}, [0, 0, 0], [1, 1, 1]),
         run('shapes-not-box', {'shape': 'sphere', 'shapes': [{'center': [0, 0, 0], 'halfExtents': [.1, .1, .1]}]}, {'type': 'static'}, [0, 0, 0], [1, 1, 1]),
     ]
+    if namespace.get('PhysicsSchemaTools'):
+        scenarios.append(run('infinite-ground',{'shape':'plane','infinite':True,'size':[0,0,.1],'friction':[1.2,.08,.01]},{'type':'static'},[0,0,0],[1,1,1]))
+        scenarios.append(run('infinite-ground-dynamic',{'shape':'plane','infinite':True},{'type':'dynamic'},[0,0,0],[1,1,1]))
     with tempfile.TemporaryDirectory(prefix='isaac-real-mesh-') as directory:
         mesh=Path(directory)/'tetra.obj'
         mesh.write_text(chr(10).join(['v 0 0 0','v 0.2 0 0','v 0 0.2 0','v 0 0 0.2','f 1 3 2','f 1 2 4','f 1 4 3','f 2 3 4'])+chr(10))
@@ -484,6 +504,17 @@ for (const probe of probes) {
   }
 
   describe('SceneAdapter.primitive via ' + probe.label + ' (' + probe.command + ', ' + probe.data.mode + ')', () => {
+    test.skipIf(probe.data.mode!=='stub-stage')('011：记录型SDK helper消费无限Plane并拒绝动态平面；不是PhysX运行验收',()=>{
+      const plane=scenario('infinite-ground')
+      expect(plane.error).toBeUndefined()
+      expect(plane.result!.colliderPaths).toEqual(['/World/entities/e0/geometry/CollisionPlane'])
+      expect(prim(plane,'/World/entities/e0/geometry/CollisionPlane').type).toBe('Plane')
+      expect(prim(plane,'/World/entities/e0/geometry/CollisionPlane').schemas).toContain('PhysicsCollisionAPI')
+      expect(plane.dump.prims.some(item=>item.type==='Cube')).toBe(false)
+      const dynamic=scenario('infinite-ground-dynamic')
+      expect(dynamic.error?.code).toBe('UNSUPPORTED_CAPABILITY')
+      expect(dynamic.dump.prims).toHaveLength(0)
+    })
     test('组合 shapes[] 逐盒消费，顶层单盒尺寸被忽略', () => {
       const multi = scenario('multi-box-offset')
       expect(multi.error).toBeUndefined()

@@ -1006,6 +1006,12 @@ class World:
                 else:
                     assets = {name: Path(path_from_uri(path)).read_bytes() for name, path in cfg.get('assets', {}).items()}
                     child = mj.MjSpec.from_string(cfg['xml'], assets=assets)
+                native_camera_sources, native_camera_refusals = {}, []
+                camera_urdf_path = urdf_source_path(cfg)
+                if camera_urdf_path:
+                    from urdf_cameras import install_urdf_cameras
+                    native_camera_sources, native_camera_refusals = install_urdf_cameras(child, camera_urdf_path, self.scene_camera_optics)
+                    skipped.extend({'entityId': eid, **refusal, 'cameraName': prefix + refusal['cameraName']} for refusal in native_camera_refusals)
                 # URDF converters are allowed to leave collision geoms unnamed.
                 # Give only those geoms a stable local name before attaching the
                 # child.  The entity prefix is added by MjSpec.attach, so contact
@@ -1025,10 +1031,11 @@ class World:
                 from policy_drive import apply_policy_drive
                 apply_policy_drive(child, component.get('controller', {}))
                 initial_model = child.compile()
-                # 只认源worldbody上的真实可碰撞plane及其完整世界位姿；叫floor的盒子/墙不能撤下标准地面。
+                # world及焊接到world的静态子body都允许plane；用原生weld事实和FK，不以局部pos冒世界位姿。
+                ground_data=mj.MjData(initial_model);mj.mj_forward(initial_model,ground_data)
                 for gid in range(initial_model.ngeom):
-                    if initial_model.geom_type[gid]!=mj.mjtGeom.mjGEOM_PLANE or initial_model.geom_bodyid[gid]!=0 or not(initial_model.geom_contype[gid]or initial_model.geom_conaffinity[gid]):continue
-                    point=p+quat_rotate(q,initial_model.geom_pos[gid]);normal=quat_rotate(q,quat_rotate(initial_model.geom_quat[gid],[0,0,1]))
+                    if initial_model.geom_type[gid]!=mj.mjtGeom.mjGEOM_PLANE or initial_model.body_weldid[initial_model.geom_bodyid[gid]]!=0 or not(initial_model.geom_contype[gid]or initial_model.geom_conaffinity[gid]):continue
+                    point=p+quat_rotate(q,ground_data.geom_xpos[gid]);normal=quat_rotate(q,ground_data.geom_xmat[gid].reshape((3,3))[:,2])
                     if standard_support_plane(point,normal):native_ground_names.add(prefix+initial_model.geom(gid).name)
                 from robot_authoring import source_base, configure_source_base
                 source_base_state = source_base(initial_model, cfg.get('rootBody'))
@@ -1078,7 +1085,7 @@ class World:
                     spec_bodies[eid] = (root, local[0], local[1])
                 source_path = cfg.get('sourcePath') or cfg.get('modelPath')
                 source_sha = hashlib.sha256(Path(path_from_uri(source_path)).read_bytes()).hexdigest() if source_path else None
-                maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': cfg.get('rootBody'), 'controller': copy.deepcopy(component.get('controller', {})), 'initialJoints': initial_joints, 'initialActuators': initial_actuators, 'sourceSha256': source_sha, 'sourceBase': source_base_state}
+                maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': cfg.get('rootBody'), 'controller': copy.deepcopy(component.get('controller', {})), 'initialJoints': initial_joints, 'initialActuators': initial_actuators, 'sourceSha256': source_sha, 'sourceBase': source_base_state, 'nativeCameraSources': native_camera_sources, 'nativeCameraRefusals': native_camera_refusals}
             elif component.get('collision'):
                 c = component['collision']
                 shape = c.get('shape', c.get('type', 'box'))
@@ -1252,7 +1259,7 @@ class World:
                     if geom.name.startswith(prefix):spec.delete(geom)
                 replaced_template_ground.append(entity['entityId'])
         if explicit_ground_requested(scene,self.options)and not native_planes and not (patches and patches.get('suppressDefaultGround')):
-            spec.worldbody.add_geom(name='__ground',type=mj.mjtGeom.mjGEOM_BOX,size=[50,50,.05],pos=[0,0,-.05],friction=[1.2,.08,.01]);ground_names.add('__ground')
+            spec.worldbody.add_geom(name='__ground',type=mj.mjtGeom.mjGEOM_PLANE,size=[0,0,.1],pos=[0,0,0],friction=[1.2,.08,.01]);ground_names.add('__ground')
         from robot_authoring import compile_bindings, initialize_bindings
         pending_base_bindings = compile_bindings(spec, scene, maps, poses, spec_bodies, SimError)
         scene_cameras = self.compile_scene_cameras(spec, scene, poses, spec_bodies, skipped)
@@ -1923,7 +1930,7 @@ class World:
                                  'collisionEnabled':any(self.model.geom_contype[i] or self.model.geom_conaffinity[i] for i in geom_ids),
                                  'colliderCount':len(geom_ids),'bodyName':self.model.body(info['body']).name}
         frame = {'worldId': self.id, 'generation': self.generation, 'sceneRevision': self.applied_revision, 'stepIndex': self.step_index, 'simTime': float(self.data.time), 'frameId': f'{self.id}:{self.generation}:{self.step_index}', 'entities': entities,'worldStatus':self.run_status(),'worldPhysics':self.world_physics()}
-        if any(camera.get('mount') for camera in self.scene_cameras.values()):
+        if any(camera.get('mount') for camera in self.scene_cameras.values()) or selection.get('cameraAuthoring') is True:
             # 相机与机器人投到同一观察帧，避免消费者把不同轮询步的 world pose 拼成假跟随。
             camera_frame = self.camera_list()
             frame['cameras'] = camera_frame['cameras']
@@ -3380,6 +3387,9 @@ class World:
                     if name.startswith(prefix) and len(name) > len(prefix):
                         item['localName'] = name[len(prefix):]
                         item['entityId'] = info['entity']['entityId']
+                        source_camera = info.get('nativeCameraSources', {}).get(item['localName'])
+                        if source_camera:
+                            item.update({key: value for key, value in source_camera.items() if key != 'parentBodyName'})
                         break
             item['override'] = override is not None
             if override:
@@ -3391,6 +3401,12 @@ class World:
         for declared in self.scene_cameras.values():
             if declared.get('available') is False:
                 cameras.append({**self._camera_frame_identity(), **declared, 'cameraSource': 'scene-camera'})
+        for info in self.entities.values():
+            for refusal in info.get('nativeCameraRefusals', []):
+                cameras.append({**self._camera_frame_identity(), 'entityId': info['entity']['entityId'],
+                                'cameraSource': 'urdf', 'cameraName': info['prefix'] + refusal['cameraName'],
+                                'localName': refusal['cameraName'], 'available': False,
+                                'reason': refusal['code'], 'message': refusal['message']})
         bodies = []
         for bodyid in range(1, self.model.nbody):
             name = self.model.body(bodyid).name
