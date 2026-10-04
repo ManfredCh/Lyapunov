@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "scope": "documented-t0-priority",
   "evidenceScope": "planning-only",
-  "note": "Authoritative machine-readable roster of unambiguous T0 membership in the cited repository docs. Priority is not availability or readiness. A known pack absent here is unclassified, not implicitly T1/T2. Conflicting tier claims remain explicit until a documented decision resolves them. 2026-10-04 用户明确将 forklift_c 移出默认 T0 验收和示范范围；不推定 T1/T2，保留原包、原件与历史证据。",
+  "note": "Authoritative machine-readable roster of unambiguous T0 membership in the cited repository docs. Priority is not availability or readiness. A known pack absent here is unclassified, not implicitly T1/T2. Conflicting tier claims remain explicit until a documented decision resolves them. On 2026-10-04, the product owner removed forklift_c from the default T0 validation and demonstration scope. Do not assign it to T1/T2; retain the existing pack, source assets and historical evidence.",
   "readinessSource": "packages/policy-registry/src/pack-contract.ts#inspectPack",
   "sources": [
     {
@@ -24,7 +24,7 @@
       "path": "docs/ROBOT_TIERS.md",
       "section": "用户范围调整（2026-10-04）",
       "date": "2026-10-04",
-      "note": "用户明确移出 forklift_c；仅调整默认目标，不删除已有资源，也不赋予其它等级。"
+      "note": "The product owner explicitly removed forklift_c from the default targets. Preserve existing resources and do not assign another priority tier."
     }
   ],
   "packs": [
