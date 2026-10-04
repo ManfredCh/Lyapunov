@@ -1,7 +1,9 @@
 /** @tier L0 @cap cpu_fixture：原生事件的纯折叠，不启动模型/GUI/世界。 */
 import {describe,expect,test} from 'bun:test'
 import {SessionId,type SessionEvent} from '@deepseek-ai/dsh-session'
-import type {JobSnapshot} from '@deepseek-ai/dsh-jobs'
+import {JobId,JobRegistryId,type JobView} from '@deepseek-ai/dsh-jobs'
+import {AttachmentId} from '@deepseek-ai/dsh-attachment'
+import {createToolResultMessage,ToolCallId} from '@deepseek-ai/dsh-llm'
 import {emptyExecutionGraph,foldExecutionGraph,rebuildExecutionGraph,imageFacts,publicDiagnostic,publicFacts,reconcileJobs,recoveryDecision,requestDiagnostics,type ToolObservation} from '../src/execution-graph.ts'
 const event=(seq:number,type:string,data:unknown)=>({seq,type,data,time:1000+seq} as SessionEvent)
 const empty=()=>emptyExecutionGraph({id:SessionId('session-a')})
@@ -9,12 +11,28 @@ const obs=(callId:string,extra:Partial<ToolObservation>={}):ToolObservation=>({c
 
 describe('原生执行图折叠',()=>{
  test('turn/step/tool结果按原身份更新，可重建且同seq不重复',()=>{
-  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'tool/call',{turn:1,step:1,callId:'call-a',name:'scene_inspect',arguments:'{}'}),event(3,'tool/result',{turn:1,step:1,message:{content:[{type:'tool-result',toolCallId:'call-a',isError:false,content:[{type:'text',text:'PRIVATE_RESULT_BODY'}]}]}})]
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'tool/call',{turn:1,step:1,callId:'call-a',name:'scene_inspect',arguments:'{}'}),event(3,'tool/result',{turn:1,step:1,message:createToolResultMessage({callId:ToolCallId('call-a'),isError:false,content:[{type:'text',text:'PRIVATE_RESULT_BODY'}]})})]
   const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
   expect(graph.nodes.filter(row=>row.id==='tool:call-a')).toHaveLength(1)
   expect(graph.nodes.find(row=>row.id==='tool:call-a')).toMatchObject({parent:'step:1:1',status:'success'})
   expect(foldExecutionGraph(graph,events.at(-1)!)).toBe(graph)
   expect(JSON.stringify(graph)).not.toContain('PRIVATE_RESULT_BODY')
+ })
+ test('V4顶层工具错误与图片保留原call身份和正文，图只读摘要',()=>{
+  const image={type:'image' as const,attachment:{attachmentId:AttachmentId('sha256:'+'e'.repeat(64)),mediaType:'image/png' as const,width:8,height:8,bytes:80}}
+  const message=createToolResultMessage({callId:ToolCallId('image-error'),isError:true,content:[{type:'text',text:'PRIVATE_TOOL_ERROR'},image]})
+  const before=JSON.stringify(message)
+  let graph=foldExecutionGraph(empty(),event(0,'tool/call',{turn:1,step:1,callId:'image-error',name:'viewer_observe',arguments:'{}'}))
+  graph=foldExecutionGraph(graph,event(1,'tool/result',{turn:1,step:1,message,error:{name:'ObservationUnavailable',code:'OBSERVATION_UNAVAILABLE'}}))
+  expect(graph.nodes.find(row=>row.id==='tool:image-error')).toMatchObject({status:'failed',code:'OBSERVATION_UNAVAILABLE',images:1})
+  expect(JSON.stringify(message)).toBe(before);expect(JSON.stringify(graph)).not.toContain('PRIVATE_TOOL_ERROR')
+ })
+ test.each([
+  ['completed','success'],['aborted','cancelled'],['interrupted','cancelled'],
+  ['blocked','waiting'],['forked','waiting'],['max-tokens','waiting'],['future-owner-reason','unknown'],
+ ])('原生turn/end %s不伪造目标完成', (kind,status)=>{
+  const graph=foldExecutionGraph(empty(),event(0,'turn/end',{turn:1,reason:{kind}}))
+  expect(graph.nodes.find(row=>row.id==='turn:1')?.status).toBe(status)
  })
  test('A→B→A、换参数和随机action/request/worldId不重置失败窗口',()=>{
   let graph=empty()
@@ -80,19 +98,19 @@ describe('原生执行图折叠',()=>{
  })
  test('同名bash-1跨代次不能接管，旧无身份保持未知',()=>{
   const receipt={jobId:'bash-1',registryId:'old',hostInstanceId:'host-old',startedAt:1,callId:'call',callSeq:0,seq:1,status:'running'}
-  const live={id:'bash-1',registryId:'new',startedAt:1,status:'completed'} as unknown as JobSnapshot
+  const live:JobView={id:JobId('bash-1'),registryId:JobRegistryId('new'),kind:'bash',label:'离线夹具',startedAt:1,status:'completed',output:{total:0,earliest:0}}
   expect(reconcileJobs([receipt],[live])[0]).toMatchObject({matched:false,currentStatus:'unknown'})
-  expect(reconcileJobs([{...receipt,registryId:null}],[{...live,registryId:'old'} as JobSnapshot])[0]?.matched).toBe(false)
-  expect(reconcileJobs([receipt],[{...live,registryId:'old'} as JobSnapshot])[0]).toMatchObject({matched:true,currentStatus:'completed'})
+  expect(reconcileJobs([{...receipt,registryId:null}],[{...live,registryId:JobRegistryId('old')}])[0]?.matched).toBe(false)
+  expect(reconcileJobs([receipt],[{...live,registryId:JobRegistryId('old')}])[0]).toMatchObject({matched:true,currentStatus:'completed'})
  })
  test('旧真实bash接收文本只重建unknown，不从同名ID/路径推当前执行',()=>{
   let graph=foldExecutionGraph(empty(),event(0,'tool/call',{turn:1,step:1,callId:'old-call',name:'bash',arguments:'{}'}))
-  graph=foldExecutionGraph(graph,event(1,'tool/result',{message:{content:[{type:'tool-result',toolCallId:'old-call',isError:false,content:[{type:'text',text:'started background job bash-1'}]}]}}))
+  graph=foldExecutionGraph(graph,event(1,'tool/result',{message:createToolResultMessage({callId:ToolCallId('old-call'),isError:false,content:[{type:'text',text:'started background job bash-1'}]})}))
   expect(graph.jobs).toEqual([{jobId:'bash-1',registryId:null,hostInstanceId:null,startedAt:null,callId:'old-call',callSeq:0,seq:1,status:'unknown'}])
  })
  test('真实Bash timeout/SIGTERM与外层isError=false独立投影，不把下载标成功',()=>{
   let graph=foldExecutionGraph(empty(),event(0,'tool/call',{turn:1,step:1,callId:'download',name:'bash',arguments:'{}'}))
-  graph=foldExecutionGraph(graph,event(1,'tool/result',{message:{content:[{type:'tool-result',toolCallId:'download',isError:false,content:[{type:'text',text:'[timed out after 60000ms]\n[killed by signal: SIGTERM]'}]}]}}))
+  graph=foldExecutionGraph(graph,event(1,'tool/result',{message:createToolResultMessage({callId:ToolCallId('download'),isError:false,content:[{type:'text',text:'[timed out after 60000ms]\n[killed by signal: SIGTERM]'}]})}))
   expect(graph.nodes[0]).toMatchObject({status:'unknown',code:'PROCESS_TIMEOUT',facts:{timedOut:true,timeoutMs:60000,killedSignal:'SIGTERM'}})
   expect(graph.recovery.unknown).toMatchObject([{callId:'download',name:'bash'}])
  })
@@ -107,7 +125,7 @@ describe('原生执行图折叠',()=>{
   expect(diagnostic).toMatchObject({fieldPath:null,requestId:null,effect:'unknown'});expect(JSON.stringify(diagnostic)).not.toContain('PRIVATE')
  })
  test('实际请求摘要含owner/section/hash/图像数，但不留原文或原工具schema',()=>{
-  const request={provider:'mock',model:'mock',messages:[{role:'user',source:{kind:'plugin',plugin:'owner',form:'snapshot',sections:[{name:'current',text:'PRIVATE_SECTION'}]},content:[{type:'text',text:'PRIVATE_SECTION'}]}],tools:[{name:'tool',description:'PRIVATE_TOOL',parameters:{}}]} as never
+  const request={provider:'mock',model:'mock',messages:[{role:'user',source:{kind:'owner',form:'snapshot',sections:[{name:'current',text:'PRIVATE_SECTION'}]},content:[{type:'text',text:'PRIVATE_SECTION'}]}],tools:[{name:'tool',description:'PRIVATE_TOOL',parameters:{}}]} as never
   const value=requestDiagnostics(request,1,2);expect(value.contexts[0]).toMatchObject({owner:'owner',bytes:15,sections:[{name:'current',bytes:15}]});expect(JSON.stringify(value)).not.toContain('PRIVATE')
  })
  test('有界图明确裁剪，回指seq及Session隔离仍保持',()=>{

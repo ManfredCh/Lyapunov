@@ -2,7 +2,7 @@
 import {createHash} from 'node:crypto'
 import type {ContentBlock,GenerateOptions} from '@deepseek-ai/dsh-llm'
 import type {SessionEvent,SessionHeader} from '@deepseek-ai/dsh-session'
-import type {JobSnapshot} from '@deepseek-ai/dsh-jobs'
+import type {JobView} from '@deepseek-ai/dsh-jobs'
 import {isHumanDirectedSource} from './conversation-history.ts'
 
 export type PublicFact=string|number|boolean
@@ -73,7 +73,6 @@ export function imageFacts(content:readonly ContentBlock[]):string[]{
  const out:string[]=[]
  for(const block of content){
   if(block.type==='image')out.push(String(block.attachment.attachmentId))
-  else if(block.type==='tool-result')out.push(...imageFacts(block.content))
  }
  return out
 }
@@ -91,7 +90,7 @@ export function requestDiagnostics(request:GenerateOptions,turn:number,step:numb
 }
 
 /** 只有同provider代次、同startedAt的句柄才能关联实时Job；无关联的旧记录保持未知。 */
-export function reconcileJobs(receipts:readonly JobReceipt[],snapshots:readonly JobSnapshot[]){
+export function reconcileJobs(receipts:readonly JobReceipt[],snapshots:readonly JobView[]){
  return receipts.map(receipt=>{
   const live=snapshots.find(job=>job.id===receipt.jobId&&receipt.registryId!==null&&job.registryId===receipt.registryId&&job.startedAt===receipt.startedAt)
   return {...receipt,currentStatus:live?.status??'unknown',finishedAt:live?.finishedAt??null,matched:live!==undefined}
@@ -135,20 +134,14 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
  else if(type==='lyapunov/request-diagnostics'){next.request=event.data as RequestDiagnostics;add(`request:${seq}`,stepId,'request',String(data.model),'running')}
  else if(type==='tool/call'||type==='tool/ptc-dispatch-start')add(`tool:${data.callId??data.subCallId}`,stepId,'tool',String(data.name),'running',null,{argumentsHash:digest(data.arguments)})
  else if(type==='tool/result'){
-  const message=object(data.message)
-  for(const wrapper of Array.isArray(message.content)?message.content:[]){
-   const block=object(wrapper);if(block.type!=='tool-result')continue
-   const content=Array.isArray(block.content)?block.content as ContentBlock[]:[],error=object(data.error),code=publicId(error.code)
-   const id=`tool:${block.toolCallId}`,prior=next.nodes.find(row=>row.id===id)
-   const text=content.flatMap(part=>part.type==='text'?[part.text]:[]).join('\n'),timeout=text.match(/\[timed out after (\d+)ms\]/),signal=text.match(/\[killed by signal: (SIG[A-Z0-9]+)\]/),exit=text.match(/\[exit code: (-?\d+)\]/)
-   const processFacts={...prior?.facts,...timeout?{timedOut:true,timeoutMs:Number(timeout[1])}:{},...signal?{killedSignal:signal[1]}:{},...exit?{exitCode:Number(exit[1])}:{}}
-   add(id,prior?.parent??stepId,'tool',prior?.label??'tool',timeout||signal?'unknown':block.isError===true||exit&&Number(exit[1])!==0?'failed':'success',timeout?'PROCESS_TIMEOUT':code,processFacts,imageFacts(content).length,prior?.diagnostic??null)
-   const legacyJob=content.flatMap(part=>part.type==='text'?[part.text]:[]).map(text=>text.match(/^started background job ([A-Za-z]+-\d+)$/)?.[1]).find(Boolean)
-   if(legacyJob&&!next.jobs.some(job=>job.callId===String(block.toolCallId)))next.jobs=[...next.jobs,{jobId:legacyJob,registryId:null,hostInstanceId:null,startedAt:null,callId:String(block.toolCallId),callSeq:prior?.seq??null,seq,status:'unknown'}].slice(-128)
-   if((code==='TOOL_OUTCOME_UNKNOWN'||(prior?.label==='bash'&&(timeout||signal)))&&prior?.facts.argumentsHash)next.recovery={...next.recovery,unknown:[...next.recovery.unknown.filter(row=>row.callId!==String(block.toolCallId)),{callId:String(block.toolCallId),argumentsHash:String(prior.facts.argumentsHash),name:prior.label,seq}].slice(-128)}
-   next.nodes=replaceNode(next.nodes,node!,maxNodes)
-   node=undefined
-  }
+  const message=event.data.message,content=message.content,callId=String(message.toolCallId),error=object(data.error),code=publicId(error.code)
+  const id='tool:'+callId,prior=next.nodes.find(row=>row.id===id)
+  const text=content.flatMap(part=>part.type==='text'?[part.text]:[]).join('\n'),timeout=text.match(/\[timed out after (\d+)ms\]/),signal=text.match(/\[killed by signal: (SIG[A-Z0-9]+)\]/),exit=text.match(/\[exit code: (-?\d+)\]/)
+  const processFacts={...prior?.facts,...timeout?{timedOut:true,timeoutMs:Number(timeout[1])}:{},...signal?{killedSignal:signal[1]}:{},...exit?{exitCode:Number(exit[1])}:{}}
+  add(id,prior?.parent??stepId,'tool',prior?.label??'tool',timeout||signal?'unknown':message.isError===true||exit&&Number(exit[1])!==0?'failed':'success',timeout?'PROCESS_TIMEOUT':code,processFacts,imageFacts(content).length,prior?.diagnostic??null)
+  const legacyJob=content.flatMap(part=>part.type==='text'?[part.text]:[]).map(text=>text.match(/^started background job ([A-Za-z]+-\d+)$/)?.[1]).find(Boolean)
+  if(legacyJob&&!next.jobs.some(job=>job.callId===callId))next.jobs=[...next.jobs,{jobId:legacyJob,registryId:null,hostInstanceId:null,startedAt:null,callId,callSeq:prior?.seq??null,seq,status:'unknown'}].slice(-128)
+  if((code==='TOOL_OUTCOME_UNKNOWN'||(prior?.label==='bash'&&(timeout||signal)))&&prior?.facts.argumentsHash)next.recovery={...next.recovery,unknown:[...next.recovery.unknown.filter(row=>row.callId!==callId),{callId,argumentsHash:String(prior.facts.argumentsHash),name:prior.label,seq}].slice(-128)}
  }
  else if(type==='command/run')add(`command:${data.commandId}`,next.turn?`turn:${next.turn}`:null,'command',String(data.name),'running')
  else if(type==='command/done'){
@@ -181,7 +174,7 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
  else if(type==='lyapunov/recovery-handoff'){next.recovery={...next.recovery,handoffSeq:seq};add(`handoff:${seq}`,stepId,'handoff','recovery','waiting',publicId(data.code))}
  else if(type==='turn/end'){
   const reason=object(data.reason)
-  add(`turn:${data.turn}`,null,'turn','turn',reason.kind==='error'?'failed':reason.kind==='interrupted'?'cancelled':'success',publicId(object(reason.error).code))
+  add(`turn:${data.turn}`,null,'turn','turn',reason.kind==='error'?'failed':reason.kind==='aborted'||reason.kind==='interrupted'?'cancelled':reason.kind==='completed'?'success':['blocked','forked','max-tokens'].includes(String(reason.kind))?'waiting':'unknown',publicId(object(reason.error).code))
  }
  if(node)next.nodes=replaceNode(next.nodes,node,maxNodes)
  if(next.nodes.length===maxNodes&&state.nodes.length===maxNodes&&node&&!state.nodes.some(row=>row.id===node!.id))next.omittedNodes+=1

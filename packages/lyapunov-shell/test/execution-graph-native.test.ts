@@ -8,7 +8,8 @@ import {createUserMessage,createToolResultMessage,ToolCallId} from '@deepseek-ai
 import {defineTool} from '@deepseek-ai/dsh-tools'
 import JobsLocal from '@deepseek-ai/dsh-jobs-local'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
-import type {JobOutcome} from '@deepseek-ai/dsh-jobs'
+import {JobId,type JobOutcome} from '@deepseek-ai/dsh-jobs'
+import type {Agent} from '@deepseek-ai/dsh-agent'
 import {AttachmentId} from '@deepseek-ai/dsh-attachment'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -34,28 +35,31 @@ async function setup(script:ConstructorParameters<typeof MockAdapter>[0]){
   return {ctx,adapter,agent,other,read,send,close:()=>ctx.fiber.dispose()}
  }catch(error){await ctx.fiber.dispose();throw error}
 }
+function jobNotices(agent:Agent){
+ return agent.session.snapshotEvents().flatMap(event=>event.type==='agent/inbox/spliced'?event.data.inserted:[]).filter(message=>message.source.kind==='tool-jobs')
+}
 const output={schema:{type:'object' as const,additionalProperties:false as const,properties:{result:{type:'string' as const,required:true as const}}},render:(_args:unknown,value:{result?:unknown})=>[{type:'text' as const,text:String(value.result)}]}
 
 describe('原生Graph/恢复hook',()=>{
  test('真实Loop未知操作后重复原生状态read有界等待，保原unknown/Job身份且不读输出或取消',async()=>{
   const h=await setup([toolCallResponse('u0','uncertain',{}),...Array.from({length:6},(_,i)=>toolCallResponse('status-'+i,'execution_status',i%2?{detail:'full'}:{})),textResponse('不应到达')])
-  let settle!:(value:JobOutcome)=>void,reads=0,cancels=0
+  let settle!:(value:JobOutcome)=>void,cancels=0
   const done=new Promise<JobOutcome>(resolve=>settle=resolve),values:string[]=[]
   h.ctx.tools.register(defineTool({name:'uncertain',description:'Unknown outcome fixture',parameters:{},output,async execute(){throw Error('TOOL_OUTCOME_UNKNOWN')}}))
   try{
-   const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent,run:()=>({done,cancel(){cancels++;settle({status:'killed'})},readOutput(){reads++;return 'PRIVATE_OUTPUT'}})}),before=h.ctx.jobs.get(jobId,h.agent)
+   const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent.id,run:job=>{job.append('PRIVATE_OUTPUT');return {done,cancel(){cancels++;settle({status:'killed'})}}}}),before=h.ctx.jobs.get(jobId,h.agent.id)
    h.ctx.on('tools/result',(exec,result)=>{if(exec.agent===h.agent&&exec.name==='execution_status'&&!result.isError)values.push(String((result.value as {result:string}).result))})
    await h.send()
-   const events=h.agent.session.snapshotEvents(),graph=h.read(h.agent).graph,current=h.ctx.jobs.get(jobId,h.agent)
+   const events=h.agent.session.snapshotEvents(),graph=h.read(h.agent).graph,current=h.ctx.jobs.get(jobId,h.agent.id)
    expect(h.adapter.requests).toHaveLength(3);expect(events.filter(row=>row.type==='lyapunov/recovery-handoff')).toHaveLength(1);expect(graph.recovery.waitingQueries).toBe(2)
    expect(graph.recovery.unknown).toContainEqual({callId:'u0',argumentsHash:expect.any(String),name:'uncertain',seq:expect.any(Number)})
-   expect(current).toMatchObject({registryId:before.registryId,startedAt:before.startedAt,status:'running'});expect(reads).toBe(0);expect(cancels).toBe(0)
+   expect(current).toMatchObject({registryId:before.registryId,startedAt:before.startedAt,status:'running'});expect(cancels).toBe(0)
    const polls=events.filter(row=>row.type==='lyapunov/tool-observation'&&row.data.name==='execution_status')
    expect(polls).toHaveLength(2);expect(polls.every(row=>row.type==='lyapunov/tool-observation'&&row.data.facts.ownerProgress===false)).toBe(true)
    expect(Buffer.byteLength(values[0]!)).toBeLessThanOrEqual(EXECUTION_STATUS_SUMMARY_MAX_BYTES);expect(JSON.parse(values[1]!).graph.sessionId).toBe(String(h.agent.id));expect(JSON.stringify(values)).not.toContain('PRIVATE_OUTPUT')
    const count=events.length,window=JSON.stringify(graph.recovery)
    for(let i=0;i<3;i++)await h.ctx.tools.execute({name:'execution_status',arguments:{},agent:h.agent,callId:ToolCallId('direct-status-'+i),signal:AbortSignal.timeout(1000)})
-   expect(h.agent.session.snapshotEvents()).toHaveLength(count);expect(JSON.stringify(h.read(h.agent).graph.recovery)).toBe(window);expect(h.read(h.other).graph.nodes).toHaveLength(0)
+   expect(h.agent.session.snapshotEvents()).toHaveLength(count);expect(JSON.stringify(h.read(h.agent).graph.recovery)).toBe(window);expect(h.read(h.other).graph.nodes).toHaveLength(0);expect(h.ctx.jobs.read(jobId,h.agent.id).chunks.map(chunk=>chunk.text).join('')).toBe('PRIVATE_OUTPUT')
   }finally{settle({status:'killed'});await h.close()}
  })
  test('真实Loop没有Job时交替summary/full不由自身step/phase/读取节点伪造进展',async()=>{
@@ -73,20 +77,20 @@ describe('原生Graph/恢复hook',()=>{
   const done=new Promise<JobOutcome>(resolve=>settle=resolve)
   h.ctx.tools.register(defineTool({name:'no_new_facts',description:'No owner progress fixture',parameters:{},output,async execute(){return {result:''}}}))
   try{
-   h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent,run:()=>({done,cancel(){settle({status:'killed'})}})})
+   h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent.id,run:()=>({done,cancel(){settle({status:'killed'})}})})
    await h.send();expect(h.adapter.requests).toHaveLength(3);expect(h.read(h.agent).graph.recovery.waitingQueries).toBe(2);expect(h.agent.session.snapshotEvents().filter(row=>row.type==='lyapunov/recovery-handoff')).toHaveLength(1)
   }finally{settle({status:'killed'});await h.close()}
  })
  test('真实Job owner终态变化可推进一次，原unknown保留且之后相同status读仍不续预算',async()=>{
   const h=await setup([toolCallResponse('u0','uncertain',{}),...Array.from({length:4},(_,i)=>toolCallResponse('transition-'+i,'execution_status',{})),textResponse('Job已结束；原unknown仍需读回')])
-  let settle!:(value:JobOutcome)=>void,reads=0,cancels=0,polls=0
+  let settle!:(value:JobOutcome)=>void,cancels=0,polls=0
   const done=new Promise<JobOutcome>(resolve=>settle=resolve)
   h.ctx.tools.register(defineTool({name:'uncertain',description:'Unknown outcome fixture',parameters:{},output,async execute(){throw Error('TOOL_OUTCOME_UNKNOWN')}}))
   try{
-   const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent,run:()=>({done,cancel(){cancels++;settle({status:'killed'})},readOutput(){reads++;return 'PRIVATE_OUTPUT'}})})
+   const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_LABEL',owner:h.agent.id,run:job=>{job.append('PRIVATE_OUTPUT');return {done,cancel(){cancels++;settle({status:'killed'})}}}})
    h.ctx.on('tools/result',(exec)=>{if(exec.agent===h.agent&&exec.name==='execution_status'&&++polls===1)settle({status:'completed'})})
    await h.send();const events=h.agent.session.snapshotEvents(),graph=h.read(h.agent).graph
-   expect(h.adapter.requests).toHaveLength(6);expect(events.filter(row=>row.type==='lyapunov/recovery-handoff')).toHaveLength(0);expect(h.ctx.jobs.get(jobId,h.agent).status).toBe('completed');expect(reads).toBe(0);expect(cancels).toBe(0);expect(graph.recovery.unknown).toHaveLength(1);expect(graph.recovery.stagnant).toBe(2)
+   expect(h.adapter.requests).toHaveLength(6);expect(events.filter(row=>row.type==='lyapunov/recovery-handoff')).toHaveLength(0);expect(h.ctx.jobs.get(jobId,h.agent.id).status).toBe('completed');expect(h.ctx.jobs.read(jobId,h.agent.id).chunks.map(chunk=>chunk.text).join('')).toBe('PRIVATE_OUTPUT');expect(cancels).toBe(0);expect(graph.recovery.unknown).toHaveLength(1);expect(graph.recovery.stagnant).toBe(2)
    expect(events.filter(row=>row.type==='lyapunov/tool-observation'&&row.data.name==='execution_status').map(row=>row.type==='lyapunov/tool-observation'?row.data.facts.ownerProgress:null)).toEqual([false,true,false,false])
   }finally{settle({status:'killed'});await h.close()}
  })
@@ -104,7 +108,7 @@ describe('原生Graph/恢复hook',()=>{
   const image={type:'image' as const,attachment:{attachmentId:AttachmentId('sha256:'+'a'.repeat(64)),mediaType:'image/png' as const,width:8,height:8,bytes:64}}
   try{
    await h.send();expect(h.adapter.requests).toHaveLength(3);expect(h.read(h.agent).graph.recovery.unknown).toHaveLength(1)
-   for(const source of [{kind:'plugin',plugin:'lyapunov-orientation',form:'notice',summary:'导入方向检查'},{kind:'plugin',plugin:'lyapunov-engine-install',form:'notice',summary:'引擎安装授权状态'},{kind:'lyapunov-domain-pointer',form:'snapshot'}]){
+   for(const source of [{kind:'lyapunov-orientation',form:'notice',summary:'导入方向检查'},{kind:'lyapunov-engine-install',form:'notice',summary:'引擎安装授权状态'},{kind:'lyapunov-domain-pointer',form:'snapshot'}]){
     h.agent.followup(createUserMessage({content:[{type:'text',text:'自动反馈，不代表新人工意图'},image],source:source as never}));await h.agent.whenIdle();expect(h.adapter.requests).toHaveLength(3)
    }
    // 与feedbackMessage实际producer相同的source对象，不改写为kind=user。
@@ -114,6 +118,42 @@ describe('原生Graph/恢复hook',()=>{
    expect(transmitted).toEqual(annotation);expect(transmitted?.content).toContainEqual(image)
    expect(h.read(h.agent).graph.recovery).toMatchObject({stagnant:0,handoffSeq:null});expect(h.read(h.agent).graph.recovery.unknown).toHaveLength(1);expect(h.read(h.other).graph.nodes).toHaveLength(0)
   }finally{await h.close()}
+ })
+ test('原生V4工具图片与同一结果进入下一模型步，Graph不改原内容',async()=>{
+  const h=await setup([toolCallResponse('observe-v4','image_observation',{}),textResponse('已读取原工具观察')])
+  const image={type:'image' as const,attachment:{attachmentId:AttachmentId('sha256:'+'e'.repeat(64)),mediaType:'image/png' as const,width:8,height:8,bytes:64}}
+  h.ctx.tools.register(defineTool({name:'image_observation',description:'原工具图像夹具',parameters:{},output:{schema:output.schema,render:(_args,value)=>[{type:'text',text:String(value.result)},image]},async execute(){return {result:'PRIVATE_IMAGE_TOOL_RESULT'}}}))
+  try{
+   await h.send()
+   const result=h.agent.session.snapshotEvents().find(row=>row.type==='tool/result'&&row.data.message.toolCallId===ToolCallId('observe-v4'))
+   if(result?.type!=='tool/result')throw Error('missing native tool result')
+   expect(result.data.message).toMatchObject({role:'tool',toolCallId:ToolCallId('observe-v4'),isError:false})
+   expect(result.data.message.content).toContainEqual(image)
+   const transmitted=h.adapter.requests[1]!.messages.find(message=>message.id===result.data.message.id)
+   expect(transmitted).toEqual(result.data.message);expect(transmitted?.content).toContainEqual(image)
+   expect(h.read(h.agent).graph.nodes.find(node=>node.id==='tool:observe-v4')).toMatchObject({status:'success',images:1})
+   expect(h.read(h.agent).graph.request?.imageCount).toBe(1);expect(JSON.stringify(h.read(h.agent))).not.toContain('PRIVATE_IMAGE_TOOL_RESULT')
+  }finally{await h.close()}
+ })
+ test('原生人工Stop投影为取消，已有Job与Sim停止仍需各owner确认',async()=>{
+  const h=await setup([toolCallResponse('stop-active','pending_operation',{}),textResponse('不应再执行')])
+  const started=Promise.withResolvers<void>();let settle!:(value:JobOutcome)=>void,jobCancels=0
+  const done=new Promise<JobOutcome>(resolve=>settle=resolve)
+  h.ctx.tools.register(defineTool({name:'pending_operation',description:'等待原生取消的夹具',parameters:{},output,async execute(_args,exec){
+   started.resolve()
+   await new Promise<void>((_resolve,reject)=>{if(exec.signal.aborted)reject(exec.signal.reason);else exec.signal.addEventListener('abort',()=>reject(exec.signal.reason),{once:true})})
+   return {result:'UNREACHABLE'}
+  }}))
+  try{
+   const id=h.ctx.jobs.start({kind:'bash',label:'独立已有Job',owner:h.agent.id,run:()=>({done,cancel(){jobCancels++;settle({status:'killed'})}})})
+   h.agent.followup(createUserMessage({content:[{type:'text',text:'仅测试当前原生Stop'}],source:{kind:'user'}}))
+   await started.promise;h.agent.cancel({kind:'user'});await h.agent.whenIdle()
+   const value=h.read(h.agent)
+   expect(value.graph.nodes.find(node=>node.id==='turn:1')?.status).toBe('cancelled')
+   expect(h.agent.session.snapshotEvents().findLast(row=>row.type==='turn/end')).toMatchObject({data:{reason:{kind:'aborted',reason:{kind:'user'}}}})
+   expect(value.stop.agentStatus).toBe('idle');expect(h.ctx.jobs.get(id,h.agent.id).status).toBe('running');expect(jobCancels).toBe(0)
+   expect(value.stop.physicalStop).toBe('Requires separate confirmation by the Sim owner');expect(h.adapter.requests).toHaveLength(1)
+  }finally{settle({status:'killed'});await h.close()}
  })
  test('真实资源/Scene水位变化允许同参数多次操作，手动关闭观察不改变执行',async()=>{
   const h=await setup([toolCallResponse('c1','progress',{}),toolCallResponse('c2','progress',{}),toolCallResponse('c3','progress',{}),toolCallResponse('c4','progress',{}),textResponse('完成')])
@@ -128,12 +168,12 @@ describe('原生Graph/恢复hook',()=>{
   for(const [name,facts] of [['scene_static',{sceneRevision:1}],['world_static',{worldGeneration:1}]] as const)h.ctx.tools.register(defineTool({name,description:'静态owner回执夹具',parameters:{},output,async execute(){reads++;return {result:JSON.stringify(facts)}}}))
   try{await h.send();expect(reads).toBe(5);expect(h.adapter.requests).toHaveLength(5);expect(h.agent.session.snapshotEvents().filter(row=>row.type==='lyapunov/recovery-handoff')).toHaveLength(1);expect(h.read(h.agent).graph.recovery.stagnant).toBe(3)}finally{await h.close()}
  })
- test('Job只接收，实时代次匹配；快照不读输出/不改reported；模型完成不杀Job',async()=>{
+ test('Job只接收，实时代次匹配；快照不消费输出/不认领通知；模型完成不杀Job',async()=>{
   const h=await setup([toolCallResponse('start','launch',{}),textResponse('后台已受理')])
-  let settle!:(value:JobOutcome)=>void,readCount=0,cancels=0
+  let settle!:(value:JobOutcome)=>void,cancels=0
   const done=new Promise<JobOutcome>(resolve=>settle=resolve)
-  h.ctx.tools.register(defineTool({name:'launch',description:'原生Job夹具',parameters:{},output:{schema:{type:'object',additionalProperties:false,properties:{jobId:{type:'string',required:true}}},render:(_a,v)=>[{type:'text',text:JSON.stringify(v)}]},async execute(_a,exec){const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_COMMAND',owner:exec.agent,run:()=>({done,cancel(){cancels++;settle({status:'killed'})},readOutput(){readCount++;return 'PRIVATE_OUTPUT'}})});return {jobId}}}))
-  try{await h.send();const first=h.read(h.agent);expect(first.jobs[0]).toMatchObject({matched:true,currentStatus:'running'});expect(first.jobs[0]?.registryId).toBeString();expect(readCount).toBe(0);expect(cancels).toBe(0);expect(h.ctx.jobs.list(h.agent)[0]?.reported).toBe(false);expect(JSON.stringify(first)).not.toContain('PRIVATE_COMMAND');expect(JSON.stringify(first)).not.toContain('PRIVATE_OUTPUT');expect(h.read(h.other).jobs).toHaveLength(0);settle({status:'completed'});await Promise.resolve();await Promise.resolve();expect(h.read(h.agent).jobs[0]?.currentStatus).toBe('completed')}
+  h.ctx.tools.register(defineTool({name:'launch',description:'原生Job夹具',parameters:{},output:{schema:{type:'object',additionalProperties:false,properties:{jobId:{type:'string',required:true}}},render:(_a,v)=>[{type:'text',text:JSON.stringify(v)}]},async execute(_a,exec){const jobId=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_COMMAND',owner:exec.agent?.id,run:job=>{job.append('PRIVATE_OUTPUT');return {done,cancel(){cancels++;settle({status:'killed'})}}}});return {jobId}}}))
+  try{await h.send();const first=h.read(h.agent);expect(first.jobs[0]).toMatchObject({matched:true,currentStatus:'running'});expect(first.jobs[0]?.registryId).toBeString();expect(h.ctx.jobs.read(JobId(first.jobs[0]!.jobId),h.agent.id).chunks.map(chunk=>chunk.text).join('')).toBe('PRIVATE_OUTPUT');expect(cancels).toBe(0);expect(jobNotices(h.agent)).toHaveLength(0);expect(JSON.stringify(first)).not.toContain('PRIVATE_COMMAND');expect(JSON.stringify(first)).not.toContain('PRIVATE_OUTPUT');expect(h.read(h.other).jobs).toHaveLength(0);settle({status:'completed'});await Promise.resolve();await Promise.resolve();expect(h.read(h.agent).jobs[0]?.currentStatus).toBe('completed');expect(jobNotices(h.agent)).toHaveLength(1)}
   finally{settle({status:'killed'});await h.close()}
  })
  test('已记录unknown同操作先读回，guard不调用工具；不同会话不受影响',async()=>{
@@ -148,20 +188,20 @@ describe('原生Graph/恢复hook',()=>{
   const child=await h.agent.ctx.plugin(ToolJobs,{completionDelivery:'quiet'})
   const setters:Array<(value:JobOutcome)=>void>=[]
   try{
-   for(let i=0;i<6;i++){let settle!:(value:JobOutcome)=>void;const done=new Promise<JobOutcome>(resolve=>settle=resolve);setters.push(settle);h.ctx.jobs.start({kind:'bash',label:'同正文',owner:h.agent,run:()=>({done,cancel(){settle({status:'killed'})}})})}
+   for(let i=0;i<6;i++){let settle!:(value:JobOutcome)=>void;const done=new Promise<JobOutcome>(resolve=>settle=resolve);setters.push(settle);h.ctx.jobs.start({kind:'bash',label:'同正文',owner:h.agent.id,run:()=>({done,cancel(){settle({status:'killed'})}})})}
    for(const settle of setters)settle({status:'completed',detail:'同终态'})
    await Promise.resolve();await Promise.resolve()
-   const notices=h.agent.session.snapshotEvents().filter(x=>x.type==='agent/inbox/spliced').flatMap(x=>x.type==='agent/inbox/spliced'?x.data.inserted:[]).filter(x=>x.source.kind==='plugin'&&x.source.plugin==='tool-jobs')
+   const notices=h.agent.session.snapshotEvents().filter(x=>x.type==='agent/inbox/spliced').flatMap(x=>x.type==='agent/inbox/spliced'?x.data.inserted:[]).filter(x=>x.source.kind==='tool-jobs')
    expect(notices).toHaveLength(6);expect(new Set(notices.map(x=>(x.source as unknown as {job:{id:string}}).job.id)).size).toBe(6)
-   expect(h.ctx.jobs.list(h.agent).every(x=>x.reported)).toBe(true)
-   await child.dispose();expect(h.ctx.jobs.list(h.agent)).toHaveLength(6)
+   expect(h.ctx.jobs.list(h.agent.id).every(x=>x.status==='completed')).toBe(true);h.read(h.agent);expect(jobNotices(h.agent)).toHaveLength(6)
+   await child.dispose();expect(h.ctx.jobs.list(h.agent.id)).toHaveLength(6)
   }finally{for(const settle of setters)settle({status:'killed'});await h.close()}
  })
  test('重启旧bash-1未知句柄不能读/停止当前同名Job，明确当前代次才允许只读输出',async()=>{
-  const h=await setup([]);let reads=0,cancels=0,settle!:(value:JobOutcome)=>void
+  const h=await setup([]);let cancels=0,settle!:(value:JobOutcome)=>void
   const done=new Promise<JobOutcome>(resolve=>settle=resolve)
   try{
-   const jobId=h.ctx.jobs.start({kind:'bash',label:'隔离当前Job',owner:h.agent,run:()=>({done,cancel(){cancels++;settle({status:'killed'})},readOutput(){reads++;return '隔离输出'}})})
+   const jobId=h.ctx.jobs.start({kind:'bash',label:'隔离当前Job',owner:h.agent.id,run:job=>{job.append('隔离输出');return {done,cancel(){cancels++;settle({status:'killed'})}}}})
    const old=ToolCallId('old-before-restart')
    h.agent.session.append('tool/call',{turn:1,step:1,callId:old,name:'bash',arguments:'{}'})
    h.agent.session.append('tool/result',{turn:1,step:1,message:createToolResultMessage({callId:old,isError:false,content:[{type:'text',text:'started background job '+jobId}]})},{surfaceOp:'append'})
@@ -169,10 +209,10 @@ describe('原生Graph/恢复hook',()=>{
     const value=await h.ctx.tools.execute({name,arguments:{job_id:jobId},agent:h.agent,callId:ToolCallId('deny-'+name),signal:AbortSignal.timeout(1000)})
     expect(value.isError).toBe(true);if(value.isError)expect(value.error.info?.code).toBe('JOB_INSTANCE_UNKNOWN')
    }
-   expect(reads).toBe(0);expect(cancels).toBe(0);expect(h.read(h.agent).jobs[0]).toMatchObject({currentStatus:'unknown',matched:false})
-   const registryId=h.ctx.jobs.get(jobId,h.agent).registryId
+   expect(cancels).toBe(0);expect(h.read(h.agent).jobs[0]).toMatchObject({currentStatus:'unknown',matched:false})
+   const registryId=h.ctx.jobs.get(jobId,h.agent.id).registryId
    const value=await h.ctx.tools.execute({name:'job_output',arguments:{job_id:jobId,registry_id:registryId},agent:h.agent,callId:ToolCallId('current-read'),signal:AbortSignal.timeout(1000)})
-   expect(value.isError).toBe(false);expect(reads).toBe(1);expect(cancels).toBe(0);expect(h.ctx.jobs.get(jobId,h.agent).status).toBe('running')
+   expect(value.isError).toBe(false);if(value.isError)throw Error('current instance read failed');expect(value.value).toMatchObject({text:'隔离输出'});expect(h.ctx.jobs.read(jobId,h.agent.id).chunks).toHaveLength(0);expect(cancels).toBe(0);expect(h.ctx.jobs.get(jobId,h.agent.id).status).toBe('running')
   }finally{settle({status:'killed'});await h.close()}
  })
  test('实际Loader+Include由配置装配原生Loop/Jobs及Shell图贡献，恢复预算按配置生效',async()=>{
@@ -198,17 +238,17 @@ describe('原生Graph/恢复hook',()=>{
    expect(read.isError).toBe(false);expect(JSON.stringify(read.content)).toContain('loader-host')
   }finally{await ctx.fiber.dispose();await rm(scratch,{recursive:true,force:true})}
  })
- test('真实原生projection ver1/ver2坏旧缓存按ver3从完整事件重建，checkout不改原事件且回到准确前缀',async()=>{
+ test('真实原生projection ver1/ver2/ver3坏旧缓存按ver4从完整事件重建，checkout不改原事件且回到准确前缀',async()=>{
   const h=await setup([toolCallResponse('cache','progress',{}),textResponse('完成')])
   h.ctx.tools.register(defineTool({name:'progress',description:'原生缓存回执',parameters:{},output,async execute(){return {result:JSON.stringify({sceneRevision:1})}}}))
   try{
    await h.send();const events=h.agent.session.snapshotEvents(),before=JSON.stringify(events),rows=h.ctx.sessionProjections.checkpoint(h.agent.session)
-   expect(rows.lyapunovGraph?.ver).toBe(3)
-   for(const ver of [1,2]){
+   expect(rows.lyapunovGraph?.ver).toBe(4)
+   for(const ver of [1,2,3]){
     const old={...rows,lyapunovGraph:{ver,seq:events.at(-1)!.seq,val:{oldSchema:true,stagnant:-999}}}
     expect(h.ctx.sessionProjections.restoreFloor(old)).toBe(SessionLogOffset(0))
     const rebuilt=h.ctx.sessionProjections.restore(old,events,SessionLogOffset(0),h.agent.session.header,h.agent.session.inheritedEventCount)
-    expect(rebuilt.checkpoint.lyapunovGraph?.ver).toBe(3);expect(rebuilt.checkpoint.lyapunovGraph?.val).toEqual(h.read(h.agent).graph);expect(JSON.stringify(h.agent.session.snapshotEvents())).toBe(before)
+    expect(rebuilt.checkpoint.lyapunovGraph?.ver).toBe(4);expect(rebuilt.checkpoint.lyapunovGraph?.val).toEqual(h.read(h.agent).graph);expect(JSON.stringify(h.agent.session.snapshotEvents())).toBe(before)
    }
    const anchor=events.find(row=>row.type==='step/end')!.seq
    const changed=h.agent.session.checkout(anchor)
@@ -218,10 +258,10 @@ describe('原生Graph/恢复hook',()=>{
   }finally{await h.close()}
  })
  test('真实execution_status默认summary有界/原Job身份与unknown可读，full显式取全图且轮询不自造进展',async()=>{
-  const h=await setup([]);let settle!:(value:JobOutcome)=>void,reads=0,cancels=0
+  const h=await setup([]);let settle!:(value:JobOutcome)=>void,cancels=0
   const done=new Promise<JobOutcome>(resolve=>settle=resolve)
   try{
-   const id=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_JOB_LABEL',owner:h.agent,run:()=>({done,cancel(){cancels++},readOutput(){reads++;return 'PRIVATE_OUTPUT'}})})
+   const id=h.ctx.jobs.start({kind:'bash',label:'PRIVATE_JOB_LABEL',owner:h.agent.id,run:job=>{job.append('PRIVATE_OUTPUT');return {done,cancel(){cancels++}}}})
    for(let i=0;i<220;i++)h.agent.session.append('lyapunov/service-diagnostic',{callId:'c'+i,intentKey:'intent-'+i,code:'CENTRAL_SEARCH_RECONCILIATION_REQUIRED',outcome:'error',diagnostic:{version:1,domain:'search',code:'central_search_usage_unknown',stage:'upstream_response',fieldPath:null,retryable:false,effect:'unknown',requestId:'original-request-'+i}},{ignorable:true})
    h.ctx.tools.register(defineTool({name:'uncertain',description:'unknown夹具',parameters:{},output,async execute(){throw Error('TOOL_OUTCOME_UNKNOWN')}}))
    await h.ctx.tools.execute({name:'uncertain',arguments:{},agent:h.agent,callId:ToolCallId('unknown-status'),signal:AbortSignal.timeout(1000)})
@@ -229,14 +269,14 @@ describe('原生Graph/恢复hook',()=>{
    const call=async(detail?:'summary'|'full')=>h.ctx.tools.execute({name:'execution_status',arguments:detail?{detail}:{},agent:h.agent,callId:ToolCallId('status-'+(detail??'default')),signal:AbortSignal.timeout(1000)})
    const compact=await call();expect(compact.isError).toBe(false)
    if(compact.isError)throw Error('status failed')
-   const compactString=(compact.value as {result:string}).result,value=JSON.parse(compactString),live=h.ctx.jobs.get(id,h.agent)
+   const compactString=(compact.value as {result:string}).result,value=JSON.parse(compactString),live=h.ctx.jobs.get(id,h.agent.id)
    expect(Buffer.byteLength(compactString)).toBeLessThanOrEqual(EXECUTION_STATUS_SUMMARY_MAX_BYTES);expect(value.detail).toBe('summary');expect(value.graph).toBeUndefined()
    expect(value.jobs.current).toContainEqual({id,registryId:live.registryId,startedAt:live.startedAt,status:'running'})
    expect(value.recovery.unknownCount).toBe(1);expect(value.recovery.unknown).toContainEqual({name:'uncertain',callId:'unknown-status',seq:expect.any(Number)})
    expect(value.recentOutcomes.some((row:{diagnostic?:{requestId?:string}})=>row.diagnostic?.requestId==='original-request-219')).toBe(true)
    const full=await call('full');expect(full.isError).toBe(false);if(full.isError)throw Error('full failed')
    const fullString=(full.value as {result:string}).result;expect(JSON.parse(fullString).graph.nodes).toHaveLength(400);expect(Buffer.byteLength(fullString)).toBeGreaterThan(Buffer.byteLength(compactString))
-   await call();expect(h.agent.session.snapshotEvents()).toHaveLength(events);expect(JSON.stringify(h.read(h.agent).graph.recovery)).toBe(before);expect(reads).toBe(0);expect(cancels).toBe(0);expect(compactString).not.toContain('PRIVATE')
+   await call();expect(h.agent.session.snapshotEvents()).toHaveLength(events);expect(JSON.stringify(h.read(h.agent).graph.recovery)).toBe(before);expect(h.ctx.jobs.read(id,h.agent.id).chunks.map(chunk=>chunk.text).join('')).toBe('PRIVATE_OUTPUT');expect(cancels).toBe(0);expect(compactString).not.toContain('PRIVATE')
    const denied=await h.ctx.tools.execute({name:'execution_status',arguments:{},callId:ToolCallId('no-session'),signal:AbortSignal.timeout(1000)});expect(denied.isError).toBe(true)
   }finally{settle({status:'killed'});await h.close()}
  })

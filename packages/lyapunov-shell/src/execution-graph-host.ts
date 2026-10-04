@@ -11,6 +11,12 @@ import {isHumanDirectedSource} from './conversation-history.ts'
 import {executionStatusSummary} from './execution-status-summary.ts'
 import {emptyExecutionGraph,foldExecutionGraph,rebuildExecutionGraph,imageFacts,observationHash,publicCodeFromText,publicDiagnostic,publicFacts,reconcileJobs,recoveryDecision,requestDiagnostics,type ToolObservation,type PublicDiagnostic} from './execution-graph.ts'
 
+declare module '@deepseek-ai/dsh-llm' {
+ interface MessageSourceMap {
+  'lyapunov-recovery':{kind:'lyapunov-recovery';form:'notice';summary:string}
+ }
+}
+
 const object=(value:unknown):Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{}
 export interface GraphConfig {recoveryBudget?:number;maxNodes?:number}
 export interface ModelProgress {attemptId:string;turn:number;step:number;phase:'request'|'stream'|'retry-wait'|'terminal'|'abandoned';phaseStartedAt:number;startedAt:number;lastProgressAt:number;chunks:number;textChars:number;argumentChars:number;partialTools:string[];finishCode:string|null;phaseFailureCode:string|null;usagePresent:boolean;retry:number;maxRetries:number|null;upstreamStatus:number|null;requestId:string|null;diagnostic:PublicDiagnostic|null}
@@ -23,7 +29,7 @@ export function toolObservation(exec:Readonly<ToolExecution>,result:Readonly<Too
  const processUnknown=exec.name==='bash'&&(object(value).timedOut===true||object(value).aborted===true||typeof object(value).signal==='string')
  const diagnostic=processUnknown?publicDiagnostic({code:object(value).timedOut===true?'PROCESS_TIMEOUT':'PROCESS_INTERRUPTED',stage:'process_execution',effect:'unknown',retryable:false}):publicDiagnostic(value,info?.code??(result.isError?publicCodeFromText(result.error.message):undefined))
  const raw=object(value),nested=object(typeof raw.result==='string'?parseJson(raw.result):raw.result),jobId=typeof raw.jobId==='string'?raw.jobId:typeof nested.jobId==='string'?nested.jobId:null
- const live=jobId?ctx.jobs.list(agent).find(row=>row.id===jobId):undefined
+ const live=jobId?ctx.jobs.list(agent.id).find(row=>row.id===jobId):undefined
  const call=events.findLast(event=>event.type==='tool/call'&&event.data.callId===exec.callId)
  return {callId:String(exec.callId),rootCallId:String(exec.rootCallId),name:exec.name,turn:boundary?.type==='step/start'?boundary.data.turn:0,step:boundary?.type==='step/start'?boundary.data.step:0,
   argumentsHash:observationHash(typeof exec.arguments==='string'?exec.arguments:JSON.stringify(exec.arguments)),target:publicFacts(args,true),facts:{...publicFacts(value,true),...publicFacts(value)},diagnostic,
@@ -41,7 +47,7 @@ function nativeStatusObservation(exec:Readonly<ToolExecution>,result:Readonly<To
  const call=started.type==='tool/call'?started:events.findLast(event=>event.type==='tool/call'&&event.data.callId===exec.rootCallId)
  const node=graph.nodes.find(row=>row.id===`tool:${exec.callId}`)
  if(call?.type!=='tool/call'||call.data.turn!==graph.turn||call.data.step!==graph.step||node?.status!=='running'||node.seq!==Number(started.seq))return null
- const jobs=ctx.jobs.list(agent),ownerStateHash=observationHash(jobs.map(job=>({id:String(job.id),registryId:job.registryId??null,startedAt:job.startedAt,status:job.status})).sort((a,b)=>a.id.localeCompare(b.id)))
+ const jobs=ctx.jobs.list(agent.id),ownerStateHash=observationHash(jobs.map(job=>({id:String(job.id),registryId:job.registryId??null,startedAt:job.startedAt,status:job.status})).sort((a,b)=>a.id.localeCompare(b.id)))
  const prior=graph.nodes.findLast(row=>row.kind==='tool'&&row.label==='execution_status'&&row.seq>=graph.recovery.userSeq&&typeof row.facts.ownerStateHash==='string')
  // 不从summary/full读取phase/asOf/step/recentOutcomes；首次只建立owner基线，不能伪造目标进展。
  return {callId:String(exec.callId),rootCallId:String(exec.rootCallId),name:exec.name,turn:graph.turn,step:graph.step,argumentsHash:observationHash(typeof exec.arguments==='string'?exec.arguments:JSON.stringify(exec.arguments)),target:{},facts:{status:jobs.some(job=>job.status==='running'||job.status==='stopping')?'running':'idle',ownerStateHash,ownerProgress:prior!==undefined&&prior.facts.ownerStateHash!==ownerStateHash},diagnostic:result.isError?publicDiagnostic({},result.error.info?.code??publicCodeFromText(result.error.message)??undefined):null,images:[],job:null,isError:result.isError,late:exec.signal.aborted,waited:false}
@@ -59,14 +65,14 @@ export function applyExecutionGraph(ctx:Context,hostInstanceId:string,config:Gra
  const diagnosticSchema=z.object({code:z.string(),stage:z.string().nullable(),fieldPath:z.string().nullable(),retryable:z.boolean().nullable(),effect:z.enum(['none','committed','released','reserved','charged','unknown']),requestId:z.string().nullable(),upstreamHttpStatus:z.number().int().min(100).max(599).optional(),upstreamFailureCode:z.string().max(128).optional()}).strict().nullable()
  const requestSchema=z.object({turn:z.number(),step:z.number(),provider:z.string(),model:z.string(),messageCount:z.number(),imageCount:z.number(),toolCount:z.number(),toolsBytes:z.number(),toolsHash:z.string().length(64),contexts:z.array(contextSchema),basis:z.literal('harness-before-adapter')}).strict()
  const schema=z.object({version:z.literal(1),sessionId:z.string(),asOfSeq:z.number(),turn:z.number(),step:z.number(),omittedNodes:z.number(),nodes:z.array(z.object({id:z.string(),parent:z.string().nullable(),kind:z.string(),label:z.string(),seq:z.number(),at:z.number(),status:z.enum(['running','success','failed','cancelled','unknown','waiting']),code:z.string().nullable(),images:z.number(),facts:factsSchema,diagnostic:diagnosticSchema}).strict()).max(maxNodes),jobs:z.array(jobSchema).max(128),request:requestSchema.nullable(),recovery:z.object({userSeq:z.number(),stagnant:z.number(),waitingQueries:z.number(),factsHash:z.string(),factsSeen:z.array(z.string().length(64)).max(128).optional(),goalBest:z.record(z.string().length(64),z.number().finite()).optional(),goalError:z.number().nullable(),lastCode:z.string().nullable(),handoffSeq:z.number().nullable(),unknown:z.array(z.object({callId:z.string(),argumentsHash:z.string(),name:z.string(),seq:z.number()}).strict()).max(128)}).strict()}).strict()
- ctx.effect(()=>registry.register({key:'lyapunovGraph',stateVersion:3,stateSchema:schema,init:header=>emptyExecutionGraph(header),apply:(state,event,checkout)=>{
+ ctx.effect(()=>registry.register({key:'lyapunovGraph',stateVersion:4,stateSchema:schema,init:header=>emptyExecutionGraph(header),apply:(state,event,checkout)=>{
   if(event.type==='session/history-checkout'&&checkout)return rebuildExecutionGraph({id:SessionId(state.sessionId)},checkout,maxNodes)
   return foldExecutionGraph(state,event,maxNodes)
  }}),'执行图投影注册')
  const modelProgress=new WeakMap<Agent,ModelProgress>()
  const graphOf=(session:Session)=>{const value=registry.stateOf(session,'lyapunovGraph');if(!value)throw Error('GRAPH_PROJECTION_REQUIRED');return value}
  const snapshot=(agent:Agent)=>{
-  const graph=graphOf(agent.session),progress=modelProgress.get(agent),currentJobs=ctx.jobs.list(agent)
+  const graph=graphOf(agent.session),progress=modelProgress.get(agent),currentJobs=ctx.jobs.list(agent.id)
   return {graph,hostInstanceId,jobs:reconcileJobs(graph.jobs,currentJobs),model:progress?{...progress,noProgressWaitMs:Math.max(0,Date.now()-progress.lastProgressAt),basis:'native-stream' as const}:null,
    liveJobCount:currentJobs.filter(job=>job.status==='running'||job.status==='stopping').length,stop:{agentStatus:agent.status,jobs:currentJobs.map(job=>({id:job.id,registryId:job.registryId??null,startedAt:job.startedAt,status:job.status})),physicalStop:'Requires separate confirmation by the Sim owner',unknownEffects:graph.recovery.unknown.length}}
  }
@@ -75,7 +81,7 @@ export function applyExecutionGraph(ctx:Context,hostInstanceId:string,config:Gra
   if(graph.recovery.handoffSeq!==null)return
   const code=waiting?'ASYNC_WAIT_PENDING':'RECOVERY_NO_PROGRESS'
   agent.session.append('lyapunov/recovery-handoff',{turn,step,code,stagnant:graph.recovery.stagnant,waiting},{ignorable:true})
-  agent.session.append('user/message',createUserMessage({content:[{type:'text',text:waiting?'The Job is still running. Repeated polling has stopped. Read the terminal result using the original Job identity; do not resubmit an operation with unconfirmed effects.':`Automatic recovery stopped (${graph.recovery.lastCode??'NO_NEW_FACTS'}). Read the current state from the original resource, world, or Job owner, then continue from new facts within the existing authorization.`}],source:{kind:'plugin',plugin:'lyapunov-recovery',form:'notice',summary:waiting?'Job waiting':'Recovery handoff'}}),{surfaceOp:'append'})
+  agent.session.append('user/message',createUserMessage({content:[{type:'text',text:waiting?'The Job is still running. Repeated polling has stopped. Read the terminal result using the original Job identity; do not resubmit an operation with unconfirmed effects.':`Automatic recovery stopped (${graph.recovery.lastCode??'NO_NEW_FACTS'}). Read the current state from the original resource, world, or Job owner, then continue from new facts within the existing authorization.`}],source:{kind:'lyapunov-recovery',form:'notice',summary:waiting?'Job waiting':'Recovery handoff'}}),{surfaceOp:'append'})
   // disarm只撤自动续轮，不改变Goal phase或伪造完成；工具/Jobs/Sim各自清理。
   ctx.get('goals')?.disarm(agent)
   agent.cancel({kind:'hook',reason:code},{keepInbox:true})
@@ -91,7 +97,7 @@ export function applyExecutionGraph(ctx:Context,hostInstanceId:string,config:Gra
   if(exec.agent){
    if(exec.name==='job_output'||exec.name==='job_kill'){
     const args=object(typeof exec.arguments==='string'?parseJson(exec.arguments):exec.arguments),jobId=String(args.job_id??'')
-    const live=ctx.jobs.list(exec.agent).find(job=>job.id===jobId),receipt=graphOf(exec.agent.session).jobs.findLast(job=>job.jobId===jobId)
+    const live=ctx.jobs.list(exec.agent.id).find(job=>job.id===jobId),receipt=graphOf(exec.agent.session).jobs.findLast(job=>job.jobId===jobId)
     const explicitlyCurrent=typeof args.registry_id==='string'&&args.registry_id===live?.registryId
     if(!explicitlyCurrent&&(!live||!receipt||receipt.registryId===null||receipt.registryId!==live.registryId||receipt.startedAt!==live.startedAt))return {kind:'deny',reason:'The recorded Job identity does not match the current instance. Use execution_status to check the identity before reading or stopping a Job with the same name.',info:{name:'JobInstanceUnknown',code:'JOB_INSTANCE_UNKNOWN'}}
    }
