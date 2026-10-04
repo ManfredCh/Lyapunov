@@ -13,6 +13,24 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const python=process.env.LYAPUNOV_MUJOCO_PYTHON??resolve(root,".runtime/sim-python/bin/python")
 const suite=existsSync(python)?describe:describe.skip
 suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
+ test('无静态geom时两个不同实体rigid-flex同样兼容，mask互斥及单件不暗启；信息不冒缺碰撞',async()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'flex-pair-')),file=resolve(directory,'triangle.obj')
+  writeFileSync(file,'v -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n')
+  const provider=new MuJoCoProvider({pythonPath:python,workerPath:resolve(root,'packages/sim-mujoco/python/worker.py')})
+  const surface=(id:string):SceneSnapshot['entities'][number]=>({entityId:id,name:id,transform:identityTransform(),resources:[],components:{visual:{kind:'mesh'},collision:{shape:'mesh',source:'asset-bake-surface',parts:[pathToFileURL(file).href],meshTopology:'static-triangles',surfaceRadiusM:1e-9},rigidBody:{type:'static'},physicsBinding:{status:'BOUND',usage:'environment',strategy:'auto'}}})
+  const actor:SceneSnapshot['entities'][number]={entityId:'actor',name:'actor',transform:{...identityTransform(),position:[4,4,1]},resources:[],components:{collision:{shape:'sphere',halfExtents:[.04,0,0]},rigidBody:{type:'dynamic',massKg:1}}}
+  let scene:SceneSnapshot={sceneId:'static-flex-pair',revision:1,coordinates:SCENE_COORDINATES,entities:[surface('one'),surface('two'),actor]}
+  try{
+   let handle=await provider.open(scene,{clock:'manual',startPaused:true,ground:false}),frame=await provider.observe(handle.worldId,{contacts:true})
+   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
+   assert.ok(!handle.warnings?.some(w=>w.code==='ENTITY_SKIPPED_NO_COLLISION'))
+   assert.equal(frame.worldPhysics!.collisionCoverage.status,'COMPLETE');assert.deepEqual(frame.worldPhysics!.collisionCoverage.physicalEntityIds,['actor','one','two']);assert.equal(frame.contacts!.length,0)
+   await provider.close(handle.worldId)
+   scene={...scene,sceneId:'static-flex-masks',entities:[{...surface('one'),components:{...surface('one').components,collision:{...surface('one').components.collision,contype:1,conaffinity:1}}},{...surface('two'),components:{...surface('two').components,collision:{...surface('two').components.collision,contype:2,conaffinity:2}}},actor]}
+   handle=await provider.open(scene,{clock:'manual',ground:false});assert.ok(!handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'));await provider.close(handle.worldId)
+   handle=await provider.open({...scene,sceneId:'single-static-flex',entities:[surface('one'),actor]},{clock:'manual',ground:false});assert.ok(!handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'));await provider.close(handle.worldId)
+  }finally{await provider.dispose();rmSync(directory,{recursive:true,force:true})}
+ })
  test('Scene静态原三角zero-DOF兼容不改原件mask，保动态重力接触/停用且拒明确island启用',async()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'static-island-')),file=resolve(directory,'triangle.obj')
   writeFileSync(file,'v -1 -1 -0.01\nv 1 -1 -0.01\nv 0 1 -0.01\nf 1 2 3\n')

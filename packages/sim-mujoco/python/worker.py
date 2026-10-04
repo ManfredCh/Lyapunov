@@ -959,6 +959,10 @@ class World:
                 if eid is not None:physical.add(eid);names.setdefault(eid,[]).append(name)
                 if name in self.native_ground_names:planes.append((eid,name))
                 if name=='__ground':legacy=True
+            for fid in range(self.model.nflex):
+                if not(self.model.flex_contype[fid]or self.model.flex_conaffinity[fid]):continue
+                name=mj.mj_id2name(self.model,mj.mjtObj.mjOBJ_FLEX,fid);eid=self.entity_of_geom(name)
+                if eid is not None:physical.add(eid)
             ground=[{'source':'scene','entityId':eid,'geomNames':names[eid]}for eid in declared_ground_ids(self.scene)if eid in names]
             ground.extend({'source':'native-plane','entityId':eid,'geomNames':[name]}for eid,name in planes)
             if legacy:ground.append({'source':'explicit-legacy','geomNames':['__ground']})

@@ -165,9 +165,20 @@ def body_has_dofs(model, body):
 
 def configure_static_surface_islands(model, derived_prefixes, explicit_choices, error):
     """仅Scene派生静态rigid-flex与zero-DOF静态形状相遇的3.13兼容路径，不改mask。"""
-    active_static = [gid for gid in range(model.ngeom)
-                     if (model.geom_contype[gid] or model.geom_conaffinity[gid])
-                     and not body_has_dofs(model, int(model.geom_bodyid[gid]))]
+    geom_types, geom_affinities = 0, 0
+    for gid in range(model.ngeom):
+        if not body_has_dofs(model, int(model.geom_bodyid[gid])):
+            geom_types |= int(model.geom_contype[gid])
+            geom_affinities |= int(model.geom_conaffinity[gid])
+    static_flexes, type_counts, affinity_counts = {}, [0] * 32, [0] * 32
+    for fid in range(model.nflex):
+        if not model.flex_rigid[fid] or body_has_dofs(model, int(model.flex_vertbodyid[int(model.flex_vertadr[fid])])):
+            continue
+        ctype, affinity = int(model.flex_contype[fid]) & 0xffffffff, int(model.flex_conaffinity[fid]) & 0xffffffff
+        static_flexes[fid] = (ctype, affinity)
+        for bit in range(32):
+            type_counts[bit] += bool(ctype & (1 << bit))
+            affinity_counts[bit] += bool(affinity & (1 << bit))
     risky = []
     for fid in range(model.nflex):
         name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_FLEX, fid) or ''
@@ -176,8 +187,10 @@ def configure_static_surface_islands(model, derived_prefixes, explicit_choices, 
         body = int(model.flex_vertbodyid[int(model.flex_vertadr[fid])])
         if body_has_dofs(model, body):
             continue
-        if any((model.flex_contype[fid] & model.geom_conaffinity[gid]) or
-               (model.geom_contype[gid] & model.flex_conaffinity[fid]) for gid in active_static):
+        ctype, affinity = static_flexes[fid]
+        other_flex = any((affinity & (1 << bit) and type_counts[bit] > bool(ctype & (1 << bit))) or
+                         (ctype & (1 << bit) and affinity_counts[bit] > bool(affinity & (1 << bit))) for bit in range(32))
+        if (ctype & geom_affinities) or (geom_types & affinity) or other_flex:
             risky.append(fid)
     if not risky:
         return None
