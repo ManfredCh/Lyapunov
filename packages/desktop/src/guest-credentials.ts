@@ -2,7 +2,7 @@ import {Context,Service} from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import {credentialKey,CredentialProvider,type CredentialInfo,type CredentialRef,type CredentialKey,type CredentialRecord,type CredentialRecordInfo,type CredentialRecordEntry,type ResolvedCredential} from "@deepseek-ai/dsh-credentials"
 import type {} from "@deepseek-ai/dsh-settings"
-import type {PiAiCompositionPolicy,ResolvedPiAiProviderProfile,Config as PiAiConfig} from "@deepseek-ai/dsh-llm-pi-ai"
+import type {PiAiCompositionPolicy,ResolvedPiAiProviderProfile,Options as PiAiOptions} from "@deepseek-ai/dsh-llm-pi-ai"
 import {withFileLock,writeFileAtomic} from "@deepseek-ai/dsh-atomic-write"
 import {mkdir,readFile} from "node:fs/promises"
 import {isAbsolute,join} from "node:path"
@@ -27,7 +27,7 @@ export class GuestCredentials extends CredentialProvider {
     const assertRoute=(provider:string)=>{if(!isOwnProviderRoute(provider))throw new Error("GUEST_OWN_PROVIDER_REQUIRED: product/managed routes are unavailable in guest")}
     const policy:PiAiCompositionPolicy={
       allowAmbientCredentials:false,
-      validateProfiles:(providers:PiAiConfig['providers'])=>{
+      validateProfiles:(providers:PiAiOptions['providers'])=>{
         for(const [route,profile] of Object.entries(providers??{})){
           assertRoute(route)
           if(profile.managedBaseURL!==undefined)throw new Error("GUEST_MANAGED_PROVIDER_FORBIDDEN")
@@ -50,7 +50,7 @@ export class GuestCredentials extends CredentialProvider {
     this.store=await this.readStore()
     yield ()=>this.pending
   }
-  private profiles(){return (this.ctx.get("settings")?.get("llm-pi-ai") as PiAiConfig|undefined)?.providers??{}}
+  private profiles(){return (this.ctx.get("settings")?.describe().find(form=>form.ns==="llm-pi-ai")?.value as PiAiOptions|undefined)?.providers??{}}
   private allowsRef(ref:CredentialRef){return isOwnProviderRef(ref)&&Object.entries(this.profiles()).some(([route,p])=>isOwnProviderRoute(route)&&p.apiKeyEnv===ref&&ref===ownProviderRef(route))}
   private allowsRecord(key:CredentialKey){const [scope,route,...rest]=key.split("/");return scope==="llm-pi-ai"&&rest.length===0&&route!==undefined&&isOwnProviderRoute(route)&&Object.hasOwn(this.profiles(),route)}
   private async readStore():Promise<Store>{

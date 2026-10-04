@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
@@ -13,10 +13,11 @@ import { executePreferenceShortcut } from './preferences-actions.ts'
 import { soundOptions } from './preferences-sounds.ts'
 import { applyPreferenceThemes } from './preferences-themes.tsx'
 import { latestNotificationSequence, unreadNotificationMarkers } from './preferences-notification-state.ts'
+import { mainSessionId } from './history-navigation.ts'
 
 type Notice = { id: number; sessionId: string; title: string; body: string }
 type Surface = {
-  scope: SettingsScope<Preferences>
+  scope: ConfigForm<Preferences>
   tr(zh: string, en: string): string
   subscribe(listener: () => void): () => void
   notices(): readonly Notice[]
@@ -35,7 +36,7 @@ function PreferencesSection({ surface }: { surface: Surface }) {
   const [editing, setEditing] = useState<Preferences['shortcuts']>()
   const [permission, setPermission] = useState(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
   const permissionLabels: Record<string, [string, string]> = { default: ['尚未询问', 'Not requested'], granted: ['已允许', 'Allowed'], denied: ['已阻止', 'Blocked'], unsupported: ['当前环境不支持', 'Unavailable'] }
-  const save = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work() } catch (error) { setError(String(error)) } finally { setBusy(false) } }
+  const save = async (work: () => Promise<void | boolean>) => { setBusy(true); setError(''); try { await work() } catch (error) { setError(String(error)) } finally { setBusy(false) } }
   const writable = state.status === 'ready' && state.writable && !busy
   return <section style={{ display: 'grid', gap: 16, padding: 20 }} aria-label={tr('通知与快捷键', 'Notifications and shortcuts')}>
     <h2 style={{ margin: 0 }}>{tr('通知与快捷键', 'Notifications and shortcuts')}</h2>
@@ -70,14 +71,14 @@ function Notices({ surface }: { surface: Surface }) {
 
 /** 有界产品快捷键与通知直接消费现有 Client 服务，生命周期由父插件释放。 */
 export function applyPreferencesClient(root: Context) {
-  root.inject(['slots', 'locale', 'settingsScope', 'sessions', 'uiSession', 'layout', 'uiWorkspace', 'remote'], ctx => {
-    const scope = ctx.settingsScope.bind<Preferences>({ namespace: PREFERENCES_NAMESPACE })
+  root.inject(['slots', 'locale', 'configForms', 'sessions', 'uiSession', 'layout', 'uiWorkspace', 'remote'], ctx => {
+    const scope = ctx.configForms.get<Preferences>(PREFERENCES_NAMESPACE)
     const sessions = ctx.get('sessions') as unknown as ISessions
     const tr = (zh: string, en: string) => ctx.locale.getSnapshot().active.startsWith('zh') ? zh : en
     applyPreferenceThemes(ctx, scope, tr)
     const pendingReads = new Set<string>()
     const markSelectedRead = () => {
-      const snapshot = scope.getSnapshot(), reading = snapshot.value, id = sessions.list.getSnapshot().current
+      const snapshot = scope.getSnapshot(), reading = snapshot.value, id = mainSessionId(sessions.list.getSnapshot())
       if (!id || !reading || !snapshot.writable || !unreadNotificationMarkers(reading, id).length) return
       const seq = latestNotificationSequence(reading, id), key = id + ':' + seq
       if (pendingReads.has(key)) return
@@ -93,7 +94,7 @@ export function applyPreferencesClient(root: Context) {
     const surface: Surface = {
       scope, tr, subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } }, notices: () => rows,
       dismiss(id) { rows = rows.filter(row => row.id !== id); publish() },
-      open(id) { const target = sessions.list.getSnapshot().ids.find(value => value === id); if (target) { window.focus(); sessions.open(target) } },
+      open(id) { const target = sessions.list.getSnapshot().ids.find(value => value === id); if (target) { window.focus(); ctx.uiWorkspace.openSession(target) } },
       async sound(kind) {
         if (disposed) return
         audio ??= new AudioContext()
@@ -111,7 +112,7 @@ export function applyPreferencesClient(root: Context) {
       },
     }
     const notify = (kind: NotificationKind, id: string, body: string) => {
-      const preferences = scope.getSnapshot().value ?? defaultPreferences, current = sessions.list.getSnapshot().current === id
+      const preferences = scope.getSnapshot().value ?? defaultPreferences, current = mainSessionId(sessions.list.getSnapshot()) === id
       if (!shouldNotify(preferences, kind, current, document.visibilityState === 'visible' && document.hasFocus())) return
       const title = tr(...labels[kind])
       if (preferences[`${kind}Sound`] && audio?.state === 'running') void surface.sound(kind).catch(() => {})
@@ -131,11 +132,11 @@ export function applyPreferencesClient(root: Context) {
       for (const id of next.ids) if (previous.byId[id]?.running && !next.byId[id]?.running && next.byId[id]?.origin !== 'subagent') notify('agent', id, next.byId[id]!.displayTitle)
       previous = next
     }))
-    let pending = new Set([...ctx.uiSession.pendingInteractions.getSnapshot().values()].map(value => value.key))
-    ctx.effect(() => ctx.uiSession.pendingInteractions.subscribe(() => {
-      const next = ctx.uiSession.pendingInteractions.getSnapshot()
-      for (const value of next.values()) if (value.kind === 'approval' && !pending.has(value.key)) notify('permissions', value.sessionId, sessions.list.getSnapshot().byId[value.sessionId]?.displayTitle ?? tr('有操作需要你决定是否允许。', 'An operation needs your approval.'))
-      pending = new Set([...next.values()].map(value => value.key))
+    let pending = new Set([...ctx.uiSession.sessionStatus.getSnapshot().values()].flatMap(status => status.pendingInteraction ? [status.pendingInteraction.key] : []))
+    ctx.effect(() => ctx.uiSession.sessionStatus.subscribe(() => {
+      const next = ctx.uiSession.sessionStatus.getSnapshot()
+      for (const { pendingInteraction: value } of next.values()) if (value?.kind === 'approval' && !pending.has(value.key)) notify('permissions', value.sessionId, sessions.list.getSnapshot().byId[value.sessionId]?.displayTitle ?? tr('有操作需要你决定是否允许。', 'An operation needs your approval.'))
+      pending = new Set([...next.values()].flatMap(status => status.pendingInteraction ? [status.pendingInteraction.key] : []))
     }))
     ctx.effect(() => ctx.remote.$on('api-session/error', (id, message) => { if (sessions.list.getSnapshot().byId[id]?.origin !== 'subagent') notify('errors', id, message) }), 'lyapunov-preferences: session errors')
     ctx.effect(() => {
@@ -146,7 +147,7 @@ export function applyPreferencesClient(root: Context) {
         if (!action) return
         event.preventDefault()
         void executePreferenceShortcut(ctx, action, scope).catch(error => {
-          const notice = { id: ++nextId, sessionId: sessions.list.getSnapshot().current ?? '', title: tr('快捷键操作未完成', 'Shortcut action failed'), body: String(error) }
+          const notice = { id: ++nextId, sessionId: mainSessionId(sessions.list.getSnapshot()) ?? '', title: tr('快捷键操作未完成', 'Shortcut action failed'), body: String(error) }
           rows = [...rows.slice(-3), notice]; publish()
           const timer = setTimeout(() => { timers.delete(timer); surface.dismiss(notice.id) }, 12000); timers.add(timer)
         })

@@ -44,7 +44,7 @@ export function applyProductUI(ctx:Context){
    const link=document.createElement('link');link.rel='stylesheet';link.href='/api/lyapunov/fonts/lyapunov-fonts.css';link.dataset.lyapunovFonts=''
    document.head.append(link);return()=>link.remove()
   })
-  ctx.effect(()=>{const desktop=typeof window==='undefined'?undefined:window.lyapunovDesktop;return desktop?synchronizeDesktopLocale(ctx.locale,ctx.settingsScope.bind<LocaleSettings>({namespace:'locale'}),desktop):()=>{}})
+  ctx.effect(()=>{const desktop=typeof window==='undefined'?undefined:window.lyapunovDesktop;return desktop?synchronizeDesktopLocale(ctx.locale,ctx.configForms.get<LocaleSettings>('locale'),desktop):()=>{}})
   ctx.slots.inject("sidebar.brand.mark",()=>ctx.slots.register({name:"sidebar.brand.mark"},Mark))
   ctx.slots.inject("sidebar.brand.name",()=>ctx.slots.register({name:"sidebar.brand.name",locale:'lyapunov-product'},BrandName))
   ctx.slots.inject("conversation.hero.brand.mark",()=>ctx.slots.register({name:"conversation.hero.brand.mark"},Mark))

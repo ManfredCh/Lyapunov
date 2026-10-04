@@ -1,23 +1,35 @@
 import type {ISessions} from "@deepseek-ai/dsh-api-session-controller/client"
 import type {IConversation} from "@deepseek-ai/dsh-client-ui-conversation/client"
+import type {IJobs} from "@deepseek-ai/dsh-api-job-controller/client"
+import type {SessionId} from "@deepseek-ai/dsh-session/types"
 import type {DesktopBridge} from "./bridge.ts"
+import {mainSessionId} from "../../lyapunov-shell/src/history-navigation.ts"
 export const name="lyapunov-desktop-lifecycle-client"
-export const inject=["sessions","conversation"]
+export const inject=["sessions","conversation","jobs"]
 
 /** 读取/取消原生会话；聊天草稿继续由原生 Conversation store 的持久镜像管理。 */
-export function apply(ctx:{sessions:ISessions;conversation:IConversation;effect:(setup:()=>()=>void,label:string)=>unknown}){
+export function apply(ctx:{sessions:ISessions;conversation:IConversation;jobs:IJobs;effect:(setup:()=>()=>void,label:string)=>unknown}){
   const desktop=(window as unknown as {lyapunovDesktop?:DesktopBridge}).lyapunovDesktop
   if(!desktop?.registerExitParticipant)return
   const currentInput=()=>{
-    const selected=ctx.sessions.list.getSnapshot().current
+    const selected=mainSessionId(ctx.sessions.list.getSnapshot())
     const scope=selected?ctx.sessions.scope(selected):undefined
     return scope?{id:selected!,input:ctx.conversation.input.for(scope)}:undefined
   }
-  ctx.effect(()=>desktop.registerExitParticipant("native-sessions",{
+  ctx.effect(()=>{
+    const rosters=new Map<SessionId,()=>void>()
+    const watchSessions=()=>{
+      const ids=new Set(ctx.sessions.list.getSnapshot().ids)
+      for(const [id,release] of rosters)if(!ids.has(id)){release();rosters.delete(id)}
+      for(const id of ids)if(!rosters.has(id))rosters.set(id,ctx.jobs.watchRows(id))
+    }
+    const unsubscribe=ctx.sessions.list.subscribe(watchSessions)
+    watchSessions()
+    const unregister=desktop.registerExitParticipant("native-sessions",{
     summary:()=>{
       const list=ctx.sessions.list.getSnapshot(),current=currentInput()
       const running=list.ids.filter(id=>list.byId[id]?.running).length
-      const jobs=Object.values(list.jobsBySession).flat().filter(job=>job.status==="running"||job.status==="stopping").length
+      const jobs=Object.values(ctx.jobs.state.getSnapshot().rows).flat().filter(job=>job.status==="running"||job.status==="stopping").length
       return {dirtyDrafts:current&&(current.input.state.getSnapshot().draft.trim()||current.input.state.getSnapshot().attachmentIds.length)?1:0,runningActions:running+jobs}
     },
     flush:async()=>{
@@ -39,5 +51,7 @@ export function apply(ctx:{sessions:ISessions;conversation:IConversation;effect:
         if(!result.ok)throw new Error(result.error.message)
       }
     },
-  }),"desktop native Session exit")
+    })
+    return()=>{unregister();unsubscribe();for(const release of rosters.values())release();rosters.clear()}
+  },"desktop native Session exit")
 }

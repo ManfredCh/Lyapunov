@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {IWorkspaces} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {ISessions} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {SessionId} from '@deepseek-ai/dsh-session/types'
+import {mainSessionId} from './history-navigation.ts'
 
 const zh={browse:'浏览电脑目录',workspace:'当前工作区',hint:'目录浏览按电脑用户权限进行。选择“作为工作区打开”后，会切换到该目录的工作区。',unavailable:'目录选择不可用',error:'无法打开工作区：'}
 const en:typeof zh={browse:'Browse computer directories',workspace:'Current workspace',hint:'Browse with this computer user’s access. “Open as workspace” switches to the workspace for the selected directory.',unavailable:'Directory picker unavailable',error:'Workspace could not be opened: '}
@@ -53,7 +54,7 @@ export function applyFilesNavigationClient(ctx:Context){
   if(selected===undefined)return
   // 原生 Session 导航提交后，让新会话的标签座位完成挂载，再只向该会话打开 Files。
   await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
-  if(sessions.list.getSnapshot().current===selected)ctx.sidebarRight.openTabIn(selected,'files')
+  if(mainSessionId(sessions.list.getSnapshot())===selected)ctx.sidebarRight.openTabIn(selected,'files')
  }
  ctx.effect(()=>ctx.slots.inject('sidebar.right.tab.files.actions',()=>ctx.slots.register({
   name:'sidebar.right.tab.files.actions',id:'lyapunov-directory-navigation',locale:'lyapunovFiles',

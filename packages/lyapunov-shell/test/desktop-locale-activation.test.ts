@@ -16,9 +16,9 @@ test('真实Cordis注入边界下Electron桥接能激活品牌和原生locale设
  const ctx=new Context()
  const locale={register:()=>()=>{},getSnapshot:()=>({active:'en'}),subscribe:()=>()=>{},setLocale:()=>{}}
  const slots={inject:(_name:string,callback:()=>unknown)=>callback(),register:()=>()=>{}}
- const settingsScope={bind:({namespace}:{namespace:string})=>{binds.push(namespace);return {getSnapshot:()=>({status:'ready'}),subscribe:()=>()=>{}}}}
+ const configForms={get:(namespace:string)=>{binds.push(namespace);return {getSnapshot:()=>({status:'ready'}),subscribe:()=>()=>{}}}}
  try{
-  for(const name of inject)ctx.provide(name,(name==='locale'?locale:name==='slots'?slots:name==='settingsScope'?settingsScope:{}) as never)
+  for(const name of inject)ctx.provide(name,(name==='locale'?locale:name==='slots'?slots:name==='configForms'?configForms:{}) as never)
   await ctx.plugin({inject,apply:applyProductUI})
   await new Promise(resolve=>setTimeout(resolve,0))
   expect(binds).toEqual(['locale'])

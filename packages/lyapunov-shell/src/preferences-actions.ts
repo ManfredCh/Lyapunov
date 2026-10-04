@@ -10,13 +10,14 @@ import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { Preferences, ShortcutAction } from './preferences.ts'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { neighboringUnreadSession } from './preferences-notification-state.ts'
 import { legacyThemePresets } from './preferences-theme-data.ts'
+import { mainSessionId } from './history-navigation.ts'
 
 /** 有界快捷键调用表；每个操作直接委托已有所有者，不维护另一份选择状态。 */
-export async function executePreferenceShortcut(ctx: Context, action: ShortcutAction, preferences?: SettingsScope<Preferences>): Promise<void> {
-  const sessions = ctx.get('sessions') as unknown as ISessions, list = sessions.list.getSnapshot(), id = list.current
+export async function executePreferenceShortcut(ctx: Context, action: ShortcutAction, preferences?: ConfigForm<Preferences>): Promise<void> {
+  const sessions = ctx.get('sessions') as unknown as ISessions, list = sessions.list.getSnapshot(), id = mainSessionId(list)
   if (action === 'newSession') { ctx.uiWorkspace.startSession(); return }
   if (action === 'sidebar') { ctx.layout.toggleSidebar(); return }
   if (action === 'projectOpen' || action === 'projectPrevious' || action === 'projectNext') {
@@ -25,14 +26,14 @@ export async function executePreferenceShortcut(ctx: Context, action: ShortcutAc
     if (action === 'projectOpen') {
       const path = await ctx.uiWorkspace.pickDirectory(); if (path === null) return
       const workspace = await workspaces.create({ path })
-      sessions.open(await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId)); return
+      ctx.uiWorkspace.openSession(await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId)); return
     }
     const snapshot = workspaces.list.getSnapshot()
     const current = snapshot.items.findIndex(workspace => id && workspace.sessionIds.includes(id))
     const target = snapshot.items[current + (action === 'projectPrevious' ? -1 : 1)]
     if (!target) return
     const recent = target.sessionIds.filter(sessionId => list.byId[sessionId] && !snapshot.archivedSessionIds.includes(sessionId)).sort((a, b) => list.byId[b]!.updatedAt - list.byId[a]!.updatedAt)[0]
-    sessions.open(recent ?? await ctx.uiWorkspace.connectWorkspace(target.workspaceId)); return
+    ctx.uiWorkspace.openSession(recent ?? await ctx.uiWorkspace.connectWorkspace(target.workspaceId)); return
   }
   if (action === 'themeCycle') { if (!preferences) throw new Error('主题偏好尚未就绪。'); const ids = ['native', ...legacyThemePresets.map(theme => theme.id)], current = preferences.getSnapshot().value?.themePalette ?? 'native'; await preferences.set('themePalette', ids[(ids.indexOf(current) + 1) % ids.length]); return }
   if (action === 'languageCycle') { const state = ctx.locale.getSnapshot(), index = state.locales.findIndex(locale => locale.id === state.active), next = state.locales[(index + 1) % state.locales.length]; if (next) ctx.locale.setLocale(next.id); return }
@@ -48,7 +49,7 @@ export async function executePreferenceShortcut(ctx: Context, action: ShortcutAc
       // parentId 只是 fork 血缘（普通fork也有），不能当作子代理标记，否则普通fork的未读完成标记会被跳过。
       const ids = (workspace?.sessionIds ?? list.ids.filter(candidate => list.byId[candidate]?.cwd === list.byId[id]?.cwd)).filter(candidate => list.byId[candidate] && list.byId[candidate]?.origin !== 'subagent' && !grouping?.archivedSessionIds.includes(candidate))
       const target = neighboringUnreadSession(ids, id, direction, reading)
-      if (target) sessions.open(target as typeof id)
+      if (target) ctx.uiWorkspace.openSession(target as typeof id)
       return
     }
     const workspaces = ctx.get('workspaces') as unknown as IWorkspaces | undefined, grouping = workspaces?.list.getSnapshot()
@@ -60,7 +61,7 @@ export async function executePreferenceShortcut(ctx: Context, action: ShortcutAc
     })
     const start = ids.indexOf(id)
     const next = ids[start < 0 ? (direction > 0 ? 0 : ids.length - 1) : (start + direction + ids.length) % ids.length]
-    if (next && next !== id) sessions.open(next)
+    if (next && next !== id) ctx.uiWorkspace.openSession(next)
     return
   }
   const binding = sessions.binding(id), actx = sessions.scope(id)

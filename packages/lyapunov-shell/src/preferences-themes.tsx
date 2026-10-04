@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { Preferences } from './preferences.ts'
@@ -13,7 +13,7 @@ export function paletteTokens(id: string) {
  if (!theme) throw new Error('找不到该本地主题。')
  return theme.tokens
 }
-function ThemePaletteRow({ scope, tr }: { scope: SettingsScope<Preferences>; tr(zh: string, en: string): string }) {
+function ThemePaletteRow({ scope, tr }: { scope: ConfigForm<Preferences>; tr(zh: string, en: string): string }) {
  const snapshot = useSyncExternalStore(listener => scope.subscribe(listener), () => scope.getSnapshot(), () => scope.getSnapshot())
  const [error, setError] = useState(''), [busy, setBusy] = useState(false)
  return <div style={{ padding: '12px 0', display: 'grid', gap: 8 }}>
@@ -25,7 +25,7 @@ function ThemePaletteRow({ scope, tr }: { scope: SettingsScope<Preferences>; tr(
  </div>
 }
 /** 只添加原生token覆盖层，模式与DOM呈现仍由DSH主题所有者维护。 */
-export function applyPreferenceThemes(ctx: Context, scope: SettingsScope<Preferences>, tr: (zh: string, en: string) => string) {
+export function applyPreferenceThemes(ctx: Context, scope: ConfigForm<Preferences>, tr: (zh: string, en: string) => string) {
  ctx.inject(['theme', 'slots'], owner => {
   let selected: string | undefined, remove: (() => void) | undefined
   const sync = () => {

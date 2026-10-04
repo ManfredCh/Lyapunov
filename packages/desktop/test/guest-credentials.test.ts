@@ -1,14 +1,10 @@
 import {expect,test} from "bun:test"
 import {Context} from "@deepseek-ai/cordis"
 import {credentialRef,credentialKey} from "@deepseek-ai/dsh-credentials"
-import SettingsFile from "@deepseek-ai/dsh-settings-file"
-import Llm from "@deepseek-ai/dsh-llm"
-import * as PiAi from "@deepseek-ai/dsh-llm-pi-ai"
 import {mkdtemp,rm,writeFile,stat,readFile} from "node:fs/promises"
 import {tmpdir} from "node:os"
 import {join} from "node:path"
-import GuestCredentials from "../src/guest-credentials.ts"
-async function boot(root:string){const ctx=new Context();await ctx.plugin(SettingsFile,{path:join(root,"guest-settings.yaml"),watch:false});await ctx.plugin(GuestCredentials,{dshHome:root});await ctx.plugin(Llm);await ctx.plugin(PiAi,{providers:{}});return ctx}
+import {bootGuestFixture as boot} from "./guest-loader-fixture.ts"
 const profile={api:"openai-completions",apiKeyEnv:"FIXTURE_API_KEY",baseURL:"http://127.0.0.1:9999/v1",models:[{id:"fixture",contextWindow:8192,maxTokens:1024}]}
 test("guest原生同owner仅接受已声明ownroute的派生Key，browser授权仍内存",async()=>{
   const root=await mkdtemp(join(tmpdir(),"lyapunov-guest-keys-"));let ctx:Context|undefined

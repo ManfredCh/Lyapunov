@@ -1,5 +1,27 @@
 import {expect,test} from "bun:test"
-import {ExitCoordinator,ExitParticipants,type ExitOrigin} from "../src/exit-coordinator.ts"
+import {ExitCoordinator,ExitParticipants,type ExitOrigin,type ExitParticipant} from "../src/exit-coordinator.ts"
+import {apply as applyDesktopLifecycle} from "../src/client.tsx"
+
+test("桌面退出消费原生Job roster，保留运行动作告警并释放目录订阅",async()=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,"window"),watched:string[]=[],released:string[]=[],listeners=new Set<()=>void>(),cleanups:Array<()=>void>=[]
+  let participant:ExitParticipant|undefined,unregistered=0
+  const snapshot={ids:["main","background"],byId:{main:{id:"main",running:false,retainedBy:{mainView:1}},background:{id:"background",running:false,retainedBy:{rightbar:1}}}}
+  let rows={main:[{id:"job-running",status:"running"},{id:"job-stopping",status:"stopping"},{id:"job-finished",status:"completed"}]}
+  Object.defineProperty(globalThis,"window",{value:{lyapunovDesktop:{registerExitParticipant:(id:string,value:ExitParticipant)=>{expect(id).toBe("native-sessions");participant=value;return()=>{unregistered++}}}},configurable:true})
+  try{
+    const ctx={sessions:{list:{getSnapshot:()=>snapshot,subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>listeners.delete(listener)}},scope:()=>undefined},conversation:{input:{for:()=>{throw Error("没有主会话scope，不应取得后台composer")}}},jobs:{state:{getSnapshot:()=>({rows})},watchRows:(id:string)=>{watched.push(id);return()=>{released.push(id)}}},effect:(setup:()=>()=>void)=>{cleanups.push(setup())}} as Parameters<typeof applyDesktopLifecycle>[0]
+    applyDesktopLifecycle(ctx)
+    expect(watched).toEqual(["main","background"])
+    expect(await participant!.summary()).toEqual({dirtyDrafts:0,runningActions:2})
+    snapshot.byId.main.running=true
+    expect(await participant!.summary()).toEqual({dirtyDrafts:0,runningActions:3})
+    rows={main:[]};snapshot.byId.main.running=false;snapshot.ids=["main"]
+    for(const listener of listeners)listener()
+    expect(released).toEqual(["background"])
+    expect(await participant!.summary()).toEqual({dirtyDrafts:0,runningActions:0})
+  }finally{for(const cleanup of cleanups)cleanup();if(previous)Object.defineProperty(globalThis,"window",previous);else Reflect.deleteProperty(globalThis,"window")}
+  expect(released).toEqual(["background","main"]);expect(listeners.size).toBe(0);expect(unregistered).toBe(1)
+})
 
 function bench(approve=true){
   const calls:string[]=[]

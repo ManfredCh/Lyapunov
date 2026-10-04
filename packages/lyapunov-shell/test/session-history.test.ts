@@ -21,20 +21,21 @@ import {SessionId} from "@deepseek-ai/dsh-session"
 import JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl"
 import {generationLogPath} from "@deepseek-ai/dsh-session-persistence-jsonl/src/format.ts"
 import {currentDshHome,discoverSessions,precheckSession,restoreSession,historyRoots} from "../src/session-history.ts"
-import {openExistingHistorySession,type ExistingHistoryEntry,type HistoryNavigationPort} from "../src/history-navigation.ts"
+import {mainSessionId,openExistingHistorySession,type ExistingHistoryEntry,type HistoryNavigationPort} from "../src/history-navigation.ts"
 
 describe('当前运行根历史会话复用原生导航',()=>{
  const entry:ExistingHistoryEntry={id:'retained-history',cwd:'/qa/workspace',cwdExists:true,current:true,archived:false}
  function navigation(){
-  const events:string[]=[],snapshot={phase:'ready',current:'current' as string|undefined,byId:{} as Record<string,{cwd?:string}>}
-  const port:HistoryNavigationPort={snapshot:()=>snapshot,refresh:async()=>{events.push('native-refresh');snapshot.byId[entry.id]={cwd:entry.cwd}},open:id=>{events.push('native-open:'+id);snapshot.current=id}}
-  return {events,snapshot,port}
+  const events:string[]=[],snapshot={phase:'ready',byId:{current:{id:'current',retainedBy:{mainView:1}}} as Record<string,{id:string;cwd?:string;retainedBy:{mainView?:number;rightbar?:number}}>}
+  const select=(id:string)=>{for(const row of Object.values(snapshot.byId))delete row.retainedBy.mainView;snapshot.byId[id]??={id,retainedBy:{}};snapshot.byId[id]!.retainedBy.mainView=1}
+  const port:HistoryNavigationPort={snapshot:()=>snapshot,refresh:async()=>{events.push('native-refresh');snapshot.byId[entry.id]={id:entry.id,cwd:entry.cwd,retainedBy:{}}},open:id=>{events.push('native-open:'+id);select(id)}}
+  return {events,snapshot,port,select}
  }
  test('先刷新Host目录再打开相同SID；不复制或创建记录，不修改cwd',async()=>{
   const n=navigation(),original=structuredClone(entry)
   expect(await openExistingHistorySession(entry,n.port)).toEqual({sessionId:entry.id,opened:true})
-  expect(n.events).toEqual(['native-refresh','native-open:retained-history']);expect(n.snapshot.current).toBe(entry.id)
-  expect(Object.keys(n.snapshot.byId)).toEqual([entry.id]);expect(entry).toEqual(original)
+  expect(n.events).toEqual(['native-refresh','native-open:retained-history']);expect(mainSessionId(n.snapshot)).toBe(entry.id)
+  expect(Object.keys(n.snapshot.byId)).toEqual(['current',entry.id]);expect(entry).toEqual(original)
  })
  test('foreign、归档及失效cwd在任何原生请求前拒绝',async()=>{
   for(const [change,code] of [[{current:false},'HISTORY_FOREIGN_ROOT_COPY_REQUIRED'],[{archived:true},'HISTORY_SESSION_ARCHIVED'],[{cwdExists:false},'HISTORY_CWD_UNAVAILABLE']] as const){
@@ -43,15 +44,21 @@ describe('当前运行根历史会话复用原生导航',()=>{
  })
  test('文件可发现不代替Native目录权威；缺SID/错cwd/目录失败不伪造导航',async()=>{
   for(const [kind,code] of [['missing','HISTORY_SESSION_NOT_ADDRESSABLE'],['cwd','HISTORY_SESSION_CWD_MISMATCH'],['error','HISTORY_SESSION_DIRECTORY_UNAVAILABLE']] as const){
-   const n=navigation();n.port.refresh=async()=>{n.events.push('native-refresh');if(kind==='cwd')n.snapshot.byId[entry.id]={cwd:'/another/workspace'};if(kind==='error')n.snapshot.phase='error'}
+   const n=navigation();n.port.refresh=async()=>{n.events.push('native-refresh');if(kind==='cwd')n.snapshot.byId[entry.id]={id:entry.id,cwd:'/another/workspace',retainedBy:{}};if(kind==='error')n.snapshot.phase='error'}
    await expect(openExistingHistorySession(entry,n.port)).rejects.toThrow(code);expect(n.events).toEqual(['native-refresh'])
   }
  })
  test('刷新迟到时新会话选择或原生navigation取消不写回旧目标',async()=>{
-  const changed=navigation();changed.port.refresh=async()=>{changed.snapshot.current='new-selection';changed.snapshot.byId[entry.id]={cwd:entry.cwd}}
-  await expect(openExistingHistorySession(entry,changed.port)).rejects.toThrow('HISTORY_NAVIGATION_SUPERSEDED');expect(changed.snapshot.current).toBe('new-selection');expect(changed.events).toEqual([])
-  const cancelled=navigation(),controller=new AbortController();cancelled.port.refresh=async()=>{controller.abort();cancelled.snapshot.byId[entry.id]={cwd:entry.cwd}}
+  const changed=navigation();changed.port.refresh=async()=>{changed.select('new-selection');changed.snapshot.byId[entry.id]={id:entry.id,cwd:entry.cwd,retainedBy:{}}}
+  await expect(openExistingHistorySession(entry,changed.port)).rejects.toThrow('HISTORY_NAVIGATION_SUPERSEDED');expect(mainSessionId(changed.snapshot)).toBe('new-selection');expect(changed.events).toEqual([])
+  const cancelled=navigation(),controller=new AbortController();cancelled.port.refresh=async()=>{controller.abort();cancelled.snapshot.byId[entry.id]={id:entry.id,cwd:entry.cwd,retainedBy:{}}}
   await expect(openExistingHistorySession(entry,cancelled.port,controller.signal)).rejects.toThrow();expect(cancelled.events).toEqual([])
+ })
+ test('后台保留正文不成为主选择，没有mainView引用时保持无主会话',()=>{
+  const n=navigation();n.snapshot.byId.background={id:'background',retainedBy:{rightbar:1}}
+  expect(mainSessionId(n.snapshot)).toBe('current')
+  delete n.snapshot.byId.current!.retainedBy.mainView
+  expect(mainSessionId(n.snapshot)).toBeUndefined()
  })
 })
 
