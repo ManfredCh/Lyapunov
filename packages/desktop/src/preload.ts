@@ -23,6 +23,7 @@ const api:DesktopBridge={
   onExitStateChanged:listener=>{exitListeners.add(listener);listener(committing);return()=>exitListeners.delete(listener)},
   getDroppedFilePaths:files=>files.map(file=>webUtils.getPathForFile(file)),
   showAccount:()=>invoke("show-account"),
+  returnToLogin:()=>invoke("return-to-login"),
   mode:()=>invoke("mode"),accountState:()=>invoke("account-state"),login:()=>invoke("login"),cancelLogin:()=>invoke("cancel-login"),logout:()=>invoke("logout"),switchAccount:()=>invoke("switch-account"),restore:()=>invoke("restore"),refresh:()=>invoke("refresh"),commerce:()=>invoke("commerce"),createOrder:(plan,provider)=>invoke("create-order",plan,provider),showWorkspace:()=>invoke("workspace"),selectFiles:()=>invoke("select-files"),version:()=>invoke("version"),checkUpdates:()=>invoke("check-updates"),installUpdate:()=>invoke("install-update"),
   onAccountChanged(listener){const handler=(_event:Electron.IpcRendererEvent,state:Parameters<typeof listener>[0])=>listener(state);ipcRenderer.on("lyapunov:account-changed",handler);return()=>ipcRenderer.removeListener("lyapunov:account-changed",handler)},
 }

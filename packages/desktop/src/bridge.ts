@@ -21,6 +21,7 @@ export interface DesktopBridge {
   createOrder(planId:string,provider:PaymentProvider):Promise<{order:AccountOrder}>
   showWorkspace():Promise<void>
   showAccount():Promise<void>
+  returnToLogin():Promise<void>
   selectFiles():Promise<string[]>
   getDroppedFilePaths(files:File[]):string[]
   version():Promise<string>

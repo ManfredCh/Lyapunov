@@ -116,26 +116,36 @@ function AccountApp({api}:{api:DesktopBridge}){
   const commerce=commerceState.kind==="ready"?commerceState.data:undefined
   const commerceMessage=commerceState.kind==="error"?commerceState.message:undefined
   const authenticated=state.status==="ready"
-  return <main className={authenticated?"shell account":"shell welcome-stage"}><div className="topbar"><div className="brand"><span className="mark" aria-hidden="true"><img src="../icons/lyapunov.png" alt=""/></span><span>Lyapunov</span></div><div className="preferences"><select aria-label={t.language} value={locale} onChange={event=>{if(validLocale(event.target.value)){setLocale(event.target.value);void api.setUiLocale(event.target.value,true)}}}><option value="zh">中文</option><option value="en">English</option></select><select aria-label={t.theme} value={theme} onChange={event=>{if(validTheme(event.target.value))setTheme(event.target.value)}}><option value="system">{t.system}</option><option value="light">{t.light}</option><option value="dark">{t.dark}</option></select></div></div>
-    {!authenticated?<section className="welcome">
-      <h1>{t.title}</h1>
+  const canCancel=["restoring","waiting-login","starting"].includes(state.status)
+  const accountMessage=error??state.message
+  return <main className={authenticated?"shell account":"shell welcome-stage"}><div className="topbar">{authenticated&&<div className="brand"><span className="mark" aria-hidden="true"><img src="../icons/lyapunov.png" alt=""/></span><span>Lyapunov</span></div>}<div className="preferences"><select aria-label={t.language} value={locale} onChange={event=>{if(validLocale(event.target.value)){setLocale(event.target.value);void api.setUiLocale(event.target.value,true)}}}><option value="zh">中文</option><option value="en">English</option></select><select aria-label={t.theme} value={theme} onChange={event=>{if(validTheme(event.target.value))setTheme(event.target.value)}}><option value="system">{t.system}</option><option value="light">{t.light}</option><option value="dark">{t.dark}</option></select></div></div>
+    {!authenticated?<section className="welcome" aria-labelledby="welcome-title"><div className="welcome-panel">
+      <div className="welcome-brand"><img src="../icons/lyapunov.png" alt=""/><span>Lyapunov</span></div>
+      <h1 id="welcome-title">{t.title}</h1>
       <p className="intro">{t.intro}</p>
-      {waiting&&<p className="status" role="status"><span className="spinner"/>{messages[state.status]}</p>}
       <div className="actions">
-        {!state.user&&<button className="primary" disabled={waiting||busy} onClick={()=>void run(api.login)}>{t.login}</button>}
-        <button className="quiet" disabled={busy||state.status==="guest-starting"} onClick={()=>void run(api.guest)}>{t.guest}</button>
-        {waiting&&<button className="quiet" disabled={busy} onClick={()=>void api.cancelLogin()}>{t.cancel}</button>}
-        {state.status==="error"&&!state.user&&<button className="quiet" disabled={busy} onClick={()=>void run(api.restore)}>{t.retry}</button>}
+        {!state.user&&<button className="primary" disabled={waiting||busy} onClick={()=>void run(api.login)}><span>{t.login}</span><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button>}
         {state.status==="error"&&state.user&&<button className="primary" disabled={busy} onClick={()=>void run(api.restore)}>{t.reconnect}</button>}
-        {state.user&&<button className="quiet" disabled={busy} onClick={()=>void run(api.logout)}>{t.logout}</button>}
+        {!waiting&&!state.user&&<p className="sign-in-hint">{t.signInHint}</p>}
+        {waiting&&<div className="welcome-status" role="status"><span className="spinner" aria-hidden="true"/><span>{messages[state.status]}</span></div>}
+        {accountMessage&&<p role={state.status==="error"?"alert":"status"} className={state.status==="error"?"welcome-message error":"welcome-message"}>{accountMessage}</p>}
+        {(canCancel||state.status==="error")&&<div className="recovery-actions">
+          {canCancel&&<button className="quiet" onClick={()=>void api.cancelLogin().catch(failure=>setError(failure instanceof Error?failure.message:String(failure)))}>{t.cancel}</button>}
+          {state.status==="error"&&!state.user&&<button className="quiet" disabled={busy} onClick={()=>void run(api.restore)}>{t.retry}</button>}
+          {state.status==="error"&&<button className="quiet" disabled={busy} onClick={()=>void run(api.returnToLogin)}>{t.backToSignIn}</button>}
+        </div>}
+        <div className="welcome-divider"><span>{t.or}</span></div>
+        <button className="secondary" disabled={busy||state.status==="guest-starting"} onClick={()=>void run(api.guest)}>{t.guest}</button>
+        <p className="guest-hint">{t.guestHint}</p>
       </div>
+    </div>
     </section>:<>
       <header className="profile"><div><h1>{state.user?.email}</h1><p className="muted">{t.isolation}</p></div><button className="primary" onClick={()=>void run(api.showWorkspace)}>{t.workspace}</button></header>
       <section className="balance"><small>{t.points}</small><div className="balance-grid"><div><span>{t.available}</span><strong>{formatAccountPoints(state.balances,locale)}</strong></div><div><span>{t.reserved}</span><strong>{formatAccountPointValue(state.usage?.reserved,locale)}</strong></div><div><span>{t.used}</span><strong>{state.usageStatus==="syncing"?t.usageSyncing:state.usage?.usedStatus==="available"?formatAccountPointValue(state.usage.used,locale):t.usageUnavailable}</strong></div></div><p className="muted usage-note">{state.usageStatus==="error"?t.usageLedgerUnavailable:state.usageStatus==="balance-unavailable"||state.usage?.usedStatus==="unavailable"?t.usageUnavailable:""}</p><div className="actions"><button className="quiet" disabled={busy} onClick={()=>void loadCommerce()}>{t.refresh}</button><button className="quiet" disabled={busy} onClick={()=>void run(api.switchAccount)}>{t.switchAccount}</button><button className="quiet" disabled={busy} onClick={()=>void run(api.logout)}>{t.logout}</button></div></section>
       <h2>{t.plans}</h2>{commerceState.kind==="loading"||commerceState.kind==="idle"?<p>{t.loadingPlans}</p>:commerceMessage?<p role="status" className="message">{commerceMessage}</p>:<div className="grid">{commerce!.plans.map(plan=><Plan key={plan.id} plan={plan} methods={commerce!.paymentMethods} disabled={busy} t={t} buy={provider=>run(async()=>{await api.createOrder(plan.id,provider);await loadCommerce()})}/>)}</div>}
       <h2>{t.orders}</h2>{commerceState.kind==="loading"||commerceState.kind==="idle"?<p>{t.loadingOrders}</p>:commerceMessage?<p role="status" className="message">{commerceMessage}</p>:commerce!.orders.length?<div className="table-wrap"><table><thead><tr><th>{t.order}</th><th>{t.amount}</th><th>{t.status}</th><th>{t.time}</th></tr></thead><tbody>{commerce!.orders.map(order=><tr key={order.id}><td>{order.name??order.planId}</td><td>¥{(order.amountFen/100).toFixed(2)}</td><td>{t[order.status]}</td><td>{new Date(order.createdAt).toLocaleString(locale)}</td></tr>)}</tbody></table></div>:<p>{t.emptyOrders}</p>}
     </>}
-    {(error||state.message)&&<p role="status" className="message">{error??state.message}</p>}
+    {authenticated&&accountMessage&&<p role="status" className="message">{accountMessage}</p>}
     <footer className="footer"><span className="muted">Lyapunov {version}</span><button className="quiet" onClick={()=>void run(async()=>{const update=await api.checkUpdates();if(!update.available){setError(update.reason??t.latest);return}if(window.confirm(`${t.versionFound} ${update.version}. ${t.install}`))await api.installUpdate()})}>{t.updates}</button></footer>
   </main>
 }
