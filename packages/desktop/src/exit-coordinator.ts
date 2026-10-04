@@ -1,5 +1,10 @@
 export type ExitOrigin = "window" | "shortcut" | "menu" | "app" | "update" | "system" | "startup-error"
 export interface ExitSummary { dirtyDrafts:number; runningActions:number }
+export function isExitSummary(value:unknown):value is ExitSummary {
+  if(!value||typeof value!=="object")return false
+  const summary=value as Partial<ExitSummary>
+  return [summary.dirtyDrafts,summary.runningActions].every(count=>typeof count==="number"&&Number.isSafeInteger(count)&&count>=0)
+}
 export interface ExitParticipant {
   summary():ExitSummary|Promise<ExitSummary>
   flush():Promise<void>
@@ -53,6 +58,7 @@ export class ExitCoordinator {
     }
     const failures:string[]=[]
     const started=new Set<string>()
+    let confirmedClean=false
     const report=async(error:unknown)=>{
       const message=error instanceof Error?error.message:String(error)
       failures.push(message)
@@ -75,11 +81,15 @@ export class ExitCoordinator {
     try{
       const ordinary=["window","shortcut","menu","app"].includes(origin)
       if(ordinary){
-        const confirmation=(async()=>{const summary=await this.options.summary();return forced()||await this.options.confirm(summary)})()
+        const confirmation=(async()=>{const summary=await this.options.summary();confirmedClean=isExitSummary(summary)&&summary.dirtyDrafts===0;return forced()||await this.options.confirm(summary)})()
         if(!await Promise.race([confirmation,escalation.then(()=>true)]))return {origin,decision:"cancelled"}
       }
       await phase("冻结新输入",async()=>{this.committing=true;this.options.stateChanged?.(true)})
-      await phase("草稿 flush",()=>this.options.flush())
+      // 确认期间可能有后台变更；冻结后再读一次，未知摘要不能当成空草稿。
+      if(confirmedClean){
+        try{const summary=await settle("退出摘要",this.options.summary());confirmedClean=isExitSummary(summary)&&summary.dirtyDrafts===0}catch{confirmedClean=false}
+      }
+      if(!confirmedClean)await phase("草稿 flush",()=>this.options.flush())
       await phase("动作 stop",()=>this.options.stop())
       await phase("Host close",()=>this.options.close())
       return finish()

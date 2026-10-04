@@ -6,6 +6,23 @@ function bench(approve=true){
   const options={summary:async()=>{calls.push("summary");return {dirtyDrafts:2,runningActions:1}},confirm:async()=>{calls.push("confirm");return approve},flush:async()=>{calls.push("flush")},stop:async()=>{calls.push("stop")},close:async()=>{calls.push("close")},exit:(origin:ExitOrigin)=>{calls.push("exit:"+origin)},failed:async()=>{calls.push("failed")},shutdownTimeoutMs:5}
   return {calls,options}
 }
+test("确认无未保存草稿时只停止关闭，不执行保存；运行动作不是草稿",async()=>{
+  for(const runningActions of [0,2]){
+    const b=bench();b.options.summary=async()=>{b.calls.push("summary");return {dirtyDrafts:0,runningActions}}
+    const exit=new ExitCoordinator(b.options)
+    expect(await exit.request("window")).toMatchObject({decision:"closed",cleanup:"confirmed"})
+    expect(b.calls).toEqual(["summary","confirm","summary","stop","close","exit:window"])
+  }
+})
+test("冻结后新增草稿仍保存；未知和无效摘要不能跳过保存",async()=>{
+  for(const mode of ["became-dirty","unknown","invalid"]){
+    const b=bench();let reads=0
+    const summary=async()=>{b.calls.push("summary");reads++;return mode==="unknown"?undefined:mode==="invalid"?{dirtyDrafts:0,runningActions:-1}:reads===1?{dirtyDrafts:0,runningActions:0}:{dirtyDrafts:1,runningActions:0}}
+    expect(await new ExitCoordinator({...b.options,summary}).request("window")).toMatchObject({decision:"closed",cleanup:"confirmed"})
+    expect(b.calls).toContain("flush")
+    expect(b.calls.slice(-3)).toEqual(["stop","close","exit:window"])
+  }
+})
 test("普通四入口取消保原Host和草稿，不执行清理",async()=>{
   for(const origin of ["window","shortcut","menu","app"] as const){
     const b=bench(false),exit=new ExitCoordinator(b.options)

@@ -1,4 +1,5 @@
 import {desktopLocales,type AccountLocale} from "./account-locales.ts"
+import {isExitSummary} from "./exit-coordinator.ts"
 /** SDK 继续持有会话标题；桌面只正规化最终窗口品牌与游客身份，不翻译用户内容。 */
 export function desktopWindowTitle(pageTitle:string,locale:AccountLocale="zh",guest=false):string {
  const match=pageTitle.trim().match(/^(.*?)\s+—\s+(?:Lyapunov|DeepSeek Harness|DSH(?: Local Build|\s*本地构建))$/i)
@@ -8,8 +9,9 @@ export function desktopWindowTitle(pageTitle:string,locale:AccountLocale="zh",gu
 }
 export function desktopExitDialog(locale:AccountLocale,summary?:{dirtyDrafts:number;runningActions:number}){
  const t=desktopLocales[locale]
- const detail=summary?t.exitDetail.replace("{dirtyDrafts}",String(summary.dirtyDrafts)).replace("{runningActions}",String(summary.runningActions)):t.exitUnknown
- return {type:"question" as const,title:t.exitTitle,message:t.exitMessage,detail,buttons:[t.cancel,t.saveAndExit],defaultId:0,cancelId:0,noLink:true}
+ const known=isExitSummary(summary),clean=known&&summary.dirtyDrafts===0
+ const detail=clean?(summary.runningActions?t.exitRunningDetail.replace("{runningActions}",String(summary.runningActions)):t.exitCleanDetail):known?t.exitDetail.replace("{dirtyDrafts}",String(summary.dirtyDrafts)).replace("{runningActions}",String(summary.runningActions)):t.exitUnknown
+ return {type:"question" as const,title:t.exitTitle,message:clean||!known?t.exitCleanMessage:t.exitMessage,detail,buttons:[t.cancel,clean?t.exit:t.saveAndExit],defaultId:0,cancelId:0,noLink:true}
 }
 
 export type DesktopShortcut='undo'|'redo'|'cut'|'copy'|'paste'|'selectAll'|'reload'|'fullscreen'|'close'|'quit'|'devtools'

@@ -56,4 +56,13 @@ describe("桌面语言投影",()=>{
     expect(JSON.stringify([known,unknown])).not.toMatch(/[\u3400-\u9fff]/)
     expect(desktopExitDialog("zh",{dirtyDrafts:2,runningActions:3}).detail).toContain("2 份草稿、3 项")
   })
+  test("无未保存草稿只显示退出；运行数不触发保存措辞，未知不冒充干净",()=>{
+    for(const runningActions of [0,3]){
+      const english=desktopExitDialog("en",{dirtyDrafts:0,runningActions}),chinese=desktopExitDialog("zh",{dirtyDrafts:0,runningActions})
+      expect(english.buttons).toEqual(["Cancel","Exit"]);expect(chinese.buttons).toEqual(["取消","退出"])
+      expect(english.message+english.detail).not.toMatch(/save|draft/i);expect(chinese.message+chinese.detail).not.toContain("保存")
+    }
+    expect(desktopExitDialog("en").buttons).toEqual(["Cancel","Save and quit"])
+    expect(desktopExitDialog("en",{dirtyDrafts:0,runningActions:-1}).buttons).toEqual(["Cancel","Save and quit"])
+  })
 })
