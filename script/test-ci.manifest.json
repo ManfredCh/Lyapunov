@@ -1900,6 +1900,13 @@
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）；调用真实供应商模型/计费（realmodel）"
     },
     {
+      "path": "packages/sim-isaac/test/model-origin.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": ["envgate", "isaac"],
+      "decision": "exclude",
+      "reason": "专门验收：需显式选择含真实 pxr/Gf/numpy 的已安装解释器；只执行真实 USD 的资源原点/原生根平移、旋转、缩放、锚点与错根拒绝，不启动 Kit/PhysX，不出网、不改原件。正常 Host/managed SDK 的真实 PhysX 首帧、sync/reset、基座约束与视觉后代验收由候选回执单列，不能由此离线数值用例代签。"
+    },
+    {
       "path": "packages/sim-isaac/test/scene-adapter-transform.test.ts",
       "declaredRunner": "bun:test",
       "markers": [

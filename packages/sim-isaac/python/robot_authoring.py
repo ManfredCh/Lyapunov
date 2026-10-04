@@ -50,6 +50,66 @@ def pose_receipt(matrix):
     return {'positionM': [float(v) for v in matrix.ExtractTranslation()], 'quaternionXyzw': [*map(float, imaginary), float(q.GetReal())]}
 
 
+def capture_model_origin(stage, entry, world_from_model, native_path=None):
+    """Capture the imported body's rigid relation to the Resource origin before base edits.
+
+    Gf uses row vectors: rootWorld = rootInModel * modelWorld. Scene scale is
+    already present in the imported USD world pose, so its scaled source offset
+    is preserved without guessing a root height, a bounding box or a foot.
+    """
+    from scene_adapter import SceneError
+    if native_path is None:
+        paths = entry['pose'].paths
+        if len(paths) != 1:
+            raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'One native pose is required for entity ' + entry['entity']['entityId'])
+        native_path = paths[0]
+        prim = stage.GetPrimAtPath(native_path)
+        if entry['articulation'] is not None and prim.IsA(UsdPhysics.Joint):
+            joint = UsdPhysics.Joint(prim)
+            targets = list(joint.GetBody1Rel().GetTargets()) or list(joint.GetBody0Rel().GetTargets())
+            if len(targets) != 1:
+                raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Articulation root joint does not identify one body: ' + str(native_path))
+            native_path = str(targets[0])
+        elif entry['articulation'] is not None and not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            # Official ordered USD articulation metadata identifies its root link.
+            links = entry['articulation'].link_paths
+            if len(links) != 1 or not links[0]:
+                raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Imported articulation has no root link: ' + str(native_path))
+            native_path = links[0][0]
+    prim = stage.GetPrimAtPath(native_path)
+    if not prim.IsValid() or not str(native_path).startswith(entry['path'] + '/') and str(native_path) != entry['path']:
+        raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Native root is outside its entity: ' + str(native_path))
+    native_world = UsdGeom.XformCache().GetLocalToWorldTransform(prim).RemoveScaleShear()
+    entry['nativePosePath'] = str(native_path)
+    entry['modelFromNativeRoot'] = native_world * world_from_model.RemoveScaleShear().GetInverse()
+
+
+def native_initial_pose(stage, entry):
+    """Read the same root body for USD initialization and later PhysX tensor poses."""
+    matrix = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath(entry['nativePosePath'])).RemoveScaleShear()
+    q = matrix.ExtractRotationQuat()
+    return list(matrix.ExtractTranslation()), [float(q.GetReal()), *map(float, q.GetImaginary())]
+
+
+def model_world_matrix(entry, native_position, native_quaternion):
+    """Project native-root state to the Resource origin; native sensor poses remain native."""
+    from scene_adapter import SceneError
+    relation = entry.get('modelFromNativeRoot')
+    if relation is None:
+        raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Imported model/native-root relation is unavailable')
+    p = [float(v) for v in native_position]; q = [float(v) for v in native_quaternion]
+    native_world = Gf.Matrix4d(1).SetRotate(Gf.Quatd(q[0], Gf.Vec3d(*q[1:]))).SetTranslateOnly(Gf.Vec3d(*p)).RemoveScaleShear()
+    return relation.GetInverse() * native_world
+
+
+def verify_native_origin(entry):
+    """Refuse a USD/tensor root mismatch instead of correcting an unrelated body."""
+    from scene_adapter import SceneError
+    paths = entry['articulation'].link_paths if entry['articulation'] is not None else [entry['pose'].paths]
+    if len(paths) != 1 or not paths[0] or str(paths[0][0]) != entry['nativePosePath']:
+        raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Imported root and native pose root differ for ' + entry['entity']['entityId'])
+
+
 def install_base_bindings(stage, scene, entities, error):
     declarations = {entity['entityId']: entity.get('components', {}).get('baseBinding') for entity in scene['entities']}
     done = set(); visiting = set()
@@ -64,6 +124,9 @@ def install_base_bindings(stage, scene, entities, error):
         if not source or not source['editable'] or source['massKg'] <= 0:
             raise error('ROBOT_BASE_UNSUPPORTED', '根本体关节/质量不可核，不允许删除内部机构')
         root = body_prim(stage, entry, source['bodyName'], error); root_path = root.GetPath()
+        if entry.get('nativePosePath') != str(root_path):
+            from scene_adapter import poses
+            capture_model_origin(stage, entry, poses(scene)[eid], str(root_path))
         # 只改世界↔根的固定关节；根与内部连杆的 Revolute/Prismatic 等源约束全部保留。
         for joint in world_joints(stage, root_path):
             if not joint.GetPrim().IsA(UsdPhysics.FixedJoint): raise error('ROBOT_BASE_UNSUPPORTED', '根存在源本体世界关节，不能删除')
@@ -140,7 +203,7 @@ def authoring_description(world, eid):
         other = b if root_path in a else a
         if other and str(other[0]).startswith(entry['path'] + '/') and '__lyapunov_base_fixed' not in str(prim.GetPath()): continue
         enabled = joint.GetJointEnabledAttr().Get(); active = enabled is not False
-        target_eid = next((other_id for other_id, other_entry in world.entities.items() if other and str(other[0]).startswith(other_entry['path'] + '/')), None)
+        target_eid = next((other_id for other_id, other_entry in world.entities.items() if other and (str(other[0]) == other_entry['path'] or str(other[0]).startswith(other_entry['path'] + '/'))), None)
         constraints.append({'name': str(prim.GetPath().MakeRelativePath(Sdf.Path(entry['path']))), 'kind': 'fixed' if prim.IsA(UsdPhysics.FixedJoint) else prim.GetTypeName(), 'active': active,
                             'bodyName': base_source['bodyName'], **({'targetEntityId': target_eid, 'targetBodyName': other[0].name} if target_eid else {'targetBodyName': 'world'})})
     declaration = entry['entity'].get('components', {}).get('baseBinding'); fixed = any(c['active'] and c['kind'] == 'fixed' for c in constraints)

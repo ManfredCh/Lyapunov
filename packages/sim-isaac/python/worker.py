@@ -383,10 +383,10 @@ class World:
             self.glb_imports=glb_import_reports(self.import_warnings)
             for entry in caught:warnings.warn_explicit(entry.message,entry.category,entry.filename,entry.lineno)
             initial_rigid_poses={}
+            from robot_authoring import native_initial_pose,verify_native_origin
             for eid,e in self.entities.items():
                 if e['articulation'] is None and e['rigidPaths']:
-                    with use_backend('usd',raise_on_fallback=True):p,q=e['pose'].get_world_poses()
-                    initial_rigid_poses[eid]=(array(p).reshape(-1).tolist(),array(q).reshape(-1).tolist())
+                    initial_rigid_poses[eid]=native_initial_pose(self.stage,e)
             # 同一条处方也必须落在 articulation 上，否则只做了一半：引擎装配的种子位形是
             # 「模型自带的基体位姿 + 各DOF引擎默认0」（导入产物里没有任何关节状态，见下方 configure_robots
             # 的关节初值通道），initialize_physics() 内部会**自己跑一步物理**（SDK源码
@@ -399,8 +399,7 @@ class World:
             initial_articulation_poses={}
             for eid,e in self.entities.items():
                 if e['articulation'] is not None:
-                    with use_backend('usd',raise_on_fallback=True):p,q=e['pose'].get_world_poses()
-                    initial_articulation_poses[eid]=(array(p).reshape(-1).tolist(),array(q).reshape(-1).tolist())
+                    initial_articulation_poses[eid]=native_initial_pose(self.stage,e)
             self.stage_id=UsdUtils.StageCache.Get().GetId(self.stage).ToLongInt()
             device=os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')
             SM.setup_simulation(dt=self.dt,device=device)
@@ -414,6 +413,7 @@ class World:
             SM.enable_fabric(rendering)
             self.timeline.set_auto_update(False);self.timeline.play();self.timeline.commit();SM.initialize_physics()
             self.configure_robots()
+            for entry in self.entities.values():verify_native_origin(entry)
             # SDK初始化会内部预热物理。关节初态刚写入时，独立刚体也须回到
             # Scene声明的初态，不能把预热中与默认机器人姿态碰撞的冲量带入第0帧。
             for eid,(p,q) in initial_rigid_poses.items():
@@ -948,6 +948,7 @@ class World:
         return {**base,'joints':joints,'controlledJointNames':e['controlled']}
     def observe(self,selection=None):
         self.ready();selection=selection or {};frame=empty_frame(self)
+        from robot_authoring import model_world_matrix
         # Fabric同步是RTX观察/渲染的按需边界，不应把每个0.002s物理步变成GPU/CPU全场同步。
         # PhysX仍由唯一SM.step推进；读取命名site前刷新一次官方Fabric接口即可。
         if rendering and selection.get('sensors') is True:
@@ -965,7 +966,8 @@ class World:
             # 时保持引擎原值，不猜测、不强制清零。
             if asleep:velocity=[0.]*6
             p=array(p).reshape(-1);q=array(q).reshape(-1)
-            item={'entityId':eid,'transform':{'position':p.tolist(),'quaternion':[*q[1:].tolist(),float(q[0])],'scale':e['entity']['transform'].get('scale',[1,1,1])}}
+            model_world=model_world_matrix(e,p,q);model_quaternion=model_world.ExtractRotationQuat()
+            item={'entityId':eid,'transform':{'position':list(model_world.ExtractTranslation()),'quaternion':[*map(float,model_quaternion.GetImaginary()),float(model_quaternion.GetReal())],'scale':e['entity']['transform'].get('scale',[1,1,1])}}
             if e.get('collision') and e['articulation'] is None:
                 collider_prims=[self.stage.GetPrimAtPath(path) for path in e['collision']['colliderPaths']]
                 enabled=[bool(UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get()) for prim in collider_prims]
@@ -1072,9 +1074,10 @@ class World:
                 if ancestor and (ancestor['articulation'] is not None or ancestor['rigidPaths']):
                     with use_backend('tensor',raise_on_fallback=True):position,quaternion=ancestor['pose'].get_world_poses()
                     position=array(position).reshape(-1);quaternion=array(quaternion).reshape(-1)
+                    model_world=model_world_matrix(ancestor,position,quaternion)
                     actual=Gf.Matrix4d(1);actual.SetScale(Gf.Transform(authored[parent]).GetScale())
-                    rotation=Gf.Matrix4d(1);rotation.SetRotate(Gf.Quatd(float(quaternion[0]),Gf.Vec3d(*quaternion[1:].tolist())))
-                    actual=actual*rotation;actual.SetTranslateOnly(Gf.Vec3d(*position.tolist()))
+                    rotation=Gf.Matrix4d(1);rotation.SetRotate(model_world.ExtractRotationQuat())
+                    actual=actual*rotation;actual.SetTranslateOnly(model_world.ExtractTranslation())
                     current=Gf.Transform(authored[item['entityId']]*authored[parent].GetInverse()*actual)
                     q=current.GetRotation().GetQuat();item['transform']={'position':list(current.GetTranslation()),'quaternion':[*q.GetImaginary(),float(q.GetReal())],'scale':list(current.GetScale())}
                     break
