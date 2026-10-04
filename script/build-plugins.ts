@@ -37,6 +37,10 @@ for(const name of packages){
   await mkdir(join(dir,"dist"),{recursive:true})
   const build=await Bun.build({entrypoints:[entry],outdir:join(dir,"dist"),target:"node",format:"esm",external:["@deepseek-ai/*","three","fast-xml-parser"],minify:false})
   if(!build.success)throw new AggregateError(build.logs,"插件构建失败："+name)
+  if (name === 'lyapunov-shell' || name === 'lyapunov-workspace') {
+    const preferences = await Bun.build({entrypoints:[join(dir,'src/preferences-host.ts')],outdir:join(dir,'dist'),naming:'[name].js',target:'node',format:'esm',external:['@deepseek-ai/*'],minify:false})
+    if (!preferences.success) throw new AggregateError(preferences.logs, '原生偏好 Config 入口构建失败：' + name)
+  }
   if(name==="desktop"){
     const credentials=await Bun.build({entrypoints:[join(dir,"src/guest-credentials.ts")],outdir:join(dir,"dist"),target:"node",format:"esm",external:["@deepseek-ai/*"]})
     if(!credentials.success)throw new AggregateError(credentials.logs,"游客传输凭据provider构建失败")

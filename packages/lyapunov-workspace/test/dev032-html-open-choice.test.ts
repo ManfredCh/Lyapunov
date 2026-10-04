@@ -28,7 +28,7 @@ function fakeContext() {
   const ctx = {
     locale: { getSnapshot: () => ({ active: 'zh-CN' }) },
     effect: (fn: () => unknown) => { effects.push(fn as () => void); return () => {} },
-    inject: (_deps: string[], fn: (owner: unknown) => void) => { fn({ effect: (run: () => unknown) => { effects.push(run as () => void) } , remote: { workspaceFiles: { readAll: async () => ({ ok: true, value: { data: '' } }) } } }) },
+    inject: (_deps: string[], fn: (owner: unknown) => void) => { fn({ effect: (run: () => unknown) => { effects.push(run as () => void) } , remote: { workspaceFiles: { readBytes: async () => ({ ok: true, value: { data: new Uint8Array() } }) } } }) },
     sidebarRightTabs: { register: (definition: Definition) => { definitions.push(definition); return definition } },
     slots: { inject: (_seat: string, fn: () => unknown) => { fn() }, register: (row: { name: string; key: string }) => { const entry = { seat: row.name, key: row.key }; slots.push(entry); return entry } },
   }

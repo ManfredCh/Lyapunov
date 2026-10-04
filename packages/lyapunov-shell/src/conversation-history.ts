@@ -26,7 +26,8 @@ export function isHumanDirectedSource(source: unknown): boolean {
  */
 export function isCompactionSummary(message: Message): boolean {
   const source = message.source as { kind: string; plugin?: string; compactionId?: unknown }
-  return source.kind === 'plugin' && (source.plugin === 'compact' || typeof source.compactionId === 'string')
+  return source.kind === 'compact-checkpoint' || source.kind === 'plugin:compact'
+    || source.kind === 'plugin' && source.plugin === 'compact'
 }
 
 /** 任务意图：用户消息/批注，或压缩后唯一的任务摘要（摘要后没有新的用户消息时它就是当前意图）。 */
@@ -43,6 +44,7 @@ export function isTaskIntent(message: Message): boolean {
 export function isRoutingInput(message: Message): boolean {
   const source = message.source as { kind: string; plugin?: string }
   return message.role !== 'system' && source.kind !== 'lyapunov-domain-pointer'
+    && source.kind !== 'runtime-context' && source.kind !== 'plugin:@deepseek-ai/dsh-system-prompt'
     && !(source.kind === 'plugin' && source.plugin === '@deepseek-ai/dsh-system-prompt')
 }
 

@@ -45,7 +45,12 @@ export function apply(ctx:Context,config:Config={}){
     return {cancel:()=>child.terminate(),done}
    }
    if(!args.background){const result=await run(exec.signal).done;if(result.status!=='completed')throw new Error(result.output);return {result:result.output}}
-   const jobId=ctx.jobs.start({kind:'sam3',label:'SAM3 '+request.requestId,owner:exec.agent,run:()=>run(exec.signal)})
+   if(exec.signal.aborted)throw exec.signal.reason??new Error('Cancelled before background Job registration')
+   const controller=new AbortController()
+   const jobId=ctx.jobs.start({kind:'sam3',label:'SAM3 '+request.requestId,owner:exec.agent?.id,run:()=>{
+    const hooks=run(controller.signal)
+    return {cancel:()=>{controller.abort();hooks.cancel()},done:hooks.done.then(({output,...outcome})=>({...outcome,result:output}))}
+   }})
    return {result:JSON.stringify({jobId,provider:'sam3',requestId:request.requestId,source:request.source})}
   },
  })

@@ -37,7 +37,7 @@ test('host 侧：只读 GET 路由 + 会话级快照，且不改判定语义', (
   expect(plugin).toContain('kind:"lyapunov-domain-pointer",form:"snapshot"')
   expect(plugin).toContain('messages.some(isUserIntent)&&previous!==undefined?cleared:undefined')
   // 授权状态独立为notice，不能随下一份能力建议替换掉。
-  expect(plugin).toContain('plugin:"lyapunov-engine-install",form:"notice"')
+  expect(plugin).toContain('kind:"lyapunov-engine-install",form:"notice"')
   // 判定文件本身没有被改动过的痕迹（本轮只读它的输出）
   expect(routing).toContain('export function routeEnvironment(')
 })

@@ -69,7 +69,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
    manifest.firstFrame = sourceFrame(initial)
    const recorder = new SimulationRecording(recordingDirectory(directory(agent), manifest.recordingId), agent.id)
    let finish!: (reason: string) => Promise<void>
-   const jobId = ctx.jobs.start({ kind: 'recording', label: `录制 ${input.sceneId}`, owner: agent, outputLimitBytes: 4000, run: () => {
+   const jobId = ctx.jobs.start({ kind: 'recording', label: `录制 ${input.sceneId}`, owner: agent?.id, outputLimitBytes: 4000, run: () => {
     let stopping: Promise<void> | undefined, timer: ReturnType<typeof setTimeout> | undefined, saveTimer: ReturnType<typeof setInterval> | undefined, offEvents: (() => void) | undefined, offScene: (() => void) | undefined, observationTimer: ReturnType<typeof setInterval> | undefined, observationBusy = false, queue = Promise.resolve(), elapsedS = 0, lastFrame = initial
     // 多视角采集状态：只记录真实发生的采集与其相对订阅帧的步差，不做任何“已经是同步”的假设。
     const cameraCapture = cameraNames === undefined ? undefined : { cameraNames: [...cameraNames], width: cameraWidth, height: cameraHeight, everyNFrames: cameraEveryNFrames, frames: 0, captures: 0, synchronizedFrames: 0, driftedFrames: 0, maxStepDrift: 0, stopped: undefined as string | undefined }
@@ -92,8 +92,8 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
       const stats = await recorder.stop(); manifest.frameCount = stats.frameCount
       manifest.status = ['recording-stop', 'duration-limit', 'frame-limit', 'wall-time-limit'].includes(reason) ? 'completed' : reason === 'job-killed' || reason.includes('disposed') ? 'killed' : 'failed'
       manifest.stopReason = reason; manifest.stoppedAt = new Date().toISOString(); await writeRecordingManifest(directory(agent), manifest)
-      done.resolve({ status: manifest.status === 'completed' ? 'completed' : manifest.status === 'killed' ? 'killed' : 'failed', output: JSON.stringify(summary(manifest, agent)), detail: reason })
-     } catch (error) { manifest.status = 'failed'; manifest.stopReason = String(error); await writeRecordingManifest(directory(agent), manifest); done.resolve({ status: 'failed', output: JSON.stringify(summary(manifest, agent)) }) }
+      done.resolve({ status: manifest.status === 'completed' ? 'completed' : manifest.status === 'killed' ? 'killed' : 'failed', result: JSON.stringify(summary(manifest, agent)), detail: reason })
+     } catch (error) { manifest.status = 'failed'; manifest.stopReason = String(error); await writeRecordingManifest(directory(agent), manifest); done.resolve({ status: 'failed', result: JSON.stringify(summary(manifest, agent)) }) }
     })()
     // 投影拥有的Scene没有SceneStore订阅；新revision在recordSceneFor里按需读同一world投影。
     offScene = sceneOwner === 'scene-store' ? sceneOf(agent).scene.subscribe(input.sceneId, snapshot => { if (!stopping) sourceScenes.set(snapshot.revision, snapshot) }) : undefined
@@ -149,7 +149,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
   async recording_stop(input: { recordingId: string }, agent?: Agent) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    const manifest = await current(agent, input.recordingId)
-   if (manifest.status === 'recording') { ctx.jobs.kill(JobId(manifest.jobId!), agent, 'recording-stop'); await ctx.jobs.wait(JobId(manifest.jobId!), 10000, agent) }
+   if (manifest.status === 'recording') { ctx.jobs.kill(JobId(manifest.jobId!), agent?.id, 'recording-stop'); await ctx.jobs.wait(JobId(manifest.jobId!), 10000, agent?.id) }
    return summary(await current(agent, input.recordingId), agent)
   },
   async recording_list(input: { sceneId?: string }, agent?: Agent) {
@@ -174,7 +174,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
   async recording_export(input: { recordingId: string }, agent?: Agent) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    const m = await current(agent, input.recordingId); if (m.status === 'recording') throw new Error('RECORDING_NOT_FINISHED')
-   const jobId = ctx.jobs.start({ kind: 'dataset', label: `导出录制 ${m.recordingId}`, owner: agent, outputLimitBytes: 4000, run: () => { let cancelled = false; return { cancel: () => { cancelled = true }, done: exportRecording(directory(agent), m.recordingId).then(result => ({ status: cancelled ? 'killed' as const : result.status === 'PARTIAL' ? 'failed' as const : 'completed' as const, output: JSON.stringify(result) }), error => ({ status: 'failed' as const, output: String(error) })) } } })
+   const jobId = ctx.jobs.start({ kind: 'dataset', label: `导出录制 ${m.recordingId}`, owner: agent?.id, outputLimitBytes: 4000, run: () => { let cancelled = false; return { cancel: () => { cancelled = true }, done: exportRecording(directory(agent), m.recordingId).then(result => ({ status: cancelled ? 'killed' as const : result.status === 'PARTIAL' ? 'failed' as const : 'completed' as const, result: JSON.stringify(result) }), error => ({ status: 'failed' as const, result: String(error) })) } } })
    return { jobId, recordingId: m.recordingId }
   },
  }

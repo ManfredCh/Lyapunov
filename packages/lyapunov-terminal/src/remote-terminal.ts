@@ -7,8 +7,10 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionAssistantStreamBaseline, SessionControlFrame, SessionFollowFrame, SessionRequestId, SessionWireHeader } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { JobListFrame, JobView } from '@deepseek-ai/dsh-api-job-controller/types'
 import { expandAssistantStream, joinAssistantStreamText, type AssistantStreamRecord } from '@deepseek-ai/dsh-llm/assistant-stream'
 import { RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/node'
+import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/node'
 import { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-reference/grammar'
 import { connectTerminalRemote, type TerminalRemoteOptions } from './remote-connection.ts'
 import { RemoteTerminalDrafts } from './remote-draft.ts'
@@ -31,6 +33,32 @@ class InputStream extends PassThrough {
 }
 function value<T>(result: RemoteResult<T>): T { if (!result.ok) throw result.error; return result.value }
 const unquote = (text: string) => /^("[\s\S]*"|'[\s\S]*')$/.test(text) ? text.slice(1, -1) : text
+
+/** Jobs 展示只跟随原生全量 rows 流；缺锚点/断流为未知，不制造空列表或新 owner。 */
+export function followTerminalJobRows(remote: Pick<ClientRemote, '$stream' | 'job'>, sessionId: SessionId, changed: (jobs: readonly JobView[] | undefined) => void) {
+  const { job } = remote
+  changed(undefined)
+  const stream = remote.$stream<JobListFrame>({
+    name: '终端原生 Jobs ' + sessionId,
+    open: signal => job.list({ sessionId }, signal),
+    ended: accepted => accepted ? new RemoteStreamCarrierError('Jobs 连接结束，等待原生重连') : new Error('原生 Jobs 流没有返回初始列表。'),
+    carrierFailed: () => changed(undefined),
+  })
+  const task = (async () => {
+    try {
+      for await (const item of stream) { changed(item.value.jobs); item.accept() }
+    } catch (reason) { changed(undefined); throw reason }
+    finally { await stream.dispose() }
+  })()
+  return { task, dispose: () => stream.dispose() }
+}
+
+/** :jobs 只读原生第一份实际列表；流未给锚点时失败，不以空值冒充。 */
+export async function firstTerminalJobRows(remote: Pick<ClientRemote, 'job'>, sessionId: SessionId, signal: AbortSignal): Promise<readonly JobView[]> {
+  const frame = await firstFrame(remote.job.list({ sessionId }, signal))
+  if (frame.type !== 'rows') throw new Error('原生 Jobs 流缺少 rows 锚点。')
+  return frame.jobs
+}
 
 /** 连接已有Host的终端表面；不启动Host，不持有远端Agent/Session/Goal，退出只断开客户端。 */
 export async function runRemoteTerminal(options: TerminalRemoteOptions & { startup?: TerminalStartupConfig; fullscreen?: boolean }): Promise<number> {
@@ -66,7 +94,7 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
   let screen: FullscreenTerminal | undefined
   const activeTurns = new Map<SessionId, number>()
   const running = new Map<SessionId, boolean>()
-  let jobsBySession: Readonly<Record<string, readonly unknown[]>> = {}
+  const jobsBySession = new Map<SessionId, readonly JobView[]>(), jobStreams = new Map<SessionId, ReturnType<typeof followTerminalJobRows>>()
   const liveTexts = new Map<SessionId, LiveAttempt>()
   // 观察通道（跟随流）已终态失败的会话：失败后没有任何事件源能再产生 turn/end，
   // 用于在“输入已结束”的时刻判定结果未知；真的 :open 恢复出新流时清账。
@@ -193,9 +221,14 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
       await Promise.race([ready.promise, new Promise<never>((_, reject) => { if (signal.aborted) reject(signal.reason); else signal.addEventListener('abort', () => reject(signal.reason), { once: true }) })])
     }
     signal.throwIfAborted(); if (!views.has(sessionId)) throw new Error('远端会话没有可用快照。'); selected = sessionId; input?.setPrompt('lyapunov-remote:' + sessionId + '> ')
+    if (!jobStreams.has(sessionId)) {
+      const jobs = followTerminalJobRows(remote, sessionId, rows => { if (rows === undefined) jobsBySession.delete(sessionId); else jobsBySession.set(sessionId, rows) })
+      jobStreams.set(sessionId, jobs)
+      tasks.push(jobs.task.catch(reason => { if (jobStreams.get(sessionId) === jobs) { jobStreams.delete(sessionId); jobsBySession.delete(sessionId) }; if (!closing) error(reason) }))
+    }
     line('[会话] ' + sessionId + ' [远端] ' + linked.origin)
   }
-  // 全屏只读远端原生投影：导航来自远端 Workspace baseline，线程/Jobs 计数来自远端会话清单与控制流快照。
+  // 全屏只读远端原生状态：导航来自 Workspace baseline，Jobs 计数来自每会话 job.list 全量流。
   const fullscreenRuntime: FullscreenRuntime = {
     navigation: async signal => {
       const frame = await firstFrame(remote.workspace.follow(signal))
@@ -220,7 +253,7 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
       const draft = selected === undefined ? undefined : drafts.get(selected)
       const view = selected === undefined ? undefined : views.get(selected)
       const selection = view?.projections.modelSelection as { next?: { provider?: string; model?: string } } | undefined
-      const jobs = selected === undefined ? undefined : jobsBySession[String(selected)]
+      const jobs = selected === undefined ? undefined : jobsBySession.get(selected)
       const state = selected === undefined ? undefined : running.get(selected)
       return {
         ...(selected === undefined ? {} : { sessionId: String(selected) }),
@@ -230,7 +263,7 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
         attachments: draft?.attachments.length ?? 0,
         pendingApprovals: [...approvals.keys()],
         pendingQuestions: [...questions.keys()],
-        jobs: jobs?.length ?? 0,
+        ...(jobs === undefined ? {} : { jobs: jobs.length }),
       }
     },
     editor: () => ({
@@ -243,7 +276,7 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
   const control = remote.$stream<SessionControlFrame>({ name: '终端原生控制', open: signal => remote.session.control(signal), ended: () => new RemoteStreamCarrierError('控制连接结束') })
   tasks.push((async () => { for await (const item of control) {
     const frame = item.value
-    if (frame.type === 'baseline') { item.accept(); jobsBySession = frame.value.jobs; for (const [sessionId, projection] of Object.entries(frame.value.projections)) { const view = views.get(SessionId(sessionId)); if (view) view.projections = { ...projection.values } } }
+    if (frame.type === 'baseline') { item.accept(); for (const [sessionId, projection] of Object.entries(frame.value.projections)) { const view = views.get(SessionId(sessionId)); if (view) view.projections = { ...projection.values } } }
     else if (frame.type === 'projection') { const view = views.get(frame.sessionId); if (view) view.projections[frame.key] = frame.value }
   } })().catch(reason => { if (!closing) error(reason) }))
   const removeApproval = remote.$on('approval/request', (request, next) => {
@@ -374,7 +407,13 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
     if (text === ':archive') { line(JSON.stringify(value(await remote.workspace.archiveSession({ sessionId })))); return }
     if (text === ':goal') { line(JSON.stringify(value(await remote.goals.get(sessionId))) ?? '当前没有Goal。'); return }
     if (text === ':todos' || text === ':todo') { line(JSON.stringify(views.get(sessionId)?.projections.todos) ?? '当前没有Todo。'); return }
-    if (text === ':queue' || text === ':jobs') { const iterator = remote.session.control(signal)[Symbol.asyncIterator](); try { const first = (await iterator.next()).value; if (first?.type !== 'baseline') throw new Error('控制流没有baseline'); line(JSON.stringify(text === ':queue' ? first.value.queues[sessionId] ?? [] : first.value.jobs[sessionId] ?? [], null, 2)) } finally { await iterator.return?.() }; return }
+    if (text === ':queue') {
+      const frame = await firstFrame(remote.session.control(signal))
+      if (frame.type !== 'baseline') throw new Error('控制流没有 baseline。')
+      const inbox = frame.value.projections[sessionId]?.values.inbox
+      line(inbox === undefined ? '当前会话的原生 Inbox 投影尚未就绪。' : JSON.stringify(inbox, null, 2)); return
+    }
+    if (text === ':jobs') { line(JSON.stringify(await firstTerminalJobRows(remote, sessionId, signal), null, 2)); return }
     if (text === ':export' || text.startsWith(':export ')) { const path = resolve(unquote(text.slice(7).trim()) || sessionId + '.zip'); const response = await linked.fetch('/api/session.export?' + new URLSearchParams({ sessionId, includeDescendants: 'true' }), { signal }); if (!response.ok || !response.body) throw new Error('远端导出失败 HTTP ' + response.status); const file = await open(path, 'wx', 0o600); let complete = false; try { await response.body.pipeTo(new WritableStream({ async write(chunk) { await file.writeFile(chunk) } }), { signal }); complete = true } finally { await file.close(); if (!complete) await unlink(path) }; line('[ZIP 已导出] ' + path); return }
     if (text.startsWith('/') || /^:(compact|undo|redo)(\s|$)/.test(text)) { const prepared = await drafts.prepare(linked, sessionId, signal, ''); const result = value(await remote.commands.execute(sessionId, text.startsWith(':') ? '/' + text.slice(1) : raw, prepared.content.filter(part => part.type !== 'text'), signal)); if (!result) throw new Error('原生命令不存在，未发送模型。'); if (result.result.kind === 'success') prepared.commit(); return }
     if (text.startsWith(':') && text !== ':send') throw new Error('未知终端操作，输入 :help。')
@@ -470,6 +509,6 @@ export async function runRemoteTerminal(options: TerminalRemoteOptions & { start
     closing = true; lifetime.abort(); for (const pending of approvals.values()) pending('cancelled'); for (const pending of questions.values()) pending.cancel()
     editorAbort?.abort(); input?.close(); screen?.dispose(); process.stdin.off('data', onData); process.stdin.off('end', onEnd); process.stdin.pause(); process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); tty.destroy()
     if (process.stdin.isTTY && process.stdout.isTTY) process.stdout.write(BRACKETED_PASTE_DISABLE)
-    removeApproval(); removeQuestion(); await Promise.allSettled([control.dispose(), ...[...streams.values()].map(stream => stream.dispose())]); await chain; await Promise.allSettled(tasks); await linked.dispose()
+    removeApproval(); removeQuestion(); await Promise.allSettled([control.dispose(), ...[...streams.values()].map(stream => stream.dispose()), ...[...jobStreams.values()].map(stream => stream.dispose())]); await chain; await Promise.allSettled(tasks); await linked.dispose()
   }
 }

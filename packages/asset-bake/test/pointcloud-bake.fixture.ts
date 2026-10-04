@@ -46,7 +46,7 @@ try {
   const completedId = JobId(JSON.parse((background.value as { result: string }).result).jobId)
   const done = await ctx.jobs.wait(completedId, 10000)
   assert.equal(done.status, 'completed')
-  const bg = JSON.parse(ctx.jobs.read(completedId).text)
+  const bg = JSON.parse((ctx.jobs.read(completedId).result ?? ''))
   assert.deepEqual(bg.objects[0].boxes, fg.objects[0].boxes)
   const cancelled = await call(join(output, 'cancelled'), true)
   assert.equal(cancelled.isError, false)

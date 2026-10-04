@@ -57,18 +57,18 @@ export function apply(ctx: Context, config: Config) {
         if (!args.background) return { result: JSON.stringify(await run(exec.signal)) }
         await runGeneration(input,{...config,signal:exec.signal,prepareOnly:true,authorizeSubmission:generationAuthorizer(ctx,exec.agent,true)})
         const controller = new AbortController()
-        exec.signal.addEventListener("abort", () => controller.abort(exec.signal.reason), { once: true })
+        if (exec.signal.aborted) throw exec.signal.reason ?? new Error("Cancelled before background Job registration")
         const jobId = ctx.jobs.start({
           kind: "lyapunov-generation",
           label: (config.mode === "formal" || process.env.LYAPUNOV_MODE?.trim() === "formal" ? generationPublicName("marble") : "marble") + " " + input.requestId,
-          owner: exec.agent,
+          owner: exec.agent?.id,
           run: () => ({
             cancel: () => controller.abort(),
             done: run(controller.signal).then(
-              (result) => ({ status: "completed" as const, output: JSON.stringify(result) }),
+              (result) => ({ status: "completed" as const, result: JSON.stringify(result) }),
               (error) => ({
                 status: controller.signal.aborted ? ("killed" as const) : ("failed" as const),
-                output: String(error),
+                result: String(error),
               }),
             ),
           }),

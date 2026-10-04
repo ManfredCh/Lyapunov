@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import type { JobHooks, JobOutcome, JobRegistry } from "@deepseek-ai/dsh-jobs"
+import { StringDecoder } from "node:string_decoder"
+import type { JobHandle, JobHooks, JobOutcome, JobRegistry } from "@deepseek-ai/dsh-jobs"
 import type { SubprocessHandle, SubprocessRuntime } from "@deepseek-ai/dsh-subprocess"
 import type { EngineInstallResult, EngineLicenseAcceptance } from "./engine-provider-contract.ts"
 import {resolveSdkPython} from "../../lyapunov-product-bundle/src/sdk-python.mjs"
@@ -273,7 +274,8 @@ export function createProviderInstaller(options: InstallerOptions) {
     receipt.result = result ?? { status: status === "completed" ? "OK" : status === "blocked" ? "BLOCKED" : "FAILED", code, message }
     persist(receipt)
   }
-  const run = (receipt: InstallReceipt): JobHooks => {
+  const run = (receipt: InstallReceipt, job: JobHandle): JobHooks => {
+    const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") }
     let child: SubprocessHandle | undefined
     let cancelled = false
     let finished = false
@@ -299,8 +301,11 @@ export function createProviderInstaller(options: InstallerOptions) {
         ioError = error
         try { terminate() } catch (terminationError) { ioError = terminationError }
       }
-      const append = (data: Buffer | string) => {
-        try { appendFileSync(logPath(receipt.attemptId), data, { mode: 0o600 }) }
+      const append = (channel: "stdout" | "stderr") => (data: Buffer | string) => {
+        try {
+          appendFileSync(logPath(receipt.attemptId), data, { mode: 0o600 })
+          job.append(typeof data === "string" ? data : decoders[channel].write(data), { channel })
+        }
         catch (error) { outputError(error instanceof Error ? error : new Error(String(error))) }
       }
       try {
@@ -308,12 +313,12 @@ export function createProviderInstaller(options: InstallerOptions) {
           const current = license()
           if (!current || current.acceptedAt !== receipt.eula.acceptance?.acceptedAt) {
             finish(receipt, "blocked", "LICENSE_CONFIRMATION_REQUIRED", "Server EULA acceptance changed before launch")
-            return { status: "failed", detail: receipt.detail }
+            return { status: "failed", detail: receipt.detail, result: JSON.stringify(receipt) }
           }
         }
         if (cancelled) {
           finish(receipt, "killed", "INSTALL_CANCELLED", "Cancelled before launch")
-          return { status: "killed", detail: receipt.detail }
+          return { status: "killed", detail: receipt.detail, result: JSON.stringify(receipt) }
         }
         receipt.status = "running"
         persist(receipt)
@@ -321,8 +326,8 @@ export function createProviderInstaller(options: InstallerOptions) {
           argv: argv(receipt.provider, receipt.eula.acceptance !== null), cwd: options.cwd, env: options.env,
           stdio: { stdin: "ignore", stdout: "pipe", stderr: "pipe" }, graceMs: 2000,
         })
-        child.stdout?.on("data", append).on("error", outputError)
-        child.stderr?.on("data", append).on("error", outputError)
+        child.stdout?.on("data", append("stdout")).on("error", outputError)
+        child.stderr?.on("data", append("stderr")).on("error", outputError)
         const exit = await child.done
         receipt.exitCode = exit.exitCode
         receipt.signal = exit.signal
@@ -358,6 +363,7 @@ export function createProviderInstaller(options: InstallerOptions) {
         catch (storageError) { message += `; receipt persistence failed: ${String(storageError)}` }
         outcome = { status: finalStatus === "killed" ? "killed" : "failed", detail: message }
       } finally {
+        for (const channel of ["stdout", "stderr"] as const) job.append(decoders[channel].end(), { channel })
         finished = true
         active.delete(receipt.attemptId)
         // 安装可能刚把某个运行时装好：下一次 `state()` 必须重新读，而不是继续回放安装前的缓存。
@@ -365,8 +371,8 @@ export function createProviderInstaller(options: InstallerOptions) {
         try { options.onSettled?.() }
         catch { /* Cache invalidation must not change the recorded install outcome. */ }
       }
-      return { ...outcome, output: JSON.stringify(receipt) }
-    }).catch(error => ({ status: "failed", detail: String(error) }))
+      return { ...outcome, result: JSON.stringify(receipt) }
+    }).catch(error => ({ status: "failed", detail: String(error), result: JSON.stringify(receipt) }))
     return { cancel, done }
   }
 
@@ -438,8 +444,8 @@ export function createProviderInstaller(options: InstallerOptions) {
           try {
             receipt.jobId = options.jobs.start({
               kind: "provider-install", label: `Install ${provider} (${attemptId})`, outputLimitBytes: 8000,
-              run: () => {
-                const hooks = run(receipt)
+              run: job => {
+                const hooks = run(receipt, job)
                 active.set(attemptId, { receipt, hooks })
                 return hooks
               },

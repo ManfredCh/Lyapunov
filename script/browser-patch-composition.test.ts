@@ -5,7 +5,8 @@ import {dirname,join,resolve} from "node:path"
 import {spawnSync} from "node:child_process"
 import {createHash} from "node:crypto"
 import {verifiedBrowserRootComposition,verifiedComposedPatch} from "./upstream-patches.mjs"
-const root=resolve(import.meta.dirname,".."),upstream=join(root,".upstream/deepseek-harness-20260911-candidate")
+import {legacySDKFixture} from "./legacy-sdk-fixture.mjs"
+const root=resolve(import.meta.dirname,".."),upstream=legacySDKFixture(root)
 const digest=(bytes:Uint8Array)=>createHash("sha256").update(bytes).digest("hex")
 const git=(cwd:string,args:string[])=>{
   const result=spawnSync("git",args,{cwd,encoding:"utf8",maxBuffer:32<<20})

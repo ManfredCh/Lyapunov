@@ -89,6 +89,8 @@ interface Harness {
   createAgent(id: string, cwd?: string): Promise<Agent>
   /** 真实附件服务实际保存的图片名（真图才存得下，假图会被它解码拒绝）。 */
   images: string[]
+  /** 重载实际产品插件，原生 Registry 与 owner 生命周期保持。 */
+  reloadPlugin(): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -100,7 +102,7 @@ async function createHarness(options: { executable?: string; workspace?: string;
   // 本文件**不注册任何 LLM adapter**：不发起模型请求，测试只驱动工具与消息投递。
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(JobsLocal)
-  // 原生 tool-jobs：它自己注册全局 onJobDone 监听，是"作业完成后唤醒 owner"的**唯一**来源。
+  // 原生 tool-jobs：它自己订阅 settled 事件，是"作业完成后唤醒 owner"的**唯一**来源。
   // 只在这条测试里装，用来证明本插件投递图片时没有重复唤醒（默认 wakeup 投递）。
   if (options.toolJobs === true) await ctx.plugin(ToolJobs as never, undefined as never)
   ctx.jobs.attachController('blender-run-test')
@@ -119,11 +121,12 @@ async function createHarness(options: { executable?: string; workspace?: string;
       const ref = await saveImage(input); images.push(input.name); return ref
     }
   }
-  await ctx.plugin({
+  const mountPlugin = () => ctx.plugin({
     name: 'test-blender',
     inject: ['tools', 'subprocess', 'jobs'],
     apply: (scoped: Context) => { apply(scoped, { executable: options.executable ?? BLENDER, workspace: options.workspace, textureApiBase: options.textureApiBase }) },
   } as never, undefined as never)
+  let pluginFiber = await mountPlugin()
   const tools = ctx.get('tools') as { execute(input: unknown): Promise<ToolCall> }
   // 生产 AgentLoop：agent/session 由它创建并注册，后台作业的 owner 因此是**注册表里的活 agent**
   // （jobs-local 的 ensureOwnerCleanup 要求的正是这一条）。
@@ -138,6 +141,7 @@ async function createHarness(options: { executable?: string; workspace?: string;
     ctx,
     agent,
     images,
+    async reloadPlugin() { await pluginFiber.dispose(); pluginFiber = await mountPlugin() },
     async call(args, signal) { return await run('blender_run', agent, args, signal) },
     async callTool(name, args, callInfo) { return await run(name, callInfo?.caller ?? agent, args, callInfo?.signal) },
     claimNextStep(caller = agent) { return loop.claim(caller, 'next-step', 1) as unknown as InboxMessage[] },
@@ -628,10 +632,10 @@ test('后台取消：job_kill 真的终止子进程，作业落 killed 而不是
     const job = JSON.parse(String(call.value?.result)) as JobCall
     assert.match(job.jobId, /^blender-\d+$/)
     await new Promise(resolve => setTimeout(resolve, 300))
-    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent, '测试取消'), 'requested')
-    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 10_000, harness.agent)
+    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent?.id, '测试取消'), 'requested')
+    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 10_000, harness.agent?.id)
     assert.equal(snapshot.status, 'killed')
-    assert.match(harness.ctx.jobs.read(job.jobId as never, harness.agent).text, /BLENDER_CANCELLED/)
+    assert.match((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? ''), /BLENDER_CANCELLED/)
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -649,9 +653,9 @@ test('后台作业：进程失败必须落 failed，输出保留原因（退出�
     const call = await harness.call({ output_directory: output, background: true })
     assert.equal(call.isError, false, resultText(call))
     const job = JSON.parse(String(call.value?.result)) as JobCall
-    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)
+    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)
     assert.equal(snapshot.status, 'failed', '退出码 0 但没有 LYAPUNOV_RESULT 行必须是 failed')
-    assert.match(harness.ctx.jobs.read(job.jobId as never, harness.agent).text, /BLENDER_OUTPUT_MISSING/)
+    assert.match((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? ''), /BLENDER_OUTPUT_MISSING/)
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -662,9 +666,9 @@ test('后台作业：进程失败必须落 failed，输出保留原因（退出�
   try {
     const call = await harness3.call({ output_directory: join(exit3, 'world'), background: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
-    const snapshot = await harness3.ctx.jobs.wait(job.jobId as never, 15_000, harness3.agent)
+    const snapshot = await harness3.ctx.jobs.wait(job.jobId as never, 15_000, harness3.agent?.id)
     assert.equal(snapshot.status, 'failed')
-    const text = harness3.ctx.jobs.read(job.jobId as never, harness3.agent).text
+    const text = (harness3.ctx.jobs.read(job.jobId as never, harness3.agent?.id).result ?? '')
     assert.match(text, /BLENDER_FAILED/)
     assert.match(text, /RuntimeError: bg-fail/, '后台失败同样保留 stderr')
   } finally {
@@ -682,9 +686,9 @@ test('后台作业：真实 Blender 小场景完成后，job_output 给出与前
     assert.equal(call.isError, false, resultText(call))
     const job = JSON.parse(String(call.value?.result)) as JobCall
     assert.equal(job.outputDirectory, output)
-    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent)
+    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent?.id)
     assert.equal(snapshot.status, 'completed')
-    const parsed = JSON.parse(harness.ctx.jobs.read(job.jobId as never, harness.agent).text) as { scene: string; entities: number }
+    const parsed = JSON.parse((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')) as { scene: string; entities: number }
     assert.ok(parsed.entities > 0)
     assert.ok(existsSync(parsed.scene))
   } finally {
@@ -877,7 +881,7 @@ test('后台真实渲染完成：owner 的下一步收到一条带图消息（�
     assert.equal(call.isError, false, resultText(call))
     const job = JSON.parse(String(call.value?.result)) as JobCall
     assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 }, '起作业本身不该往会话里塞消息')
-    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent)
+    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent?.id)
     assert.equal(snapshot.status, 'completed')
     const delivered = harness.pending()
     assert.equal(delivered.nextTurn, 0, 'inject 不唤醒驱动：不能因为带图就多排一轮（唤醒仍由原生完成通知那一次负责）')
@@ -885,8 +889,7 @@ test('后台真实渲染完成：owner 的下一步收到一条带图消息（�
     const messages = harness.claimNextStep()
     assert.equal(messages.length, 1)
     const [notice] = messages
-    assert.equal(notice?.source?.kind, 'plugin')
-    assert.equal(notice?.source?.plugin, 'lyapunov-blender')
+    assert.equal(notice?.source?.kind, 'lyapunov-blender')
     assert.equal(notice?.source?.form, 'notice')
     const blocks = notice?.content ?? []
     assert.equal(blocks[0]?.type, 'text', '文本块在前，模型先看到"这是什么"')
@@ -897,7 +900,7 @@ test('后台真实渲染完成：owner 的下一步收到一条带图消息（�
     assert.ok(imageBlocks[0]?.attachment, '图像块带真实附件引用')
     assert.ok(harness.images.includes('preview.png'), '附件服务真的存下了这张图')
     // 结果文本里说明投递走的哪条路：模型能区分"通知里带了图"和"只是路径"。
-    const text = harness.ctx.jobs.read(job.jobId as never, harness.agent).text
+    const text = (harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')
     const parsed = JSON.parse(text) as { images: { attached: number; delivery: string; deliveryError?: string } }
     assert.equal(parsed.images.attached, 1)
     assert.equal(parsed.images.delivery, 'job-notice')
@@ -935,14 +938,14 @@ test('原生 tool-jobs 一起装配：作业完成只开一次驱动，图片消
       assert.equal(messages.length, 2, `本批应恰好两条消息，实际 ${messages.length}：${JSON.stringify(messages.map(m => m.source))}`)
       // 批次里只能有一条"唤醒车道"（next-turn）的消息：多出来的那一条就是本插件自己的图片消息，
       // 它走的是 inject（next-step），不新开驱动、不新开 Agent。
-      const image = messages.find(message => message.source?.plugin === 'lyapunov-blender')
-      const native = messages.filter(message => message.source?.plugin === 'tool-jobs')
+      const image = messages.find(message => message.source?.kind === 'lyapunov-blender')
+      const native = messages.filter(message => message.source?.kind === 'tool-jobs')
       assert.ok(image, `本插件的图片通知必须在这批里：${JSON.stringify(messages.map(m => m.source))}`)
       assert.equal(native.length, 1, `原生完成通知只发一次：${JSON.stringify(messages.map(m => m.source))}`)
       // Inbox claim 的顺序 = 先 next-step 整批、再一条 next-turn：图片消息排在前面，正说明它在 next-step 车道
       // （inject），而唤醒车道上只有原生那一条。
-      assert.equal(messages[0]?.source?.plugin, 'lyapunov-blender', `图片消息应走 inject（next-step）车道：${JSON.stringify(messages.map(m => m.source))}`)
-      assert.equal(messages[1]?.source?.plugin, 'tool-jobs')
+      assert.equal(messages[0]?.source?.kind, 'lyapunov-blender', `图片消息应走 inject（next-step）车道：${JSON.stringify(messages.map(m => m.source))}`)
+      assert.equal(messages[1]?.source?.kind, 'tool-jobs')
       // 真 Agent 的驱动**同一次启动**把两条都取走：turn 只有一个 = 唤醒只有一次。
       assert.equal(new Set(claimed.map(entry => entry.turn)).size, 1, '两条消息必须属于同一个 turn（同一次唤醒）')
       assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 }, '这条唤醒之后没有再多排一轮（本插件的图没有自己再开一次轮）')
@@ -954,7 +957,7 @@ test('原生 tool-jobs 一起装配：作业完成只开一次驱动，图片消
       assert.deepEqual((native[0]?.content ?? []).filter(block => block.type === 'image'), [], '原生完成通知不该带图（图由本插件的消息带）')
       assert.match(String(native[0]?.content[0]?.text ?? ''), new RegExp(`background job ${job.jobId}`))
       // 到此完成通知已经发出，才可以读作业结果（读会把作业标记为 reported，之后再读就没有通知了）。
-      const parsed = JSON.parse(harness.ctx.jobs.read(job.jobId as never, harness.agent).text) as { images: { attached: number; delivery: string } }
+      const parsed = JSON.parse((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')) as { images: { attached: number; delivery: string } }
       assert.equal(parsed.images.attached, 1)
       assert.equal(parsed.images.delivery, 'job-notice')
     } finally { offClaimed() }
@@ -974,7 +977,7 @@ test('后台取消：Blender 进程已完成、**附件保存期间**被 job_kil
   const killDuringSave = (): void => {
     const id = jobId
     jobId = undefined
-    if (id !== undefined) harness?.ctx.jobs.kill(id as never, harness!.agent, '附件保存期间取消')
+    if (id !== undefined) harness?.ctx.jobs.kill(id as never, harness!.agent?.id, '附件保存期间取消')
   }
   harness = await createHarness({ onSaveImage: killDuringSave })
   try {
@@ -982,10 +985,10 @@ test('后台取消：Blender 进程已完成、**附件保存期间**被 job_kil
     assert.equal(call.isError, false, resultText(call))
     const job = JSON.parse(String(call.value?.result)) as JobCall
     jobId = job.jobId
-    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent)).status, 'killed', '收尾阶段的取消必须落 killed，不能报 completed')
+    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent?.id)).status, 'killed', '收尾阶段的取消必须落 killed，不能报 completed')
     assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 }, '被取消的作业不能把图投进会话')
     assert.ok(harness.images.includes('preview.png'), '附件确实存下来了（取消发生在附件化之后）——所以这里靠的是投递门，不是"碰巧没图"')
-    const text = harness.ctx.jobs.read(job.jobId as never, harness.agent).text
+    const text = (harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')
     assert.match(text, /BLENDER_CANCELLED/)
     assert.match(text, /附件化阶段/)
   } finally {
@@ -1005,10 +1008,10 @@ test('后台取消：收尾读数（texture_query 取图）期间 job_kill → �
     const call = await harness.call({ output_directory: join(directory, 'world'), texture_query: 'plaster wall', background: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
     assert.equal(await waitUntil(() => fixture.requests.length > 0), true, '取图请求必须真的发出去')
-    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent, '收尾读数阶段取消'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 60_000, harness.agent)).status, 'killed', '取消不是失败：不能因为收尾抛错就报 failed')
+    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent?.id, '收尾读数阶段取消'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 60_000, harness.agent?.id)).status, 'killed', '取消不是失败：不能因为收尾抛错就报 failed')
     assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 })
-    assert.match(harness.ctx.jobs.read(job.jobId as never, harness.agent).text, /BLENDER_CANCELLED/)
+    assert.match((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? ''), /BLENDER_CANCELLED/)
   } finally {
     await harness.dispose()
     await fixture.close()
@@ -1035,13 +1038,13 @@ test('后台：调用信号已取消时不启动作业；作业启动后调用�
     // 信号已触发就返回 `tool call aborted before dispatch`，工具体根本不会被调用，因此这里读不到
     // 本插件自己的取消文本（插件里那道 `exec.signal.aborted` 门保的是不走注册表调度器的派发路径）。
     // 判据落在"尊重已取消请求"这件事本身：不报成功、不起作业、不往会话里塞消息。
-    const before = harness.ctx.jobs.list(harness.agent).length
+    const before = harness.ctx.jobs.list(harness.agent?.id).length
     const cancelled = new AbortController()
     cancelled.abort()
     const refused = await harness.call({ output_directory: join(directory, 'world-a'), background: true }, cancelled.signal)
     assert.equal(refused.isError, true, '已取消的调用不能报成功')
     assert.match(resultText(refused), /aborted before dispatch/)
-    assert.equal(harness.ctx.jobs.list(harness.agent).length, before, '已取消的调用不该起一个还要继续跑的作业')
+    assert.equal(harness.ctx.jobs.list(harness.agent?.id).length, before, '已取消的调用不该起一个还要继续跑的作业')
     assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 })
 
     // ② 调用正常返回后，调用方立刻撤销自己的信号：作业照跑、照投图。
@@ -1049,17 +1052,17 @@ test('后台：调用信号已取消时不启动作业；作业启动后调用�
     const call = await harness.call({ output_directory: join(directory, 'world-b'), background: true }, controller.signal)
     assert.equal(call.isError, false, resultText(call))
     const job = JSON.parse(String(call.value?.result)) as JobCall
-    const running = harness.ctx.jobs.read(job.jobId as never, harness.agent).snapshot.status
+    const running = harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).job.status
     controller.abort()
     assert.equal(running, 'running', '取消要发生在作业**还在跑**的时候，否则这条读数什么也证明不了')
     assert.equal(
-      (await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)).status,
+      (await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)).status,
       'completed',
       '调用信号取消不该打断已经启动的后台作业（要停它得用 job_kill）',
     )
     assert.equal(harness.pending().nextStep, 1, '作业照常完成并投图')
     assert.ok(harness.images.includes('preview.png'))
-    const parsed = JSON.parse(harness.ctx.jobs.read(job.jobId as never, harness.agent).text) as { images: { attached: number; delivery: string } }
+    const parsed = JSON.parse((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')) as { images: { attached: number; delivery: string } }
     assert.equal(parsed.images.attached, 1)
     assert.equal(parsed.images.delivery, 'job-notice')
   } finally {
@@ -1080,8 +1083,8 @@ test('后台取消/失败：**不发旧图**（磁盘上留着上一轮的 previ
       const call = await killing.call({ output_directory: output, background: true, render: true })
       const job = JSON.parse(String(call.value?.result)) as JobCall
       await new Promise(resolve => setTimeout(resolve, 300))
-      assert.equal(killing.ctx.jobs.kill(job.jobId as never, killing.agent, '测试取消'), 'requested')
-      assert.equal((await killing.ctx.jobs.wait(job.jobId as never, 15_000, killing.agent)).status, 'killed')
+      assert.equal(killing.ctx.jobs.kill(job.jobId as never, killing.agent?.id, '测试取消'), 'requested')
+      assert.equal((await killing.ctx.jobs.wait(job.jobId as never, 15_000, killing.agent?.id)).status, 'killed')
       assert.deepEqual(killing.pending(), { nextStep: 0, nextTurn: 0 }, '取消的作业不能往会话里投图')
       assert.equal(killing.images.length, 0)
     } finally { await killing.dispose() }
@@ -1091,7 +1094,7 @@ test('后台取消/失败：**不发旧图**（磁盘上留着上一轮的 previ
     try {
       const call = await failing.call({ output_directory: output, background: true, render: true })
       const job = JSON.parse(String(call.value?.result)) as JobCall
-      assert.equal((await failing.ctx.jobs.wait(job.jobId as never, 15_000, failing.agent)).status, 'failed')
+      assert.equal((await failing.ctx.jobs.wait(job.jobId as never, 15_000, failing.agent?.id)).status, 'failed')
       assert.deepEqual(failing.pending(), { nextStep: 0, nextTurn: 0 }, '失败的作业不能把上一轮的图当成本次结果投出去')
       assert.equal(failing.images.length, 0)
     } finally { await failing.dispose() }
@@ -1109,8 +1112,8 @@ test('后台：投递失败要如实记录（owner 已释放 / inject 抛错）�
     try {
       const call = await harness.call({ output_directory: join(directory, 'world'), fixture: true, render: true, background: true })
       const job = JSON.parse(String(call.value?.result)) as JobCall
-      assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent)).status, 'completed')
-      const parsed = JSON.parse(harness.ctx.jobs.read(job.jobId as never, harness.agent).text) as { images: { attached: number; delivery: string; deliveryError?: string } }
+      assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent?.id)).status, 'completed')
+      const parsed = JSON.parse((harness.ctx.jobs.read(job.jobId as never, harness.agent?.id).result ?? '')) as { images: { attached: number; delivery: string; deliveryError?: string } }
       assert.equal(parsed.images.delivery, 'none')
       assert.match(parsed.images.deliveryError ?? '', /投递失败/)
       assert.match(parsed.images.deliveryError ?? '', /blender-run-test-delivery-fail/)
@@ -1123,13 +1126,58 @@ test('后台：投递失败要如实记录（owner 已释放 / inject 抛错）�
 })
 
 // ── 11. blender_job_images：复用原生作业输出，不新建任务缓存 ─────────────────────
+test('blender_job_images：重复取图不吞一次原生result，结果产物缺件/错代次/破损必须拒绝', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'blender-jobimg-rc2-'))
+  const output = join(directory, 'world'), preview = join(directory, 'preview.png')
+  await writeFile(preview, tinyPng())
+  const result = JSON.stringify({ scene: join(directory, 'scene.json'), preview })
+  const harness = await createHarness({ executable: await fakeExecutable(directory, `printf '${PREFIX}%s\\n' '${result}'`) })
+  try {
+    const started = await harness.call({ output_directory: output, background: true, render: true })
+    const job = JSON.parse(String(started.value?.result)) as JobCall
+    await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent.id)
+    for (let i = 0; i < 2; i++) {
+      const pulled = await harness.callTool('blender_job_images', { job_id: job.jobId })
+      assert.equal(pulled.isError, false, resultText(pulled))
+      assert.equal(pulled.content?.filter(block => block.type === 'image').length, 1)
+    }
+    const collected = harness.ctx.jobs.read(job.jobId as never, harness.agent.id)
+    assert.equal(JSON.parse(collected.result!).preview, preview)
+    assert.equal(harness.ctx.jobs.read(job.jobId as never, harness.agent.id).result, undefined)
+    const again = await harness.callTool('blender_job_images', { job_id: job.jobId })
+    assert.equal(again.isError, false, '模型已经读过result后仍能重复取图')
+    await harness.reloadPlugin()
+    assert.equal(harness.ctx.jobs.list(harness.agent.id).length, 1)
+    const reloaded = await harness.callTool('blender_job_images', { job_id: job.jobId })
+    assert.equal(reloaded.isError, false, '插件重载后仍从同一Job结果产物重复取图')
+    const path = join(output, `.lyapunov-job-result-${job.jobId}.json`)
+    const original = await readFile(path, 'utf8')
+    const receipt = JSON.parse(original)
+    for (const patch of [{ registryId: 'another-registry' }, { startedAt: receipt.startedAt + 1 }, { result: '{}' }]) {
+      await writeFile(path, JSON.stringify({ ...receipt, ...patch }))
+      const unavailable = await harness.callTool('blender_job_images', { job_id: job.jobId })
+      assert.equal(unavailable.isError, true)
+      assert.match(resultText(unavailable), /身份或完整性不匹配/)
+      assert.equal(unavailable.content?.filter(block => block.type === 'image').length, 0)
+    }
+    await rm(path)
+    const missing = await harness.callTool('blender_job_images', { job_id: job.jobId })
+    assert.equal(missing.isError, true)
+    assert.match(resultText(missing), /结果产物不可读取/)
+    assert.equal(missing.content?.filter(block => block.type === 'image').length, 0)
+  } finally {
+    await harness.dispose()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('blender_job_images：已完成作业的图能取回上下文；结果显示 jobId/status/images', { skip: skipWithoutBlender }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'blender-jobimg-'))
   const harness = await createHarness({})
   try {
     const call = await harness.call({ output_directory: join(directory, 'world'), fixture: true, render: true, background: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
-    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent)).status, 'completed')
+    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 120_000, harness.agent?.id)).status, 'completed')
     harness.claimNextStep() // 先取走完成通知，避免把两种投递混在一起看
     const pulled = await harness.callTool('blender_job_images', { job_id: job.jobId })
     assert.equal(pulled.isError, false, resultText(pulled))
@@ -1159,8 +1207,8 @@ test('blender_job_images：取消的作业拒绝发图（旧的 preview.png 还�
     const call = await harness.call({ output_directory: output, background: true, render: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
     await new Promise(resolve => setTimeout(resolve, 300))
-    harness.ctx.jobs.kill(job.jobId as never, harness.agent, '测试取消')
-    await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)
+    harness.ctx.jobs.kill(job.jobId as never, harness.agent?.id, '测试取消')
+    await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)
     const pulled = await harness.callTool('blender_job_images', { job_id: job.jobId })
     assert.equal(pulled.isError, true, '取消的作业不能发图')
     assert.match(resultText(pulled), /BLENDER_JOB_IMAGES_UNAVAILABLE/)
@@ -1190,10 +1238,10 @@ test('blender_job_images：只认本插件产出的作业（kind 不是 blender 
     const foreign = harness.ctx.jobs.start({
       kind: 'bash',
       label: 'sleep 30',
-      owner: harness.agent,
-      run: () => ({ cancel: () => undefined, done: Promise.resolve({ status: 'completed' as const, output: result }) }),
+      owner: harness.agent?.id,
+      run: () => ({ cancel: () => undefined, done: Promise.resolve({ status: 'completed' as const, result: result }) }),
     })
-    assert.equal((await harness.ctx.jobs.wait(foreign as never, 15_000, harness.agent)).status, 'completed')
+    assert.equal((await harness.ctx.jobs.wait(foreign as never, 15_000, harness.agent?.id)).status, 'completed')
     const call = await harness.callTool('blender_job_images', { job_id: foreign })
     assert.equal(call.isError, true, '别的 kind 的作业不能当 Blender 结果解析')
     assert.match(resultText(call), /BLENDER_JOB_IMAGES_UNAVAILABLE/)
@@ -1220,7 +1268,7 @@ test('blender_job_images：limit 有界——必须是正整数，传超过上�
   try {
     const call = await harness.call({ output_directory: join(directory, 'world'), background: true, render: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
-    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)).status, 'completed')
+    assert.equal((await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)).status, 'completed')
     // 0 / 负数不是"取几张"的合法说法：参数合同层只保证整数，取值合不合约由本工具判，理由指向 limit 本身。
     for (const limit of [0, -1]) {
       const bad = await harness.callTool('blender_job_images', { job_id: job.jobId, limit })
@@ -1255,6 +1303,9 @@ test('blender_job_images：别的会话读不到本会话的作业（原生 owne
   try {
     const call = await harness.call({ output_directory: join(directory, 'world'), background: true })
     const job = JSON.parse(String(call.value?.result)) as JobCall
+    const unfinished = await harness.callTool('blender_job_images', { job_id: job.jobId })
+    assert.equal(unfinished.isError, true)
+    assert.match(resultText(unfinished), /running/)
     const outsider = await harness.createAgent('blender-run-outsider')
     const foreign = await harness.callTool('blender_job_images', { job_id: job.jobId }, { caller: outsider })
     assert.equal(foreign.isError, true, '别的会话不能读本会话的作业')
@@ -1263,8 +1314,8 @@ test('blender_job_images：别的会话读不到本会话的作业（原生 owne
     const unknown = await harness.callTool('blender_job_images', { job_id: 'blender-999999' })
     assert.equal(unknown.isError, true)
     assert.match(resultText(unknown), /blender-999999/)
-    harness.ctx.jobs.kill(job.jobId as never, harness.agent, '收尾')
-    await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)
+    harness.ctx.jobs.kill(job.jobId as never, harness.agent?.id, '收尾')
+    await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -1580,8 +1631,8 @@ test('后台作业：贴图取图在作业内进行，job_kill 能取消在途�
     const call = await harness.call({ output_directory: join(directory, 'world'), background: true, material_textures: JSON.stringify({ 灰泥: 'plaster wall' }) })
     const job = JSON.parse(String(call.value?.result)) as JobCall
     await new Promise(resolve => setTimeout(resolve, 400))
-    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent, '测试取消'), 'requested')
-    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent)
+    assert.equal(harness.ctx.jobs.kill(job.jobId as never, harness.agent?.id, '测试取消'), 'requested')
+    const snapshot = await harness.ctx.jobs.wait(job.jobId as never, 15_000, harness.agent?.id)
     assert.equal(snapshot.status, 'killed')
     assert.equal(await waitUntil(() => fixture.aborted.length >= 1), true, 'job_kill 必须把在途的贴图下载一起取消')
     assert.deepEqual(harness.pending(), { nextStep: 0, nextTurn: 0 }, '取消的作业不发完成通知')
@@ -1700,7 +1751,7 @@ const controlOf = (call: ToolCall): ControlReading => {
 }
 /** 本会话里 blender 作业的 id 集合（负对照"不得出现第二个 jobId"的机器判据）。 */
 const blenderJobIds = (harness: Harness): string[] =>
-  harness.ctx.jobs.list(harness.agent).filter(job => job.kind === 'blender').map(job => String(job.id)).sort()
+  harness.ctx.jobs.list(harness.agent?.id).filter(job => job.kind === 'blender').map(job => String(job.id)).sort()
 /** 假可执行文件：把每次收到的 argv 追加落盘，然后长时间 sleep（好让 pause 有东西可停）。 */
 async function recordingExecutable(directory: string, log: string, tail = 'sleep 30'): Promise<string> {
   return await fakeExecutable(directory, `printf '%s\\n' "$*" >> '${log}'\n${tail}`)
@@ -1744,7 +1795,7 @@ test('ENV-57①：pause→resume 后 jobId 逐字相同、作业记录数不变�
     assert.equal(paused.resumeCount, 0)
     // 负对照（本项机制的因果链）：暂停**不落定**记录 ⇒ 原生状态照实是 running。
     assert.equal(paused.nativeStatus, 'running')
-    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent).snapshot.status, 'running', '暂停不落定：原生状态必须仍是 running')
+    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent?.id).job.status, 'running', '暂停不落定：原生状态必须仍是 running')
     const onDisk = JSON.parse(await readFile(stateFileOf(output), 'utf8')) as Record<string, unknown>
     assert.equal(onDisk.state, 'paused')
     assert.equal(onDisk.jobId, jobId, '状态文件里的 jobId 必须就是这条作业')
@@ -1771,8 +1822,8 @@ test('ENV-57①：pause→resume 后 jobId 逐字相同、作业记录数不变�
     assert.equal(resumed.resumeCount, 1)
     assert.equal(resumed.resumedWith, '原 argv（本作业还没有 source.blend）', '没有 source.blend 时如实回落原 argv，不假装用了源工程')
     assert.deepEqual(blenderJobIds(harness), [jobId], 'resume 不得新铸第二个 jobId')
-    assert.equal(harness.ctx.jobs.list(harness.agent).length, 1, '全过程只有一条作业记录')
-    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent).snapshot.status, 'running')
+    assert.equal(harness.ctx.jobs.list(harness.agent?.id).length, 1, '全过程只有一条作业记录')
+    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent?.id).job.status, 'running')
     // 恢复后原生面：同一条 id 还在，仍是 running（这一次是真的在跑），行数不变 ⇒ 没有第二个作业。
     const listedAfterResume = nativeJobListText(await harness.callTool('job_list', {}))
     assert.deepEqual(listedBlenderIds(listedAfterResume), [jobId])
@@ -1784,8 +1835,8 @@ test('ENV-57①：pause→resume 后 jobId 逐字相同、作业记录数不变�
     assert.ok(second.includes('--factory-startup'), `没有 source.blend ⇒ 恢复如实回落原 argv：${second}`)
 
     // 收尾：真终态仍然是 job_kill（暂停/恢复不改变取消语义）
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'killed')
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -1799,9 +1850,9 @@ test('ENV-57②：终态作业 resume ⇒ ALREADY_FINISHED，且作业记录数�
     const call = await harness.call({ output_directory: join(directory, 'world'), background: true })
     assert.equal(call.isError, false, resultText(call))
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'completed')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'completed')
     const idsBefore = blenderJobIds(harness)
-    const recordsBefore = harness.ctx.jobs.list(harness.agent).length
+    const recordsBefore = harness.ctx.jobs.list(harness.agent?.id).length
     // 原生 `job_list` 原文快照（终态：completed）——被拒绝的 resume 之后必须**逐字不变**。
     const listedBefore = nativeJobListText(await harness.callTool('job_list', {}))
     assert.match(listedBefore, new RegExp(`^${jobId} \\[blender\\] completed`, 'm'))
@@ -1814,7 +1865,7 @@ test('ENV-57②：终态作业 resume ⇒ ALREADY_FINISHED，且作业记录数�
     assert.match(resultText(pause), /BLENDER_JOB_PAUSE_ALREADY_FINISHED/)
     // 核心负对照：两条被拒绝的控制动作都**没有**产生第二条作业记录、也没有新 jobId。
     assert.deepEqual(blenderJobIds(harness), idsBefore, '被拒绝的 resume 不得新铸第二个 jobId')
-    assert.equal(harness.ctx.jobs.list(harness.agent).length, recordsBefore, '被拒绝的 resume 不得新增作业记录')
+    assert.equal(harness.ctx.jobs.list(harness.agent?.id).length, recordsBefore, '被拒绝的 resume 不得新增作业记录')
     const listedAfter = nativeJobListText(await harness.callTool('job_list', {}))
     assert.equal(listedAfter, listedBefore, '原生 job_list 必须逐字不变（行数、id、状态都不变）')
     assert.equal(listedBlenderRows(listedAfter), 1, 'job_list 里 blender 作业行数恒为 1（不得出现第二个 jobId）')
@@ -1840,12 +1891,12 @@ test('ENV-57③：从未暂停的 running 作业 resume ⇒ NOT_PAUSED（且不�
     assert.equal(resume.isError, true)
     assert.match(resultText(resume), /BLENDER_JOB_RESUME_NOT_PAUSED/)
     assert.deepEqual(blenderJobIds(harness), [jobId], '被拒绝的 resume 不得新铸第二个 jobId')
-    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent).snapshot.status, 'running')
+    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent?.id).job.status, 'running')
     // 负对照：状态文件不该因为一次被拒绝的 resume 而凭空出现（没有暂停过就没有检查点）
     assert.equal(existsSync(stateFileOf(output)), false, '从未暂停的作业不该有暂停状态文件')
     assert.equal((await argvLines(log)).length, 1, '被拒绝的 resume 不得起第二个子进程')
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'killed')
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -1859,10 +1910,10 @@ test('ENV-57④：kind≠blender ⇒ NOT_BLENDER；未知/他人会话 jobId 用
   try {
     // ① kind=bash 的作业（最小生产者）：三种 action 都必须按 kind 拒绝，并指出正确的读法。
     const foreign = harness.ctx.jobs.start({
-      kind: 'bash', label: 'sleep 30', owner: harness.agent,
-      run: () => ({ cancel: () => undefined, done: Promise.resolve({ status: 'completed' as const, output: 'bash 输出' }) }),
+      kind: 'bash', label: 'sleep 30', owner: harness.agent?.id,
+      run: () => ({ cancel: () => undefined, done: Promise.resolve({ status: 'completed' as const, result: 'bash 输出' }) }),
     })
-    assert.equal((await harness.ctx.jobs.wait(foreign as never, 15_000, harness.agent)).status, 'completed')
+    assert.equal((await harness.ctx.jobs.wait(foreign as never, 15_000, harness.agent?.id)).status, 'completed')
     for (const action of ['pause', 'resume', 'status']) {
       const call = await harness.callTool('blender_job_control', { job_id: foreign, action })
       assert.equal(call.isError, true, `kind=bash 的作业不该接受 ${action}`)
@@ -1888,8 +1939,8 @@ test('ENV-57④：kind≠blender ⇒ NOT_BLENDER；未知/他人会话 jobId 用
       assert.doesNotMatch(resultText(call), /BLENDER_JOB_CONTROL|BLENDER_JOB_RESUME|BLENDER_JOB_PAUSE/)
     }
     // 收尾：用**它的 owner** 取消，避免留下活作业
-    assert.equal(harness.ctx.jobs.kill(otherJob as never, other, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(otherJob as never, 15_000, other)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(otherJob as never, other?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(otherJob as never, 15_000, other?.id)).status, 'killed')
     // 负对照：暂停/恢复拒绝路径不得在本会话里留下任何 blender 作业记录
     assert.deepEqual(blenderJobIds(harness), [])
     assert.equal(existsSync(stateFileOf(output)), false, '被拒绝的控制动作不得写出暂停状态文件')
@@ -1919,8 +1970,8 @@ test('ENV-57⑤：pause 幂等——第二次不重复写状态文件、不重�
     assert.equal(await readFile(stateFileOf(output), 'utf8'), fileAfterFirst, '幂等：状态文件逐字不变')
     assert.deepEqual(blenderJobIds(harness), [jobId], '幂等：不得出现第二个作业')
     assert.equal((await argvLines(log)).length, 1, '幂等：不得再起一个子进程')
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'killed')
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -1946,7 +1997,7 @@ test('ENV-57⑥：resume 时输入源与检查点不符 ⇒ INPUT_MISMATCH，且
     assert.match(resultText(mismatch), /argvDigest/)
     // 负对照：被拒绝的 resume 不得偷跑——作业仍在暂停、没有第二个子进程、没有新作业。
     assert.equal(controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'status' })).state, 'paused')
-    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent).snapshot.status, 'running')
+    assert.equal(harness.ctx.jobs.read(jobId as never, harness.agent?.id).job.status, 'running')
     assert.equal((await argvLines(log)).length, 1, '被拒绝的 resume 不得起第二个子进程')
     assert.deepEqual(blenderJobIds(harness), [jobId])
 
@@ -1964,8 +2015,8 @@ test('ENV-57⑥：resume 时输入源与检查点不符 ⇒ INPUT_MISMATCH，且
     const ok = controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'resume' }))
     assert.equal(ok.jobId, jobId)
     await waitFor(async () => (await argvLines(log)).length >= 2, 8000, '恢复后第二个子进程起来')
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'killed')
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -1982,10 +2033,10 @@ test('ENV-57：暂停中 job_kill 必须落定（否则 owner 释放会卡在 aw
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
     assert.equal(controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'pause' })).state, 'paused')
     // 暂停中的作业被 kill：有界 wait 必须**返回**（卡住的话这里就超时失败，而不是"看起来通过"）。
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, '暂停中取消'), 'requested')
-    const snapshot = await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, '暂停中取消'), 'requested')
+    const snapshot = await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)
     assert.equal(snapshot.status, 'killed', '暂停中 job_kill 必须落定（不能卡在 await job.settled）')
-    assert.match(harness.ctx.jobs.read(jobId as never, harness.agent).text, /BLENDER_CANCELLED/)
+    assert.match((harness.ctx.jobs.read(jobId as never, harness.agent?.id).result ?? ''), /BLENDER_CANCELLED/)
     // 落定之后：resume 只能 ALREADY_FINISHED（暂停不跨宿主重启的同一条道理）。
     const after = await harness.callTool('blender_job_control', { job_id: jobId, action: 'resume' })
     assert.equal(after.isError, true)
@@ -2023,8 +2074,8 @@ test('ENV-57 A5：resume 打开本作业的 output/source.blend（保住工程�
     assert.equal(secondTokens.includes('--factory-startup'), false, `恢复不得再用 --factory-startup：${second}`)
     assert.equal(first.split(' ')[1], '--factory-startup', '第一次尝试仍是调用方原本的输入（本用例没给 source_blend）')
     assert.deepEqual(blenderJobIds(harness), [jobId], 'A5 不改变 jobId：仍是同一条作业')
-    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent, 'ENV-57 测试收尾'), 'requested')
-    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent)).status, 'killed')
+    assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, 'ENV-57 测试收尾'), 'requested')
+    assert.equal((await harness.ctx.jobs.wait(jobId as never, 15_000, harness.agent?.id)).status, 'killed')
   } finally {
     await harness.dispose()
     await rm(directory, { recursive: true, force: true })
@@ -2087,7 +2138,7 @@ printf '${PREFIX}{"scene":"/w/scene.json"}\\n'`)
     const resumed = controlOf(await pausedHarness.callTool('blender_job_control', { job_id: jobId, action: 'resume' }))
     assert.equal(resumed.jobId, jobId, 'resume 逐字沿用同一个 jobId')
     assert.equal(resumed.resumeCount, 1)
-    assert.equal((await pausedHarness.ctx.jobs.wait(jobId as never, 30_000, pausedHarness.agent)).status, 'completed', '恢复轮必须真的跑完（本用例的前提）')
+    assert.equal((await pausedHarness.ctx.jobs.wait(jobId as never, 30_000, pausedHarness.agent?.id)).status, 'completed', '恢复轮必须真的跑完（本用例的前提）')
     const status = controlOf(await pausedHarness.callTool('blender_job_control', { job_id: jobId, action: 'status' }))
     assert.equal(status.nativeStatus, 'completed')
     assert.deepEqual(status.completedPhases, ['textures', 'blender'],
@@ -2105,7 +2156,7 @@ printf '${PREFIX}{"scene":"/w/scene.json"}\\n'`)
     const plain = await plainHarness.call({ output_directory: join(directory, 'world-plain'), background: true, material_textures: textures })
     assert.equal(plain.isError, false, resultText(plain))
     const plainId = (JSON.parse(String(plain.value?.result)) as JobCall).jobId
-    assert.equal((await plainHarness.ctx.jobs.wait(plainId as never, 30_000, plainHarness.agent)).status, 'completed')
+    assert.equal((await plainHarness.ctx.jobs.wait(plainId as never, 30_000, plainHarness.agent?.id)).status, 'completed')
     const plainStatus = controlOf(await plainHarness.callTool('blender_job_control', { job_id: plainId, action: 'status' }))
     assert.deepEqual(plainStatus.completedPhases, ['textures', 'blender'],
       `一次跑完的作业也不许只报取图：${JSON.stringify(plainStatus.completedPhases)}`)

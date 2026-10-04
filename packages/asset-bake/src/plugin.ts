@@ -35,6 +35,6 @@ export function apply(ctx:Context,config:Config={}){
    return route.physicalize?physicalize(route.injectStrategy?{...request,strategy:route.injectStrategy}:request,{python,signal,execute}):execute(request)
   }
   if(!args.background)return {result:JSON.stringify(await run(exec.signal))}
-  const controller=new AbortController();exec.signal.addEventListener('abort',()=>controller.abort(),{once:true});const jobId=ctx.jobs.start({kind:'lyapunov-provider',label:'asset_bake',owner:exec.agent,run:()=>({cancel:()=>controller.abort(),done:run(controller.signal).then(value=>({status:'completed' as const,output:JSON.stringify(value)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,output:String(error)}))})});return {result:JSON.stringify({jobId})}
+  if(exec.signal.aborted)throw exec.signal.reason??new Error('Cancelled before background Job registration');const controller=new AbortController();const jobId=ctx.jobs.start({kind:'lyapunov-provider',label:'asset_bake',owner:exec.agent?.id,run:()=>({cancel:()=>controller.abort(),done:run(controller.signal).then(value=>({status:'completed' as const,result:JSON.stringify(value)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)}))})});return {result:JSON.stringify({jobId})}
  }}))
 }

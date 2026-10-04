@@ -38,7 +38,7 @@ export interface FullscreenStatus {
   readonly attachments: number
   readonly pendingApprovals: readonly string[]
   readonly pendingQuestions: readonly string[]
-  readonly jobs: number
+  readonly jobs?: number
   /** 最近一次用户可见的全屏提示（例如焦点切换）。 */
   readonly note?: string
 }
@@ -276,7 +276,7 @@ export function renderFrame(view: FullscreenView): string[] {
   // 第 1 行：身份、会话、运行中任务与焦点标签（全屏固定区域，不是行式重画）。
   const running = [
     view.status.agentStatus ?? '无会话',
-    view.status.jobs ? `Jobs ${view.status.jobs}` : '',
+    view.status.jobs === undefined ? 'Jobs ?' : `Jobs ${view.status.jobs}`,
     view.status.pendingApprovals.length ? `待审批 ${view.status.pendingApprovals.length}` : '',
     view.status.pendingQuestions.length ? `待问答 ${view.status.pendingQuestions.length}` : '',
   ].filter(Boolean).join(' · ')

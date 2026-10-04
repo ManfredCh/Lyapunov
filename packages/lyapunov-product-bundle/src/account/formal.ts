@@ -1,5 +1,5 @@
 import {createAccountClient,normalizeAccountApiUrl,type AccountMe} from "./client.ts"
-import type {Config as PiAiConfig} from "@deepseek-ai/dsh-llm-pi-ai"
+import type {Options as PiAiOptions} from "@deepseek-ai/dsh-llm-pi-ai"
 
 export interface VerifiedAccount {
   apiUrl:string
@@ -22,7 +22,7 @@ export async function verifyFormalAccount(input:{apiUrl:string;token:string;fetc
 
 /** 使用 DSH 原生 OpenAI-compatible Provider；Key仍是可撤销的用户会话，计费留在中央服务。 */
 export function formalModelRows(account:Pick<VerifiedAccount,"apiUrl">){
-  const llm:PiAiConfig={providers:{"lyapunov-plans":{
+  const llm:PiAiOptions={providers:{"lyapunov-plans":{
     displayName:"peiri",apiKeyEnv:"LYAPUNOV_ACCOUNT_TOKEN",api:"openai-completions",baseURL:account.apiUrl+"/v1",
     compat:{supportsStore:false,supportsUsageInStreaming:true,supportsReasoningEffort:false},
     retryPolicy:{mode:'normal',maxRetries:5},

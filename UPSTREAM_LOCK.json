@@ -1,14 +1,14 @@
 {
-  "repository": "https://github.com/ManfredCh/deepseek-harness.git",
-  "commit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
-  "version": "0.1.6-alpha.1",
+  "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+  "commit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+  "version": "0.2.0-rc.2",
   "directory": ".upstream/deepseek-harness-20260911-candidate",
-  "registryStatus": "2026-09-11 已获取官方 dsh-v0.1.5-rc.2 标签并从同一commit构建；不依赖npm版本替代。2026-09-14 起钉死自有 fork（ManfredCh/deepseek-harness）的 lyapunov-patched 分支头：基线 fb2c4b9e + 14 个 vendored 补丁逐个成 commit；上游更新经 fetch 官方 tags 后 rebase 控制节奏。2026-09-15 14 个补丁 rebase 到官方 dsh-v0.1.6-alpha.1（分支 lyapunov-patched-0.1.6，remote-node-transport 部分被上游 installConnection 吸收；0.1.6 原生含侧边栏终端，产品自研底部贯通栏随之退役）。2026-09-16 官方 master 前进 5 个提交（worktree-bootfast2 启动性能系列，无新标签、无 computer-use 新功能——computer-use/browser-use 包组随 0.1.6 引入且已在本检出内），14 个补丁零冲突 rebase 到 master 0d1f50007f（分支头 abf8fce718，force-with-lease 推送）；computer-use(native cua-driver)同日起经 runtime-patch 挂载进产品。2026-09-16 第 15 个补丁 dsh-preset-skill-roots:standard preset 的 skill-filesystem 设 includeDefaultRoots=false,收敛技能目录只含产品显式装配(用户级 ~/.agents 与项目根 .agents 技能不再泄漏进产品会话),分支头 93bc1184dd80。2026-09-18 第 16 个补丁 dsh-goal-guardrails:goal 工具的完成与阻塞补上否定清单(不许仅因困难/缓慢/不确定/不完整/想澄清就标 blocked;不许因预算将尽或自行停工就标 complete),并拆开续跑提示词中把取证与完成并置的一句;分支头 7c3f05885033aa3aed74904d59a94692d12a47f7,17 个补丁零冲突(already-in-branch 9 + already-applied 6 + applied 2)。",
+  "registryStatus": "Alpha5：按用户stable优先/无stable则最新RC规则固定官方0.2.0-rc.2。旧产品补丁逐项语义迁移；以新的完整性记录和实际测试签收，不使用Alpha，也不复用Alpha4验收声明。",
   "upstreamBase": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "commit": "0d1f50007f9bca3f52b06e1c3074fa14d5fb0720",
-    "tag": "dsh-v0.1.6-alpha.1",
-    "patchedBranch": "lyapunov-patched-0.1.6"
+    "commit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "tag": "dsh-v0.2.0-rc.2",
+    "patchedBranch": "lyapunov-alpha5-rc2"
   },
   "productPackageManager": "bun@1.3.13",
   "upstreamPackageManager": "pnpm@11.7.0",
@@ -433,10 +433,9 @@
     "scope": "仅同hash已可见正文的Tool默认复用说明English；机器变量/去重逻辑/raw正文与来源保留"
   },
   "sdkSourceIntegrity": {
-    "file": "script/sdk-source-integrity.json",
-    "sha256": "23e852d7873ad044fc5e51d89f69e03dd4d23d130818927eb36ba52a295a08f1",
-    "baseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
-    "scope": "固定7c全部tracked未覆本体＋已签完整registry合法stage/final；unknown新增源码拒绝，标准ignoreddeps/cache/build按实际Git约束保留"
+    "file": "script/sdk-source-integrity-rc2.json",
+    "baseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "sha256": "ee6b87570f0593a91a41b62431cfb95d1072e01303af061b3d6a42b6c6e11887"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -464,5 +463,16 @@
       "@deepseek-ai/dsh-client-ui-conversation"
     ],
     "scope": "普通文本、引用与附件统一沿原生提交事务保留草稿至Host准入ACK；失败原件保留、重复提交受同一事务约束。既有registry先完整消费验final，再应用精确后继delta并验新全源final；不改原生Queue、Session事件格式或模型请求预算。"
+  },
+  "sdkSourceIntegrityLegacy": {
+    "file": "script/sdk-source-integrity.json",
+    "sha256": "23e852d7873ad044fc5e51d89f69e03dd4d23d130818927eb36ba52a295a08f1",
+    "baseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
+    "scope": "固定7c全部tracked未覆本体＋已签完整registry合法stage/final；unknown新增源码拒绝，标准ignoreddeps/cache/build按实际Git约束保留"
+  },
+  "sdkProductPatch": {
+    "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
+    "baseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "sha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1"
   }
 }

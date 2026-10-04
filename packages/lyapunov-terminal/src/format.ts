@@ -14,7 +14,6 @@ export function contentText(content: readonly ContentBlock[]): string {
       case 'text': return block.text
       case 'reasoning': return `[思考] ${block.text}`
       case 'tool-call': return `[工具 ${block.name}] ${block.arguments}`
-      case 'tool-result': return `[工具结果 ${block.toolCallId}${block.isError ? ' 错误' : ''}] ${contentText(block.content)}`
       default: return `[${block.type}] ${JSON.stringify(block)}`
     }
   }).join('\n')
@@ -39,7 +38,10 @@ export function eventText(event: SessionEvent): string | undefined {
     case 'user/message': return event.data.source.kind === 'user' ? `[用户] ${contentText(event.data.content)}` : undefined
     case 'assistant/message': return `[模型] ${contentText(event.data.message.content)}`
     case 'tool/call': return `[工具调用 ${event.data.name}] ${event.data.arguments}`
-    case 'tool/result': return contentText(event.data.message.content)
+    case 'tool/result': {
+      const message = event.data.message
+      return `[工具结果 ${message.toolCallId}${message.isError ? ' 错误' : ''}] ${contentText(message.content)}`
+    }
     case 'command/done': return `[命令 ${event.data.kind}] ${event.data.text ?? ''}`
     case 'turn/end': return `[轮次结束] ${JSON.stringify(event.data.reason)}`
     case 'approval/decided': return `[审批结果] ${event.data.outcome}`

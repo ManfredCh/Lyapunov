@@ -19,7 +19,7 @@ import type {Context} from "@deepseek-ai/cordis"
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client"
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client"
 import type {} from "@deepseek-ai/dsh-client-locale/client"
-import type {SettingsScope} from "@deepseek-ai/dsh-client-ui-settings/client"
+import type {ConfigForm} from "@deepseek-ai/dsh-client-ui-settings/client"
 import type {ISessions} from "@deepseek-ai/dsh-api-session-controller/client"
 import type {} from "../../lyapunov-contracts/src/workbench-slots.ts"
 import {WORKSPACE_PREFERENCES,type WorkspacePreferences} from "./preferences.ts"
@@ -38,9 +38,9 @@ export function apply(ctx:Context){
     zh:{open:"文件与终端",unmounted:"工作区状态未挂载：请确认工作台插件已加载。"},
     en:{open:"Files & terminal",unmounted:"Workspace state is not mounted; make sure the workbench plugin is loaded."},
   }))
-  ctx.inject(["settingsScope","sessions","conversation"],owner=>{
-    const scope=owner.settingsScope.bind<WorkspacePreferences>({namespace:WORKSPACE_PREFERENCES}),sessions=owner.get("sessions") as unknown as ISessions
-    const surface:WorkspaceSurface={scope,navigateFiles:options=>options.section==="search"||options.section==="review"||options.picker||options.newWorktree?owner.sidebarRight.openTab("lyapunov.workspace.tools",{params:options}):owner.sidebarRight.openTab("files"),current:id=>sessions.list.getSnapshot().current===id,addSelection:(id,selection)=>addSelectionToContext(owner,id,selection)}
+  ctx.inject(["configForms","sessions","conversation"],owner=>{
+    const scope=owner.configForms.get<WorkspacePreferences>(WORKSPACE_PREFERENCES),sessions=owner.get("sessions") as unknown as ISessions
+    const surface:WorkspaceSurface={scope,navigateFiles:options=>options.section==="search"||options.section==="review"||options.picker||options.newWorktree?owner.sidebarRight.openTab("lyapunov.workspace.tools",{params:options}):owner.sidebarRight.openTab("files"),current:id=>Object.values(sessions.list.getSnapshot().byId).some(row=>row?.id===id&&(row.retainedBy.mainView??0)>0),addSelection:(id,selection)=>addSelectionToContext(owner,id,selection)}
     registerWorkspaceTabs(owner,surface)
     owner.slots.inject("lyapunov.workbench.session",()=>owner.slots.register({
       name:"lyapunov.workbench.session",registrant:"lyapunov-workspace",locale:"lyapunovWorkspace",

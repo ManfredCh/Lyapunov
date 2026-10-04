@@ -472,9 +472,12 @@ function commandFor(entry: ManifestEntry, root: string): { cmd: string | null; a
   const bun = resolveBun()
   // 解析不出执行器 ⇒ **不许拿名字去 spawn**（那只会得到 ENOENT/127，且会被误读成"用例失败"）。
   if (bun === null) return { cmd: null, args: [], executedBy: '-' }
-  if (entry.declaredRunner === 'plain') return { cmd: bun, args: ['--no-env-file', file], executedBy: bun }
+  // 产品消费已构建SDK；固定本项目配置，防SDK的source paths产生第二份运行实例。
+  const tsconfig = resolve(root, 'tsconfig.json')
+  const flags = ['--no-env-file', ...(existsSync(tsconfig) ? [`--tsconfig-override=${tsconfig}`] : [])]
+  if (entry.declaredRunner === 'plain') return { cmd: bun, args: existsSync(tsconfig) ? ['run', ...flags, file] : [...flags, file], executedBy: bun }
   // bun:test 与 node:test 都用 bun test（node:test 的理由见文件头实测）
-  return { cmd: bun, args: ['--no-env-file', 'test', file], executedBy: bun }
+  return { cmd: bun, args: existsSync(tsconfig) ? ['test', ...flags, file] : [...flags, 'test', file], executedBy: bun }
 }
 
 function runProcess(

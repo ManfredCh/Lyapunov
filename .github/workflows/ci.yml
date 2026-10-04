@@ -43,17 +43,20 @@ jobs:
           test -x "$bun_path"
           echo "TESTCI_BUN=$bun_path" >> "$GITHUB_ENV"
 
-      # 上游钉在自有 fork(公开仓库,无需凭据);浅克隆加速,bootstrap 会校验 commit 并应用产品补丁。
-      - name: Seed upstream checkout (shallow clone of pinned fork)
+      # 固定官方RC2；完整历史对象仅供隔离7c3源码fixture，不安装旧底座。
+      - name: Seed exact official RC2 checkout and historical source objects
         run: |
           set -eu
           dir=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).directory")
           commit=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).commit")
-          branch=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).upstreamBase.patchedBranch")
           repo=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).repository")
+          test "$repo" = "https://github.com/deepseek-ai/deepseek-harness.git"
+          test "$commit" = "639ed015397290b3745d163aafe02ffee4aa3f84"
+          node --input-type=module -e "import {preflightUpstreamPatches} from './script/upstream-patches.mjs'; preflightUpstreamPatches(process.cwd())"
           mkdir -p "$(dirname "$dir")"
-          git clone --depth 40 --branch "$branch" "$repo" "$dir"
+          git clone --no-checkout "$repo" "$dir"
           git -C "$dir" checkout --detach "$commit"
+          git -C "$dir" cat-file -e '7c3f05885033aa3aed74904d59a94692d12a47f7^{commit}'
 
       - name: Restore pnpm store cache
         uses: actions/cache@v4

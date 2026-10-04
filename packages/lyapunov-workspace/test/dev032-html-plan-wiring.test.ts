@@ -37,7 +37,7 @@ function captureFilePaneBody() {
   const ctx = {
     locale: { getSnapshot: () => ({ active: 'zh-CN' }) },
     effect: (fn: () => unknown) => { fn(); return () => {} },
-    inject: (_deps: string[], fn: (owner: unknown) => void) => { fn({ effect: (run: () => unknown) => { run() }, remote: { workspaceFiles: { readAll: async () => ({ ok: true, value: { data: '' } }) } } }) },
+    inject: (_deps: string[], fn: (owner: unknown) => void) => { fn({ effect: (run: () => unknown) => { run() }, remote: { workspaceFiles: { readBytes: async () => ({ ok: true, value: { data: new Uint8Array() } }) } } }) },
     sidebarRightTabs: { register: (definition: unknown) => definition },
     slots: {
       inject: (_seat: string, fn: () => unknown) => { fn() },

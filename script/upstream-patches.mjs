@@ -6,7 +6,7 @@ import {join,basename} from 'node:path'
 import {readFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import {applyPublicModelDiagnosticsPatch} from './public-model-patch.mjs'
-import {verifySDKSourceIntegrity,sdkSourceIsFinal,sdkFileBytes} from './sdk-source-integrity.mjs'
+import {verifySDKSourceIntegrity,sdkSourceIsFinal,sdkFileBytes,SDK_BASE_COMMIT,LEGACY_SDK_BASE_COMMIT,RC2_PRODUCT_PATCH,verifySDKRegistryArtifacts} from './sdk-source-integrity.mjs'
 import {applyFormalEnglishUpgrade} from './formal-english-upgrade.mjs'
 
 
@@ -78,7 +78,7 @@ export function verifiedComposedPatch(root,upstream,patch){
 }
 
 /** 固定上游commit上的少量可审阅补丁；重复运行不覆盖用户的其他修改。 */
-export function upstreamPatches(root){
+export function legacyUpstreamPatches(root){
   return [
     {file:join(root,'packages/lyaup-migrations/patches/dsh-v2-queued-surface.patch'),package:'@deepseek-ai/dsh-session-format-v2-to-v3'},
     {file:join(root,'packages/lyapunov-mcp-extras/patches/dsh-mcp-content-bridge.patch'),package:'@deepseek-ai/dsh-mcp-client'},
@@ -136,8 +136,50 @@ export function upstreamPatches(root){
   ]
 }
 
+/** 当前锁的registry只有同代固定产物；RC2决不再顺序消费旧53项。 */
+export function upstreamPatches(root){
+  const base=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).commit
+  if(base===SDK_BASE_COMMIT)return [{file:join(root,RC2_PRODUCT_PATCH),package:'@deepseek-ai/dsh-root'}]
+  if(base===LEGACY_SDK_BASE_COMMIT)return legacyUpstreamPatches(root)
+  throw Error('SDK_SOURCE_BASE_UNSUPPORTED')
+}
+
+function signedRC2PatchBytes(root,patch){
+  const record=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).sdkProductPatch
+  if(!record||record.file!==RC2_PRODUCT_PATCH||record.baseCommit!==SDK_BASE_COMMIT)throw Error('SDK_RC2_PATCH_REQUIRED')
+  const bytes=readFileSync(patch.file)
+  if(createHash('sha256').update(bytes).digest('hex')!==record.sha256)throw Error('SDK_RC2_PATCH_SIGNATURE_INVALID')
+  return bytes
+}
+
+/** artifact在clone/install/build之前完整验签；缺签名不会产生半个冷安装。 */
+export function preflightUpstreamPatches(root){
+  const patches=upstreamPatches(root)
+  if(JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).commit===SDK_BASE_COMMIT)signedRC2PatchBytes(root,patches[0])
+  verifySDKRegistryArtifacts(root,patches)
+  return patches
+}
+
+/** RC2必须先完成完整来源验签，只有精确base或final才允许写入或认定幂等。 */
 export function applyUpstreamPatches(root,upstream){
   const patches=upstreamPatches(root)
+  if(JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).commit===SDK_BASE_COMMIT){
+    const bytes=signedRC2PatchBytes(root,patches[0])
+    const proof=verifySDKSourceIntegrity(root,upstream,patches)
+    if(sdkSourceIsFinal(proof))return [{...patches[0],status:'already-applied',verifiedComposition:'sdk-complete-signed-final-source'}]
+    const checked=spawnSync('git',['apply','--check','-'],{cwd:upstream,encoding:'utf8',input:bytes})
+    if(checked.status!==0)throw Error('SDK_RC2_PATCH_CHECK_FAILED: '+checked.stderr)
+    const applied=spawnSync('git',['apply','-'],{cwd:upstream,encoding:'utf8',input:bytes})
+    if(applied.status!==0)throw Error('SDK_RC2_PATCH_APPLY_FAILED: '+applied.stderr)
+    verifySDKSourceIntegrity(root,upstream,patches,true)
+    return [{...patches[0],status:'applied'}]
+  }
+  return applyLegacyUpstreamPatches(root,upstream)
+}
+
+/** 旧来源与旧签名的显式隔离入口，仅为历史固定产物重放保留。 */
+export function applyLegacyUpstreamPatches(root,upstream){
+  const patches=legacyUpstreamPatches(root)
   const admission=patches.find(patch=>basename(patch.file)==='dsh-native-admission-ack.patch')
   if(!admission)return applyPatchRegistry(root,upstream,patches)
   const digest=value=>createHash('sha256').update(value).digest('hex')
@@ -150,12 +192,12 @@ export function applyUpstreamPatches(root,upstream){
   const previous=patches.filter(patch=>patch!==admission)
   const results=applyPatchRegistry(root,upstream,previous)
   results.push(applySignedFilesPatch(root,upstream,admission))
-  verifySDKSourceIntegrity(root,upstream,patches,true)
+  verifySDKSourceIntegrity(root,upstream,patches,true,LEGACY_SDK_BASE_COMMIT)
   return results
 }
 
 function applyPatchRegistry(root,upstream,patches){
-  const sourceProof=verifySDKSourceIntegrity(root,upstream,patches)
+  const sourceProof=verifySDKSourceIntegrity(root,upstream,patches,false,LEGACY_SDK_BASE_COMMIT)
   const results=[]
   // fork 分支把补丁逐个成 commit("patch: <name> [<pkg>]"),浅克隆下用提交主题判定已在分支内;
   // git apply 的正/反 check 在 rebase 三路合并后会因上下文漂移双败,不能只靠它们。
@@ -180,6 +222,6 @@ function applyPatchRegistry(root,upstream,patches){
     if(applied.status!==0)throw new Error('应用上游补丁失败：'+patch.file+'\n'+applied.stderr)
     results.push({...patch,status:'applied'})
   }
-  verifySDKSourceIntegrity(root,upstream,patches,true)
+  verifySDKSourceIntegrity(root,upstream,patches,true,LEGACY_SDK_BASE_COMMIT)
   return results
 }

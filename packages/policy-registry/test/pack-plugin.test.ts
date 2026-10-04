@@ -19,6 +19,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, matchPolicy, name, inject, searchPacks, searchPolicies, POLICY_INPUT_INVALID_JSON, POLICY_INPUT_MUST_BE_OBJECT, toolInput } from '../src/plugin.ts'
 import type { PackFetcher, PackRequestInit } from '../src/pack-source.ts'
+import { JobId, type JobHandle, type JobOutcome, type JobSpec } from '@deepseek-ai/dsh-jobs'
+import { SessionId } from '@deepseek-ai/dsh-session'
 
 const ENDPOINT = 'http://127.0.0.1:9472/packs/v1' // 合同允许 http://127.0.0.1|localhost 便于测试
 const TOKEN = 'test-pack-token' // 假 token（测试注入用；实现不把任何 token 写进文件）
@@ -86,13 +88,13 @@ function mockPackServer(options: MockOptions = {}) {
 function fakeCtx() {
   const tools = new Map<string, any>()
   const commands = new Map<string, any>()
-  const jobs: any[] = []
+  const jobs: JobSpec[] = []
   const provided = new Map<string, any>()
   const ctx = {
     tools: { register: (tool: any) => void tools.set(tool.name, tool) },
     commands: { register: (command: any) => void commands.set(command.name, command) },
     jobs: {
-      start: (spec: any) => { jobs.push(spec); return 'job-' + jobs.length },
+      start: (spec: JobSpec) => { jobs.push(spec); return JobId('job-' + jobs.length) },
       kill: () => {}, wait: async () => undefined,
     },
     effect: () => () => {},
@@ -105,7 +107,8 @@ function fakeCtx() {
 function boot(mock: ReturnType<typeof mockPackServer>, dataDirectory = emptyDir()) {
   const harness = fakeCtx()
   apply(harness.ctx as any, { dataDirectory, packEndpoint: ENDPOINT, packFetcher: mock.fetcher })
-  const exec = { agent: 'test-agent', signal: new AbortController().signal }
+  const id = SessionId('test-agent')
+  const exec = { agent: { id, session: { id } }, signal: new AbortController().signal }
   const call = (toolName: string, input: Record<string, unknown>) => {
     const tool = harness.tools.get(toolName)
     expect(tool).toBeDefined()
@@ -211,19 +214,23 @@ describe('plugin 操作面 × packs 源（工具入口 → downloadPack）', () 
     const accepted = await call('policy_download', { provider: 'packs', modelId: 'packs/unitree_go2', background: true })
     expect(accepted).toEqual({ status: 'RUNNING', jobId: 'job-1' })
     expect(jobs[0].kind).toBe('policy_download')
-    const handle = jobs[0].run()
+    expect(jobs[0].owner).toBe(SessionId('test-agent'))
+    const handle = jobs[0].run(valueJob(accepted.jobId))
     expect(typeof handle.cancel).toBe('function')
     const outcome = await handle.done
     expect(outcome.status).toBe('completed')
-    expect(JSON.parse(output(outcome)).status).toBe('DOWNLOADED')
+    expect(JSON.parse(resultOf(outcome)).status).toBe('DOWNLOADED')
+    expect(outcome).not.toHaveProperty('output')
     expect(mock.calls.map(row => new URL(row.url).pathname)).toEqual(['/packs/v1/catalog', '/packs/v1/open', '/packs/v1/stream', '/packs/v1/stream'])
 
     const failing = mockPackServer({ fail: { phase: 'catalog', status: 401 } })
     const { call: call2, jobs: jobs2 } = boot(failing)
     await call2('policy_download', { provider: 'packs', modelId: 'packs/unitree_go2', background: true })
-    const failed = await jobs2[0].run().done
+    expect(jobs2[0].owner).toBe(SessionId('test-agent'))
+    const failed = await jobs2[0].run(valueJob('job-1')).done
     expect(failed.status).toBe('failed')
-    expect(failed.output).toContain('PACK_UNAUTHORIZED') // 失败也保留错误码
+    expect(resultOf(failed)).toContain('PACK_UNAUTHORIZED') // 失败也保留错误码
+    expect(failed).not.toHaveProperty('output')
   })
 
   test('policy_search → 只打 catalog（元数据 only），模型 id 投影成 packs/<packId>，无资产 URL', async () => {
@@ -370,7 +377,16 @@ describe('本地策略来源与工具参数边界',()=>{
  })
 })
 
-const output = (outcome: { output: string }) => outcome.output
+/** 本用例只消费生产者的结束正文；若改成流式生产者，必须补对应原生Ring验收。 */
+const valueJob = (id: string): JobHandle => ({
+  id: JobId(id),
+  append() { throw new Error('PACK_FIXTURE_UNEXPECTED_STREAM') },
+  updateProgress() { throw new Error('PACK_FIXTURE_UNEXPECTED_PROGRESS') },
+})
+const resultOf = (outcome: JobOutcome): string => {
+  if (typeof outcome.result !== 'string') throw new Error('PACK_FIXTURE_TERMINAL_RESULT_MISSING')
+  return outcome.result
+}
 
 /**
  * 工具入参归一化（回执 §6.1/§7.1）：`parameters.input` 是 `type:'json'` ⇒ **JSON 字符串也是合法形状**，

@@ -79,7 +79,7 @@ export function imageFacts(content:readonly ContentBlock[]):string[]{
 
 /** 当前真实模型请求的来源/hash/体量摘要，不留任何文本或工具参数。 */
 export function requestDiagnostics(request:GenerateOptions,turn:number,step:number):RequestDiagnostics{
- const contexts=request.messages.filter(message=>message.role==='system'||(message.role==='user'&&message.source.kind!=='user'&&message.source.kind!=='tool')).map(message=>{
+ const contexts=request.messages.filter(message=>message.role==='system'||(message.role==='user'&&message.source!==undefined&&message.source.kind!=='user'&&message.source.kind!=='tool')).map(message=>{
   const source=object(message.source),owner=String(source.plugin??source.kind??'native-system')
   const content=message.content.filter(block=>block.type==='text').map(block=>block.text).join('\n')
   const sections=Array.isArray(source.sections)?source.sections.flatMap(item=>{const s=object(item);return typeof s.name==='string'&&typeof s.text==='string'?[{name:s.name.slice(0,128),bytes:Buffer.byteLength(s.text),hash:digest(s.text)}]:[]}):[]
@@ -133,7 +133,7 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
  else if(type==='user/message'&&isHumanDirectedSource(data.source))next.recovery={...emptyExecutionGraph({id:state.sessionId as SessionHeader['id']}).recovery,userSeq:seq,unknown:state.recovery.unknown}
  else if(type==='lyapunov/request-diagnostics'){next.request=event.data as RequestDiagnostics;add(`request:${seq}`,stepId,'request',String(data.model),'running')}
  else if(type==='tool/call'||type==='tool/ptc-dispatch-start')add(`tool:${data.callId??data.subCallId}`,stepId,'tool',String(data.name),'running',null,{argumentsHash:digest(data.arguments)})
- else if(type==='tool/result'){
+  else if(event.type==='tool/result'){
   const message=event.data.message,content=message.content,callId=String(message.toolCallId),error=object(data.error),code=publicId(error.code)
   const id='tool:'+callId,prior=next.nodes.find(row=>row.id===id)
   const text=content.flatMap(part=>part.type==='text'?[part.text]:[]).join('\n'),timeout=text.match(/\[timed out after (\d+)ms\]/),signal=text.match(/\[killed by signal: (SIG[A-Z0-9]+)\]/),exit=text.match(/\[exit code: (-?\d+)\]/)

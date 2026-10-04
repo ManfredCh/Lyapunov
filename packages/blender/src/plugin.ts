@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {} from '../../lyapunov-contracts/src/message-sources.ts'
 import { explainTextureQuery, fetchTextureSet, findTextures } from './textures.ts'
 import type { TextureResolution } from './textures.ts'
 import { attachResultImages, blenderEvidence, blenderSpawnFailure, finishBlenderRun, lastResultLine, noteImageDelivery, resultImagePaths } from './result.ts'
@@ -13,9 +14,9 @@ import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import { fileURLToPath } from 'node:url'
 import { isAbsolute, join, resolve } from 'node:path'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 export const name='lyapunov-blender'
 /** world.py 结果行的稳定前缀；长度只在这里定义，解析方不得硬编码数字。 */
 const RESULT_PREFIX='LYAPUNOV_RESULT='
@@ -43,7 +44,7 @@ export type BlenderControlState='running'|'pause-requested'|'paused'
  * 作业记录本身（jobId/状态/输出）仍在原生 `ctx.jobs` 里，这里不放第二份作业表。
  */
 export interface BlenderJobControl {
-  /** 由 `ctx.jobs.start()` **返回之后**回填——id 是 jobs-local 在 `run()` 之后才铸的（`jobs-local:150-153`）。 */
+  /** 原生 Registry 在调用 starter 前签发的 JobId。 */
   jobId:JobId
   /** 作业输出目录（状态文件、`source.blend` 都在这里）。 */
   readonly output:string
@@ -139,7 +140,7 @@ function parseTextureChoice(material:string,raw:unknown):TextureChoice|{problem:
  *
  * 为什么是 `owner.inject` 而不是 `followup`：`inject` 把消息排进 owner 的下一步（durable，
  * 见 AgentLoop 的 inbox splice），**不唤醒**驱动——这样原生的作业完成通知（tool-jobs 的
- * onJobDone 投递）仍然只唤醒一次，不会因为带图就多开一轮模型请求，也不会另起 Agent。
+ * settled 事件投递）仍然只唤醒一次，不会因为带图就多开一轮模型请求，也不会另起 Agent。
  * 投递本身失败（owner 已释放等）时把原因写回图片读数，结果文本里明说没送到。
  */
 function deliverImagesToOwner(owner:unknown, jobId:string|undefined, report:ImageReport, refs:readonly unknown[]):void{
@@ -155,7 +156,7 @@ function deliverImagesToOwner(owner:unknown, jobId:string|undefined, report:Imag
     +'这些图来自本次作业的结果行；要重新取用请调用 blender_job_images。'
   const content:ContentBlock[]=[{type:'text',text},...refs.map(ref=>({type:'image',attachment:ref} as ContentBlock))]
   try{
-    target.inject(createUserMessage({content,source:{kind:'plugin',plugin:name,form:'notice',summary:`Blender 渲染图 ${refs.length} 张${where}`}}))
+    target.inject(createUserMessage({content,source:{kind:'lyapunov-blender',form:'notice',summary:`Blender 渲染图 ${refs.length} 张${where}`}}))
     report.delivery='job-notice'
   }catch(error){
     report.delivery='none'
@@ -309,10 +310,12 @@ export function apply(ctx:Context, config:Config={}) {
   /**
    * 后台作业的控制表（A1）。**不复制**作业记录：jobId/状态/输出仍在原生 `ctx.jobs`；
    * 这里只放"生产者控制面"（暂停请求、恢复信号、检查点读数）。
-   * 为什么不放在 jobs 面：原生 `JobHooks` 只有 `cancel`/`done`/`readOutput`（类型定义 `types.ts:72-91`），
+   * 为什么不放在 jobs 面：原生 `JobHooks` 只有 `cancel`/`done`，输出由 Registry 的 Ring 和 result 持有，
    * 没有 pause/resume；而 `done` 不落定 ⇒ 记录恒为 running ⇒ **jobId 逐字不变**——这是本项的因果链。
    */
   const jobControls=new Map<JobId,BlenderJobControl>()
+  /** 同一 Job 的 Blender 结果产物；重复取图不消费模型的一次性 result。 */
+  const jobResultFile=(control:Pick<BlenderJobControl,'jobId'|'output'>)=>join(control.output,`.lyapunov-job-result-${control.jobId}.json`)
   /** 调用方输入的摘要（不是派生 argv 的摘要，见用法处注释）。 */
   const digestOf=(value:unknown):string=>`sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`
   const jobStatePath=(directory:string):string=>join(directory,JOB_STATE_FILE)
@@ -450,14 +453,13 @@ export function apply(ctx:Context, config:Config={}) {
       if(exec.signal.aborted)throw new Error('BLENDER_CANCELLED: 调用已被取消（后台作业尚未启动）')
       // 同输出目录互斥：同一 output 已有**未终态**的 blender 作业时明确拒绝，不启动第二个。
       // 否则两个作业的工程文档会 last-writer-wins，落成"混合态"（N106 实测：blender-7 rev1 被 blender-6 rev2 覆盖）。
-      // 判据复用既有快照与既有 label 约定——`JobSnapshot` 里没有 output 字段（dsh-jobs/src/types.ts:100-114），
+      // 判据复用原生 JobView 与既有 label 约定，不把 Ring 元数据当作输出目录。
       // 而 label 就是本插件自己写的 `Blender ${operation} ${output}`；不新增调度器/锁文件/配置。
-      const busy=ctx.jobs.list(exec.agent).find(job=>job.kind==='blender'&&job.status!=='completed'&&job.status!=='killed'&&job.status!=='failed'&&job.label===`Blender ${operation} ${String(output)}`)
+      const busy=ctx.jobs.list(exec.agent?.id).find(job=>job.kind==='blender'&&job.status!=='completed'&&job.status!=='killed'&&job.status!=='failed'&&job.label===`Blender ${operation} ${String(output)}`)
       if(busy)throw new Error(`BLENDER_OUTPUT_BUSY: 输出目录 ${output} 已有未完成作业 ${busy.id}（${busy.status}）`)
       const controller=new AbortController()
       /**
-       * 控制句柄在 `start()` **之前**建好、`jobId` 在 `start()` 返回后回填（A3）：id 由 jobs-local
-       * 在 `spec.run()` 之后才铸（`jobs-local:150-153`），而 `run()` 内部的 `done` IIFE 是同步启动的，
+       * 控制句柄在 `start()` **之前**建好；starter 从原生 JobHandle 取得 jobId，再启动生产者循环，
        * 先建对象才能让闭包在任何时刻都拿到同一个句柄，不出现"还没赋值就被读到"的窗口。
        */
       const control:BlenderJobControl={
@@ -467,7 +469,8 @@ export function apply(ctx:Context, config:Config={}) {
         argvDigest:digestOf({argv,output,sourceBlend:argvInput.sourceBlend??null,materialTextures:args.material_textures??null,materialColors:args.material_colors??null}),
         completedPhases:[],resumeCount:0,requested:false,waiting:false,
       }
-      const started=ctx.jobs.start({kind:'blender',label:`Blender ${operation} ${output}`,owner:exec.agent,run:()=>{
+      const started=ctx.jobs.start({kind:'blender',label:`Blender ${operation} ${output}`,owner:exec.agent?.id,run:job=>{
+        control.jobId=job.id
         // 子进程在**取完贴图之后**才起：world.py 读的就是 textures.json，先跑进程会让本次接线看不到清单。
         // 取图在作业内、用作业自己的信号，所以这一步也能被 job_kill 取消（下载中和渲染中都能停）。
         let child:SubprocessHandle|undefined
@@ -476,7 +479,7 @@ export function apply(ctx:Context, config:Config={}) {
         /** 收尾阶段的取消：作业已落 killed，图**不投递**（结果文本里说明走到哪一步被取消的）。 */
         const killedAt=(stage:string):JobOutcome=>{
           const io=child?collected(child):{stdout:'',stderr:''}
-          return {status:'killed' as const,output:blenderEvidence(`BLENDER_CANCELLED: 作业在${stage}被取消（Blender 进程已完成，结果不作为本次产出投递）`,io.stdout,io.stderr),detail:`operation=${operation}`}
+          return {status:'killed' as const,result:blenderEvidence(`BLENDER_CANCELLED: 作业在${stage}被取消（Blender 进程已完成，结果不作为本次产出投递）`,io.stdout,io.stderr),detail:`operation=${operation}`}
         }
         /**
          * 暂停生效：写状态文件（`pausedAt` 只有到这一步才写）、通知 pause 调用方、等恢复信号。
@@ -513,7 +516,7 @@ export function apply(ctx:Context, config:Config={}) {
             // 而不是再起一次子进程（否则 job_kill 会被"恢复"抵消掉，作业永远不结束）。
             if(controller.signal.aborted)return killedAt('暂停等待阶段')
             const textureRequest=await prepareTextures(controller.signal)
-            if(controller.signal.aborted)return {status:'killed' as const,output:'BLENDER_CANCELLED: 作业在取贴图阶段被取消（Blender 进程尚未启动）',detail:`operation=${operation}`}
+            if(controller.signal.aborted)return {status:'killed' as const,result:'BLENDER_CANCELLED: 作业在取贴图阶段被取消（Blender 进程尚未启动）',detail:`operation=${operation}`}
             // 输入准备阶段完成（贴图清单已落盘；没有请求贴图时这一步是空转，不记成"完成了什么"）。
             if(attempt===0&&textureRequest!==undefined&&!('error' in textureRequest)&&args.material_textures)control.completedPhases=['textures']
             // 暂停请求若在起进程**之前**就到了（典型：取图阶段收到请求），这一轮干脆不起进程：
@@ -536,7 +539,7 @@ export function apply(ctx:Context, config:Config={}) {
             }
             // 取消/失败**不发旧图**：只有本次真的 completed 才去碰结果里的图片路径
             // （磁盘上可能还留着上一轮的 preview.png，凭路径发图就会把旧图当新结果）。
-            if(finish.status!=='completed')return {status:finish.status,output:finish.error,detail:`operation=${operation}`}
+            if(finish.status!=='completed')return {status:finish.status,result:finish.error,detail:`operation=${operation}`}
             // 收尾读数（等网络的贴图那一步）走完再检查取消：这一步可能被 job_kill 打断。
             const decorated=await applyReadings(finish.value,finish.result,controller.signal,textureRequest)
             if(controller.signal.aborted)return killedAt('结果读数阶段')
@@ -550,6 +553,17 @@ export function apply(ctx:Context, config:Config={}) {
               report.deliveryError='作业在附件化阶段被取消：本次不投递图片（取消的作业不作为本次产出发给模型）'
               return killedAt(`附件化阶段（已附件化 ${report.attached} 张，全部不投递）`)
             }
+            // 原始 Blender 结果独立于图片投递读数；成功落盘后才允许发送完成图片。
+            const view=ctx.jobs.get(job.id,exec.agent?.id)
+            if(view.registryId===undefined)throw new Error('BLENDER_JOB_INSTANCE_UNKNOWN')
+            const result=JSON.stringify(finish.value)
+            const target=jobResultFile(control),temporary=`${target}.tmp-${randomUUID()}`
+            await mkdir(output,{recursive:true})
+            try{
+              await writeFile(temporary,JSON.stringify({version:1,jobId:view.id,registryId:view.registryId,startedAt:view.startedAt,result,sha256:createHash('sha256').update(result).digest('hex')}),{mode:0o600,flag:'wx'})
+              await rename(temporary,target)
+            }finally{await rm(temporary,{force:true})}
+            if(controller.signal.aborted)return killedAt('结果记录阶段')
             if(refs.length>0)deliverImagesToOwner(exec.agent,started,report,refs)
             else noteImageDelivery(report,{lane:'job-notice',renderRequested})
             // 终态归位（缺陷 2）：在此之前 `completedPhases` 只在 attempt 0 的输入准备阶段写过一次（`['textures']`），
@@ -557,14 +571,14 @@ export function apply(ctx:Context, config:Config={}) {
             // 'textures'）+ Blender 子进程里的建模/导出/可选渲染（world.py 一次进程内完成，记 'blender'）。
             // 不新增字段、不改键名：只把既有字段在终态时写成**真的完成了什么**。
             control.completedPhases=[...control.completedPhases,'blender']
-            return {status:'completed' as const,output:withImages(finish.value,report),detail:`operation=${operation}`}
+            return {status:'completed' as const,result:withImages(finish.value,report),detail:`operation=${operation}`}
           }
         })().catch(error=>{
           const message=String(error instanceof Error?error.message:String(error))
           // 取消不是失败：收尾步骤被 job_kill 打断时同样落 killed，不能混进 failed。
           return controller.signal.aborted
-            ?{status:'killed' as const,output:blenderEvidence(message.startsWith('BLENDER_CANCELLED')?message:`BLENDER_CANCELLED: 作业在收尾阶段被取消（${message}）`,child?collected(child).stdout:'',child?collected(child).stderr:''),detail:`operation=${operation}`}
-            :{status:'failed' as const,output:message,detail:`operation=${operation}`}
+            ?{status:'killed' as const,result:blenderEvidence(message.startsWith('BLENDER_CANCELLED')?message:`BLENDER_CANCELLED: 作业在收尾阶段被取消（${message}）`,child?collected(child).stdout:'',child?collected(child).stderr:''),detail:`operation=${operation}`}
+            :{status:'failed' as const,result:message,detail:`operation=${operation}`}
         })
         /**
          * 取消（`job_kill` / owner 释放 / 服务卸载）。三件事缺一不可：
@@ -576,8 +590,7 @@ export function apply(ctx:Context, config:Config={}) {
          */
         return {cancel:()=>{controller.abort();control.requested=false;child?.terminate();control.wakeResume?.()},done:done as Promise<JobOutcome>}
       }})
-      // A3：id 只有 `start()` 返回后才有（`jobs-local:150-153`），此刻回填并把句柄挂进控制表。
-      control.jobId=started
+      // 注册提交后挂入控制表；生产者与控制面共享同一个原生 JobHandle 身份。
       jobControls.set(started,control)
       // 图已作为原生消息投给 owner，这里只回作业句柄（读取仍走原生 job_output / blender_job_images）。
       return {result:JSON.stringify({jobId:started,outputDirectory:output,...taskCwd?{cwd:taskCwd}:{}})}
@@ -630,17 +643,22 @@ export function apply(ctx:Context, config:Config={}) {
     // 工具参数里 job id 就是字符串，原生实现负责校验它是否真的存在、是否属于本会话。
     if(args.limit!==undefined&&(!Number.isInteger(args.limit)||args.limit<1))throw new Error(`BLENDER_ARGUMENT_INVALID: limit 需要正整数，收到 ${JSON.stringify(args.limit)}`)
     const limit=Math.min(args.limit??MAX_RESULT_IMAGES,MAX_RESULT_IMAGES)
-    const read=ctx.jobs.read(args.job_id as JobId,exec.agent)
-    const {snapshot}=read
+    const snapshot=ctx.jobs.get(args.job_id as JobId,exec.agent?.id)
     // 会话里还有别的后台作业（原生 Jobs 不只有本插件用）：按 kind 认生产者，别的 kind 的作业
     // 即使属于本会话也不能当 Blender 结果解析（它的输出不是本插件的结果行形状）。
     if(snapshot.kind!=='blender')throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 的 kind=${snapshot.kind}，不是 Blender 生产者（本插件只认 kind=blender 的作业）。要读它的输出用原生 job_output。`)
     if(snapshot.status!=='completed')throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 当前状态是 ${snapshot.status}${snapshot.detail?`（detail=${snapshot.detail}）`:''}：只有 completed 的作业才发图，取消/失败不发图（磁盘上可能还留着上一轮的图）。要读文本用 job_output。`)
-    // 作业输出就是**同一条结果 JSON**（本插件写进 JobOutcome.output 的就是它，不是带前缀的 stdout）；
-    // 仍兼容"输出里带 LYAPUNOV_RESULT= 前缀行"的形态，两种都认。
-    const output=read.text.trim()
-    const line=lastResultLine(output,RESULT_PREFIX)
-    const json=line!==undefined?line.slice(RESULT_PREFIX.length):output
+    // 插件重载后控制表已释放；原生不可变 label 仍保留本生产者登记的绝对输出目录。
+    const directory=/^Blender (?:build|preview|export) ([\s\S]+)$/.exec(snapshot.label)?.[1]
+    const control=jobControls.get(snapshot.id)??(directory&&isAbsolute(directory)?{jobId:snapshot.id,output:directory}:undefined)
+    if(!control||snapshot.registryId===undefined)throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 缺少当前执行身份或结果产物位置`)
+    let saved:unknown
+    try{saved=JSON.parse(await readFile(jobResultFile(control),'utf8'))}
+    catch(error){throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 的结果产物不可读取（${String(error)}）`)}
+    if(typeof saved!=='object'||saved===null)throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 的结果产物无效`)
+    const receipt=saved as {version?:unknown;jobId?:unknown;registryId?:unknown;startedAt?:unknown;result?:unknown;sha256?:unknown}
+    if(receipt.version!==1||receipt.jobId!==snapshot.id||receipt.registryId!==snapshot.registryId||receipt.startedAt!==snapshot.startedAt||typeof receipt.result!=='string'||receipt.sha256!==createHash('sha256').update(receipt.result).digest('hex'))throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 的结果产物身份或完整性不匹配`)
+    const json=receipt.result
     let value:unknown
     try{ value=JSON.parse(json) }
     catch(error){ throw new Error(`BLENDER_JOB_IMAGES_UNAVAILABLE: 作业 ${snapshot.id} 的输出不是可解析的结果 JSON（${String(error instanceof Error?error.message:String(error))}）：${json.slice(0,300)}`) }
@@ -649,7 +667,7 @@ export function apply(ctx:Context, config:Config={}) {
     // 渲染过的作业却一张图都取不回来要明确报失败；没渲染的作业 requested=0 是正常，不报错。
     const record=typeof value==='object'&&value!==null?value as {renderMode?:unknown;preview?:unknown}:{}
     noteImageDelivery(report,{lane:'tool-result',renderRequested:record.renderMode!==undefined||record.preview!==undefined})
-    // result 字段 = 该作业自己的结果 JSON 文本（与 job_output 同源），图片路径仍在里面。
+    // result 是原始 Blender 结果产物；图片投递的本轮读数由外层 images 报告。
     const text=JSON.stringify({jobId:snapshot.id,status:snapshot.status,result:json,images:report})
     if(refs.length>0)attachmentsByResult.set(text,refs)
     return {result:text}
@@ -673,8 +691,7 @@ export function apply(ctx:Context, config:Config={}) {
    */
   ctx.tools.register(defineTool({name:'blender_job_control',description:`Control Blender jobs started by blender_run background:true in this session. action:"pause" requests a pause and stops the current Blender process without settling the job; jobId remains unchanged and state is written to .lyapunov-job-state.json in the output directory. action:"resume" continues with **the same jobId** by rerunning the same job and recomputing completed phases, **not resuming a computation checkpoint**; it prefers this job's saved output/source.blend as input to preserve resource identities. action:"status" reads actual product-side state. completedPhases records phases actually completed at plugin level; "blender" appears only after full completion, is not a progress percentage, and does not depend on UI language. During a pause, native job_list/job_output **still show running** because upstream JobStatus has no paused value; inspect this tool's state. Pauses do not survive Host restart/session disposal: released records cause resume to return BLENDER_JOB_RESUME_ALREADY_FINISHED.`,parameters:{job_id:{type:'string',required:true,description:'jobId returned by blender_run background:true, for example blender-1.'},action:{type:'string',enum:['pause','resume','status'],required:true,description:'pause requests a pause; resume reruns the same jobId to completion and recomputes completed phases; status reads state without changing anything.'}},output:{schema:{type:'object',additionalProperties:false,properties:{result:{type:'string',required:true}}},render:(_args,value)=>[{type:'text',text:value.result} as ContentBlock]},async execute(args,exec){
     // 未知 / 他人会话都交给原生：这里不 try/catch、不换文案，原生抛什么就是什么。
-    const read=ctx.jobs.read(args.job_id as JobId,exec.agent)
-    const {snapshot}=read
+    const snapshot=ctx.jobs.get(args.job_id as JobId,exec.agent?.id)
     if(snapshot.kind!=='blender')throw new Error(`BLENDER_JOB_CONTROL_NOT_BLENDER: 作业 ${snapshot.id} 的 kind=${snapshot.kind}，不是 Blender 生产者（本插件只认 kind=blender 的作业）。暂停/恢复只对 blender_run background:true 起的作业有意义；别的 kind 读输出用原生 job_output。`)
     // 终态判定在控制表**之前**：一旦落定（completed/killed/failed），本插件绝不为此新铸第二个作业，
     // resume 只能明确失败。（`stopping` 不是终态：取消还在飞，控制表仍在。）

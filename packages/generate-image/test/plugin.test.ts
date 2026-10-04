@@ -168,22 +168,24 @@ test("未装配附件服务：如实报「没送到」，但仍给出真实路�
 test("后台作业：前台问一次，作业内不再问；完成通知把图投进会话", async () => {
   await withHarness({}, async (harness, stub, directory) => {
     harness.respondWith("提交生成")
-    const call = await harness.call({ request_json: request({ prompt: "后台出图", size: "1024*1024" }), background: true })
+    const caller = new AbortController()
+    const call = await harness.call({ request_json: request({ prompt: "后台出图", size: "1024*1024" }), background: true }, { signal: caller.signal })
+    caller.abort(new Error("人工Stop本轮请求，已注册的Job独立继续"))
     assert.notEqual(call.isError, true, resultText(call))
     const started = JSON.parse(resultText(call)) as { jobId: string; requestId: string }
     assert.equal(started.requestId, "yard-1")
     assert.equal(harness.asked.length, 1, "授权只在前后台边界问一次")
-    const snapshot = await harness.ctx.jobs.wait(started.jobId as never, 15_000, harness.agent)
+    const snapshot = await harness.ctx.jobs.wait(started.jobId as never, 15_000, harness.agent?.id)
     assert.equal(snapshot.status, "completed", snapshot.detail)
     // 读的是**同一条结果行**（原生 jobs 的终态输出），不是另造一份
-    const parsed = JSON.parse(harness.ctx.jobs.read(started.jobId as never, harness.agent).text) as { imageDelivery: { attached: number; delivery: string }; images: Array<{ path: string }> }
+    const parsed = JSON.parse((harness.ctx.jobs.read(started.jobId as never, harness.agent?.id).result ?? '')) as { imageDelivery: { attached: number; delivery: string }; images: Array<{ path: string }> }
     assert.equal(parsed.imageDelivery.attached, 1)
     assert.equal(parsed.imageDelivery.delivery, "job-notice")
     assert.deepEqual(await readFile(parsed.images[0].path), tinyPng())
     // 完成通知真的进了 owner 的下一步，并且带的是**图像块**
     const messages = harness.claimNextStep()
     assert.equal(messages.length, 1)
-    assert.equal(messages[0].source?.plugin, "lyapunov-generate-image")
+    assert.equal(messages[0].source?.kind, "lyapunov-generate-image")
     assert.equal(messages[0].source?.form, "notice")
     assert.match(messages[0].source?.summary ?? "", /生成图 1 张/)
     assert.equal(messages[0].content.filter((block) => block.type === "image").length, 1)
@@ -207,8 +209,8 @@ test("后台作业被取消：落 killed、不发图（取消的作业不作为�
     const deadline = Date.now() + 5000
     while (stub.queries.length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
     assert.ok(stub.queries.length >= 1)
-    assert.equal(harness.ctx.jobs.kill(started.jobId as never, harness.agent, "测试取消"), "requested")
-    const snapshot = await harness.ctx.jobs.wait(started.jobId as never, 15_000, harness.agent)
+    assert.equal(harness.ctx.jobs.kill(started.jobId as never, harness.agent?.id, "测试取消"), "requested")
+    const snapshot = await harness.ctx.jobs.wait(started.jobId as never, 15_000, harness.agent?.id)
     assert.equal(snapshot.status, "killed", snapshot.detail)
     assert.deepEqual(harness.claimNextStep(), [], "取消的作业不发图")
     assert.deepEqual(harness.images, [])

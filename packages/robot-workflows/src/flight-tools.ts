@@ -34,9 +34,9 @@ export function applyFlight(ctx:Context){
   }
   const request=input as FlightInput
   if(input.background===false)return summarizeFlight(await runFlight(sim,request,signal))
-  const controller=new AbortController(),abort=()=>controller.abort(signal.reason)
-  if(signal.aborted)abort();else signal.addEventListener('abort',abort,{once:true})
-  const jobId=ctx.jobs.start({kind:'lyapunov-provider' as never,label:'Crazyflie 本地飞控',owner:parent.agent,outputLimitBytes:2000000,run:()=>({cancel:()=>controller.abort(),done:runFlight(sim,request,controller.signal).then(value=>({status:value.status==='cancelled'?'killed' as const:value.status==='completed'?'completed' as const:'failed' as const,output:JSON.stringify(flightSummary(value))}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,output:String(error)})).finally(()=>signal.removeEventListener('abort',abort))})})
+  if(signal.aborted)throw signal.reason??new Error('Cancelled before background Job registration')
+  const controller=new AbortController()
+  const jobId=ctx.jobs.start({kind:'lyapunov-provider' as never,label:'Crazyflie 本地飞控',owner:parent.agent?.id,outputLimitBytes:2000000,run:()=>({cancel:()=>controller.abort(),done:runFlight(sim,request,controller.signal).then(value=>({status:value.status==='cancelled'?'killed' as const:value.status==='completed'?'completed' as const:'failed' as const,result:JSON.stringify(flightSummary(value))}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)}))})})
   return {operation:input.operation,status:'running',jobId,worldId:input.worldId,generation:input.expectedGeneration,sceneRevision:input.expectedSceneRevision}
  }
  ctx.tools.register(defineTool({name:'robot_flight',description,parameters,output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>publicValue(await perform(args.input as unknown as FlightCommandInput,exec,exec.signal))}))

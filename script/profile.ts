@@ -11,7 +11,7 @@ import type {VerifiedAccount} from "../packages/lyapunov-product-bundle/src/acco
 import {linkProductPackage,reconcileProductPackageLinks} from './product-link.ts'
 import {migrateLegacyProfile,type LegacyProfileMigration} from './profile-migration.ts'
 import {migrateRuntimeLayout} from './migrate-workspace-layout.ts'
-import {healProfilesModuleFallback} from '@deepseek-ai/dsh-app-boot'
+import {createRuntimeResolution, loadProfileDirectory, type RuntimeResolution} from '@deepseek-ai/dsh-app-boot'
 
 function productRoot(){
   let directory=resolve(readRuntimeEnv(process.env,"productRoot")??import.meta.dirname)
@@ -96,7 +96,7 @@ export function installRootOfLinkTarget(target:string):string{
  *
  * **这是归属读数，不是改动读数。** 归本函数的槽位切换由 `reconcileAndReportProductLinks()` 的
  * `{updated,removed}` 逐条给出；同级目录（`<DSH_HOME>/profiles/node_modules`）由上游 DSH 的
- * profile fallback linker 维护，那里**发生了什么本函数观测不到**，所以只报范围与当前归属、不报改动。
+ * 原生 RuntimeResolution 维护，那里**发生了什么本函数观测不到**，所以只报范围与当前归属、不报改动。
  */
 export async function censusModuleLinkScope(input:{directory:string;installRoot:string}):Promise<ModuleLinkScopeCensus|undefined>{
  const roots=new Set<string>()
@@ -135,29 +135,10 @@ export async function censusModuleLinkScope(input:{directory:string;installRoot:
  return {directory:input.directory,total,currentInstall,otherInstall:total-currentInstall,otherRoots}
 }
 
-/* ---------------------------------------------------------------------------------------------------
- * 共享依赖镜像（`$DSH_HOME/profiles/node_modules`）的归并：**由它的真正 owner 执行，产品只调用与播报**
- *
- * 现象（2026-09-28 的启动中间态）：产品托管槽位 36 条先切到新安装，此时同级
- * `profiles/node_modules` 的 284 条原生 DSH 依赖链接尚未由其 owner 归并。随后现场读回
- * new=284 / old=0，不能把中间态当作持续混用。那面镜像的 owner 是上游 DSH 的 profile
- * fallback linker（`healProfilesModuleFallback`），不是 `reconcileProductPackageLinks()`：
- * 产品自己没有改那 284 条，因此仅播报"本次改指 36 条"容易让人误读最终状态。
- *
- * 修法（不夺权、不重写 owner）：在**本次启动**的归属普查之前，先用 owner 自己的函数按**当前安装**
- * 重新归并那面镜像；产品只负责调用、计数与播报。归属判定、冲突 fail-closed、软链写入全部仍由上游
- * 决定——因此只有"当前安装闭包里的同名槽位"会被改指，用户自定义目录/符号链接不会被覆盖或删除。
- *   · 有改动：打一行简短摘要（明细进跨 Profile 的 JSONL 诊断文件）；
- *   · 0 改动且没有指向别处：一个字都不打（幂等启动零噪声）；
- *   · 仍有不归并的链接：如实报条数与归属，并给出原因（不把混用状态藏起来）。
- *
- * `heal`/`census`/`targets`/`log`/`audit` 只用于测试注入替身；本函数不复制归属判定，也不直接删除链接。
- * ------------------------------------------------------------------------------------------------- */
+/** RC2 使用原生 RuntimeResolution；旧共享镜像只保留归属读数，不再改写链接。 */
+export type InstallationMirrorReport={directory:string;switched:string[];currentInstall:number;otherInstall:number;otherRoots:string[];resolution?:RuntimeResolution;error?:string}
 
-/** 一次共享依赖镜像归并的结果。`switched` 是本次由 owner 改指到当前安装的槽位名。 */
-export type InstallationMirrorReport={directory:string;switched:string[];currentInstall:number;otherInstall:number;otherRoots:string[];error?:string}
-
-/** 共享依赖镜像的审计文件名；它是**跨 Profile** 的一份，因此落在 `profiles/` 而不是某个 Profile 里。 */
+/** 旧共享镜像的诊断文件；记录原生解析表和物理归属，不记录虚构的切换。 */
 export const INSTALLATION_MIRROR_AUDIT="lyapunov-installation-mirror.jsonl"
 
 /** 枚举一个 `node_modules` 目录（自身 + 一层 `@scope`，不沿符号链接递归）里每个软链的解析后目标。 */
@@ -187,27 +168,13 @@ export async function moduleLinkTargets(directory:string):Promise<Map<string,str
  return targets
 }
 
-/** 一个安装根的两种文本形态（配置路径与真实路径）；与 `censusModuleLinkScope` 的口径一致。 */
-function installRootPrefixes(installRoot:string):Set<string>{
- const roots=new Set<string>([resolve(installRoot)])
- try{roots.add(realpathSync(installRoot))}catch{}
- return roots
-}
-
-function targetWithinInstallRoot(target:string,prefixes:ReadonlySet<string>):boolean{
- for(const root of prefixes)if(target===root||target.startsWith(root+sep))return true
- return false
-}
-
 /**
- * 用当前安装归并 `$DSH_HOME/profiles/node_modules`，只改由该安装器管理的旧安装链接。
- *
- * 镜像目录不存在时直接返回 `undefined`（没有这一层可归并），因此不制造任何输出。目录存在而
- * `installAnchor` 不在时**不做任何写入**，仍普查并如实报告未归并条数（不猜一个安装闭包）。
+ * 用 RC2 原生 Profile 与安装解析表读取当前模块归属，不维护共享 fallback 文件。
+ * 旧镜像不存在时不制造诊断；存在时保留所有旧链接及用户目录，实际运行由原生 launcher 安装解析表。
  */
 export async function reconcileAndReportInstallationMirror(input:{
  profileDirectory:string;productRoot:string;installAnchor:string;home?:string;
- heal?:typeof healProfilesModuleFallback;
+ resolveModules?:typeof createRuntimeResolution;
  census?:typeof censusModuleLinkScope;
  targets?:typeof moduleLinkTargets;
  log?:(line:string)=>void;
@@ -220,33 +187,22 @@ export async function reconcileAndReportInstallationMirror(input:{
  if(!info.isDirectory())return undefined
  const log=input.log??((line:string)=>{console.log(line)})
  const census=input.census??censusModuleLinkScope
- const targetsOf=input.targets??moduleLinkTargets
- const prefixes=installRootPrefixes(input.productRoot)
- const isCurrent=(target:string)=>targetWithinInstallRoot(target,prefixes)
- const before=await targetsOf(directory)
- let error:string|undefined
+ let resolution:RuntimeResolution|undefined,error:string|undefined
  if(existsSync(input.installAnchor)){
-  try{await (input.heal??healProfilesModuleFallback)({installAnchor:input.installAnchor,home})}
-  catch(cause){error=String((cause as Error)?.message??cause)}
+  try{
+   const profile=loadProfileDirectory('lyapunov',input.profileDirectory,input.installAnchor,{userLayer:false})
+   resolution=await (input.resolveModules??createRuntimeResolution)({installAnchor:input.installAnchor,home,profile})
+  }catch(cause){error=String(cause instanceof Error?cause.message:cause)}
  }else error=`当前安装锚点不存在：${input.installAnchor}`
- const after=await targetsOf(directory)
- const switched:{name:string;target:string}[]=[]
- for(const [name,previous] of before){
-  const target=after.get(name)
-  if(target===undefined)continue
-  if(isCurrent(target)&&!isCurrent(previous)&&installRootOfLinkTarget(previous)!=="")switched.push({name,target})
- }
  const post=await census({directory,installRoot:input.productRoot})
- const otherInstall=post?.otherInstall??0
- const otherRoots=post?.otherRoots??[]
- const report:InstallationMirrorReport={directory,switched:switched.map(item=>item.name),currentInstall:post?.currentInstall??0,otherInstall,otherRoots,...(error===undefined?{}:{error})}
- if(switched.length||otherInstall){
-  if(switched.length)log(`上游依赖镜像归并（${directory}）：本次改指 ${switched.length} 条到当前安装 ${resolve(input.productRoot)}${otherInstall?`；仍有 ${otherInstall} 条不指向当前安装：${otherRoots.join("、")}`:""}`)
-  else log(`上游依赖镜像未归并（${directory}）：仍有 ${otherInstall} 条链接不指向当前安装 ${resolve(input.productRoot)}：${otherRoots.join("、")}${error?`；原因：${error}`:""}`)
-  const record=JSON.stringify({time:new Date().toISOString(),directory,productRoot:resolve(input.productRoot),switched,currentInstall:report.currentInstall,otherInstall,otherRoots,...(error===undefined?{}:{error})})+"\n"
+ const report:InstallationMirrorReport={directory,switched:[],currentInstall:post?.currentInstall??0,otherInstall:post?.otherInstall??0,otherRoots:post?.otherRoots??[],...(resolution===undefined?{}:{resolution}),...(error===undefined?{}:{error})}
+ if(report.otherInstall||error){
+  log(resolution
+   ? `RC2 原生模块解析已读取当前安装：${resolution.entries.length} 个包；旧共享镜像保留 ${report.otherInstall} 条其他归属链接，不参与本次安装映射（${directory}）`
+   : `RC2 原生模块解析未完成（${directory}）：${error??'未取得解析表'}；旧共享镜像与用户目录保持原样`)
+  const record=JSON.stringify({time:new Date().toISOString(),directory,productRoot:resolve(input.productRoot),switched:[],currentInstall:report.currentInstall,otherInstall:report.otherInstall,otherRoots:report.otherRoots,...(resolution===undefined?{}:{resolution}),...(error===undefined?{}:{error})})+"\n"
   const write=input.audit??(async(line:string)=>{await appendFile(join(home,"profiles",INSTALLATION_MIRROR_AUDIT),line)})
-  try{await write(record)}
-  catch(cause){log(`  审计记录追加失败（归并已完成，结果不受影响）：${String((cause as Error)?.message??cause)}`)}
+  try{await write(record)}catch(cause){log(`  审计记录追加失败：${String(cause instanceof Error?cause.message:cause)}`)}
  }
  return report
 }
@@ -276,7 +232,7 @@ export function productLinkSwitchNotice(input:{profileDirectory:string;productRo
  const inScope=scope?.inScope
  if(changed&&inScope?.total)lines.push(`  范围：本函数只管辖 Profile 自己的 node_modules 下由本次安装提供的托管槽位（本次改指 ${updated.length} 条、清理 ${removed.length} 条；该目录现有软链 ${inScope.total} 条，其中 ${inScope.currentInstall} 条指向本次安装）`)
  if(outOfScope?.total){
-  lines.push(`  不归本函数：同级目录 ${outOfScope.directory} 另有 ${outOfScope.total} 条链接（上游 DSH 的 profile fallback linker 维护的依赖镜像）；归属与改指由该 owner 决定，本函数只在启动归并前后播报它的改动`)
+  lines.push(`  不归本函数：同级目录 ${outOfScope.directory} 另有 ${outOfScope.total} 条链接（旧共享镜像；RC2 原生 RuntimeResolution 使用独立安装映射）；本函数只报告物理归属，不改写这些链接`)
   if(outOfScope.otherInstall)lines.push(`    这 ${outOfScope.total} 条里有 ${outOfScope.otherInstall} 条当前指向的不是本次安装：${outOfScope.otherRoots.join("、")}`)
   const visible=inScope?.total??updated.length
   lines.push(`  ⇒ 本次可见的托管链接共 ${visible+outOfScope.total} 条 ＝ 本函数管辖 ${visible} 条 ＋ 不归本函数 ${outOfScope.total} 条；「本次改指 ${updated.length} 条」不是这个数`)
@@ -305,22 +261,12 @@ async function productLinkScopes(input:{profileDirectory:string;productRoot:stri
 }
 
 /**
- * 呼叫产品托管链接切换，并**播报**它实际改了什么（`runtime-patch.ts` 里那个唯一调用点走的就是这里）。
- *
- * **不改变切换语义**：归属判定、冲突 fail-closed、切换动作全部仍由 `script/product-link.ts` 决定，
- * 本函数只消费它的返回值，不多判一次、不改一个链接。
- *
- * `reconcile`/`census`/`log` 只用于测试注入替身（默认分别是 `reconcileProductPackageLinks`、
- * `censusModuleLinkScope` 与 `console.log`）：回归用例据此构造"有改动 / 0 改动"两种场景，
- * **不碰任何真实运行根的链接**。
- *
- * 在归属普查之前先用镜像的真正 owner 归并同级 `profiles/node_modules`（见
- * `reconcileAndReportInstallationMirror`）：这样"本次改指 N 条"与"底座现在指向谁"读的是同一时刻的真值，
- * 而不是"产品改完、owner 还没跑"的中间态。
+ * 先消费产品托管槽位的真实改动，再读取 RC2 原生安装解析表与旧共享镜像归属。
+ * 只有 reconcileProductPackageLinks 管辖的槽位改动计入切换；RuntimeResolution 不写旧共享链接。
  */
-export async function reconcileAndReportProductLinks(input:{profileDirectory:string;productRoot:string;installAnchor:string;overlayPaths?:readonly string[];reconcile?:typeof reconcileProductPackageLinks;census?:typeof censusModuleLinkScope;mirrorHeal?:typeof healProfilesModuleFallback;mirrorTargets?:typeof moduleLinkTargets;log?:(line:string)=>void}):Promise<ProductLinkSwitchReport>{
+export async function reconcileAndReportProductLinks(input:{profileDirectory:string;productRoot:string;installAnchor:string;overlayPaths?:readonly string[];reconcile?:typeof reconcileProductPackageLinks;census?:typeof censusModuleLinkScope;mirrorResolve?:typeof createRuntimeResolution;mirrorTargets?:typeof moduleLinkTargets;log?:(line:string)=>void}):Promise<ProductLinkSwitchReport>{
  const report=await (input.reconcile??reconcileProductPackageLinks)({profileDirectory:input.profileDirectory,productRoot:input.productRoot,installAnchor:input.installAnchor,overlayPaths:input.overlayPaths})
- await reconcileAndReportInstallationMirror({profileDirectory:input.profileDirectory,productRoot:input.productRoot,installAnchor:input.installAnchor,heal:input.mirrorHeal,census:input.census,targets:input.mirrorTargets,log:input.log})
+ await reconcileAndReportInstallationMirror({profileDirectory:input.profileDirectory,productRoot:input.productRoot,installAnchor:input.installAnchor,resolveModules:input.mirrorResolve,census:input.census,targets:input.mirrorTargets,log:input.log})
  const scope=await productLinkScopes(input)
  const notice=productLinkSwitchNotice({profileDirectory:input.profileDirectory,productRoot:input.productRoot,updated:report.updated,removed:report.removed,scope,source:"reconcile"})
  await emitProductLinkSwitchNotice({notice,profileDirectory:input.profileDirectory,log:input.log})

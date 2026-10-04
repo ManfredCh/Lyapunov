@@ -13,7 +13,7 @@
 import {createContext,useContext,useEffect,useRef,useState,useSyncExternalStore} from "react"
 import type {ReactNode} from "react"
 import type {PropsLocale,PropsRuntime} from "@deepseek-ai/dsh-client-ui-slots"
-import type {SettingsScope} from "@deepseek-ai/dsh-client-ui-settings/client"
+import type {ConfigForm} from "@deepseek-ai/dsh-client-ui-settings/client"
 import type {} from "../../lyapunov-contracts/src/workbench-slots.ts"
 import type {WorkbenchReveal,WorkbenchSessionOwnerProps} from "../../lyapunov-contracts/src/workbench-slots.ts"
 export type {WorkbenchReveal}
@@ -25,7 +25,7 @@ import {workspaceStyle} from "./workspace-style.ts"
 
 type Entry={name:string;path:string;type:string}
 type Terminal={sessionId:string;name?:string;status:{kind:string}}
-export interface WorkspaceSurface{navigateFiles?:(options:{picker?:boolean;section?:"files"|"search"|"review";toggleTree?:boolean;newWorktree?:boolean})=>void;openDocument?:(sessionId:string,path:string,create?:boolean)=>Promise<void>|void;scope:SettingsScope<WorkspacePreferences>;current:(id:string)=>boolean;addSelection:(id:string,selection:ReturnType<typeof selectedFileContext>)=>void}
+export interface WorkspaceSurface{navigateFiles?:(options:{picker?:boolean;section?:"files"|"search"|"review";toggleTree?:boolean;newWorktree?:boolean})=>void;openDocument?:(sessionId:string,path:string,create?:boolean)=>Promise<void>|void;scope:ConfigForm<WorkspacePreferences>;current:(id:string)=>boolean;addSelection:(id:string,selection:ReturnType<typeof selectedFileContext>)=>void}
 type FileDraft={file:{path:string;version?:string;content:string};draft:string}
 // 仅保留当前浏览器页面中的编辑视图，不写文件、不创建另一套会话存储。
 const sessionDrafts=new Map<string,FileDraft>()

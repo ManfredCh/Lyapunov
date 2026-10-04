@@ -58,7 +58,7 @@ export function applyFilesNavigationClient(ctx:Context){
  }
  ctx.effect(()=>ctx.slots.inject('sidebar.right.tab.files.actions',()=>ctx.slots.register({
   name:'sidebar.right.tab.files.actions',id:'lyapunov-directory-navigation',locale:'lyapunovFiles',
-  children:{'sidebar.right.tab.files.directoryFlow':{kind:'single',scope:'scoped'}},
+  children:{'sidebar.right.tab.files.directoryFlow':{kind:'single',scope:'session'}},
   inject:()=>({openWorkspaceDirectory}),
  },FilesNavigationActions)))
 }

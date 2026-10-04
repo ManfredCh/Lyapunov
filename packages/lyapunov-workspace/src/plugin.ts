@@ -16,7 +16,6 @@ import {createRequire} from "node:module"
 import {defineTool} from '@deepseek-ai/dsh-tools'
 import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import type {} from '@deepseek-ai/dsh-commands'
-import {applyWorkspacePreferences} from './preferences-host.ts'
 import {CONVERT_CACHE_VERSION,DECODER_ASSET_KINDS,DEFAULT_MAX_OUTPUT_BYTES,ModelPreviewUnavailable,ModelPreviewUnsupported,convertCacheIdentity,convertRegisteredSource,convertSourceOf,convertToGlb,decoderAssetFiles,decoderAssetResponse,fileByteResponse,isRobotPath,productRoot,resolveCacheRoot,robotPreview,verifyDependencies} from './model-convert.ts'
 // 拖拽转换只接受本会话 `scene_import` 已登记的源资源：路径从 scene service owner 解析，客户端给不了路径。
 import {requireSessionId} from "../../lyapunov-contracts/src/session-scope.ts"
@@ -86,7 +85,6 @@ const sessionCwd=async(ctx:Context,sessionId:string):Promise<string|undefined>=>
 
 /** 手动工作区入口直接消费原生FS/PTY/Workspace；不复制执行器或会话。 */
 export async function apply(ctx:Context,config:Config){
-  await applyWorkspacePreferences(ctx)
   const commentWrites=new Map<string,Promise<unknown>>()
   const run=async(agent:Agent,argv:string[],signal:AbortSignal)=>{
     const cwd=agent.session.header.cwd;if(!cwd)throw new Error("WORKSPACE_REQUIRED")

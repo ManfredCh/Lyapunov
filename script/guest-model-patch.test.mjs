@@ -7,7 +7,8 @@ import {spawnSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
 import {verifiedGuestOwnProviderComposition} from './guest-own-provider-patch.mjs'
 import {applySignedGuestPatch} from './guest-model-patch.mjs'
-const root=resolve(import.meta.dirname,'..'),source=process.env.GUEST_UPGRADE_TEST_SDK??join(root,'.upstream/deepseek-harness-20260911-candidate')
+import {legacySDKFixture} from './legacy-sdk-fixture.mjs'
+const root=resolve(import.meta.dirname,'..'),source=process.env.GUEST_UPGRADE_TEST_SDK??legacySDKFixture(root)
 const manifestName='packages/desktop/patches/dsh-guest-presentation-227-to-d756.json'
 const signed=JSON.parse(readFileSync(join(root,manifestName),'utf8'))
 const digest=path=>createHash('sha256').update(readFileSync(path)).digest('hex')

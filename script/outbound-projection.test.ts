@@ -24,8 +24,8 @@ if (!compiled) {
     // `BUN_BIN` 仍交给子进程：子文件用它拉起内层 `bun --no-env-file test script/outbound-projection.test.ts`
     // 来跑本文件真正的那 7 条投影断言——**父、子分工是刻意的**（父=bun:test 入口，子=node:test 构建/隔离）。
     const runnerArguments = process.versions.bun
-      ? ['test', join(import.meta.dir, 'upstream-patches.test.mjs')]
-      : ['--test', join(import.meta.dir, 'upstream-patches.test.mjs')]
+      ? ['test', '--no-env-file', '--tsconfig-override='+join(import.meta.dir,'../tsconfig.json'), '--test-name-pattern=当前RC2真实outbound', join(import.meta.dir, 'upstream-patches.test.mjs')]
+      : ['--test', '--test-name-pattern=当前RC2真实outbound', join(import.meta.dir, 'upstream-patches.test.mjs')]
     const result = spawnSync(process.execPath, runnerArguments, {
       cwd: resolve(import.meta.dir, '..'), encoding: 'utf8', timeout: isolatedTestTimeoutMs,
       env: {...process.env, BUN_BIN: process.execPath},

@@ -6,6 +6,8 @@
  * 原测试随 Jev 一起删除 ⇒ 提取出来的模块失去覆盖。本文件补上这一块。
  */
 import { expect, test } from 'bun:test'
+import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
+import type {} from '../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/lib/types/runtime-context.d.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -84,4 +86,19 @@ test('latestUserText：本步消息优先于历史，压缩摘要可作为当前
 test('负对照：只有域指针/快照时，取不到任何意图文本（不把注入内容当用户意图）', () => {
   expect(latestUserText({ messages: [pointerHint('域指针')], history: [promptSnapshot('快照')] })).toBe('')
   expect(routingHistory(sessionOf([pointerHint('a'), promptSnapshot('b')]))).toEqual([])
+})
+
+
+test('RC2 producer与已迁移历史notice不充当人工权限，runtime快照排除而compact检查点保留', () => {
+  const current = createUserMessage({ content: [{ type: 'text', text: '当前快照' }], source: { kind: 'runtime-context' } })
+  const checkpoint = createUserMessage({ content: [{ type: 'text', text: '当前压缩摘要' }], source: compactCheckpointSource(CompactionId('fixture-compact')) })
+  for (const kind of ['lyapunov-engine-install', 'plugin:lyapunov-engine-install', 'lyapunov-orientation', 'plugin:lyapunov-orientation'] as const) {
+    const notice = createUserMessage({ content: [{ type: 'text', text: '自动回执' }], source: { kind, form: 'notice', summary: '自动回执' } })
+    expect(isUserIntent(notice)).toBe(false)
+    expect(isTaskIntent(notice)).toBe(false)
+  }
+  expect(isRoutingInput(current)).toBe(false)
+  expect(isUserIntent(current)).toBe(false)
+  expect(isCompactionSummary(checkpoint)).toBe(true)
+  expect(latestUserText({ messages: [current], history: [checkpoint] })).toBe('当前压缩摘要')
 })

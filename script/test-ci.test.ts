@@ -240,6 +240,30 @@ describe("结果计数：不吞失败", () => {
 })
 
 describe("失败传播与 fail-closed 分类", () => {
+  test("产品配置固定依赖实例，SDK的source路径不能另造一份owner", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "testci-sdk-owner-"))
+    try {
+      await mkdir(join(dir, "node_modules", "primary-owner"), { recursive: true })
+      await mkdir(join(dir, "sdk"), { recursive: true })
+      await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { module: "ESNext" } }))
+      await writeFile(join(dir, "node_modules", "primary-owner", "package.json"), JSON.stringify({ name: "primary-owner", type: "module", exports: "./index.js" }))
+      await writeFile(join(dir, "node_modules", "primary-owner", "index.js"), "export const owner = {}\n")
+      await writeFile(join(dir, "sdk", "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "primary-owner": ["./duplicate.ts"] } } }))
+      await writeFile(join(dir, "sdk", "duplicate.ts"), "export const owner = {}\n")
+      await writeFile(join(dir, "sdk", "consumer.ts"), "export { owner } from 'primary-owner'\n")
+      await writeFile(join(dir, "owner.test.ts"), "import {expect,test} from 'bun:test'\nimport {owner} from 'primary-owner'\nimport {owner as observed} from './sdk/consumer.ts'\ntest('same runtime owner',()=>expect(observed).toBe(owner))\n")
+      const result = await runEntry({ path: "owner.test.ts", declaredRunner: "bun:test", markers: [], decision: "include", reason: "actual SDK owner identity" }, dir, 30_000)
+      expect(result.status).toBe("pass")
+      expect(result.exitCode).toBe(0)
+      expect(result.command).toContain("--tsconfig-override=")
+      await writeFile(join(dir, "owner.smoke.ts"), "import {owner} from 'primary-owner'\nimport {owner as observed} from './sdk/consumer.ts'\nif (owner !== observed) process.exit(9)\n")
+      const plain = await runEntry({ path: "owner.smoke.ts", declaredRunner: "plain", markers: [], decision: "include", reason: "actual SDK owner identity in plain entry" }, dir, 30_000)
+      expect(plain.status).toBe("pass")
+      expect(plain.exitCode).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
   test("所有 Bun 子进程禁止自动加载工作目录 dotenv", async () => {
     const dir = await mkdtemp(join(tmpdir(), "testci-dotenv-"))
     const key = `TESTCI_SYNTHETIC_DOTENV_${Date.now()}`

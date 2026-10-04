@@ -7,6 +7,7 @@ import { mountAgentLoopTestDependencies } from "@deepseek-ai/dsh-agent-loop-test
 import { createUserMessage } from "@deepseek-ai/dsh-llm"
 import { SessionId } from "@deepseek-ai/dsh-session"
 import { MockAdapter } from "../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/tests/mock-adapter.ts"
+import type {} from '../../lyapunov-contracts/src/message-sources.ts'
 import { OrientationChecks } from "../src/orientation-check.ts"
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -30,7 +31,7 @@ describe("真实原生 Inbox：活动导入把图交下一 step，Stop 清掉待
           { type: "text", text: "应用自动方向检查：真实图像附件" },
           { type: "image", attachment: { attachmentId: AttachmentId("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), mediaType: "image/png", bytes: 156, width: 8, height: 6 } },
         ],
-        source: { kind: "plugin", plugin: "lyapunov-orientation" },
+        source: { kind: "lyapunov-orientation" },
       })
       agent.send(image, "next-step", true)
       const splices = agent.session.snapshotEvents().filter(event => event.type === "agent/inbox/spliced")
@@ -56,7 +57,7 @@ describe("真实原生 Inbox：活动导入把图交下一 step，Stop 清掉待
       const agent = await ctx.agentLoop.create(SessionId("orientation-keep-inbox-native"), { provider: "mock", model: "mock" })
       agent.followup(createUserMessage({ content: [{ type: "text", text: "加载资源" }], source: { kind: "user" } }))
       await until(() => agent.status === "running" && adapter.requests.length > 0)
-      const image = createUserMessage({ content: [{ type: "text", text: "方向检查图" }], source: { kind: "plugin", plugin: "lyapunov-orientation" } })
+      const image = createUserMessage({ content: [{ type: "text", text: "方向检查图" }], source: { kind: "lyapunov-orientation" } })
       const other = createUserMessage({ content: [{ type: "text", text: "用户后续要求" }], source: { kind: "user" } })
       agent.send(image, "next-step", true)
       agent.send(other, "next-turn", false)
@@ -102,7 +103,7 @@ describe("真实原生 Inbox：活动导入把图交下一 step，Stop 清掉待
       ctx.on("agent/inbox/claimed",({message})=>claimedIds.push(message.id))
       const image = createUserMessage({
         content: [{ type: "text", text: "拖拽方向检查" }, { type: "image", attachment: { attachmentId: AttachmentId("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), mediaType: "image/png", bytes: 160, width: 8, height: 6 } }],
-        source: { kind: "plugin", plugin: "lyapunov-orientation" },
+        source: { kind: "lyapunov-orientation" },
       })
       await agent.runMaintenance(async signal => { expect(signal.aborted).toBe(false); agent.send(image, "next-turn", true) })
       await until(() => adapter.requests.length > 0)
@@ -121,7 +122,7 @@ describe("真实原生 Inbox：活动导入把图交下一 step，Stop 清掉待
       const adapter = new MockAdapter(["hang", "hang"])
       ctx.llm.registerAdapter(["mock"], adapter)
       const agent = await ctx.agentLoop.create(SessionId("orientation-dedicated-stop-native"), { provider: "mock", model: "mock" })
-      const image = createUserMessage({ content: [{ type: "text", text: "独立拖拽方向图" }, { type: "image", attachment: { attachmentId: AttachmentId("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), mediaType: "image/png", bytes: 160, width: 8, height: 6 } }], source: { kind: "plugin", plugin: "lyapunov-orientation" } })
+      const image = createUserMessage({ content: [{ type: "text", text: "独立拖拽方向图" }, { type: "image", attachment: { attachmentId: AttachmentId("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), mediaType: "image/png", bytes: 160, width: 8, height: 6 } }], source: { kind: "lyapunov-orientation" } })
       const user = createUserMessage({ content: [{ type: "text", text: "用户后续任务" }], source: { kind: "user" } })
       let imageTurn=0
       const ends:Array<{turn:number;kind:string;cause?:string}>=[]
@@ -163,7 +164,7 @@ describe("真实原生 Inbox：活动导入把图交下一 step，Stop 清掉待
       const checks=new OrientationChecks(undefined,120_000,clock)
       const row=checks.begin({sessionKey,sceneId:"native-scene",revision:1,clientId:"native-window",rootEntityIds:["root"],origin:"ui"}).face
       checks.initial(sessionKey,row.checkId,{sceneId:"native-scene",sceneRevision:1,clientId:"native-window",captureId:"before"})
-      const image=createUserMessage({content:[{type:"text",text:"请检查图像"},{type:"image",attachment:{attachmentId:AttachmentId("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),mediaType:"image/png",bytes:160,width:8,height:6}}],source:{kind:"plugin",plugin:"lyapunov-orientation"}})
+      const image=createUserMessage({content:[{type:"text",text:"请检查图像"},{type:"image",attachment:{attachmentId:AttachmentId("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),mediaType:"image/png",bytes:160,width:8,height:6}}],source:{kind:"lyapunov-orientation"}})
       checks.queued(sessionKey,row.checkId,image.id)
       ctx.on("agent/inbox/claimed",({message,turn})=>{if(message.id===image.id)checks.claimed(sessionKey,message.id,turn)})
       ctx.on("session/event",(session,event)=>{if(session===agent.session&&event.type==="turn/end")checks.endTurn(sessionKey,event.data.turn,event.data.reason)})

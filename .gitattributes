@@ -1,0 +1,2 @@
+# 固定补丁的上下文空行必须保留 unified diff 的前导空格；源码仍按默认规则检查。
+script/patches/dsh-v0.2.0-rc.2-product.patch -whitespace

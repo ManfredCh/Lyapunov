@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -34,9 +34,10 @@ function PreferencesSection({ surface }: { surface: Surface }) {
   const preferences = state.value ?? defaultPreferences
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<Preferences['shortcuts']>()
+  const editRevision = useRef<number | undefined>(undefined)
   const [permission, setPermission] = useState(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
   const permissionLabels: Record<string, [string, string]> = { default: ['尚未询问', 'Not requested'], granted: ['已允许', 'Allowed'], denied: ['已阻止', 'Blocked'], unsupported: ['当前环境不支持', 'Unavailable'] }
-  const save = async (work: () => Promise<void | boolean>) => { setBusy(true); setError(''); try { await work() } catch (error) { setError(String(error)) } finally { setBusy(false) } }
+  const save = async (work: () => Promise<void | boolean>) => { setBusy(true); setError(''); try { if (await work() === false) throw new Error(tr('保存未被接受，请查看最新偏好后重试。', 'The save was refused. Review the latest preferences and retry.')) } catch (error) { setError(String(error)) } finally { setBusy(false) } }
   const writable = state.status === 'ready' && state.writable && !busy
   return <section style={{ display: 'grid', gap: 16, padding: 20 }} aria-label={tr('通知与快捷键', 'Notifications and shortcuts')}>
     <h2 style={{ margin: 0 }}>{tr('通知与快捷键', 'Notifications and shortcuts')}</h2>
@@ -57,9 +58,9 @@ function PreferencesSection({ surface }: { surface: Surface }) {
     <p style={{ margin: 0, opacity: .75 }}>{tr('未允许系统通知时，提醒仍显示在应用内。提示音首次使用需点击“试听”或开启提示音。', 'Without system permission, notices stay in the app. Click Preview sound or enable a sound to activate audio.')}</p>
     <fieldset disabled={!writable} style={{ display: 'grid', gap: 10, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8 }}>
       <legend>{tr('快捷键', 'Keyboard shortcuts')}</legend>
-      {shortcutActions.map(action => <label key={action} style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'center' }}>{tr(...actionLabels[action])}<input aria-label={tr(...actionLabels[action])} value={(editing ?? preferences.shortcuts)[action]} onChange={event => setEditing({ ...(editing ?? preferences.shortcuts), [action]: event.target.value })} spellCheck={false} /></label>)}
+      {shortcutActions.map(action => <label key={action} style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'center' }}>{tr(...actionLabels[action])}<input aria-label={tr(...actionLabels[action])} value={(editing ?? preferences.shortcuts)[action]} onChange={event => { if (editing === undefined) editRevision.current = state.revision; setEditing({ ...(editing ?? preferences.shortcuts), [action]: event.target.value }) }} spellCheck={false} /></label>)}
       <p style={{ margin: 0, opacity: .75 }}>{tr('mod 在 macOS 上代表 Cmd，在其他系统代表 Ctrl；quote/period 表示单引号/句号。清空可禁用。快捷键可在聊天输入框中使用；输入法组合、已处理的键、弹窗和终端专用区域仍由原组件处理。设置窗口用 Ctrl/Cmd+逗号，输入聚焦用 Ctrl+L，消息前后用 Ctrl/Cmd+Alt+[ 或 ]。', 'mod means Cmd on macOS and Ctrl elsewhere; quote/period mean punctuation keys. Leave blank to disable. Shortcuts work in the composer; composition, handled keys, dialogs and terminal regions retain their controls. Settings: Ctrl/Cmd+comma. Focus input: Ctrl+L. Messages: Ctrl/Cmd+Alt+[ or ].')}</p>
-      <div style={{ display: 'flex', gap: 10 }}><button type="button" disabled={!editing} onClick={() => void save(async () => { await scope.set('shortcuts', validateShortcuts(editing!)); setEditing(undefined) })}>{tr('保存快捷键', 'Save shortcuts')}</button><button type="button" onClick={() => void save(async () => { await scope.unset('shortcuts'); setEditing(undefined) })}>{tr('恢复默认快捷键', 'Reset shortcuts')}</button></div>
+      <div style={{ display: 'flex', gap: 10 }}><button type="button" disabled={!editing} onClick={() => void save(async () => { if (!await scope.mutate([{ op: 'set', path: ['shortcuts'], value: validateShortcuts(editing!) }], editRevision.current)) throw new Error(tr('保存未被接受，请查看最新偏好后重试。', 'The save was refused. Review the latest preferences and retry.')); setEditing(undefined) })}>{tr('保存快捷键', 'Save shortcuts')}</button><button type="button" onClick={() => void save(async () => { if (!await scope.mutate([{ op: 'unset', path: ['shortcuts'] }], state.revision)) throw new Error(tr('保存未被接受，请查看最新偏好后重试。', 'The save was refused. Review the latest preferences and retry.')); setEditing(undefined) })}>{tr('恢复默认快捷键', 'Reset shortcuts')}</button></div>
     </fieldset>
     {error && <p role="alert" style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{error}</p>}
   </section>

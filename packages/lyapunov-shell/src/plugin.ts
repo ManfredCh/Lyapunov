@@ -235,7 +235,7 @@ export async function apply(ctx:Context,config:Config={}){
  const orientationTakesOver=(message:Parameters<typeof isUserIntent>[0]):boolean=>{
   const kind=(message.source as {kind?:string}|undefined)?.kind
   // 已知内部插件/工具上下文可留在自动任务内；未知来源按用户输入保守处理。
-  return !kind||isUserIntent(message)||!["plugin","tool","model","lyapunov-domain-pointer"].includes(kind)
+  return !kind||isUserIntent(message)||!kind.startsWith("plugin:")&&!["plugin","tool","model","lyapunov-domain-pointer","lyapunov-orientation","lyapunov-blender","lyapunov-depth-estimation","lyapunov-generate-image","lyapunov-engine-install","lyapunov-recovery","runtime-context","compact-checkpoint"].includes(kind)
  }
  ctx.on("agent/pre-step",async({messages,agent,signal,turn,step},next)=>{
   activeTurnSignals.set(agent,signal)
@@ -258,7 +258,7 @@ export async function apply(ctx:Context,config:Config={}){
   if(pointerText!==undefined&&pointerText!==previous)additions.push(createUserMessage({content:[{type:"text",text:pointerText}],source:{kind:"lyapunov-domain-pointer",form:"snapshot"} as never}))
   if(plan)routeDecisions.set(sessionKeyOf(agent),{at:new Date().toISOString(),stage:plan.decision.stage,source:plan.decision.inputSource,word:plan.decision.intent.word??null,evidence:plan.decision.evidence,injected:plan.injected,why:plan.decision.hints.map(hint=>hint.why)})
   // 仅开发安装路径的合成 notice；正式模式保留用户原始授权而不产生自动提醒。
-  if(engineNotice)additions.push(createUserMessage({content:[{type:"text",text:engineNotice}],source:{kind:"plugin",plugin:"lyapunov-engine-install",form:"notice",summary:"引擎安装授权状态"}}))
+  if(engineNotice)additions.push(createUserMessage({content:[{type:"text",text:engineNotice}],source:{kind:"lyapunov-engine-install",form:"notice",summary:"引擎安装授权状态"}}))
   const legacySystem=privacyMode==="formal"&&typeof agent.session?.deriveMessages==="function"&&needsFormalSystemReset(agent.session.deriveMessages())
   return additions.length||legacySystem?{...decision,messages:[...decision.messages,...additions],...legacySystem?{startsRequestSeries:true as const}:{}}:decision
  })
@@ -776,7 +776,7 @@ export async function apply(ctx:Context,config:Config={}){
    if(fresh.revision!==target.revision||outcome.capture.sceneId!==target.sceneId||outcome.capture.sceneRevision!==target.revision)throw new Error("ORIENTATION_IMAGE_STALE: 图像与当前导入身份不符")
    const checked=orientationChecks.initial(target.sessionKey,face.checkId,{sceneId:target.sceneId,sceneRevision:target.revision,clientId,captureId:outcome.capture.captureId,camera:outcome.capture.camera})
    const note=orientationPrompt(checked,outcome.capture.captureId,outcome.capture.camera)+((outcome.capture.visualWarnings??[]).length?` This Frame has ${outcome.capture.visualWarnings!.length} visual missing-content warnings; report uncertain if the image is incomplete.`:"")
-   const message=createUserMessage({content:[{type:"text",text:note},{type:"image",attachment:outcome.attachment as never}] as ContentBlock[],source:{kind:"plugin",plugin:"lyapunov-orientation",form:"notice",summary:"导入方向检查"} as never})
+   const message=createUserMessage({content:[{type:"text",text:note},{type:"image",attachment:outcome.attachment as never}] as ContentBlock[],source:{kind:"lyapunov-orientation",form:"notice",summary:"导入方向检查"}})
    const sender=agent as {send?:(message:unknown,kind:"next-step"|"next-turn",wake:boolean)=>unknown;status?:string}
    if(typeof sender.send!=="function")throw new Error("ORIENTATION_AGENT_SEND_UNAVAILABLE")
    // 采集是异步的：Stop 之后的迟到图绝不借 send(wakeup=true) 被自动改投 next-turn 复活任务。
@@ -796,7 +796,7 @@ export async function apply(ctx:Context,config:Config={}){
   const source=message.source as {kind?:string;plugin?:string}
   try{
    const sessionKey=sessionKeyOf(agent)
-   if(source.kind==="plugin"&&source.plugin==="lyapunov-orientation")orientationChecks.claimed(sessionKey,message.id,turn)
+   if(source.kind==="lyapunov-orientation"||source.kind==="plugin:lyapunov-orientation")orientationChecks.claimed(sessionKey,message.id,turn)
    else orientationChecks.claimedOther(sessionKey,turn,message.id,orientationTakesOver(message))
   }catch{/* 会话刚退出时的旧消息不改当前检查 */}
  })
@@ -1714,18 +1714,19 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   if(fastgsJob?.running)return fastgsJob
   const state:{action:"download"|"install";startedAt:number;running:boolean;log:string[];result:FastGSReceipt|{status:string;message:string}|null}={action,startedAt:Date.now(),running:true,log:[],result:null}
   fastgsJob=state
-  ctx.jobs.start({kind:"fastgs-external",label:`FastGS ${action}`,outputLimitBytes:8000,run:()=>{
+  ctx.jobs.start({kind:"fastgs-external",label:`FastGS ${action}`,outputLimitBytes:8000,run:job=>{
    // 真实取消：AbortController 的 signal 进 helper，取消时停本任务的子进程/子树；不波及其它进程。
    const controller=new AbortController()
+   const log=(line:string)=>{fastgsLog(line);job.append(line.endsWith("\n")?line:line+"\n")}
    const done=(async()=>{
     try{
-     const receipt=action==="download"?await fastgsDownload({productRoot:PRODUCT_ROOT_FOR_ENGINE},{log:fastgsLog,signal:controller.signal}):await fastgsInstall({productRoot:PRODUCT_ROOT_FOR_ENGINE},{log:fastgsLog,signal:controller.signal})
+     const receipt=action==="download"?await fastgsDownload({productRoot:PRODUCT_ROOT_FOR_ENGINE},{log,signal:controller.signal}):await fastgsInstall({productRoot:PRODUCT_ROOT_FOR_ENGINE},{log,signal:controller.signal})
      state.result=receipt
      // 回执 BLOCKED/FAILED 也按真实结果终结，不能一律 Job completed。
-     return {status:(receipt.status==="OK"?"completed":"failed") as "completed"|"failed",output:JSON.stringify(receipt)}
+     return {status:(receipt.status==="OK"?"completed":"failed") as "completed"|"failed",result:JSON.stringify(receipt)}
     }catch(error){
      state.result={status:"FAILED",message:error instanceof Error?error.message:String(error)}
-     return {status:(controller.signal.aborted?"killed":"failed") as "killed"|"failed",output:JSON.stringify(state.result)}
+     return {status:(controller.signal.aborted?"killed":"failed") as "killed"|"failed",result:JSON.stringify(state.result)}
     }finally{state.running=false;fastgsStatusCache=undefined}
    })()
    return {cancel:()=>controller.abort(),done}

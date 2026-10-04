@@ -9,7 +9,8 @@
   "exports": {
     ".": "./dist/plugin.js",
     "./client": "./dist/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./preferences": "./dist/preferences-host.js"
   },
   "dsh": {
     "client": {
@@ -29,6 +30,14 @@
       "external": [
         "@lyapunov/viewer/client"
       ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
     }
   }
 }

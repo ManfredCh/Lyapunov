@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage,type ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {} from '../../lyapunov-contracts/src/message-sources.ts'
 import { basename } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import type {} from '@deepseek-ai/dsh-attachment'
@@ -49,7 +50,7 @@ function deliverToOwner(owner:Agent|undefined,ref:unknown,caption:string,jobId:s
  const target=owner as {inject?:(message:unknown)=>void}|undefined
  if(typeof target?.inject!=='function'){delivery.error='执行上下文没有可投递的 owner agent（inject 不可用）：图只能按结果里的路径自行读取';return}
  try{
-  target.inject(createUserMessage({content:[{type:'text',text:caption+'｜来源：后台作业 '+jobId},{type:'image',attachment:ref}] as ContentBlock[],source:{kind:'plugin',plugin:name,form:'notice',summary:'深度预览 '+jobId}}))
+  target.inject(createUserMessage({content:[{type:'text',text:caption+'｜来源：后台作业 '+jobId},{type:'image',attachment:ref}] as ContentBlock[],source:{kind:'lyapunov-depth-estimation',form:'notice',summary:'深度预览 '+jobId}}))
   delivery.mode='job-notice';delivery.attached=1
  }catch(error){delivery.error='投递失败：'+String(error instanceof Error?error.message:String(error))}
 }
@@ -82,22 +83,22 @@ export function apply(ctx:Context,config:Config={}){
   if(signal.aborted)throw new Error('CANCELLED: 调用已被取消，后台作业未启动')
   // 后台作业的存活期不绑定本次调用：取消来自 job_kill / owner 释放（作业自己的 controller），不是 exec.signal。
   const controller=new AbortController()
-  const jobId=ctx.jobs.start({kind:'depth_estimate',label:'单目相对深度 '+request.requestId,owner:agent,run:()=>{
+  const jobId=ctx.jobs.start({kind:'depth_estimate',label:'单目相对深度 '+request.requestId,owner:agent?.id,run:()=>{
    let cancel:(()=>void)|undefined
    const done=startDepthEstimation(ctx.subprocess,config,request,controller.signal,cwd).then(hooks=>{
     cancel=hooks.cancel
     if(controller.signal.aborted)cancel()
     return hooks.done
    }).then(async result=>{
-    if(result.status!=='completed')return {status:result.status,output:result.output}
+    if(result.status!=='completed')return {status:result.status,result:result.output}
     const attached=attach?await attachPreview(ctx,result.imagePath):noAttach
     // 顺序刻意如此：附件化 → 核对取消 → 投递 → 同步拼结果。投递之后不再有异步步骤，
     // 否则"作业已取消"与"完成通知带图发出去了"会同时成立。
-    if(controller.signal.aborted)return {status:'killed' as const,output:JSON.stringify({error:{code:'CANCELLED',message:'作业在附件化阶段被取消；本次不投图，也不交付结果'}})}
+    if(controller.signal.aborted)return {status:'killed' as const,result:JSON.stringify({error:{code:'CANCELLED',message:'作业在附件化阶段被取消；本次不投图，也不交付结果'}})}
     if('ref' in attached)deliverToOwner(agent,attached.ref,previewCaption(result.output),jobId,delivery)
     else delivery.error=attached.error
-    return {status:'completed' as const,output:withDelivery(result.output,delivery)}
-   }).catch((error:unknown)=>({status:controller.signal.aborted?'killed' as const:'failed' as const,output:String(error instanceof Error?error.message:String(error))}))
+    return {status:'completed' as const,result:withDelivery(result.output,delivery)}
+   }).catch((error:unknown)=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error instanceof Error?error.message:String(error))}))
    return {cancel:()=>{controller.abort();cancel?.()},done}
   }})
   return {result:JSON.stringify({jobId,provider:'depth-anything-v2',requestId:request.requestId,source:request.source})}

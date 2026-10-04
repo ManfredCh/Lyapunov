@@ -2919,6 +2919,20 @@
       ],
       "decision": "exclude",
       "reason": "A09-010外部相机验收：需明确LYAPUNOV_MUJOCO_PYTHON与离屏GL；实际MuJoCo3.13解析URDF Gazebo sensor、完整原件标定、Scene body相机共存、RGB-D像素/深度及FOV恢复。缺环境明确失败、不skip；主控需独立执行，默认离线不计通过。"
+    },
+    {
+      "path": "script/link-upstream.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha5 固定 SDK 与产品 workspace 唯一实例的离线依赖解析、冷依赖安装后的幂等链接、已登记 cache 归属及外部未知链接保护；只在自有临时目录测试，不联网、不读取凭据、不启动物理或生产服务。"
+    },
+    {
+      "path": "packages/lyapunov-terminal/test/rc2-terminal.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha5 原生 RC2 Terminal 的离线 Inbox、V4工具消息、同源URL及原生 RemoteStream 的首锚点/断流/恢复测试；仅内存流和临时上下文，不连接真实远端、不调用模型、不读取凭据或启动物理。"
     }
   ]
 }

@@ -125,7 +125,7 @@ function installFixture(ctx: Context, cwd: string) {
       return {
         items: sessions.list().map(item => ({
           sessionId: item.id, cwd: item.header.cwd,
-          updatedAt: item.header.createdAt, running: false, blank: item.seq === 0,
+          updatedAt: item.header.createdAt, running: false, blank: item.seq === 0, agentAvailable: true,
         })),
       }
     },

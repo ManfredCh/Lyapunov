@@ -16,10 +16,12 @@ export function apply(ctx:Context, config:Config={}) {
       const python=config.python??process.env.LYAPUNOV_ALGORITHM_PYTHON
       if(!python) throw new Error('PROVIDER_UNAVAILABLE: 缺少 LYAPUNOV_ALGORITHM_PYTHON')
       const request=JSON.parse(args.request_json)
-      const run=()=>ctx.subprocess.spawn({argv:[python,fileURLToPath(new URL('./propose.py',import.meta.url))],cwd:process.cwd(),stdio:{stdin:{data:JSON.stringify(request)},stdout:{maxBytes:4000000},stderr:{maxBytes:200000}},graceMs:2000,signal:exec.signal,env:{HF_ENDPOINT:'https://hf-mirror.com'}})
+      const run=(signal=exec.signal)=>ctx.subprocess.spawn({argv:[python,fileURLToPath(new URL('./propose.py',import.meta.url))],cwd:process.cwd(),stdio:{stdin:{data:JSON.stringify(request)},stdout:{maxBytes:4000000},stderr:{maxBytes:200000}},graceMs:2000,signal,env:{HF_ENDPOINT:'https://hf-mirror.com'}})
       if(args.background){
-        const id=ctx.jobs.start({kind:'lyapunov-provider',label:'grasp_propose',owner:exec.agent,run:()=>{
-          const child=run();return {cancel:()=>child.terminate(),done:child.done.then(outcome=>({status:outcome.exitCode===0?'completed' as const:outcome.signal?'killed' as const:'failed' as const,detail:`exitCode=${outcome.exitCode}`,output:child.collected.stdout?.readFrom(0).text??''}))}
+        if(exec.signal.aborted)throw exec.signal.reason??new Error('Cancelled before background Job registration')
+        const controller=new AbortController()
+        const id=ctx.jobs.start({kind:'lyapunov-provider',label:'grasp_propose',owner:exec.agent?.id,run:()=>{
+          const child=run(controller.signal);return {cancel:()=>{controller.abort();child.terminate()},done:child.done.then(outcome=>({status:outcome.exitCode===0?'completed' as const:outcome.signal?'killed' as const:'failed' as const,detail:`exitCode=${outcome.exitCode}`,result:child.collected.stdout?.readFrom(0).text??''}))}
         }})
         return {result:JSON.stringify({jobId:id,status:'running'})}
       }

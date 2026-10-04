@@ -19,6 +19,11 @@
  * 退出码：0=全部通过；1=有失败。
  */
 import { Context } from "@deepseek-ai/cordis"
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:repeat-tool-reminder': { kind: 'plugin:repeat-tool-reminder'; form: 'notice'; summary: string }
+  }
+}
 import Timer from "@deepseek-ai/cordis-plugin-timer"
 import AttachmentLocal from "@deepseek-ai/dsh-attachment-local"
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt"
@@ -2351,7 +2356,7 @@ try {
     const captureId=/初图 captureId ([^，]+)/.exec(prompt??"")?.[1]
     check("orientation_ui_import_sends_image_attachment",
       face?.status==="checking"&&typeof face.checkId==="string"&&delivered?.target==="next-turn"&&delivered.wakeup===true
-      &&image?.mediaType==="image/png"&&image.bytes>0&&delivered.message.source.kind==="plugin"&&prompt?.includes(rootId)===true,
+      &&image?.mediaType==="image/png"&&image.bytes>0&&delivered.message.source.kind==="lyapunov-orientation"&&prompt?.includes(rootId)===true,
       `状态=${JSON.stringify(face)}；目标=${String(delivered?.target)}；图像=${String(image?.mediaType)}/${String(image?.bytes)} B`)
     const duplicate=await harness.command(SESSION_A,"viewer_orientation_check_ui",input) as {checkId?:string}
     check("orientation_one_batch_only_once",duplicate?.checkId===face?.checkId&&sent.length===1&&window.captures.length===1,
@@ -2540,10 +2545,10 @@ try {
     const running=new AbortController()
     agent.status="running";agent.inbox.remove(dedicatedMessage.id)
     harness.ctx.emit("agent/inbox/claimed",{agent,message:dedicatedMessage,turn:42})
-    const internalNotice=createUserMessage({content:[{type:"text",text:"内部工具提示"}],source:{kind:"plugin",plugin:"repeat-tool-reminder",form:"notice",summary:"内部提示"}})
+    const internalNotice=createUserMessage({content:[{type:"text",text:"内部工具提示"}],source:{kind:"plugin:repeat-tool-reminder",form:"notice",summary:"内部提示"}})
     harness.ctx.emit("agent/inbox/claimed",{agent,message:internalNotice,turn:42})
     await agentEvents(harness.ctx,agent).waterfall("agent/pre-step",{messages:[dedicatedMessage,internalNotice],turn:42,step:1,signal:running.signal},()=>Promise.resolve({kind:"enter",messages:[dedicatedMessage,internalNotice]}))
-    const laterInternal=createUserMessage({content:[{type:"text",text:"后续内部提示"}],source:{kind:"plugin",plugin:"repeat-tool-reminder",form:"notice",summary:"后续内部提示"}})
+    const laterInternal=createUserMessage({content:[{type:"text",text:"后续内部提示"}],source:{kind:"plugin:repeat-tool-reminder",form:"notice",summary:"后续内部提示"}})
     harness.ctx.emit("agent/inbox/claimed",{agent,message:laterInternal,turn:42})
     await agentEvents(harness.ctx,agent).waterfall("agent/pre-step",{messages:[laterInternal],turn:42,step:2,signal:running.signal},()=>Promise.resolve({kind:"enter",messages:[laterInternal]}))
     let actualCancels=0

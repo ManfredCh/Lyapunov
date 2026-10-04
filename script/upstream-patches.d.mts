@@ -8,3 +8,7 @@ export function verifiedBrowserRootComposition(root: string, upstream: string, p
 export function verifiedComposedPatch(root: string, upstream: string, patch: Pick<UpstreamPatchDefinition, "file">): boolean
 export function upstreamPatches(root: string): UpstreamPatchDefinition[]
 export function applyUpstreamPatches(root: string, upstream: string): UpstreamPatchResult[]
+
+export function legacyUpstreamPatches(root: string): UpstreamPatchDefinition[]
+export function applyLegacyUpstreamPatches(root: string, upstream: string): UpstreamPatchResult[]
+export function preflightUpstreamPatches(root: string): UpstreamPatchDefinition[]

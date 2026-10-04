@@ -24,7 +24,7 @@ test("guest原生settings/key/default/adapter显式配置→真实localhost模�
     await ctx.agentDefaultModel.saveSelection(selected)
     expect(ctx.agentDefaultModel.currentSelection()).toMatchObject({provider:"fixture",model:"fixture-chat"})
     const output=new BlockAssembler();for await(const chunk of ctx.llm.stream({provider:"fixture",model:"fixture-chat",messages:[createUserMessage({content:[{type:"text",text:"Return the fixture response."}],source:{kind:"user"}})]}))output.push(chunk)
-    expect(output.message({kind:"model",provider:"fixture",model:"fixture-chat"}).content).toEqual([{type:"text",text:"guest-local-ok"}])
+    expect(output.message({provider:"fixture",model:"fixture-chat"}).content).toEqual([{type:"text",text:"guest-local-ok"}])
     expect(requests.map(row=>row.path)).toEqual(["/v1/models","/v1/chat/completions"]);expect(requests.every(row=>row.authorization==="Bearer guest-fixture-key")).toBe(true)
     const before=requests.length
     for(const url of ["https://vorynel.com/lyaup-unified/v1","https://api.vorynel.com/packs/v1","https://VORYNEL.COM./admin/api"]){

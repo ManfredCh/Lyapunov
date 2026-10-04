@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { formalModelRows } from "../src/account/formal.ts"
 import { resolveAccountApiUrl } from "../src/account/url.ts"
-import {Config as PiAiConfig} from '@deepseek-ai/dsh-llm-pi-ai'
+import * as PiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import {Context} from '@deepseek-ai/cordis'
+import Llm from '@deepseek-ai/dsh-llm'
 import {resolveRetryPolicy} from '@deepseek-ai/dsh-llm'
 
 // The server remaps public IDs. An operator's upstream model ID is not a native
@@ -32,13 +34,20 @@ test("formal default provider baseURL uses the unified production entry", () => 
   expect(provider.baseURL).toBe("https://vorynel.com/lyaup-unified/v1")
 })
 
-test('正式模型保留原生idle默认与有界重试，不对持续有进度的流强加整阶段截止',()=>{
+test('正式模型保留原生idle默认与有界重试，不对持续有进度的流强加整阶段截止',async()=>{
   const rows=formalModelRows({apiUrl:'https://account.example.invalid'})
-  const config=PiAiConfig(rows.find(row=>row.id==='llm-pi-ai')!.config)
-  const provider=config.providers!['lyapunov-plans']!
-  const retry=resolveRetryPolicy(provider.retryPolicy,'formal.provider.retryPolicy')
+  const raw=rows.find(row=>row.id==='llm-pi-ai')!.config!
+  const ctx=new Context()
+  try{
+  await ctx.plugin(Llm)
+  const fiber=ctx.plugin(PiAi,raw)
+  await fiber
+  const config:PiAi.Config=fiber.config
+  const provider=config.providers.get()['lyapunov-plans']!
+  const retry=resolveRetryPolicy(raw.providers!['lyapunov-plans']!.retryPolicy,'formal.provider.retryPolicy')
   expect(retry).toMatchObject({mode:'normal',maxRetries:5})
   expect(retry).not.toHaveProperty('requestPhaseTimeoutMs')
   expect(provider.streamIdleTimeoutMs).toBe(300_000)
   expect(provider).not.toHaveProperty('timeoutMs')
+  }finally{await ctx.fiber.dispose()}
 })

@@ -1,11 +1,12 @@
-import {useState,useSyncExternalStore} from 'react'
-import type {SettingsScope} from '@deepseek-ai/dsh-client-ui-settings/client'
+import {useRef,useState,useSyncExternalStore} from 'react'
+import type {ConfigForm} from '@deepseek-ai/dsh-client-ui-settings/client'
 import {workspaceDefaults,workspaceActions,validateWorkspaceShortcuts,type WorkspacePreferences,type WorkspaceAction} from './preferences.ts'
 export const workspaceActionLabels:Record<WorkspaceAction,[string,string]>={fileOpen:['打开文件','Open file'],panelClose:['关闭面板','Close panel'],terminalToggle:['显示/收起终端','Toggle terminal'],reviewToggle:['显示/收起Review','Toggle Review'],fileTreeToggle:['显示/收起文件树','Toggle file tree'],terminalNew:['新终端','New terminal'],addSelection:['添加选区到上下文','Add selection to context'],worktreeNew:['打开新Worktree','Open new worktree']}
-export function WorkspacePreferencesSection({scope,tr}:{scope:SettingsScope<WorkspacePreferences>;tr:(zh:string,en:string)=>string}){
+export function WorkspacePreferencesSection({scope,tr}:{scope:ConfigForm<WorkspacePreferences>;tr:(zh:string,en:string)=>string}){
  const state=useSyncExternalStore(listener=>scope.subscribe(listener),()=>scope.getSnapshot(),()=>scope.getSnapshot()),preferences=state.value??workspaceDefaults,[error,setError]=useState(''),[busy,setBusy]=useState(false),[editing,setEditing]=useState<WorkspacePreferences>()
- const value=editing??preferences,set=(field:string,v:unknown)=>setEditing({...value,[field]:v})
- const save=async(reset=false)=>{setBusy(true);setError('');try{if(reset)await scope.mutate(Object.keys(workspaceDefaults).map(key=>({op:'unset' as const,path:[key]})));else{const next={...value,shortcuts:validateWorkspaceShortcuts(value.shortcuts)};await scope.mutate(Object.entries(next).map(([key,value])=>({op:'set' as const,path:[key],value})));}setEditing(undefined)}catch(error){setError(String(error))}finally{setBusy(false)}}
+ const editRevision=useRef<number|undefined>(undefined)
+ const value=editing??preferences,set=(field:string,v:unknown)=>{if(editing===undefined)editRevision.current=state.revision;setEditing({...value,[field]:v})}
+ const save=async(reset=false)=>{setBusy(true);setError('');try{const ops=reset?Object.keys(workspaceDefaults).map(key=>({op:'unset' as const,path:[key]})):Object.entries({...value,shortcuts:validateWorkspaceShortcuts(value.shortcuts)}).map(([key,value])=>({op:'set' as const,path:[key],value}));if(!await scope.mutate(ops,reset?state.revision:editRevision.current))throw new Error(tr('保存未被接受，请查看最新偏好后重试。','The save was refused. Review the latest preferences and retry.'));setEditing(undefined)}catch(error){setError(String(error))}finally{setBusy(false)}}
  return <section aria-label={tr('文件与终端偏好','Files and terminal preferences')} style={{padding:20,display:'grid',gap:12}}><h2>{tr('文件与终端','Files and terminal')}</h2><fieldset disabled={state.status!=='ready'||!state.writable||busy} style={{display:'grid',gap:12}}>
  <label><input type="checkbox" checked={value.autoSave} onChange={e=>set('autoSave',e.target.checked)}/>{tr('自动保存编辑内容','Automatically save edits')}</label>
  <label>{tr('停止输入后保存（毫秒）','Save after typing stops (ms)')}<input type="number" min={250} max={10000} value={value.autoSaveDelayMs} onChange={e=>set('autoSaveDelayMs',Number(e.target.value))}/></label>

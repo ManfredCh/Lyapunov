@@ -190,9 +190,9 @@ export function registerWorkspaceTabs(ctx:Context,surface:WorkspaceSurface){
  ctx.inject(['remote','remote.workspaceFiles'],owner=>{
   owner.effect(()=>{
    reader=async(sessionId,path,signal)=>{
-    const result=await owner.remote.workspaceFiles.readAll(sessionId as SessionId,path,signal)
+    const result=await owner.remote.workspaceFiles.readBytes(sessionId as SessionId,path,{},signal)
     if(!result.ok)throw Error(result.error.message)
-    return Uint8Array.from(atob(result.value.data),character=>character.charCodeAt(0))
+    return result.value.data
    }
    return()=>{reader=missingModelBytes}
   },'lyapunov-workspace: model preview bytes')

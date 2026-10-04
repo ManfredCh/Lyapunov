@@ -1,10 +1,11 @@
 import {spawnSync} from "node:child_process"
 import {existsSync,readFileSync,mkdirSync} from "node:fs"
 import {resolve,join} from "node:path"
-import {applyUpstreamPatches} from "./upstream-patches.mjs"
+import {applyUpstreamPatches,preflightUpstreamPatches} from "./upstream-patches.mjs"
 const root=resolve(import.meta.dirname,"..")
 const lock=JSON.parse(readFileSync(join(root,"UPSTREAM_LOCK.json"),"utf8"))
 const upstream=join(root,lock.directory)
+preflightUpstreamPatches(root)
 function run(command,args,cwd=root){
   const result=spawnSync(command,args,{cwd,stdio:"inherit",env:{...process.env,HF_ENDPOINT:"https://hf-mirror.com",DSH_TELEMETRY_DISABLED:"1"}})
   if(result.error)throw result.error
@@ -18,7 +19,7 @@ if(!existsSync(upstream)){
 const current=spawnSync("git",["rev-parse","HEAD"],{cwd:upstream,encoding:"utf8"})
 if(current.status!==0||current.stdout.trim()!==lock.commit)throw new Error("现有上游不是固定commit；保留现状，请检查UPSTREAM_LOCK.json")
 applyUpstreamPatches(root,upstream)
-// 0.1.5 使用根工作区构建；先应用补丁，再一起更新 Host、Client 和 Web 产物。
+// 固定版本使用其根工作区构建；先通过同代补丁与完整性校验，再更新 Host、Client 和 Web 产物。
 run("pnpm",["install","--frozen-lockfile"],upstream)
 run("pnpm",["run","build"],upstream)
 const localBun=process.env.BUN_EXECUTABLE??"bun"

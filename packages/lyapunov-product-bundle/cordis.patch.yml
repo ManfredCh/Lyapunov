@@ -2,3 +2,8 @@
   disabled: true
 - id: session-title-llm
   disabled: true
+- insert:
+    - id: lyapunov-preferences
+      name: '@lyapunov/shell/preferences'
+    - id: lyapunov-workspace
+      name: '@lyapunov/workspace/preferences'

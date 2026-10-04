@@ -6,7 +6,7 @@ import {join,resolve} from 'node:path'
 import {atomicJSON,fileTransaction} from '../../scene-kit/src/persistence.ts'
 import {migratePreferences,applyLegacyApprovalPreference,type PreferenceSource,type PreferenceItem} from './preferences.ts'
 export type MigrationMode='formal'|'developer'
-export interface ScopedPreferenceSources {mode:MigrationMode;accountKey:string;sources:PreferenceSource[];webOrigins?:string[]}
+export interface ScopedPreferenceSources {mode:MigrationMode;accountKey:string;sources:PreferenceSource[];webOrigins?:string[];profileDirectory?:string}
 interface PreferenceEntryOptions {mode?:MigrationMode;accountKey:string;sourceLabel:string;dshHome:string;preferences?:ScopedPreferenceSources}
 export interface ApprovalMigrationItem {sessionId:string;applied:boolean;preservedExisting?:boolean;policy?:string;eventType?:string;eventSeq?:number;eventCount?:number;reason?:string}
 export interface IntegratedPreferences {
@@ -19,6 +19,7 @@ export interface IntegratedPreferences {
 export function validatePreferenceScope(options:PreferenceEntryOptions){
  const source=options.preferences;if(source===undefined)return
  if(!source||typeof source!=='object')throw new Error('PREFERENCE_SOURCE_INVALID')
+ if(typeof source.profileDirectory!=='string'||!source.profileDirectory.trim())throw new Error('PREFERENCE_TARGET_PROFILE_REQUIRED')
  if(!['formal','developer'].includes(options.mode??''))throw new Error('PREFERENCE_TARGET_MODE_REQUIRED')
  if(source.mode!==options.mode||source.accountKey!==options.accountKey)throw new Error('PREFERENCE_SOURCE_SCOPE_MISMATCH')
  if(!Array.isArray(source.sources)||source.sources.some(s=>!s||!['electron-settings','electron-global','web-storage-export','migration-metadata'].includes(s.kind)||typeof s.path!=='string'||!s.path.trim()))throw new Error('PREFERENCE_SOURCE_INVALID')
@@ -40,8 +41,9 @@ export async function preparePreferenceMigration(options:PreferenceEntryOptions)
  result.sourceStatus=result.sources.some(s=>s.kind!=='migration-metadata')?'EXPLICIT':'METADATA_ONLY'
  result.reasons=result.sourceStatus==='METADATA_ONLY'?['NO_UI_PREFERENCE_SOURCE']:[]
  try{
-  const native=await migratePreferences({sourceLabel:options.sourceLabel,accountKey:options.accountKey,dshHome:options.dshHome,sources:result.sources,webOrigins:options.preferences?.webOrigins})
+  const native=await migratePreferences({sourceLabel:options.sourceLabel,accountKey:options.accountKey,dshHome:options.dshHome,profileDirectory:options.preferences?.profileDirectory,sources:result.sources,webOrigins:options.preferences?.webOrigins})
   Object.assign(result,{items:native.items,sources:native.sources,missing:native.missing,sourceUnchanged:native.sourceUnchanged,applied:native.applied,unchanged:native.unchanged,preservedExisting:native.preservedExisting,unapplied:native.unapplied,nativeSettings:native.nativeSettings,settingsPhaseReport:join(options.dshHome,'migrations',options.sourceLabel,'preferences','result.json')})
+  result.reasons.push(...native.reasons)
   if(native.missing.length)result.reasons.push('PREFERENCE_SOURCE_MISSING')
   if(!native.sourceUnchanged)result.reasons.push('PREFERENCE_SOURCE_CHANGED')
  }catch(error){result.reasons.push(error instanceof Error?error.message:String(error))}

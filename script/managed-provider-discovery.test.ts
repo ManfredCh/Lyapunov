@@ -7,21 +7,25 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { after, test } from 'node:test'
+import {legacySDKFixture} from './legacy-sdk-fixture.mjs'
+import {LEGACY_SDK_BASE_COMMIT,SDK_BASE_COMMIT,RC2_PRODUCT_PATCH} from './sdk-source-integrity.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
 const lock = JSON.parse(readFileSync(join(root, 'UPSTREAM_LOCK.json'), 'utf8')) as { commit: string; directory: string }
 const registry = require('./upstream-patches.mjs') as {
   upstreamPatches: (root: string) => Array<{ file: string; package: string }>
+  legacyUpstreamPatches: (root: string) => Array<{ file: string; package: string }>
 }
-const upstream = join(root, lock.directory)
+const upstream = legacySDKFixture(root)
+const currentUpstream = join(root,lock.directory)
 const patch = join(root, 'packages/lyapunov-shell/patches/dsh-managed-provider-discovery.patch')
 const llmRelative = 'packages/llm/llm-pi-ai/src'
 const settingsRelative = 'packages/settings/settings/src/index.ts'
 
 /** Read one file straight from the pinned commit's git object — never the developer worktree. */
 function committed(relative: string): string {
-  return execFileSync('git', ['show', `${lock.commit}:${relative}`], { cwd: upstream, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  return execFileSync('git', ['show', `${LEGACY_SDK_BASE_COMMIT}:${relative}`], { cwd: upstream, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
 
 function copyPatchedTree(): string {
@@ -40,7 +44,7 @@ function copyPatchedTree(): string {
     }
     writeFileSync(join(settings, 'src/index.ts'), committed(settingsRelative))
     // Resolve the native package's declared dependencies, without modifying its links.
-    symlinkSync(join(upstream, 'packages/llm/llm-pi-ai/node_modules'), join(llm, 'node_modules'), 'dir')
+    symlinkSync(join(currentUpstream, 'packages/llm/llm-pi-ai/node_modules'), join(llm, 'node_modules'), 'dir')
     execFileSync('git', ['init', '-q'], { cwd: work })
     execFileSync('git', ['apply', '--check', patch], { cwd: work })
     execFileSync('git', ['apply', patch], { cwd: work })
@@ -82,8 +86,9 @@ test('patch applies cleanly and preserves the catalog directory path', () => {
 test('the formal patch is registered in the build flow and repeated application is a no-op', () => {
   // Registration: the patch must be part of upstreamPatches(), or a clean lock checkout
   // could neither build the implementation nor even import managed-discovery.ts.
-  const entry = registry.upstreamPatches(root).find(candidate => resolve(candidate.file) === resolve(patch))
-  assert.ok(entry, 'dsh-managed-provider-discovery.patch must appear in upstreamPatches()')
+  const entry = registry.legacyUpstreamPatches(root).find(candidate => resolve(candidate.file) === resolve(patch))
+  assert.ok(entry, '旧补丁必须仍在显式legacy registry中')
+  if(lock.commit===SDK_BASE_COMMIT)assert.deepEqual(registry.upstreamPatches(root),[{file:join(root,RC2_PRODUCT_PATCH),package:'@deepseek-ai/dsh-root'}])
   assert.equal(entry.package, '@deepseek-ai/dsh-llm-pi-ai')
 
   // Idempotency: applyUpstreamPatches() treats a patch whose reverse check succeeds as

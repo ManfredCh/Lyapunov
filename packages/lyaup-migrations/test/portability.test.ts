@@ -20,9 +20,13 @@ import { tmpdir } from 'node:os'
 import { join, isAbsolute, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { migrateLegacy } from '../src/index.ts'
+import {migratePreferences} from '../src/preferences.ts'
+import {initProfile,boot,readProfilePatches,type ProfileContext} from '@deepseek-ai/dsh-app-boot'
+import {pathToFileURL} from 'node:url'
+import {resolve} from 'node:path'
 
 /** 夹具必须落在平台临时区之外（临时区常被策略设为只读或不稳定），同时本机真的写得进去。 */
 const BASE = (() => {
@@ -79,7 +83,7 @@ const readLedger = async (home: string, label = 'legacy') => JSON.parse(await re
 const readSessionEvents = (log: any): any[] => log.events
 const contentOf = (event: any): any[] => event.type === 'user/message' ? event.data.content
   : event.type === 'assistant/message' ? event.data.message.content
-  : event.type === 'tool/result' ? (event.data.message.content as any[]).flatMap((wrapper: any) => wrapper.content ?? []) : []
+  : event.type === 'tool/result' ? event.data.message.content : []
 
 let root = ''
 beforeEach(async () => { root = await mkdtemp(join(BASE, 'lyaup-migration-')) })
@@ -441,6 +445,14 @@ describe('迁移合同：幂等、冲突保留、账号路径与记录对账', (
     expect(Object.keys(ledger.parts)).toHaveLength(9)
 
     const log = await reopenNative(root, ledger.sessions['ses-1'].id)
+    expect(log.header.version).toBe(SESSION_FORMAT_VERSION)
+    const toolEvents = readSessionEvents(log).filter(event => event.type === 'tool/result')
+    expect(toolEvents.map(event => event.data.message.role)).toEqual(['tool', 'tool', 'tool'])
+    expect(toolEvents.map(event => event.data.message.isError)).toEqual([false, true, true])
+    for (const event of toolEvents) {
+      expect(event.data.message.toolCallId).toBe(event.data.message.source.callId)
+      expect(event.data.message.content.some((block: {type:string}) => block.type === 'tool-result')).toBe(false)
+    }
     const blocks = readSessionEvents(log).flatMap(contentOf)
     const text = blocks.filter((block: any) => block.type === 'text').map((block: any) => block.text)
     expect(text).toContain('用户文本')
@@ -510,4 +522,81 @@ describe('迁移合同：幂等、冲突保留、账号路径与记录对账', (
     expect(second.sourceUnmigrated).toEqual(first.sourceUnmigrated)
     expect(second.sourceCounts).toEqual(first.sourceCounts)
   })
+})
+
+
+async function preferenceTarget(){
+ const home=join(root,'preferences-dsh'),dir=join(home,'profiles','explicit-profile'),bundle=join(dir,'node_modules','migration-preferences-test-bundle')
+ initProfile(dir,['migration-preferences-test-bundle']);await mkdir(bundle,{recursive:true})
+ await writeJSON(join(bundle,'package.json'),{name:'migration-preferences-test-bundle',version:'1.0.0',dsh:{bundle:{patch:'cordis.patch.yml'}}})
+ await writeJSON(join(bundle,'cordis.patch.yml'),[{insert:[
+  {id:'config-editor',name:'@deepseek-ai/dsh-config-editor'},
+  {id:'settings',name:'@deepseek-ai/dsh-settings'},
+  {id:'locale',name:'@deepseek-ai/dsh-client-locale'},
+  {id:'ui-theme',name:'@deepseek-ai/dsh-client-ui-theme'},
+  {id:'ui-conversation',name:'@deepseek-ai/dsh-client-ui-conversation'},
+ ]}])
+ await writeJSON(join(dir,'cordis.yml'),[])
+ await writeJSON(join(dir,'cordis.patch.yml'),[{id:'locale',config:{preference:'en'}},{id:'ui-theme',config:{preference:'dark'}}])
+ const source=join(root,'readonly-old-settings.json')
+ await writeJSON(source,{'settings.v3':{appearance:{fontSize:16},general:{followup:'steer'}}},0o444)
+ const global=join(root,'readonly-old-global.json');await writeJSON(global,{language:'zh-CN'},0o444)
+ const options={sourceLabel:'pref-legacy',accountKey:'pref-owner',dshHome:home,profileDirectory:dir,sources:[{kind:'electron-settings' as const,path:source},{kind:'electron-global' as const,path:global}]}
+ const reopen=async()=>{
+  const anchor=resolve(import.meta.dirname,'../../../package.json')
+  const profile:ProfileContext={name:'explicit-profile',dir,patchPath:join(dir,'cordis.patch.yml'),installAnchor:anchor,cwd:home,home,startedBundles:['migration-preferences-test-bundle'],overlays:[],telemetryDisabledEnv:'1'}
+  return boot('dsh',join(dir,'cordis.yml'),readProfilePatches('dsh',profile),ctx=>{ctx.provide('profileContext',profile)},pathToFileURL(anchor).href)
+ }
+ return {home,dir,source,options,reopen}
+}
+
+describe('RC2 既有显式Profile的生产偏好移植',()=>{
+ test('readonly源不变，已有raw字段优先，原生写入后正常Profile重开等值',async()=>{
+  const h=await preferenceTarget(),hash=await sha256(h.source)
+  const first=await migratePreferences(h.options)
+  expect(first.status).toBe('PASS');expect(first.applied).toBe(2);expect(first.preservedExisting).toBe(1);expect(first.sourceUnchanged).toBe(true)
+  expect(await sha256(h.source)).toBe(hash);expect((await stat(h.source)).mode&0o777).toBe(0o444)
+  const reopened=await h.reopen()
+  try{
+   const values=reopened.settings.describe()
+   expect(values.find(row=>row.ns==='locale')?.value).toMatchObject({preference:'en'})
+   expect(values.find(row=>row.ns==='ui-theme')?.value).toMatchObject({preference:'dark',fontSize:16})
+   expect(values.find(row=>row.ns==='ui-conversation')?.value).toMatchObject({busyEnter:'steer'})
+  }finally{await reopened.fiber.dispose()}
+  const again=await migratePreferences(h.options)
+  expect(again.applied).toBe(0);expect(again.unchanged).toBe(2)
+  const patch=await readFile(join(h.dir,'cordis.patch.yml'),'utf8')
+  expect(patch).not.toContain('disabled');expect(patch).not.toContain('migration-preference-import')
+ })
+ test('缺失或未指定Profile明确BLOCKED，readonly原件与用户现有patch不动',async()=>{
+  const h=await preferenceTarget(),before=await readFile(join(h.dir,'cordis.patch.yml'),'utf8'),hash=await sha256(h.source)
+  const missing=await migratePreferences({...h.options,sourceLabel:'missing-profile',profileDirectory:join(h.home,'profiles','absent')})
+  expect(missing.status).toBe('BLOCKED');expect(missing.reasons.join()).toContain('PREFERENCE_TARGET_PROFILE_MISSING')
+  const absent=await migratePreferences({...h.options,sourceLabel:'no-profile',profileDirectory:undefined})
+  expect(absent.status).toBe('BLOCKED');expect(absent.reasons).toContain('PREFERENCE_TARGET_PROFILE_REQUIRED')
+  expect(await readFile(join(h.dir,'cordis.patch.yml'),'utf8')).toBe(before);expect(await sha256(h.source)).toBe(hash)
+  await expect(stat(join(h.home,'profiles','absent'))).rejects.toThrow()
+ })
+ test('未知namespace拒绝后回滚本次已写字段并保留原始raw与patch字节',async()=>{
+  const h=await preferenceTarget(),bundle=join(h.dir,'node_modules','migration-preferences-test-bundle','cordis.patch.yml')
+  const rows=JSON.parse(await readFile(bundle,'utf8'))
+  rows[0].insert=rows[0].insert.filter((row:{id:string})=>row.id!=='ui-conversation')
+  const before=await readFile(join(h.dir,'cordis.patch.yml'),'utf8')
+  await writeJSON(bundle,rows)
+  const rejected=await migratePreferences({...h.options,sourceLabel:'rollback-missing'})
+  expect(rejected.status).toBe('BLOCKED');expect(rejected.reasons.join()).toContain('NATIVE_PREFERENCE_NAMESPACE_MISSING')
+  expect(await readFile(join(h.dir,'cordis.patch.yml'),'utf8')).toBe(before)
+
+ })
+ test('同namespace旧revision拒绝整批字段，既有profile值与patch保持',async()=>{
+  const h=await preferenceTarget(),ctx=await h.reopen()
+  try{
+   const old=ctx.settings.describe().find(row=>row.ns==='ui-theme')!
+   await ctx.settings.update('ui-theme',{fontSize:15},old.revision)
+   const before=await readFile(join(h.dir,'cordis.patch.yml'),'utf8')
+   await expect(ctx.settings.mutate('ui-theme',[{op:'set',path:['preference'],value:'light'},{op:'set',path:['fontSize'],value:17}],old.revision)).rejects.toMatchObject({code:'SETTINGS_CONFLICT'})
+   expect(await readFile(join(h.dir,'cordis.patch.yml'),'utf8')).toBe(before)
+   expect(ctx.settings.describe().find(row=>row.ns==='ui-theme')?.value).toMatchObject({preference:'dark',fontSize:15})
+  }finally{await ctx.fiber.dispose()}
+ })
 })

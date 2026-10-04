@@ -111,13 +111,14 @@ export async function handleTerminalAction(input: TerminalActionInput): Promise<
     noArguments(argument, verb)
     const id = selected(input.sessionId), frame = await firstFrame(ctx.sessionController.control(input.signal))
     if (frame.type !== 'baseline') throw new Error('原生会话控制流缺少 baseline。')
-    return json('待处理队列', frame.value.queues[id] ?? [])
+    const inbox = frame.value.projections[id]?.values.inbox
+    return inbox === undefined ? shown('当前会话的原生 Inbox 投影尚未就绪。') : json('待处理队列', inbox)
   }
   if (verb === 'jobs') {
     noArguments(argument, verb)
     const jobs = ctx.get('jobs')
     if (!jobs) return shown('当前 Profile 未加载原生 Jobs 服务。')
-    return json('Jobs', jobs.list(await agentFor(ctx, selected(input.sessionId))))
+    return json('Jobs', jobs.list((await agentFor(ctx, selected(input.sessionId))).id))
   }
   if (verb === 'goal') {
     noArguments(argument, verb)

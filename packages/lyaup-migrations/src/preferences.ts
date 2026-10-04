@@ -1,13 +1,18 @@
 import {Context} from "@deepseek-ai/cordis"
-import FileSettingsProvider from "@deepseek-ai/dsh-settings-file"
-import * as LocaleSettings from "@deepseek-ai/dsh-client-locale"
-import * as ThemeSettings from "@deepseek-ai/dsh-client-ui-theme"
-import * as ConversationSettings from "@deepseek-ai/dsh-client-ui-conversation"
+import type {} from "@deepseek-ai/dsh-settings"
+import {boot,composeEntries,loadProfileDirectory,readProfilePatches,type ProfileContext} from "@deepseek-ai/dsh-app-boot"
+import type {EntryOptions} from "@deepseek-ai/cordis-plugin-loader"
+import type {PatchOptions} from "@deepseek-ai/cordis-plugin-include"
+import {pathToFileURL} from "node:url"
+import {isDeepStrictEqual} from "node:util"
+import {parseDocument} from "yaml"
+import {withFileLock,writeFileAtomic} from "@deepseek-ai/dsh-atomic-write"
+import {prepareLegacyPreferenceSection} from "../../lyapunov-shell/src/preferences-host.ts"
 import {setApprovalPolicy} from "@deepseek-ai/dsh-user-approval"
 import type {} from "@deepseek-ai/dsh-permission-presets"
 import type {Session} from "@deepseek-ai/dsh-session"
 import {readFile,stat,mkdir} from "node:fs/promises"
-import {join,resolve} from "node:path"
+import {basename,join,resolve,relative,isAbsolute,sep} from "node:path"
 import {atomicJSON,fileTransaction,safeId} from "../../scene-kit/src/persistence.ts"
 
 export type PreferenceSourceKind="electron-settings"|"electron-global"|"web-storage-export"|"migration-metadata"
@@ -16,6 +21,8 @@ export interface PreferenceOptions {
  sourceLabel:string
  accountKey:string
  dshHome:string
+ /** 已存在的目标Profile，显式偏好迁移不可推断默认Profile。 */
+ profileDirectory?:string
  sources:PreferenceSource[]
  /** 仅检查明确属于 Lyaup 的旧 Web origin；不会打开浏览器全局数据库。 */
  webOrigins?:string[]
@@ -35,6 +42,34 @@ function flatten(value:unknown,prefix:string):Array<[string,unknown]>{
 }
 async function stamp(path:string){try{const value=await stat(path);return {path,size:value.size,mtimeMs:value.mtimeMs}}catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return {path,missing:true};throw error}}
 
+/** 仅装配指定现有Profile的设置面；执行overlay不落盘，也不启动模型或Host业务。 */
+async function preferenceProfile(home:string,profileDirectory:string|undefined):Promise<Context>{
+ if(!profileDirectory)throw new Error('PREFERENCE_TARGET_PROFILE_REQUIRED')
+ const dir=resolve(profileDirectory),scope=relative(join(home,'profiles'),dir)
+ if(!scope||scope==='..'||scope.startsWith('..'+sep)||isAbsolute(scope))throw new Error('PREFERENCE_TARGET_PROFILE_OUTSIDE_HOME')
+ for(const file of ['package.json','cordis.yml']){
+  try{await stat(join(dir,file))}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')throw new Error('PREFERENCE_TARGET_PROFILE_MISSING: '+dir);throw error}
+ }
+ const anchor=resolve(import.meta.dirname,'../../../package.json')
+ const loaded=loadProfileDirectory('dsh',dir,anchor)
+ if(loaded.skippedBundles.length)throw new Error('PREFERENCE_TARGET_PROFILE_BUNDLE_UNAVAILABLE: '+loaded.skippedBundles.map(row=>row.packageName).join(','))
+ const namespaces=new Set(['locale','ui-theme','ui-conversation','lyapunov-preferences','lyapunov-workspace'])
+ const services=new Set(['@deepseek-ai/dsh-config-editor','@deepseek-ai/dsh-settings'])
+ const rows=composeEntries([...loaded.layers.map(layer=>layer.patches),loaded.patches])
+ const overlays:PatchOptions[]=[]
+ const restrict=(entries:EntryOptions[])=>{for(const row of entries){if(row.group&&Array.isArray(row.config))restrict(row.config);else if(!namespaces.has(row.id)&&!services.has(row.name))overlays.push({id:row.id,disabled:true})}}
+ restrict(rows)
+ overlays.push({insert:[{id:'migration-preference-import',name:'cordis:migration-preference-import'}]})
+ const profile:ProfileContext={name:basename(dir),dir,patchPath:loaded.patchPath,installAnchor:anchor,cwd:home,home,startedBundles:loaded.layers.map(layer=>layer.packageName),overlays,telemetryDisabledEnv:'1'}
+ return boot('dsh',join(dir,'cordis.yml'),readProfilePatches('dsh',profile,loaded),ctx=>{
+  ctx.provide('profileContext',profile)
+  ctx.loader.builtins['migration-preference-import']={inject:['settings','configEditor','profileContext'],apply:async(owner:Context)=>{
+   const configured=new Set(owner.configEditor.configuration().map(row=>row.entry.options.id))
+   for(const ns of namespaces)if(configured.has(ns))await prepareLegacyPreferenceSection(owner,ns,ns)
+  }}
+ },pathToFileURL(anchor).href)
+}
+
 /** 独立偏好迁移器；调用方显式传旧源和新账号 DSH_HOME，不扫描其他安装。 */
 export async function migratePreferences(options:PreferenceOptions){
  safeId(options.accountKey);safeId(options.sourceLabel)
@@ -46,7 +81,7 @@ export async function migratePreferences(options:PreferenceOptions){
  return fileTransaction(ledgerPath,async()=>{
   let previous:any
   try{previous=JSON.parse(await readFile(ledgerPath,"utf8"))}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error}
-  if(previous&&(previous.accountKey!==options.accountKey||JSON.stringify(previous.sources)!==JSON.stringify(sources)))throw new Error("PREFERENCE_ACCOUNT_OR_SOURCE_MISMATCH")
+  if(previous&&(previous.accountKey!==options.accountKey||JSON.stringify(previous.sources)!==JSON.stringify(sources)||(previous.profileDirectory!==undefined&&previous.profileDirectory!==resolve(options.profileDirectory??""))))throw new Error("PREFERENCE_ACCOUNT_OR_SOURCE_MISMATCH")
   const before=await Promise.all(sources.map(source=>stamp(source.path))),items:PreferenceItem[]=[],missing:string[]=[],assignments:Assignment[]=[],preserved:Record<string,unknown>={}
   const add=(source:string,field:string,value:string|number,namespace:Assignment["namespace"],targetField:string)=>assignments.push({source,field,value,namespace,targetField})
   const unknown=(source:string,field:string,value:unknown,reason:string)=>items.push({source,field,value:sanitize(value),status:"unapplied",reason})
@@ -102,25 +137,59 @@ export async function migratePreferences(options:PreferenceOptions){
     }
    }
   }
-  const ctx=new Context(),settings=await ctx.plugin(FileSettingsProvider,{dshHome:home,watch:false})
-  const plugins=[await ctx.plugin(LocaleSettings),await ctx.plugin(ThemeSettings),await ctx.plugin(ConversationSettings)]
+  await atomicJSON(join(directory,"preserved-preferences.json"),preserved)
+  let ctx:Context|undefined
+  const reasons:string[]=[]
+  let profileBefore:string|undefined
+  const changed:Array<{namespace:string;fields:Array<{field:string;value:string|number}>}>=[]
   try{
-   for(const assignment of assignments){
-    const descriptor=ctx.settings.describe({redactSecrets:true}).find(item=>item.ns===assignment.namespace)
-    if(!descriptor)throw new Error("NATIVE_PREFERENCE_NAMESPACE_MISSING: "+assignment.namespace)
-    const target=assignment.namespace+"."+assignment.targetField,current=(descriptor.user as any)?.[assignment.targetField]
-    if(current!==undefined){items.push({source:assignment.source,field:assignment.field,value:assignment.value,target,status:current===assignment.value?"already-applied":"preserved-existing",reason:current===assignment.value?"幂等重跑，无需写入。":"新 DSH 用户设置已存在，保留用户当前选择。"});continue}
-    await ctx.settings.update(assignment.namespace,{[assignment.targetField]:assignment.value},descriptor.revision)
-    items.push({source:assignment.source,field:assignment.field,value:assignment.value,target,status:"applied"})
+   ctx=await preferenceProfile(home,options.profileDirectory)
+   try{profileBefore=await readFile(ctx.settings.documentPath,"utf8")}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error}
+   const grouped=new Map<string,Assignment[]>()
+   for(const assignment of assignments)grouped.set(assignment.namespace,[...grouped.get(assignment.namespace)??[],assignment])
+   const served=new Set(ctx.settings.describe({redactSecrets:true}).map(item=>String(item.ns)))
+   for(const namespace of grouped.keys())if(!served.has(namespace))throw new Error('NATIVE_PREFERENCE_NAMESPACE_MISSING: '+namespace)
+   for(const [namespace,group] of grouped){
+    const descriptor=ctx.settings.describe({redactSecrets:true}).find(item=>item.ns===namespace)
+    if(!descriptor)throw new Error("NATIVE_PREFERENCE_NAMESPACE_MISSING: "+namespace)
+    const fields:Array<{field:string;value:string|number}>=[]
+    const pending:Assignment[]=[]
+    for(const assignment of group){
+     const target=namespace+"."+assignment.targetField,current=(descriptor.user as Record<string,unknown>|undefined)?.[assignment.targetField]
+     if(current!==undefined){items.push({source:assignment.source,field:assignment.field,value:assignment.value,target,status:current===assignment.value?"already-applied":"preserved-existing",reason:current===assignment.value?"幂等重跑，无需写入。":"新 Profile 用户设置已存在，保留用户当前选择。"});continue}
+     fields.push({field:assignment.targetField,value:assignment.value});pending.push(assignment)
+    }
+    if(!fields.length)continue
+    await ctx.settings.mutate(namespace,fields.map(field=>({op:'set' as const,path:[field.field],value:field.value})),descriptor.revision)
+    changed.push({namespace,fields})
+    for(const assignment of pending)items.push({source:assignment.source,field:assignment.field,value:assignment.value,target:namespace+"."+assignment.targetField,status:"applied"})
    }
-   const after=await Promise.all(sources.map(source=>stamp(source.path))),sourceUnchanged=JSON.stringify(before)===JSON.stringify(after)
-   const unsupported=items.filter(item=>item.status==="unapplied")
-   const result={status:missing.length||!sourceUnchanged?"BLOCKED":unsupported.length?"PARTIAL":"PASS",accountKey:options.accountKey,sourceLabel:options.sourceLabel,sources,missing,sourceUnchanged,targetDocument:ctx.settings.documentPath,applied:items.filter(item=>item.status==="applied").length,unchanged:items.filter(item=>item.status==="already-applied").length,preservedExisting:items.filter(item=>item.status==="preserved-existing").length,unapplied:unsupported.length,items,nativeSettings:ctx.settings.describe({redactSecrets:true}).map(item=>({namespace:item.ns,value:item.value,user:item.user})),exitCode:missing.length||!sourceUnchanged||unsupported.length?2:0}
-   await atomicJSON(join(directory,"preserved-preferences.json"),preserved)
-   await atomicJSON(ledgerPath,{accountKey:options.accountKey,sources,sourceLabel:options.sourceLabel})
-   await atomicJSON(join(directory,"result.json"),result)
-   return result
-  }finally{for(const plugin of plugins.reverse())await plugin.dispose();await settings.dispose()}
+  }catch(error){
+   const message=error instanceof Error?error.message:String(error);reasons.push(message)
+   if(ctx)for(const change of changed.reverse()){
+    const view=ctx.settings.describe().find(row=>row.ns===change.namespace),user=view?.user as Record<string,unknown>|undefined
+    if(!view||change.fields.some(field=>user?.[field.field]!==field.value)){reasons.push('PREFERENCE_ROLLBACK_CONCURRENT_CHANGE: '+change.namespace);continue}
+    try{await ctx.settings.mutate(change.namespace,change.fields.map(field=>({op:'unset' as const,path:[field.field]})),view.revision)}catch(rollback){reasons.push('PREFERENCE_ROLLBACK_FAILED: '+String(rollback))}
+   }
+   if(ctx&&profileBefore!==undefined&&!reasons.some(reason=>reason.startsWith('PREFERENCE_ROLLBACK_'))){
+    const path=ctx.settings.documentPath
+    await withFileLock(join(options.profileDirectory!,'package.json'),async()=>{
+     const current=await readFile(path,'utf8')
+     const json=(text:string)=>parseDocument(text,{customTags:[{tag:'tag:yaml.org,2002:js',resolve:(value:string)=>value}]}).toJS()
+     if(isDeepStrictEqual(json(current),json(profileBefore!)))await writeFileAtomic(path,profileBefore!,{mode:0o600})
+    })
+   }
+   for(const item of items)if(item.status==='applied'){item.status='unapplied';item.reason='原生配置事务未完整提交；回滚诊断见reasons：'+message}
+   for(const assignment of assignments)if(!items.some(item=>item.source===assignment.source&&item.field===assignment.field))items.push({source:assignment.source,field:assignment.field,value:assignment.value,target:assignment.namespace+'.'+assignment.targetField,status:'unapplied',reason:message})
+  }
+  const nativeSettings=ctx?.settings.describe({redactSecrets:true}).map(item=>({namespace:item.ns,value:item.value,user:item.user}))??[]
+  await ctx?.fiber.dispose()
+  const after=await Promise.all(sources.map(source=>stamp(source.path))),sourceUnchanged=JSON.stringify(before)===JSON.stringify(after)
+  const unsupported=items.filter(item=>item.status==="unapplied")
+  const result={status:reasons.length||missing.length||!sourceUnchanged?"BLOCKED":unsupported.length?"PARTIAL":"PASS",accountKey:options.accountKey,sourceLabel:options.sourceLabel,sources,missing,reasons,sourceUnchanged,targetDocument:options.profileDirectory?join(resolve(options.profileDirectory),'cordis.patch.yml'):undefined,applied:items.filter(item=>item.status==="applied").length,unchanged:items.filter(item=>item.status==="already-applied").length,preservedExisting:items.filter(item=>item.status==="preserved-existing").length,unapplied:unsupported.length,items,nativeSettings,exitCode:reasons.length||missing.length||!sourceUnchanged||unsupported.length?2:0}
+  await atomicJSON(ledgerPath,{accountKey:options.accountKey,sources,sourceLabel:options.sourceLabel,profileDirectory:options.profileDirectory?resolve(options.profileDirectory):undefined})
+  await atomicJSON(join(directory,"result.json"),result)
+  return result
  })
 }
 

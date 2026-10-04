@@ -13,6 +13,7 @@ import subagents from '@deepseek-ai/dsh-subagent/remote'
 import agentPresets from '@deepseek-ai/dsh-agent-presets/remote'
 import llm from '@deepseek-ai/dsh-llm/remote'
 import settings from '@deepseek-ai/dsh-api-settings-controller/remote'
+import jobs from '@deepseek-ai/dsh-api-job-controller/remote'
 import type {} from '@deepseek-ai/dsh-api-remotes/types'
 import type {} from '@deepseek-ai/dsh-user-approval/types'
 import type {} from '@deepseek-ai/dsh-user-questions/types'
@@ -50,6 +51,13 @@ export interface TerminalRemoteConnection {
   dispose(): Promise<void>
 }
 
+/** 相对 RPC 路径与 URL 共用同一鉴权 origin；外站目标在携带凭据前拒绝。 */
+export function terminalRemoteUrl(path: string | URL, origin: string): URL {
+  const target = new URL(String(path), origin)
+  if (target.origin !== origin) throw new Error('REMOTE_ORIGIN_MISMATCH: 已鉴权请求只能发送到当前 DSH 服务器。')
+  return target
+}
+
 /** 连接现成DSH Web Host；Session、Agent、Goal等领域仍由远端原生服务拥有。 */
 export async function connectTerminalRemote(options: TerminalRemoteOptions): Promise<TerminalRemoteConnection> {
   options.signal?.throwIfAborted()
@@ -80,8 +88,7 @@ export async function connectTerminalRemote(options: TerminalRemoteOptions): Pro
   let disposing: Promise<void> | undefined
   const authenticatedFetch = async (path: string | URL, init: RequestInit = {}): Promise<Response> => {
     lifetime.signal.throwIfAborted()
-    const target = new URL(String(path), origin)
-    if (target.origin !== origin) throw new Error('REMOTE_ORIGIN_MISMATCH: 已鉴权请求只能发送到当前 DSH 服务器。')
+    const target = terminalRemoteUrl(path, origin)
     const headers = new Headers(init.headers)
     if (cookie) headers.set('cookie', cookie)
     headers.set('origin', origin)
@@ -112,7 +119,7 @@ export async function connectTerminalRemote(options: TerminalRemoteOptions): Pro
       })
     } })
     await ctx.plugin({ name: 'terminal-native-connection', inject: [], apply(inner: Context) {
-      Connection.installConnection(inner, { transport: { fetch: (path, init) => authenticatedFetch(path.pathname + path.search, init) }, location: { hostname: new URL(origin).hostname } })
+      Connection.installConnection(inner, { transport: { fetch: authenticatedFetch }, location: { hostname: new URL(origin).hostname } })
     } })
     await ctx.plugin({ name: 'terminal-native-gateway', inject: Gateway.inject, apply(inner: Context) {
       Gateway.apply(inner, { createWebSocket: path => {
@@ -125,7 +132,7 @@ export async function connectTerminalRemote(options: TerminalRemoteOptions): Pro
       } })
     } })
     await ctx.plugin({ name: 'terminal-native-remotes', inject: ['remote'], async apply(inner: Context) {
-      for (const contribution of [session, commands, workspace, workspaceFiles, goals, fileUploads, subagents, agentPresets, llm, settings]) await inner.remote.$mount(contribution)
+      for (const contribution of [session, commands, workspace, workspaceFiles, goals, fileUploads, subagents, agentPresets, llm, settings, jobs]) await inner.remote.$mount(contribution)
     } })
     const connection = ctx.get('connection') as unknown as Connection.ConnectionHandle
     const remote = ctx.get('remote') as Gateway.ClientRemote

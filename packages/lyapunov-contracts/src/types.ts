@@ -414,3 +414,5 @@ export function sceneGeometrySourceKey(
     : "identity"
   return `${binding.mesh.sha256}:${binding.revision}:${transform}`
 }
+
+export type { NoticeSource } from './message-sources.ts'

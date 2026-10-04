@@ -21,9 +21,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import JobsLocal from '@deepseek-ai/dsh-jobs-local'
 import LlmRuntime, { createUserMessage, createSystemMessage, createToolResultMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+// 原生 runtime-context 的声明由其发布类型文件拥有；仅加载类型，不调用私有投影 API。
+import type {} from '../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/lib/types/runtime-context.d.ts'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
@@ -59,8 +61,8 @@ async function applyOfflineShell(shell: Parameters<typeof apply>[0]) {
 }
 
 const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
-const textOf = (message: Message) => message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
-const sourceOf = (message: Message) => message.source as { kind: string; plugin?: string; form?: string }
+const textOf = (message: RequestMessage) => message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+const sourceOf = (message: RequestMessage): { kind: string; plugin?: string; form?: string } => message.source ?? { kind: 'request-input' }
 const systemText = (request: GenerateOptions) => [request.system ?? '', ...request.messages.filter(message => message.role === 'system').map(textOf)].join('\n')
 const userMessages = (events: readonly SessionEvent[]) => events.flatMap(event => event.type === 'user/message' ? [event] : [])
 /** 原始日志中的域指针；被新快照替换的旧事实仍在日志中。 */
@@ -71,7 +73,7 @@ const turnErrors = (events: readonly SessionEvent[]) => events.flatMap(event => 
 function captureInputEvidence(label:string,request:GenerateOptions):void{
   const path=process.env.LYAPUNOV_PROMPT_EVIDENCE_PATH
   if(!path)return
-  const images=(blocks:readonly ContentBlock[]):number=>blocks.reduce((n,b)=>n+(b.type==='image'?1:b.type==='tool-result'?images(b.content):0),0)
+  const images=(blocks:readonly ContentBlock[]):number=>blocks.reduce((n,b)=>n+(b.type==='image'?1:0),0)
   const digest=(value:string):string=>createHash('sha256').update(value).digest('hex')
   const messages=request.messages.map(message=>{const source=sourceOf(message);return {role:message.role,source:{kind:source.kind,...source.plugin===undefined?{}:{plugin:source.plugin},...source.form===undefined?{}:{form:source.form}},hash:digest(JSON.stringify(message.content)),bytes:Buffer.byteLength(JSON.stringify(message.content)),imageCount:images(message.content)}})
   const tools=JSON.stringify(request.tools??[])
@@ -309,7 +311,7 @@ test('原生循环：迟到工具后当前事实替换，同名世界、真实�
     expect(textOf(pointers(aModel.requests[2]!)[0]!)).toContain('previous domain pointers are no longer current')
     expect(textOf(pointers(aModel.requests[2]!)[0]!)).not.toContain("objects=庭院")
     expect(aPointerEvents[1]!.sourceEventSeqs).toEqual([aPointerEvents[0]!.seq])
-    const runtime = (request: GenerateOptions) => request.messages.filter(message => message.role === 'user' && sourceOf(message).plugin === '@deepseek-ai/dsh-system-prompt')
+    const runtime = (request: GenerateOptions) => request.messages.filter(message => message.role === 'user' && sourceOf(message).kind === 'runtime-context')
     for (const request of [...aModel.requests, ...bModel.requests]) expect(runtime(request)).toHaveLength(1)
     expect(textOf(runtime(aModel.requests[0]!)[0]!)).toContain('"sceneRevision":0')
     for (const request of aModel.requests.slice(1)) {
@@ -319,14 +321,14 @@ test('原生循环：迟到工具后当前事实替换，同名世界、真实�
       expect(request.messages.filter(message => message.id === authorization.id)).toHaveLength(1)
       expect(request.messages.filter(message => sourceOf(message).kind === 'tool')).toHaveLength(1)
     }
-    const aRuntimeRaw = userMessages(a.session.snapshotEvents()).filter(event => sourceOf(event.data).plugin === '@deepseek-ai/dsh-system-prompt')
+    const aRuntimeRaw = userMessages(a.session.snapshotEvents()).filter(event => sourceOf(event.data).kind === 'runtime-context')
     expect(aRuntimeRaw).toHaveLength(2)
     expect(aRuntimeRaw[1]!.sourceEventSeqs).toEqual([aRuntimeRaw[0]!.seq])
     expect(textOf(aRuntimeRaw[0]!.data)).toContain('"sceneRevision":0')
     expect(textOf(aRuntimeRaw[1]!.data)).toContain('"sceneRevision":1')
     expect(userMessages(a.session.snapshotEvents()).filter(event => event.data.id === authorization.id)).toHaveLength(1)
     expect(userMessages(a.session.snapshotEvents()).filter(event => sourceOf(event.data).kind === 'user')).toHaveLength(3)
-    expect(a.session.snapshotEvents().filter(event => event.type === 'tool/result').map(event => event.data.message.content[0].toolCallId)).toEqual([ToolCallId('call-a')])
+    expect(a.session.snapshotEvents().filter(event => event.type === 'tool/result').map(event => event.data.message.toolCallId)).toEqual([ToolCallId('call-a')])
     expect(a.session.snapshotEvents().filter(event => event.type === 'turn/start').map(event => event.data.turn)).toEqual([1, 2])
     expect(a.session.snapshotEvents().filter(event => event.type === 'turn/end').map(event => event.data.reason.kind)).toEqual(['completed', 'completed'])
     expect(a.session.snapshotEvents().filter(event => event.type === 'step/start').map(event => [event.data.turn, event.data.step])).toEqual([[1, 1], [1, 2], [2, 1]])
@@ -362,7 +364,7 @@ async function skillContextHost() {
 }
 
 const nestedText = (blocks: readonly ContentBlock[]): string => blocks.map(block =>
-  block.type === 'text' ? block.text : block.type === 'tool-result' ? nestedText(block.content) : '').join('\n')
+  block.type === 'text' ? block.text : '').join('\n')
 const requestText = (request: GenerateOptions) => request.messages.map(message => nestedText(message.content)).join('\n')
 const jsonlRoundtrip = (events: readonly SessionEvent[], filename: string): SessionEvent[] => {
   const path = join(installerRoot!, filename)
@@ -497,15 +499,14 @@ test('JSONL旧日志实际恢复：多份legacy当前事实与目录只投影最
     const model = new TextAdapter()
     ctx.llm.registerAdapter(['legacy-restored'], model)
     const legacy = Session.create(SessionId('legacy-context-source'))
-    const owner = '@deepseek-ai/dsh-system-prompt'
-    legacy.append('system/message', { turn: 1, step: 1, message: createSystemMessage('You are a coding agent powered by the legacy model.\n\nThe DeepSeek Harness implementation checkout is at /fixture/install. Use this checkout only to inspect or extend DSH itself.\n\n' + productIdentityText(), owner) }, { surfaceOp: 'append' })
+    legacy.append('system/message', { turn: 1, step: 1, message: createSystemMessage('You are a coding agent powered by the legacy model.\n\nThe DeepSeek Harness implementation checkout is at /fixture/install. Use this checkout only to inspect or extend DSH itself.\n\n' + productIdentityText()) }, { surfaceOp: 'append' })
     for (const revision of [0, 1]) {
-      legacy.append('user/message', createUserMessage({ content: [{ type: 'text', text: `LEGACY_RUNTIME_REVISION_${revision}` }], source: { kind: 'plugin', plugin: owner } }), { surfaceOp: 'append' })
+      legacy.append('user/message', createUserMessage({ content: [{ type: 'text', text: `LEGACY_RUNTIME_REVISION_${revision}` }], source: { kind: 'runtime-context' } }), { surfaceOp: 'append' })
       legacy.append('user/message', createUserMessage({ content: [{ type: 'text', text: `LEGACY_DOMAIN_${revision}` }], source: { kind: 'lyapunov-domain-pointer' } as never }), { surfaceOp: 'append' })
       legacy.append('user/message', createUserMessage({ content: [{ type: 'text', text: `LEGACY_CATALOG_${revision}` }], source: { kind: 'skill-catalog', form: 'catalog', entries: [{ name: `legacy-${revision}`, description: '旧目录' }] } }), { surfaceOp: 'append' })
     }
     const authorization = createUserMessage({ content: [{ type: 'text', text: 'LEGACY-AUTH：授权范围仍是原用户明确的范围。' }], source: { kind: 'user' } })
-    const retiredNotice = createUserMessage({content:[{type:'text',text:'请明确要安装哪个物理引擎：mujoco、isaac、newton。我不会猜测，也不会自动安装。'}], source:{kind:'plugin',plugin:'lyapunov-engine-install',form:'notice',summary:'旧合成提醒'}})
+    const retiredNotice = createUserMessage({content:[{type:'text',text:'请明确要安装哪个物理引擎：mujoco、isaac、newton。我不会猜测，也不会自动安装。'}], source:{kind:'plugin:lyapunov-engine-install',form:'notice',summary:'旧合成提醒'}})
     legacy.append('user/message',retiredNotice,{surfaceOp:'append'})
     const preservedUser = user('LEGACY-USER：禁止额外下载，保留这一约束。')
     const annotation = createUserMessage({ content: [{ type: 'text', text: 'LEGACY-ANNOTATION：保留这个视口批注。' }], source: { kind: 'lyapunov-annotation' } as never })
@@ -518,7 +519,7 @@ test('JSONL旧日志实际恢复：多份legacy当前事实与目录只投影最
     expect(model.requests).toHaveLength(1)
     const request = model.requests[0]!
     captureInputEvidence('legacy-formal-main',request)
-    const runtime = request.messages.filter(message => message.role === 'user' && sourceOf(message).plugin === owner)
+    const runtime = request.messages.filter(message => message.role === 'user' && sourceOf(message).kind === 'runtime-context')
     expect(runtime).toHaveLength(1)
     expect(textOf(runtime[0]!)).toContain('FRESH_RUNTIME_REVISION_2')
     expect(requestText(request)).not.toContain('LEGACY_RUNTIME_REVISION_')
@@ -539,7 +540,7 @@ test('JSONL旧日志实际恢复：多份legacy当前事实与目录只投影最
     expect(userMessages(raw).some(event=>event.data.id===retiredNotice.id)).toBe(true)
     expect(raw.slice(0, seed.length)).toEqual(seed)
     expect(pointerEvents(raw)).toHaveLength(3)
-    expect(userMessages(raw).filter(event => sourceOf(event.data).plugin === owner)).toHaveLength(3)
+    expect(userMessages(raw).filter(event => sourceOf(event.data).kind === 'runtime-context')).toHaveLength(3)
     expect(userMessages(raw).filter(event => sourceOf(event.data).kind === 'skill-catalog')).toHaveLength(3)
     expect(turnErrors(raw)).toEqual([])
     expect(systemText(request).split(productIdentityText())).toHaveLength(2)
@@ -554,11 +555,16 @@ test('原生辅助压缩实际输入：旧系统与安装合成提醒退役，�
     const model = new TextAdapter()
     ctx.llm.registerAdapter(['compact-prompt-fixture'], model)
     const agent = await ctx.agentLoop.create(SessionId('prompt-compaction'), {provider:'compact-prompt-fixture',model:'fixture'})
-    const oldSystem = createSystemMessage('You are a coding agent powered by the old model.\n\nThe client-plugin HMR receiver is active.', '@deepseek-ai/dsh-system-prompt')
+    // 当前产品头由本 Session 的原生回合提交；辅助压缩不得借未记录的新 assembly 文本。
+    agent.followup(user('记录本次已有产品上下文。'))
+    await agent.whenIdle()
+    expect(agent.session.deriveMessages().filter(message=>message.role==='system').map(textOf).join('\n')).toBe(productIdentityText())
+    model.requests.length=0
+    const oldSystem = createSystemMessage('You are a coding agent powered by the old model.\n\nThe client-plugin HMR receiver is active.')
     const authorization = user('明确授权本次已有动作；预算与来源不可变。')
     const image = {type:'image' as const, attachment:{attachmentId:'sha256:'+ 'a'.repeat(64),mediaType:'image/png',bytes:1,width:1,height:1}} as ContentBlock
     const annotation = createUserMessage({content:[{type:'text',text:'用户批注：保持当前物体。'},image],source:{kind:'lyapunov-annotation'} as never})
-    const notice = createUserMessage({content:[{type:'text',text:'请明确要安装哪个物理引擎：mujoco、isaac、newton。我不会猜测，也不会自动安装。'}],source:{kind:'plugin',plugin:'lyapunov-engine-install',form:'notice',summary:'旧提醒'}})
+    const notice = createUserMessage({content:[{type:'text',text:'请明确要安装哪个物理引擎：mujoco、isaac、newton。我不会猜测，也不会自动安装。'}],source:{kind:'plugin:lyapunov-engine-install',form:'notice',summary:'旧提醒'}})
     const toolImage = createToolResultMessage({callId:ToolCallId('fixture-observation'),isError:false,content:[{type:'text',text:'原生观察工具回执夹具'},image]})
     const messages=[oldSystem,authorization,annotation,notice,toolImage]
     const tools=[{name:'fixture_read_only',description:'原生工具目录保持',parameters:{type:'object'}}]
@@ -574,7 +580,7 @@ test('原生辅助压缩实际输入：旧系统与安装合成提醒退役，�
     expect(requestText(request)).not.toContain('HMR receiver')
     expect(request.messages.some(message=>message.id===notice.id)).toBe(false)
     for(const preserved of [authorization,annotation,toolImage])expect(request.messages.find(message=>message.id===preserved.id)).toEqual(preserved)
-    const images=(blocks:readonly ContentBlock[]):number=>blocks.reduce((count,block)=>count+(block.type==='image'?1:block.type==='tool-result'?images(block.content):0),0)
+    const images=(blocks:readonly ContentBlock[]):number=>blocks.reduce((count,block)=>count+(block.type==='image'?1:0),0)
     expect(request.messages.reduce((count,message)=>count+images(message.content),0)).toBe(2)
     const instruction=textOf(request.messages.at(-1)!)
     expect(instruction).toContain("Use the user's language.")

@@ -11,6 +11,7 @@ import type { Agent } from "@deepseek-ai/dsh-agent"
 import { defineTool } from "@deepseek-ai/dsh-tools"
 import { createUserMessage } from "@deepseek-ai/dsh-llm"
 import type { ContentBlock } from "@deepseek-ai/dsh-llm"
+import type {} from "../../lyapunov-contracts/src/message-sources.ts"
 import type { JobId, JobOutcome } from "@deepseek-ai/dsh-jobs"
 import type {} from "@deepseek-ai/dsh-jobs"
 import type {} from "@deepseek-ai/dsh-user-questions"
@@ -87,7 +88,7 @@ function deliverImagesToOwner(owner: unknown, jobId: string | undefined, report:
     "这些图来自本次作业的结果行；本地文件路径见作业结果里的 images。"
   const content: ContentBlock[] = [{ type: "text", text }, ...refs.map((ref) => ({ type: "image", attachment: ref } as ContentBlock))]
   try {
-    target.inject(createUserMessage({ content, source: { kind: "plugin", plugin: name, form: "notice", summary: `生成图 ${refs.length} 张${where}` } }))
+    target.inject(createUserMessage({ content, source: { kind: "lyapunov-generate-image", form: "notice", summary: `生成图 ${refs.length} 张${where}` } }))
     report.delivery = "job-notice"
   } catch (error) {
     report.delivery = "none"
@@ -186,33 +187,33 @@ export function apply(ctx: Context, config: Config) {
         // 后台：先在**前台**把提交前检查与授权问答做完（后台里问不了用户），再交给原生 Jobs。
         await runImageGeneration(input, { ...config, signal: exec.signal, prepareOnly: true, authorizeSubmission: generationAuthorizer(ctx, exec.agent, true) })
         const controller = new AbortController()
-        exec.signal.addEventListener("abort", () => controller.abort(exec.signal.reason), { once: true })
+        if (exec.signal.aborted) throw exec.signal.reason ?? new Error("Cancelled before background Job registration")
         let started: JobId | undefined
         started = ctx.jobs.start({
           kind: "lyapunov-generation",
           label: (config.mode === "formal" || process.env.LYAPUNOV_MODE?.trim() === "formal" ? generationPublicName("image") : "image") + " " + input.requestId,
-          owner: exec.agent,
+          owner: exec.agent?.id,
           run: () => {
             const done = (async (): Promise<JobOutcome> => {
               const result = await run(controller.signal)
-              if (isPreparedOnly(result)) return { status: "failed" as const, output: "PROVIDER_UNAVAILABLE: 后台作业只完成了提交前检查，没有提交" }
+              if (isPreparedOnly(result)) return { status: "failed" as const, result: "PROVIDER_UNAVAILABLE: 后台作业只完成了提交前检查，没有提交" }
               // 图必须先附件化再投递：`output.render` 只有前台有，后台的唯一交付通道是 owner.inject。
               const { refs, report } = await attachResultImages(attachmentStore(ctx), result.images.map((image) => image.path), MAX_RESULT_IMAGES, "job-notice")
               // 取消的作业**不作为本次产出发图**：附件化之后不再有异步步骤，否则"作业被取消"与"完成通知带图发出"会同时成立。
               if (controller.signal.aborted) {
                 report.delivery = "none"
                 report.deliveryError = "作业在附件化阶段被取消：本次不投递图片（取消的作业不作为本次产出发给模型）"
-                return { status: "killed" as const, output: "IMAGE_CANCELLED: 作业在附件化阶段被取消（已附件化 " + report.attached + " 张，全部不投递）" }
+                return { status: "killed" as const, result: "IMAGE_CANCELLED: 作业在附件化阶段被取消（已附件化 " + report.attached + " 张，全部不投递）" }
               }
               if (refs.length > 0) deliverImagesToOwner(exec.agent, started, report, refs)
               else noteImageDelivery(report, { lane: "job-notice", renderRequested: true })
-              return { status: "completed" as const, output: withDelivery(result, report) }
+              return { status: "completed" as const, result: withDelivery(result, report) }
             })()
             return {
               cancel: () => controller.abort(),
               done: done.catch((error) => ({
                 status: controller.signal.aborted ? ("killed" as const) : ("failed" as const),
-                output: error instanceof Error ? error.message : String(error),
+                result: error instanceof Error ? error.message : String(error),
               })),
             }
           },

@@ -3,7 +3,20 @@ import {createHash} from 'node:crypto'
 import {join,relative} from 'node:path'
 import {spawnSync} from 'node:child_process'
 
-export const SDK_BASE_COMMIT='7c3f05885033aa3aed74904d59a94692d12a47f7'
+export const SDK_BASE_COMMIT='639ed015397290b3745d163aafe02ffee4aa3f84'
+export const LEGACY_SDK_BASE_COMMIT='7c3f05885033aa3aed74904d59a94692d12a47f7'
+export const RC2_PRODUCT_PATCH='script/patches/dsh-v0.2.0-rc.2-product.patch'
+export const RC2_INTEGRITY_MANIFEST='script/sdk-source-integrity-rc2.json'
+/** 只选择当前RC2或明确旧基线；没有版本匹配的签名时拒绝，不回退旧registry。 */
+export function sdkIntegrityRecord(root,baseCommit){
+  const lock=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8'))
+  if(![SDK_BASE_COMMIT,LEGACY_SDK_BASE_COMMIT].includes(baseCommit))throw Error('SDK_SOURCE_BASE_UNSUPPORTED')
+  const record=baseCommit===LEGACY_SDK_BASE_COMMIT&&lock.sdkSourceIntegrity?.baseCommit!==baseCommit
+    ?lock.sdkSourceIntegrityLegacy:lock.sdkSourceIntegrity
+  const expectedFile=baseCommit===SDK_BASE_COMMIT?RC2_INTEGRITY_MANIFEST:'script/sdk-source-integrity.json'
+  if(!record||record.file!==expectedFile||record.baseCommit!==baseCommit)throw Error('SDK_SOURCE_INTEGRITY_REQUIRED')
+  return record
+}
 const hash=value=>createHash('sha256').update(value).digest('hex')
 const publicPostProofs=new WeakMap()
 const finalProofs=new WeakSet()
@@ -41,18 +54,24 @@ export function sdkAffectedPaths(patches){
   return paths
 }
 /** 固定base逐字节、已签全序合法完整stage、unknown新增与缺件均在写入前检查。 */
-export function verifySDKSourceIntegrity(root,sdk,patches,final=false){
-  const lock=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).sdkSourceIntegrity
-  if(!lock||lock.file!=='script/sdk-source-integrity.json'||lock.baseCommit!==SDK_BASE_COMMIT)throw Error('SDK_SOURCE_INTEGRITY_REQUIRED')
+/** 冷bootstrap先核完整artifact签名与合法stage/final结构；它不是SDK来源proof。 */
+export function verifySDKRegistryArtifacts(root,patches,baseCommit=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).commit){
+  const lock=sdkIntegrityRecord(root,baseCommit)
   const bytes=readFileSync(join(root,lock.file))
   if(hash(bytes)!==lock.sha256)throw Error('SDK_SOURCE_INTEGRITY_SIGNATURE_INVALID')
   const manifest=JSON.parse(bytes),signature=sdkRegistrySignature(root,patches),entry=manifest.registries?.[signature]
-  if(manifest.version!==1||manifest.baseCommit!==SDK_BASE_COMMIT||!entry)throw Error('SDK_SOURCE_REGISTRY_UNSIGNED')
+  if(manifest.version!==1||manifest.baseCommit!==baseCommit||!entry)throw Error('SDK_SOURCE_REGISTRY_UNSIGNED')
   const affected=sdkAffectedPaths(patches)
   if(JSON.stringify(affected)!==JSON.stringify(entry.affectedPaths)||!Array.isArray(entry.stageHashes)||entry.stageHashes.length===0||entry.stageHashes.some(sha=>typeof sha!=='string'||!/^[a-f0-9]{64}$/.test(sha))||typeof entry.finalHash!=='string'||!/^[a-f0-9]{64}$/.test(entry.finalHash))throw Error('SDK_SOURCE_STAGES_INVALID')
   if(JSON.stringify(Object.keys(entry.finalPostimages??{}).sort())!==JSON.stringify(affected)||affected.some(path=>!(entry.finalPostimages[path]===null||typeof entry.finalPostimages[path]==='string'&&/^[a-f0-9]{64}$/.test(entry.finalPostimages[path])))||hash(JSON.stringify(affected.map(path=>[path,entry.finalPostimages[path]])))!==entry.finalHash)throw Error('SDK_SOURCE_FINAL_IMAGES_INVALID')
-  if(git(sdk,['rev-parse','HEAD']).trim()!==SDK_BASE_COMMIT)throw Error('SDK_SOURCE_BASE_COMMIT_MISMATCH')
-  const baseline=new Map(git(sdk,['ls-tree','-r','-z',SDK_BASE_COMMIT]).split('\0').filter(Boolean).map(row=>{const tab=row.indexOf('\t');return[row.slice(tab+1),row.slice(0,tab).split(' ')[2]]}))
+  return {baseCommit,signature,entry,affected}
+}
+
+/** 固定base、未知新增和当前完整stage都通过，才签发不可伪造的来源proof。 */
+export function verifySDKSourceIntegrity(root,sdk,patches,final=false,baseCommit=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).commit){
+  const {signature,entry,affected}=verifySDKRegistryArtifacts(root,patches,baseCommit)
+  if(git(sdk,['rev-parse','HEAD']).trim()!==baseCommit)throw Error('SDK_SOURCE_BASE_COMMIT_MISMATCH')
+  const baseline=new Map(git(sdk,['ls-tree','-r','-z',baseCommit]).split('\0').filter(Boolean).map(row=>{const tab=row.indexOf('\t');return[row.slice(tab+1),row.slice(0,tab).split(' ')[2]]}))
   const allowed=new Set(affected)
   for(const [path,blob] of baseline){
     if(allowed.has(path))continue
@@ -60,9 +79,9 @@ export function verifySDKSourceIntegrity(root,sdk,patches,final=false){
     const matches=value!==null&&createHash('sha1').update(Buffer.from('blob '+value.length+'\0')).update(value).digest('hex')===blob
     if(!matches){
       // 固定SDK的Windows .cmd按受保护.gitattributes检出CRLF；比较其精确working bytes，不宽容任意改字。
-      // 7c已签.gitattributes只有*.cmd的CRLF例外；不信任.git/info/attributes或本地配置加出的例外。
+      // 固定base已签.gitattributes只有*.cmd的CRLF例外；不信任.git/info/attributes或本地配置加出的例外。
       if(value!==null&&path.endsWith('.cmd')){
-        const raw=spawnSync('git',['cat-file','blob',SDK_BASE_COMMIT+':'+path],{cwd:sdk,maxBuffer:32*1024*1024})
+        const raw=spawnSync('git',['cat-file','blob',baseCommit+':'+path],{cwd:sdk,maxBuffer:32*1024*1024})
         if(raw.status===0&&Buffer.from(raw.stdout.toString('utf8').replace(/\r?\n/g,'\r\n')).equals(value))continue
       }
       throw Error('SDK_SOURCE_BASE_BYTES_MISMATCH: '+path)
@@ -73,7 +92,7 @@ export function verifySDKSourceIntegrity(root,sdk,patches,final=false){
   if(extra.length)throw Error('SDK_SOURCE_UNKNOWN_ADDITION: '+extra.join(', '))
   const actual=sdkAffectedFingerprint(sdk,affected)
   if(final?actual!==entry.finalHash:!entry.stageHashes.includes(actual))throw Error('SDK_SOURCE_AFFECTED_STAGE_MISMATCH')
-  const proof=Object.freeze({baseCommit:SDK_BASE_COMMIT,registrySignature:signature,baselineFiles:baseline.size,affectedFiles:affected.length})
+  const proof=Object.freeze({baseCommit:baseCommit,registrySignature:signature,baselineFiles:baseline.size,affectedFiles:affected.length})
   publicPostProofs.set(proof,entry.publicPostimages??[])
   if(actual===entry.finalHash)finalProofs.add(proof)
   return proof

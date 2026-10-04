@@ -29,7 +29,7 @@ import AgentRegistry from "@deepseek-ai/dsh-agent"
 import AgentLoop from "@deepseek-ai/dsh-agent-loop"
 import JobsLocal from "@deepseek-ai/dsh-jobs-local"
 import LlmRuntime, { createUserMessage, LlmAdapter, ToolCallId } from "@deepseek-ai/dsh-llm"
-import type { GenerateOptions, Message, StreamChunk } from "@deepseek-ai/dsh-llm"
+import type { GenerateOptions, RequestMessage, StreamChunk } from "@deepseek-ai/dsh-llm"
 import SessionStore, { SessionId } from "@deepseek-ai/dsh-session"
 import type { SessionEvent } from "@deepseek-ai/dsh-session"
 import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection"
@@ -57,8 +57,8 @@ afterEach(() => {
 })
 
 const user = (text: string) => createUserMessage({ content: [{ type: "text", text }], source: { kind: "user" } })
-const textOf = (message: Message) => message.content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n")
-const sourceKind = (message: Message) => (message.source as { kind?: string } | undefined)?.kind
+const textOf = (message: RequestMessage) => message.content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n")
+const sourceKind = (message: RequestMessage) => message.source?.kind
 const pointerMessages = (request: GenerateOptions) => request.messages.filter(message => sourceKind(message) === "lyapunov-domain-pointer")
 const pointerEvents = (events: readonly SessionEvent[]) => events.flatMap(event => event.type === "user/message" && sourceKind(event.data) === "lyapunov-domain-pointer" ? [event] : [])
 const toolCalls = (events: readonly SessionEvent[]) => events.flatMap(event => event.type === "tool/call" ? [event] : [])

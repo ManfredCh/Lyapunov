@@ -370,7 +370,7 @@ export function apply(ctx:Context,config:Config={}){
    }
    if(!input.background)return run(exec.signal)
    const controller=new AbortController()
-   const jobId=ctx.jobs.start({kind:'policy_download',label:'Policy 下载 '+id.modelId,owner:exec.agent,run:()=>({cancel:()=>controller.abort(),done:run(controller.signal).then(result=>({status:'completed' as const,output:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,output:String(error)}))})})
+   const jobId=ctx.jobs.start({kind:'policy_download',label:'Policy 下载 '+id.modelId,owner:exec.agent?.id,run:()=>({cancel:()=>controller.abort(),done:run(controller.signal).then(result=>({status:'completed' as const,result:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)}))})})
    return {status:'RUNNING',jobId}
   }},
   policy_execute:{description:"Execute an adapted policy through existing ctx.sim in a matching world/entity/generation. Synchronize CPU inference with physics steps. Long-running tasks use native Jobs and support policy_stop or job_kill.",execute:async(input,exec)=>{
@@ -382,14 +382,14 @@ export function apply(ctx:Context,config:Config={}){
    const key=input.worldId+'/'+input.entityId
    if(running.has(key))throw new Error('POLICY_ENTITY_ALREADY_RUNNING')
    const runId='policy-'+randomUUID(),controller=new AbortController()
-   const jobId=ctx.jobs.start({kind:'policy_execution',label:'Policy 执行 '+id.modelId,owner:exec.agent,outputLimitBytes:8000,run:()=>({cancel:()=>controller.abort(),done:executePolicy({dataDirectory:root(),pythonPath:config.pythonPath,pythonRuntimes:config.pythonRuntimes},{...input,...id,runId},scene,sim,controller.signal).then(result=>({status:result.status==='COMPLETED'?'completed' as const:result.status==='CANCELLED'?'killed' as const:'failed' as const,output:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,output:String(error)})).finally(()=>running.delete(key))})})
+   const jobId=ctx.jobs.start({kind:'policy_execution',label:'Policy 执行 '+id.modelId,owner:exec.agent?.id,outputLimitBytes:8000,run:()=>({cancel:()=>controller.abort(),done:executePolicy({dataDirectory:root(),pythonPath:config.pythonPath,pythonRuntimes:config.pythonRuntimes},{...input,...id,runId},scene,sim,controller.signal).then(result=>({status:result.status==='COMPLETED'?'completed' as const:result.status==='CANCELLED'?'killed' as const:'failed' as const,result:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)})).finally(()=>running.delete(key))})})
    running.set(key,{runId,jobId,controller})
    return {status:'RUNNING',runId,jobId,worldId:input.worldId,entityId:input.entityId,expectedGeneration:input.expectedGeneration,resultPath:join(root(),'policy-runs',runId,'result.json')}
   }},
   policy_stop:{description:"Stop policy Jobs for the specified world/entity and wait for physical stop confirmation and execution receipts.",execute:async(input,exec)=>{
    const key=input.worldId+'/'+input.entityId,run=running.get(key)
    if(!run)return {status:'NOT_RUNNING',worldId:input.worldId,entityId:input.entityId}
-   ctx.jobs.kill(JobId(run.jobId),exec.agent,'policy-stop');await ctx.jobs.wait(JobId(run.jobId),10000,exec.agent)
+   ctx.jobs.kill(JobId(run.jobId),exec.agent?.id,'policy-stop');await ctx.jobs.wait(JobId(run.jobId),10000,exec.agent?.id)
    try{return JSON.parse(await readFile(join(root(),'policy-runs',run.runId,'result.json'),'utf8'))}catch{return {status:'STOPPING',runId:run.runId,jobId:run.jobId}}
   }},
  }
@@ -400,7 +400,7 @@ export function apply(ctx:Context,config:Config={}){
    const value=await definition.execute(JSON.parse(invocation.rawInput||'{}'),invocation)
    // 人工命令的后台任务由原生 Jobs 面板呈现；原生 waiter 认领完成通知，
    // 不因一次按钮/命令操作自动唤醒模型。模型 Tool 发起的 Job 仍照常通知。
-   if(value?.jobId)void ctx.jobs.wait(JobId(value.jobId),600_000,invocation.agent).catch(()=>{})
+   if(value?.jobId)void ctx.jobs.wait(JobId(value.jobId),600_000,invocation.agent?.id).catch(()=>{})
    return {kind:'success',text:JSON.stringify(value)}
   }catch(error){return {kind:'error',text:String(error)}}}})
  }

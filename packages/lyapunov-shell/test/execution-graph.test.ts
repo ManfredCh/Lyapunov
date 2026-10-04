@@ -30,7 +30,7 @@ describe('原生执行图折叠',()=>{
  test.each([
   ['completed','success'],['aborted','cancelled'],['interrupted','cancelled'],
   ['blocked','waiting'],['forked','waiting'],['max-tokens','waiting'],['future-owner-reason','unknown'],
- ])('原生turn/end %s不伪造目标完成', (kind,status)=>{
+ ] as const)('原生turn/end %s不伪造目标完成', (kind,status)=>{
   const graph=foldExecutionGraph(empty(),event(0,'turn/end',{turn:1,reason:{kind}}))
   expect(graph.nodes.find(row=>row.id==='turn:1')?.status).toBe(status)
  })

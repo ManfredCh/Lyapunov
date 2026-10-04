@@ -182,7 +182,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         attachments: draft?.attachments.length ?? 0,
         pendingApprovals: [...approvals.keys()],
         pendingQuestions: [...questions.keys()],
-        jobs: selectedAgent === undefined || !jobs ? 0 : jobs.list(selectedAgent).length,
+        jobs: selectedAgent === undefined || !jobs ? 0 : jobs.list(selectedAgent?.id).length,
       }
     },
     editor: () => ({

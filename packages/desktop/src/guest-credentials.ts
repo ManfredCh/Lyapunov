@@ -27,7 +27,7 @@ export class GuestCredentials extends CredentialProvider {
     const assertRoute=(provider:string)=>{if(!isOwnProviderRoute(provider))throw new Error("GUEST_OWN_PROVIDER_REQUIRED: product/managed routes are unavailable in guest")}
     const policy:PiAiCompositionPolicy={
       allowAmbientCredentials:false,
-      validateProfiles:(providers:PiAiOptions['providers'])=>{
+      validateProfiles:providers=>{
         for(const [route,profile] of Object.entries(providers??{})){
           assertRoute(route)
           if(profile.managedBaseURL!==undefined)throw new Error("GUEST_MANAGED_PROVIDER_FORBIDDEN")

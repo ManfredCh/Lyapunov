@@ -392,14 +392,14 @@ await check('background=true 走 DSH Jobs 并能读到真实结果字符串',asy
  assert(/^depth_estimate-\d+$/.test(jobId),'jobId 形状异常: '+jobId)
  const deadline=Date.now()+300_000
  let read=ctx.jobs.read(jobId as never)
- while(!['completed','failed','killed'].includes(String(read.snapshot.status))){
-  assert(Date.now()<deadline,'后台作业超时未收敛: '+JSON.stringify(read.snapshot))
+ while(!['completed','failed','killed'].includes(String(read.job.status))){
+  assert(Date.now()<deadline,'后台作业超时未收敛: '+JSON.stringify(read.job))
   await new Promise(resolve=>setTimeout(resolve,1000))
   read=ctx.jobs.read(jobId as never)
  }
- assert(String(read.snapshot.status)==='completed','后台作业状态不是 completed: '+JSON.stringify(read.snapshot))
- assert(read.text.includes('depth.image.npy'),'Jobs 输出不是含产物的 JSON 字符串: '+read.text.slice(0,200))
- const parsed=JSON.parse(read.text) as DepthEstimationResult
+ assert(String(read.job.status)==='completed','后台作业状态不是 completed: '+JSON.stringify(read.job))
+ assert((read.result ?? '').includes('depth.image.npy'),'Jobs 输出不是含产物的 JSON 字符串: '+(read.result ?? '').slice(0,200))
+ const parsed=JSON.parse((read.result ?? '')) as DepthEstimationResult
  assert(parsed.output.sizes.preview.width===512,'后台作业未按参数生成预览: '+JSON.stringify(parsed.output.sizes.preview))
 })
 await check('取消真实进程后作业状态为 killed 且没有 completed 结果',async()=>{
@@ -422,31 +422,31 @@ await check('后台作业完成后 owner 收到带真实图像的通知，且相
   const jobId=String((payload.value as {jobId?:string}).jobId)
   const deadline=Date.now()+300_000
   // 轮询用 get（只读快照，不标记 reported）；settle 后原生通知与我们的投递都不会被“已读”掐掉。
-  let snapshot=ctx.jobs.get(jobId as never,agent)
+  let snapshot=ctx.jobs.get(jobId as never,agent?.id)
   while(!['completed','failed','killed'].includes(String(snapshot.status))){
    assert(Date.now()<deadline,'后台作业超时未收敛: '+JSON.stringify(snapshot))
    await new Promise(resolve=>setTimeout(resolve,1000))
-   snapshot=ctx.jobs.get(jobId as never,agent)
+   snapshot=ctx.jobs.get(jobId as never,agent?.id)
   }
   assert(String(snapshot.status)==='completed','后台作业未完成: '+JSON.stringify(snapshot))
   // 原生 job 通知（tool-jobs 的“finished…Read its output with job_output”）也会进 inbox，
-  // 这里找的是本插件投递的那条：source.plugin 必须是本插件名。
+  // 这里找的是本插件投递的那条：source.kind 必须是本插件名。
   type Notice={role?:string;source?:{kind?:string;plugin?:string;form?:string};content?:Array<{type?:string;text?:string;attachment?:{mediaType?:string;width?:number;height?:number}}>}
-  const ours=()=>inbox.find(item=>(item as Notice).source?.plugin===pluginName) as Notice|undefined
+  const ours=()=>inbox.find(item=>(item as Notice).source?.kind===pluginName) as Notice|undefined
   const deliveryDeadline=Date.now()+30_000
   while(!ours()&&Date.now()<deliveryDeadline)await new Promise(resolve=>setTimeout(resolve,100))
   const message=ours()
   assert(message,'后台作业完成后 owner 没有收到本插件投递的预览通知（收到的：'+JSON.stringify(inbox.map(item=>(item as Notice).source))+'）')
   assert(message.role==='user','通知消息角色不对: '+String(message.role))
-  assert(message.source?.kind==='plugin'&&message.source?.form==='notice','通知消息来源不对: '+JSON.stringify(message.source))
+  assert(message.source?.kind===pluginName&&message.source?.form==='notice','通知消息来源不对: '+JSON.stringify(message.source))
   const captionText=message.content?.find(block=>block.type==='text')?.text??''
   const attached=message.content?.find(block=>block.type==='image')?.attachment
   assert(captionText.includes(image!),'通知文本未注明来源原图: '+captionText)
   assert(captionText.includes('相对深度')&&captionText.includes('不是米制'),'通知文本未写明相对语义: '+captionText)
   assert(attached&&String(attached.mediaType).startsWith('image/'),'通知没有携带真实图像: '+JSON.stringify(attached))
   assert(attached.width===384&&attached.height===288,'通知里的预览尺寸不对: '+JSON.stringify(attached))
-  const read=ctx.jobs.read(jobId as never,agent)
-  const parsed=JSON.parse(read.text) as DepthEstimationResult
+  const read=ctx.jobs.read(jobId as never,agent?.id)
+  const parsed=JSON.parse((read.result ?? '')) as DepthEstimationResult
   assert(parsed.output.image.path===image,'相对路径未按会话 cwd 解析成真实原图: '+parsed.output.image.path)
   assert(parsed.imageDelivery?.mode==='job-notice'&&parsed.imageDelivery.attached===1,'后台交付读数不对: '+JSON.stringify(parsed.imageDelivery))
  }finally{await dispose()}
@@ -530,19 +530,19 @@ await check('后台作业在附件化期间被取消：作业 killed、owner 不
    const hold=holdNextSaveImage()
    // 作业自己会跑起来；等它进入附件化，再 job_kill，再放行。
    assert(await waitForHold(hold,FIXTURE_WAIT_MS),'后台路径没有走到附件化（等闸门超时）')
-   assert(ctx.jobs.kill(jobId as never,agent)==='requested','job_kill 未被受理: '+jobId)
+   assert(ctx.jobs.kill(jobId as never,agent?.id)==='requested','job_kill 未被受理: '+jobId)
    hold.release()
    const deadline=Date.now()+60_000
-   let snapshot=ctx.jobs.get(jobId as never,agent)
+   let snapshot=ctx.jobs.get(jobId as never,agent?.id)
    while(!['completed','failed','killed'].includes(String(snapshot.status))){
     assert(Date.now()<deadline,'被取消的作业没有收敛: '+JSON.stringify(snapshot))
     await new Promise(resolve=>setTimeout(resolve,50))
-    snapshot=ctx.jobs.get(jobId as never,agent)
+    snapshot=ctx.jobs.get(jobId as never,agent?.id)
    }
    assert(String(snapshot.status)==='killed','附件化期间取消应判 killed，实际 '+String(snapshot.status))
-   const read=ctx.jobs.read(jobId as never,agent)
-   assert(read.text.includes('CANCELLED'),'取消没有落在附件化阶段: '+read.text.slice(0,300))
-   assert(!inbox.some(item=>(item as {source?:{plugin?:string}}).source?.plugin===pluginName),'被取消的作业不该向 owner 投图（收到 '+inbox.length+' 条）')
+   const read=ctx.jobs.read(jobId as never,agent?.id)
+   assert((read.result ?? '').includes('CANCELLED'),'取消没有落在附件化阶段: '+(read.result ?? '').slice(0,300))
+   assert(!inbox.some(item=>(item as {source?:{kind?:string}}).source?.kind===pluginName),'被取消的作业不该向 owner 投图（收到 '+inbox.length+' 条）')
   })
  }finally{await dispose()}
 })

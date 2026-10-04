@@ -6,7 +6,7 @@ export const SKILL_DISCOVERY_GUIDANCE = 'Use the skill catalog to discover contr
 
 type SourceView = { kind?: string; plugin?: string; form?: string; update?: boolean; entries?: unknown }
 const sourceOf = (message: Message): SourceView => message.source as SourceView
-const systemOwned = (message: Message): boolean => message.role === 'system' && sourceOf(message).kind === 'plugin' && sourceOf(message).plugin === SYSTEM_OWNER
+const systemOwned = (message: Message): boolean => message.role === 'system' && (sourceOf(message).kind === 'system-prompt' || sourceOf(message).kind === `plugin:${SYSTEM_OWNER}` || sourceOf(message).kind === 'plugin' && sourceOf(message).plugin === SYSTEM_OWNER)
 const textOf = (message: Message): string => message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
 const nonText = (message: Message): ContentBlock[] => message.content.filter(block => block.type !== 'text')
 
@@ -27,7 +27,7 @@ function snapshotOwner(message: Message): string | undefined {
   if (message.role !== 'user') return
   const source = sourceOf(message)
   if (source.kind === 'skill-catalog' && source.form === 'catalog' || source.kind === 'lyapunov-domain-pointer') return source.kind
-  if (source.kind === 'plugin' && source.plugin === SYSTEM_OWNER) return SYSTEM_OWNER
+  if (source.kind === 'runtime-context' || source.kind === `plugin:${SYSTEM_OWNER}` || source.kind === 'plugin' && source.plugin === SYSTEM_OWNER) return 'runtime-context'
 }
 
 function catalogText(source: SourceView): string | undefined {
@@ -68,7 +68,7 @@ export function projectFormalModelInput(messages: readonly Message[], context: M
       systemWritten = true
       return
     }
-    if (message.role === 'user' && source.kind === 'plugin' && source.plugin === 'lyapunov-engine-install' && source.form === 'notice') {
+    if (message.role === 'user' && (source.kind === 'lyapunov-engine-install' || source.kind === 'plugin:lyapunov-engine-install' || source.kind === 'plugin' && source.plugin === 'lyapunov-engine-install') && source.form === 'notice') {
       append(message, nonText(message)); return
     }
     if (message.role === 'user' && source.kind === 'skill-catalog' && source.form === 'catalog') {

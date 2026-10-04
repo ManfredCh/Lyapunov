@@ -1,14 +1,23 @@
-import type {ISessions} from "@deepseek-ai/dsh-api-session-controller/client"
+import type {ISessions,SessionListState} from "@deepseek-ai/dsh-api-session-controller/client"
 import type {IConversation} from "@deepseek-ai/dsh-client-ui-conversation/client"
-import type {IJobs} from "@deepseek-ai/dsh-api-job-controller/client"
+import type {IJobs,JobsSnapshot} from "@deepseek-ai/dsh-api-job-controller/client"
 import type {SessionId} from "@deepseek-ai/dsh-session/types"
 import type {DesktopBridge} from "./bridge.ts"
 import {mainSessionId} from "../../lyapunov-shell/src/history-navigation.ts"
 export const name="lyapunov-desktop-lifecycle-client"
 export const inject=["sessions","conversation","jobs"]
 
+type ExitSessionList={readonly ids:Readonly<SessionListState["ids"]>;readonly byId:Readonly<Record<string,Readonly<Pick<SessionListState["byId"][SessionId],"id"|"running"|"retainedBy">>|undefined>>}
+type ExitJobsSnapshot={readonly rows:Readonly<Record<string,readonly Pick<JobsSnapshot["rows"][string][number],"status">[]>>}
+type ExitClientContext={
+  readonly sessions:Pick<ISessions,"scope"|"binding">&{readonly list:{getSnapshot():ExitSessionList;subscribe:ISessions["list"]["subscribe"]}}
+  readonly conversation:{readonly input:Pick<IConversation["input"],"for">}
+  readonly jobs:Pick<IJobs,"watchRows">&{readonly state:{getSnapshot():ExitJobsSnapshot}}
+  effect:(setup:()=>()=>void,label:string)=>unknown
+}
+
 /** 读取/取消原生会话；聊天草稿继续由原生 Conversation store 的持久镜像管理。 */
-export function apply(ctx:{sessions:ISessions;conversation:IConversation;jobs:IJobs;effect:(setup:()=>()=>void,label:string)=>unknown}){
+export function apply(ctx:ExitClientContext){
   const desktop=(window as unknown as {lyapunovDesktop?:DesktopBridge}).lyapunovDesktop
   if(!desktop?.registerExitParticipant)return
   const currentInput=()=>{

@@ -24,6 +24,7 @@ export interface MigrationOptions {
   accountKey: string
   /** 仅显式请求偏好迁移时必填；既有会话迁移调用不推断模式。 */
   mode?: MigrationMode
+  /** 显式偏好迁移须提供已有 profileDirectory；会话移植本身不创建 Profile。 */
   preferences?: ScopedPreferenceSources
   dshHome: string
   sceneRoot: string
@@ -202,7 +203,7 @@ export async function migrateLegacy(options: MigrationOptions) {
               if (!completed && !failed) { interrupted = true; result.interruptedTools++ }
               const toolContent: ContentBlock[] = [{ type: "text", text: completed ? String(data.state.output ?? "") : failed ? String(data.state.error ?? "旧工具返回错误") : "迁移前动作结果未知，已标记 interrupted；需重新观察，不会自动重发动作。" }]
               for (const attachment of data.state?.attachments ?? []) toolContent.push(await migrateAttachment(ctx.attachments, attachment, `${part.id}:${attachment.id ?? toolContent.length}`, legacyCwd, ledger, missing))
-              append("tool/result", { turn, step, message: freezeMessage({ id: MessageId(stableId(options.accountKey, "result", part.id)), role: "user", source: { kind: "tool", callId: ToolCallId(callId) }, content: [{ type: "tool-result", toolCallId: ToolCallId(callId), content: toolContent, isError: !completed }] }), meta: { migration: { partId: part.id, originalStatus: data.state?.status ?? "unknown", interrupted: !completed && !failed }, ...(data.state?.metadata ? { originalMetadata: data.state.metadata } : {}) } }, part.time_updated ?? part.time_created, true)
+              append("tool/result", { turn, step, message: freezeMessage({ id: MessageId(stableId(options.accountKey, "result", part.id)), role: "tool", source: { kind: "tool", callId: ToolCallId(callId) }, toolCallId: ToolCallId(callId), content: toolContent, isError: !completed }), meta: { migration: { partId: part.id, originalStatus: data.state?.status ?? "unknown", interrupted: !completed && !failed }, ...(data.state?.metadata ? { originalMetadata: data.state.metadata } : {}) } }, part.time_updated ?? part.time_created, true)
             }
             append("step/end", { turn, step }, row.time_updated ?? row.time_created)
             if (info.error) interrupted = true
@@ -404,9 +405,9 @@ async function repairExistingSession(
         toolContent.push(await migrateAttachment(ctx.attachments, attachment, attachmentId, legacyCwd, ledger, failures))
         if (before || ledger.attachments[attachmentId]) available.push(attachmentId)
       }
-      // 首次迁入把工具输出封装为[{type:'tool-result',toolCallId,content,isError}]；修补必须重建同一封装：
-      // 裸列表既与原生事件永不相等，也会被 Session 校验拒绝（tool/result 替换只允许改 content）。
-      return { content: [{ type: "tool-result", toolCallId: current.data.message.source.callId, content: toolContent, isError: !completed }], attachmentIds: available }
+      // V4 工具结果是顶层 tool 消息；附件修补只重建原 content，身份、toolCallId 与 isError 保留。
+      void current
+      return { content: toolContent, attachmentIds: available }
     }
 
     for (const row of rows) {

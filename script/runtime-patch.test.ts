@@ -11,6 +11,7 @@ import { Context } from "@deepseek-ai/cordis"
 import Web from "@deepseek-ai/dsh-web"
 import {applyEntryPatches,entryListSchema,type PatchOptions} from "@deepseek-ai/cordis-plugin-include"
 import {interpolate,type EntryOptions} from "@deepseek-ai/cordis-plugin-loader"
+import { Config as PiAiSchema, type Options as PiAiOptions } from '@deepseek-ai/dsh-llm-pi-ai'
 import { formalModelRows } from "../packages/lyapunov-product-bundle/src/account/formal.ts"
 import { runtimePaths } from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 import { backendEnvironment } from "./profile.ts"
@@ -119,8 +120,8 @@ test("native Models plugin is enabled and product overlays do not replace it", (
   expect(source).toContain('patch+="- id: ui-agent-preset\\n  disabled: true\\n"')
   const web = runtimePluginInsert({mode:"local",surface:"web",sceneRoot:"/tmp/single-jobs-owner",engine:"mujoco"})
   expect(web.filter(plugin=>plugin.name==="@deepseek-ai/dsh-tool-jobs")).toHaveLength(0)
-  const standard = readFileSync(join(root, upstream, "packages/preset/agent-presets/presets/standard/agent.cordis.yml"), "utf8")
-  expect(standard).toContain("name: '@deepseek-ai/dsh-tool-jobs'")
+  const base = readFileSync(join(root, upstream, "packages/bundle/base/cordis.patch.yml"), "utf8")
+  expect(base.match(/name: '@deepseek-ai\/dsh-tool-jobs'/g)).toHaveLength(1)
 })
 
 test("formal managed rows retain the gateway and environment-only credential", () => {
@@ -130,7 +131,9 @@ test("formal managed rows retain the gateway and environment-only credential", (
   expect(source).toContain("formalModelRows({apiUrl:input.accountApiUrl})")
   expect(rows).toContainEqual({ id: "llm-deepseek", disabled: true })
   expect(rows).toContainEqual({ id: "agent-default-model", config: { provider: "lyapunov-plans", model: "peiri" } })
-  const provider = rows.find(row => row.id === "llm-pi-ai")?.config?.providers?.["lyapunov-plans"]
+  const options: PiAiOptions | undefined = rows.find(row => row.id === "llm-pi-ai")?.config
+  expect(() => PiAiSchema(options)).not.toThrow()
+  const provider = options?.providers?.["lyapunov-plans"]
   expect(provider).toMatchObject({ displayName: "peiri", apiKeyEnv: "LYAPUNOV_ACCOUNT_TOKEN", baseURL: account.apiUrl + "/v1" })
   expect(provider).not.toHaveProperty("apiKey")
   expect(JSON.stringify(rows)).not.toContain(account.token)
@@ -351,8 +354,8 @@ test("归因播报：首行只数本函数改的，末尾把「不归本函数�
   expect(text).toContain("该目录现有软链 33 条")
   // 不归本函数的那半：点名目录 + 点名机制 + **明说归属与改指由该 owner 决定**
   expect(text).toContain("不归本函数：同级目录 /run/dsh/profiles/node_modules 另有 284 条链接")
-  expect(text).toContain("上游 DSH 的 profile fallback linker")
-  expect(text).toContain("归属与改指由该 owner 决定")
+  expect(text).toContain("RC2 原生 RuntimeResolution")
+  expect(text).toContain("只报告物理归属，不改写这些链接")
   // ⇒ 这一行就是"不许把 33 当成全部"
   const total = notice.lines.at(-1)!
   expect(total).toContain("共 317 条")
@@ -376,7 +379,7 @@ test("归因播报：不归本函数的那部分指向别处时，报归属条�
   expect(text).toContain("「本次改指 0 条」不是这个数")
   // 归因边界：只报"当前归属"，一个字都不说"谁在什么时候改的"
   expect(text).not.toContain("被改指")
-  expect(text).toContain("归属与改指由该 owner 决定")
+  expect(text).toContain("只报告物理归属，不改写这些链接")
 })
 
 test("归因播报不制造噪声：本次 0 改动且不归本函数的那部分也没指向别处 ⇒ 一行都不打", () => {
@@ -549,14 +552,9 @@ test("浏览器能力的装配面保持 launch/headless:false，且不注入 --n
 })
 
 /* ---------------------------------------------------------------------------------------------------
- * 共享依赖镜像（`$DSH_HOME/profiles/node_modules`）归并：由真正 owner 改指，产品只调用与播报。
- *
- * 现场形状：产品槽位 36 条已切到新安装，同级镜像的 284 条原生依赖仍指向旧安装；产品此前只报归属、
- * 一条不碰，于是"本次改指 36 条"被读成"底座也还是旧的"。下面用**真链接夹具 + 真 owner**
- * （`reconcileAndReportInstallationMirror` 默认走上游 `healProfilesModuleFallback`）钉住：
- *   · 旧安装留下的、当前安装闭包里的同名槽位被改指到当前安装；
- *   · 用户自定义软链与真实目录一个字都不动；
- *   · 有改动打出简短摘要并把逐条明细落进跨 Profile 的 JSONL；0 改动且无未归并项时零输出。
+ * RC2 以原生 RuntimeResolution 和 PluginPackages 选择当前安装，不维护旧共享镜像的物理fallback。
+ * 真链接夹具证明解析表与 Node 元数据查找都指向当前安装，旧链接和用户目录保持不变；
+ * 播报/审计只记录读取到的安装映射与旧镜像物理归属，不将读取冒称为改指。
  * ------------------------------------------------------------------------------------------------- */
 
 /** 造一个"当前安装"的可解析依赖闭包：lyapunov-dsh → @deepseek-ai/dsh-base → left-pad。 */
@@ -603,7 +601,7 @@ async function mirrorFixture(options: { custom?: boolean } = {}) {
   return { box, home, profile, current, old, profiles }
 }
 
-test("共享依赖镜像：旧安装槽位被真正 owner 改指到当前安装，播报一条摘要并落明细审计", async () => {
+test("RC2 原生解析：当前安装映射生效，旧镜像保留且不制造物理切换", async () => {
   const fixture = await mirrorFixture()
   try {
     const lines: string[] = []
@@ -611,31 +609,46 @@ test("共享依赖镜像：旧安装槽位被真正 owner 改指到当前安装�
       profileDirectory: fixture.profile, productRoot: fixture.current,
       installAnchor: join(fixture.current, "package.json"), log: line => lines.push(line),
     })
-    expect(report?.switched.sort()).toEqual(["@deepseek-ai/dsh-base", "left-pad"])
-    expect(report?.otherInstall).toBe(0)
+    expect(report?.switched).toEqual([])
+    expect(report?.otherInstall).toBe(2)
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toContain("上游依赖镜像归并")
-    expect(lines[0]).toContain("本次改指 2 条到当前安装")
-    expect(lines[0]).toContain(fixture.current)
-    // 切的是真链接，不是播报：解析后落进当前安装。
+    expect(lines[0]).toContain("RC2 原生模块解析")
+    expect(lines[0]).toContain("当前安装")
+    expect(report?.resolution?.entries.find(row=>row.name==='left-pad')?.packageDir).toBe(join(fixture.current,'node_modules','left-pad'))
+    const nativeResolver = spawnSync('/usr/local/bin/node', ['--input-type=module', '-e', `
+      const { Context } = await import(process.argv[1]);
+      const { PluginPackages } = await import(process.argv[2]);
+      const resolution = JSON.parse(process.argv[3]);
+      const ctx = new Context();
+      try {
+        await ctx.plugin(PluginPackages, { resolution });
+        console.log(JSON.stringify(ctx.pluginPackages.packageOf('left-pad', process.argv[4])?.dir));
+      } finally { await ctx.fiber.dispose(); }
+    `, import.meta.resolve('@deepseek-ai/cordis'), import.meta.resolve('@deepseek-ai/dsh-app-boot'), JSON.stringify(report?.resolution), pathToFileURL(join(fixture.profile,'cordis.yml')).href], {encoding:'utf8',timeout:5000})
+    expect(nativeResolver.status).toBe(0)
+    expect(nativeResolver.stderr).toBe('')
+    expect(JSON.parse(nativeResolver.stdout.trim())).toBe(join(fixture.current,'node_modules','left-pad'))
+
+    // RC2 原生解析表指向当前安装，旧共享镜像的真实链接不被改写。
     for (const name of ["@deepseek-ai/dsh-base", "left-pad"]) {
       const target = await readFile(join(fixture.profiles, "node_modules", ...name.split("/"), "package.json"), "utf8")
       expect(target).toContain(`"name":"${name}"`)
     }
     const detail = JSON.parse((await readFile(join(fixture.profiles, INSTALLATION_MIRROR_AUDIT), "utf8")).trim())
-    expect(detail).toMatchObject({ productRoot: fixture.current, otherInstall: 0 })
-    expect(detail.switched.map((item: { name: string }) => item.name).sort()).toEqual(["@deepseek-ai/dsh-base", "left-pad"])
-    expect(detail.switched[0]).toHaveProperty("target")
+    expect(detail).toMatchObject({ productRoot: fixture.current, otherInstall: 2 })
+    expect(detail.switched).toEqual([])
+    expect(detail.resolution.entries.find((row:{name:string})=>row.name==='left-pad').packageDir).toBe(join(fixture.current,'node_modules','left-pad'))
+    expect(await readlink(join(fixture.profiles,'node_modules','left-pad'))).toContain(fixture.old)
 
-    // 幂等：第二次启动 0 改动、0 未归并 ⇒ 一个字都不打（也不再追加审计）。
+    // 再次读取同一原生映射，仍不改链接；物理旧镜像归属读数继续如实记录。
     const second: string[] = []
     const again = await reconcileAndReportInstallationMirror({
       profileDirectory: fixture.profile, productRoot: fixture.current,
       installAnchor: join(fixture.current, "package.json"), log: line => second.push(line),
     })
     expect(again?.switched).toEqual([])
-    expect(second).toEqual([])
-    expect((await readFile(join(fixture.profiles, INSTALLATION_MIRROR_AUDIT), "utf8")).trim().split("\n")).toHaveLength(1)
+    expect(second).toHaveLength(1)
+    expect((await readFile(join(fixture.profiles, INSTALLATION_MIRROR_AUDIT), "utf8")).trim().split("\n")).toHaveLength(2)
   } finally {
     await rm(fixture.box, { recursive: true, force: true })
   }
@@ -649,14 +662,14 @@ test("共享依赖镜像：用户自定义软链与真实目录被保留，未�
       profileDirectory: fixture.profile, productRoot: fixture.current,
       installAnchor: join(fixture.current, "package.json"), log: line => lines.push(line),
     })
-    expect(report?.switched.sort()).toEqual(["@deepseek-ai/dsh-base", "left-pad"])
-    expect(report?.otherInstall).toBe(1) // user-custom 是认不出归属的软链，不假装它归本安装
+    expect(report?.switched).toEqual([])
+    expect(report?.otherInstall).toBe(3) // 两条旧镜像与user-custom都保留，解析表不据此授予新安装身份
     expect(report?.otherRoots.join("")).toContain("归属未识别")
     // 用户自定义软链指向没变；真实目录原样保留（owner 不 prune、产品不 rm）。
     expect(await readlink(join(fixture.profiles, "node_modules", "user-custom"))).toContain("user-custom-target")
     expect(await readFile(join(fixture.profiles, "node_modules", "keep-me", "package.json"), "utf8")).toContain("keep-me")
-    expect(lines[0]).toContain("本次改指 2 条")
-    expect(lines[0]).toContain("仍有 1 条不指向当前安装")
+    expect(lines[0]).toContain("RC2 原生模块解析")
+    expect(lines[0]).toContain("保留 3 条")
   } finally {
     await rm(fixture.box, { recursive: true, force: true })
   }
@@ -674,8 +687,8 @@ test("共享依赖镜像：锚点不在时不做任何写入，也不猜一个�
     expect(report?.switched).toEqual([])
     expect(report?.error).toContain("当前安装锚点不存在")
     expect(await readlink(join(fixture.profiles, "node_modules", "left-pad"))).toBe(before)
-    expect(lines[0]).toContain("上游依赖镜像未归并")
-    expect(lines[0]).toContain("原因：")
+    expect(lines[0]).toContain("原生模块解析未完成")
+    expect(lines[0]).toContain("当前安装锚点不存在")
   } finally {
     await rm(fixture.box, { recursive: true, force: true })
   }

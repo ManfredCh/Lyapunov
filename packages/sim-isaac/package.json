@@ -13,7 +13,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.2"
+    "@deepseek-ai/cordis": "4.0.4"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
