@@ -116,6 +116,16 @@ export class DesktopAccountController {
     }finally{clearTimeout(timeout);if(this.usageAbort===abort)this.usageAbort=undefined}
   }
   cancelLogin(){this.epoch++;this.loginAbort?.abort();this.loginAbort=undefined;this.activationAbort?.abort();this.activationAbort=undefined;this.usageAbort?.abort();this.usageAbort=undefined;this.refreshAbort?.abort();this.refreshAbort=undefined;this.refreshSequence++;if(["waiting-login","starting","restoring"].includes(this.state.status))this.publish(this.current?{status:"error",user:this.current.me.user,balances:normalizeAccountBalances(this.current.me.balances),message:"连接已取消，可重新连接工作台。"}:{status:"signed-out"})}
+  /** 返回现有账户页，不注销有效正式身份，也不隐式恢复游客前的账户。 */
+  async returnToLogin(){
+    this.cancelLogin()
+    if(this.guestActive){await this.leaveGuest();return}
+    if(this.current)this.publish({status:'ready',user:this.current.me.user,balances:normalizeAccountBalances(this.current.me.balances),usage:this.state.usage,usageStatus:this.state.usageStatus})
+    else this.publish({status:'signed-out'})
+  }
+  /** 客户端激活失败不等于认证失效；现有身份/账户存储/工程保持。 */
+  workspaceFailed(message:string){this.publish({...this.state,status:'error',message})}
+  workspaceReloaded(){if(this.guestActive)this.publish({status:'guest',capabilities:GUEST_CAPABILITIES});else if(this.current)this.publish({...this.state,status:'ready',message:undefined})}
   /** 游客不是注销；仅撤销本次网络/Host 激活，保存账号存储不动。 */
   async enterGuest(){
     if(!this.options.startGuestHost)throw new Error("游客工作台未装配")

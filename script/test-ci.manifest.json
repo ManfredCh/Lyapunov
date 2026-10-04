@@ -2686,6 +2686,13 @@
       "reason": "真实账户控制器的游客/迟到验证生命周期，使用假store/fetcher/host，无账号/网络/收费请求"
     },
     {
+      "path": "packages/desktop/test/workspace-boot-recovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha4：真实DOM启动标记的原生失败返回/重试、成功dispose与清理；临时DOM，无账号、模型、网络或用户窗口。"
+    },
+    {
       "path": "packages/desktop/test/guest-credentials.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],

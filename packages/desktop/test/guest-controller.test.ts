@@ -41,3 +41,18 @@ test("guest启动失败仍保游客owner，不因error文案自动恢复账户�
   expect({reads,requests}).toEqual({reads:0,requests:0})
   await controller.leaveGuest();await controller.restore();expect(reads).toBe(1)
 })
+
+test('游客error返回登录清错误并正常停Host，不读账号/恢复/服务器/删除存储',async()=>{
+ let reads=0,requests=0,deletes=0,stops=0
+ const controller=new DesktopAccountController({apiUrl:'https://fixture.invalid',store:{get:async()=>{reads++;return null},set:async()=>{},delete:()=>{deletes++}},openExternal:async()=>{},startHost:async()=>{},startGuestHost:async()=>{},stopHost:async()=>{stops++},changed:()=>{},fetcher:async()=>{requests++;throw Error('network forbidden')}})
+ await controller.enterGuest();controller.workspaceFailed('client activation failed')
+ expect(controller.view().status).toBe('error');await controller.returnToLogin()
+ expect(controller.view()).toEqual({status:'signed-out'});expect({reads,requests,deletes,stops}).toEqual({reads:0,requests:0,deletes:0,stops:1})
+})
+
+test('未验证身份的error返回登录只清在途/错误，不访问服务器或删除凭据',async()=>{
+ let deletes=0,requests=0
+ const controller=new DesktopAccountController({apiUrl:'https://fixture.invalid',store:{get:async()=>null,set:async()=>{},delete:()=>{deletes++}},openExternal:async()=>{},startHost:async()=>{},stopHost:async()=>{},changed:()=>{},fetcher:async()=>{requests++;throw Error('network forbidden')}})
+ controller.workspaceFailed('client load failed');await controller.returnToLogin()
+ expect(controller.view()).toEqual({status:'signed-out'});expect({deletes,requests}).toEqual({deletes:0,requests:0})
+})

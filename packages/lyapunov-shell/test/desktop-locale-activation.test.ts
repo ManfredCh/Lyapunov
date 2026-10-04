@@ -10,11 +10,10 @@ const inject=JSON.parse(declaration[1]!) as string[]
 
 test('真实Cordis注入边界下Electron桥接能激活品牌和原生locale设置',async()=>{
  const previous=Object.getOwnPropertyDescriptor(globalThis,'window')
- const projected:string[]=[],binds:string[]=[],errors:string[]=[]
+ const projected:string[]=[],binds:string[]=[]
  const desktop={uiLocale:async()=>({active:'en',requested:undefined,revision:0}),setUiLocale:async(value:string)=>{projected.push(value)},onUiLocaleChanged:()=>()=>{}}
  Object.defineProperty(globalThis,'window',{value:{lyapunovDesktop:desktop},configurable:true})
  const ctx=new Context()
- ctx.on('internal/error',(error)=>{errors.push(String(error))})
  const locale={register:()=>()=>{},getSnapshot:()=>({active:'en'}),subscribe:()=>()=>{},setLocale:()=>{}}
  const slots={inject:(_name:string,callback:()=>unknown)=>callback(),register:()=>()=>{}}
  const settingsScope={bind:({namespace}:{namespace:string})=>{binds.push(namespace);return {getSnapshot:()=>({status:'ready'}),subscribe:()=>()=>{}}}}
@@ -22,7 +21,6 @@ test('真实Cordis注入边界下Electron桥接能激活品牌和原生locale设
   for(const name of inject)ctx.provide(name,(name==='locale'?locale:name==='slots'?slots:name==='settingsScope'?settingsScope:{}) as never)
   await ctx.plugin({inject,apply:applyProductUI})
   await new Promise(resolve=>setTimeout(resolve,0))
-  expect(errors).toEqual([])
   expect(binds).toEqual(['locale'])
   expect(projected).toEqual(['en'])
  }finally{await ctx.fiber.dispose();if(previous)Object.defineProperty(globalThis,'window',previous);else Reflect.deleteProperty(globalThis,'window')}

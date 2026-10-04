@@ -17,6 +17,22 @@ function fixedStore(value: string | null) {
   }
 }
 
+test('正式身份的工作台失败返回账户页保当前身份，不注销/删store/重启Host',async()=>{
+ let deletes=0,reads=0,stops=0
+ const routes:string[]=[]
+ const controller=new DesktopAccountController({apiUrl:'https://account.example.invalid',store:{get:async()=>{reads++;return JSON.stringify({apiUrl:'https://account.example.invalid',token:'fixture-only'})},set:async()=>{},delete:()=>{deletes++}},openExternal:async()=>{},startHost:async()=>{},stopHost:async()=>{stops++},changed:()=>{},fetcher:async input=>{
+  const path=new URL(String(input)).pathname;routes.push(path)
+  if(path==='/v1/me')return Response.json({user:{id:'fixture-user',email:'fixture@example.test'}})
+  throw Error('unexpected route')
+ }})
+ await controller.restore();controller.workspaceFailed('workspace client activation failed')
+ expect(controller.view()).toMatchObject({status:'error',user:{id:'fixture-user'}})
+ const before=routes.length;await controller.returnToLogin()
+ expect(controller.view()).toMatchObject({status:'ready',user:{id:'fixture-user'}})
+ expect({deletes,reads,stops,networkRequests:routes.length-before}).toEqual({deletes:0,reads:1,stops:0,networkRequests:0})
+ expect(routes).not.toContain('/v1/auth/logout')
+})
+
 function options(fetcher: AccountControllerOptions["fetcher"], changed: AccountControllerOptions["changed"]): AccountControllerOptions {
   return {
     apiUrl: "https://account.example.invalid",

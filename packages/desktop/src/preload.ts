@@ -1,6 +1,7 @@
 import {contextBridge,ipcRenderer,webUtils} from "electron"
 import type {DesktopBridge} from "./bridge.ts"
 import {ExitParticipants} from "./exit-coordinator.ts"
+import {watchWorkspaceBoot} from './workspace-boot-recovery.ts'
 const invoke=(name:string,...args:unknown[])=>ipcRenderer.invoke("lyapunov:"+name,...args)
 const exitParticipants=new ExitParticipants()
 let committing=false
@@ -28,3 +29,8 @@ const api:DesktopBridge={
   onAccountChanged(listener){const handler=(_event:Electron.IpcRendererEvent,state:Parameters<typeof listener>[0])=>listener(state);ipcRenderer.on("lyapunov:account-changed",handler);return()=>ipcRenderer.removeListener("lyapunov:account-changed",handler)},
 }
 contextBridge.exposeInMainWorld("lyapunovDesktop",api)
+// 仅主Frame的本地工作台观察启动页；主进程再次核current WebContents/Origin。
+if(process.isMainFrame&&location.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(location.hostname)){
+ const start=()=>watchWorkspaceBoot(document,{locale:async()=>(await api.uiLocale()).active,failed:detail=>ipcRenderer.send('lyapunov:workspace-client-failed',{detail}),ready:()=>ipcRenderer.send('lyapunov:workspace-client-ready'),retry:()=>invoke('retry-workspace'),returnToLogin:()=>api.returnToLogin()})
+ if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',start,{once:true});else start()
+}

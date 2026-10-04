@@ -206,6 +206,17 @@ ipcMain.on("lyapunov:exit-response",(event,response)=>{
   clearTimeout(pending.timer);exitReplies.delete(response.id)
   if(response.ok===true)pending.resolve(response.value);else pending.reject(new Error(typeof response.message==="string"?response.message:desktopLocales[localeMirror.getSnapshot().active].participantUnconfirmed))
 })
+ipcMain.on('lyapunov:workspace-client-failed',(event,report)=>{
+  try{trusted(event as Electron.IpcMainInvokeEvent)}catch{return}
+  if(event.sender!==workspaceView?.webContents||typeof report?.detail!=='string')return
+  const detail=report.detail.slice(0,8192).replace(/([?&](?:token|access_token|api_key|key)=)[^\s&]+/gi,'$1[redacted]')
+  recordIncident('workspace-client-failed',{url:safeIncidentUrl(event.senderFrame!.url),detail})
+  controller?.workspaceFailed(localeMirror.getSnapshot().active==='zh'?'工作台界面未能加载，可重试或返回登录页。':'The workspace could not load. Retry or return to sign-in.')
+})
+ipcMain.on('lyapunov:workspace-client-ready',event=>{
+  try{trusted(event as Electron.IpcMainInvokeEvent)}catch{return}
+  if(event.sender===workspaceView?.webContents)controller?.workspaceReloaded()
+})
 function requireController(){if(!controller)throw new Error("开发模式不访问正式账户");return controller}
 void app.whenReady().then(async()=>{
 if(!app.requestSingleInstanceLock()){app.quit()}else{
@@ -246,6 +257,11 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
   handle("login",()=>{void requireController().login()});handle("cancel-login",()=>requireController().cancelLogin());handle("logout",()=>requireController().logout());handle("restore",()=>requireController().restore());handle("switch-account",async()=>{await requireController().logout();void requireController().login()});handle("refresh",()=>requireController().refresh());handle("commerce",()=>requireController().commerce());handle("create-order",(plan,provider)=>{if(typeof plan!=="string"||!['alipay','wechat'].includes(provider))throw new Error("无效订单参数");return requireController().createOrder(plan,provider)})
   handle("workspace",async()=>{if(host){const target=await ensureWindow();attachWorkspaceView();target.show();target.focus()}else throw new Error("工作台未启动")})
   handle("show-account",()=>showAccount())
+  handle('return-to-login',async()=>{await requireController().returnToLogin();await showAccount()})
+  handle('retry-workspace',async()=>{
+    if(!host||!workspaceView||workspaceView.webContents.isDestroyed())throw new Error('WORKSPACE_NOT_STARTED')
+    await workspaceView.webContents.loadURL(host.origin+'/')
+  })
   handle("select-files",async()=>{const result=await dialog.showOpenDialog({properties:["openFile","multiSelections"],filters:LOCAL_IMPORT_FILE_FILTERS});return result.canceled?[]:result.filePaths})
   const {autoUpdater}=updater;autoUpdater.autoDownload=false;autoUpdater.autoInstallOnAppQuit=false
   if(readRuntimeEnv(process.env,"updateUrl"))autoUpdater.setFeedURL({provider:"generic",url:readRuntimeEnv(process.env,"updateUrl")!})
