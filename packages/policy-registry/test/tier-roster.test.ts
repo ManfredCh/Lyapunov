@@ -12,7 +12,7 @@ const copy = () => structuredClone(roster)
 const codes = (value: unknown, catalog: unknown = registry) => validateT0Roster(value, catalog).map(issue => issue.code)
 
 const T0 = [
-  'allegro_hand', 'crazyflie_2', 'forklift_c', 'franka_panda', 'generic_quadrotor',
+  'allegro_hand', 'crazyflie_2', 'franka_panda', 'generic_quadrotor',
   'leap_hand', 'shadow_hand', 'unitree_a1', 'unitree_g1', 'unitree_go1', 'unitree_go2', 'ur10e',
 ]
 
@@ -49,6 +49,15 @@ describe('authoritative documented T0 roster', () => {
     const expansion = readFileSync(join(ROOT, roster.sources[1].path), 'utf8')
     expect(original).toContain('| 机械臂 | Franka Panda、UR5e/UR10e |')
     expect(expansion).toContain('| 机械臂 | ur5e | T1 |')
+  })
+
+  test('用户移出的叉车不再默认T0，原包仍在且不自动推为T1或T2',()=>{
+    expect(roster.packs).toHaveLength(11)
+    expect(roster.packs.some((row:any)=>row.packId==='forklift_c')).toBe(false)
+    expect(registry.packs.some((row:any)=>row.packId==='forklift_c')).toBe(true)
+    expect(JSON.parse(readFileSync(join(PACKS,'forklift_c','pack.json'),'utf8')).packId).toBe('forklift_c')
+    expect(lookupPackTier(roster,registry,'forklift_c')).toEqual({packId:'forklift_c',classification:'unclassified',tier:null})
+    expect(readFileSync(join(ROOT,'docs/ROBOT_TIERS.md'),'utf8')).toContain('用户范围调整（2026-10-04）')
   })
 
   test('absence from this T0 roster is unclassified, not inferred T1 or unsupported', () => {

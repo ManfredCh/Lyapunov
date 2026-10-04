@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "scope": "documented-t0-priority",
   "evidenceScope": "planning-only",
-  "note": "Authoritative machine-readable roster of unambiguous T0 membership in the cited repository docs. Priority is not availability or readiness. A known pack absent here is unclassified, not implicitly T1/T2. Conflicting tier claims remain explicit until a documented decision resolves them.",
+  "note": "Authoritative machine-readable roster of unambiguous T0 membership in the cited repository docs. Priority is not availability or readiness. A known pack absent here is unclassified, not implicitly T1/T2. Conflicting tier claims remain explicit until a documented decision resolves them. 2026-10-04 用户明确将 forklift_c 移出默认 T0 验收和示范范围；不推定 T1/T2，保留原包、原件与历史证据。",
   "readinessSource": "packages/policy-registry/src/pack-contract.ts#inspectPack",
   "sources": [
     {
@@ -18,6 +18,13 @@
       "section": "1. 逐形态扩面表",
       "date": "2026-09-23",
       "note": "Confirms A1 and generic quadrotor as T0; labels UR5e T1, conflicting with the original tier table. Historical build/availability wording does not establish present readiness."
+    },
+    {
+      "id": "user-scope-20261004",
+      "path": "docs/ROBOT_TIERS.md",
+      "section": "用户范围调整（2026-10-04）",
+      "date": "2026-10-04",
+      "note": "用户明确移出 forklift_c；仅调整默认目标，不删除已有资源，也不赋予其它等级。"
     }
   ],
   "packs": [
@@ -30,13 +37,6 @@
     },
     {
       "packId": "crazyflie_2",
-      "tier": "T0",
-      "sourceIds": [
-        "original-tier-table"
-      ]
-    },
-    {
-      "packId": "forklift_c",
       "tier": "T0",
       "sourceIds": [
         "original-tier-table"
