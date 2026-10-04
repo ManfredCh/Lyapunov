@@ -2,6 +2,7 @@ import {describe,test} from "node:test"
 import assert from "node:assert/strict"
 import {existsSync,mkdtempSync,writeFileSync,rmSync} from "node:fs"
 import {tmpdir} from "node:os"
+import {spawnSync} from "node:child_process"
 import {resolve,dirname} from "node:path"
 import {fileURLToPath,pathToFileURL} from "node:url"
 import {MuJoCoProvider} from "../src/provider.ts"
@@ -12,6 +13,32 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const python=process.env.LYAPUNOV_MUJOCO_PYTHON??resolve(root,".runtime/sim-python/bin/python")
 const suite=existsSync(python)?describe:describe.skip
 suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
+ test('静态原三角内部编号确定性重载、逐面位坐标及绕序不变，空/单顶点和小面也保真',()=>{
+  const script=`import sys,numpy as np
+sys.path.insert(0,sys.argv[1])
+from static_triangle_surface import reindex_surface_vertices
+for count in (0,1,3,16384):
+ points=np.arange(count*3,dtype=np.float64).reshape(count,3)/17
+ if count>=3:
+  indices=np.array([[i,i+1,i+2]for i in range(count-2)],dtype=np.uint32).reshape(-1)
+ else:indices=np.array([],dtype=np.uint32)
+ before=points.copy();faces=indices.copy()
+ first,fi=reindex_surface_vertices(points,indices)
+ second,si=reindex_surface_vertices(points,indices)
+ assert np.array_equal(first,second)and np.array_equal(fi,si)
+ assert np.array_equal(first[fi].view(np.uint64),points[indices].view(np.uint64))
+ assert np.array_equal(points,before)and np.array_equal(indices,faces)
+ assert len(first)==count and len(fi)==len(indices)
+ assert len(np.unique(fi))==len(np.unique(indices))
+ if count>3:
+  edges=np.column_stack((indices.reshape(-1,3)[:,0],indices.reshape(-1,3)[:,1]))
+  mapped=np.column_stack((fi.reshape(-1,3)[:,0],fi.reshape(-1,3)[:,1]))
+  original=np.bincount(edges[:,0]^edges[:,1]).max();balanced=np.bincount(mapped[:,0]^mapped[:,1]).max()
+  assert original>1000 and balanced<20
+print('静态原三角重复原件消费和逐面位坐标不变通过')`
+  const probe=spawnSync(python,['-c',script,resolve(root,'packages/sim-mujoco/python')],{encoding:'utf8',timeout:15000})
+  assert.equal(probe.status,0,probe.stderr);assert.ok(probe.stdout.includes('逐面位坐标不变通过'))
+ })
  test('明确静态原三角rigid-flex保孔、接触归属与禁用；动态及未知拓扑明确拒绝',async()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'static-triangles-')),file=resolve(directory,'ring.obj')
   const vertices:number[][]=[],faces:number[][]=[]

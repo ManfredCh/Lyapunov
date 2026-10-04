@@ -64,10 +64,22 @@ def read_surface_obj(path, eid, error):
         raise error('COLLISION_MESH_INVALID', eid + ' 原三角OBJ无效：' + str(exc)) from exc
 
 
+def reindex_surface_vertices(points, indices):
+    # Mu3.13 的边哈希是 vertex1 XOR vertex2。顺序相邻编号会挤入少数桶，
+    # 大场景建边退化。仅重排内部顶点编号；每个三角的坐标、顺序、绕序完全不变。
+    if len(points) < 2:
+        return points, indices
+    permutation = np.random.default_rng(0).permutation(len(points))
+    inverse = np.empty(len(points), dtype=np.uint32)
+    inverse[permutation] = np.arange(len(points), dtype=np.uint32)
+    return points[permutation], inverse[indices]
+
+
 def add_static_surface(spec, body, name, path, linear, collision, friction, solref, solimp, eid, error):
     points, indices = read_surface_obj(path, eid, error)
     # 完整仿射映射含剪切/反射：逐顶点映射，body继续承载实体的世界位置和旋转。
     points = (linear @ points.T).T
+    points, indices = reindex_surface_vertices(points, indices)
     flex = spec.add_flex(name=name, dim=2, radius=SURFACE_RADIUS_M, vertbody=[body.name],
                          vert=points.reshape(-1), elem=indices, internal=False, selfcollide=0,
                          friction=friction, solref=solref, solimp=solimp)
