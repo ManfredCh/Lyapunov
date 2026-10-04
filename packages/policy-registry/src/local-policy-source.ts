@@ -11,6 +11,7 @@ export interface LocalPolicySource {
  identity?:PolicyIdentity;adapterId?:string;packageRoot?:string;bundlePath?:string;selectedRelativePath?:string
  sourceBytesVerified:boolean;prepareFrom:'bundle'|'cache'|'weights'|'unsupported'
  bundleDownloadReady?:boolean;missingLicense?:string[];supportedEngines?:string[]
+ licenseUnchecked?:boolean
 }
 const identityOf=(pin:typeof IMPLEMENTED_POLICY_ADAPTERS[number]):PolicyIdentity=>({provider:'github',modelId:pin.modelId,revision:pin.revision})
 const same=(a:PolicyIdentity,b:PolicyIdentity)=>a.provider===b.provider&&a.modelId===b.modelId&&a.revision===b.revision

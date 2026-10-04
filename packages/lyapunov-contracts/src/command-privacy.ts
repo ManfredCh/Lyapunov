@@ -427,6 +427,29 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
     }
     return sub
   }
+  // 本地策略 UI 只持登记 id；Host 缓存路径、包根与原件相对路径不穿透出站边界。
+  const policyIdentity = (value: unknown): unknown => {
+    if (!isPlainObject(value)) return undefined
+    return projectOut({provider:value.provider,modelId:value.modelId,revision:value.revision},roots)
+  }
+  const localPolicyEntry = (value: unknown): unknown => {
+    if (!isPlainObject(value)) return undefined
+    const entry:Record<string,unknown>={}
+    for(const key of ['id','label','registeredAt','available','sourceBytesVerified','adapterId'])if(value[key]!==undefined)entry[key]=key==='label'?displayPath(value[key]):value[key]
+    if(value.identity!==undefined)entry.identity=policyIdentity(value.identity)
+    entry.licenseUnchecked=value.licenseUnchecked===true||Array.isArray(value.missingLicense)&&value.missingLicense.length>0
+    return projectOut(entry,roots)
+  }
+  const localPolicyState = (): void => {
+    if(source.localEntry!==undefined)out.localEntry=localPolicyEntry(source.localEntry)
+    if(isPlainObject(source.localSource)){
+      const local:Record<string,unknown>={}
+      for(const key of ['status','adapterId','sourceBytesVerified','prepareFrom','bundleDownloadReady','supportedEngines'])if(source.localSource[key]!==undefined)local[key]=source.localSource[key]
+      if(source.localSource.identity!==undefined)local.identity=policyIdentity(source.localSource.identity)
+      local.licenseUnchecked=source.localSource.licenseUnchecked===true||Array.isArray(source.localSource.missingLicense)&&source.localSource.missingLicense.length>0
+      out.localSource=projectOut(local,roots)
+    }
+  }
   switch (name) {
     case "viewer_orientation_check_ui":
     case "viewer_orientation_stop_ui":
@@ -440,15 +463,18 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
       return out
     case "policy_download_sources":
       pick("status", "models")
+      if(Array.isArray(source.localEntries))out.localEntries=source.localEntries.map(localPolicyEntry).filter(Boolean)
       return out
     case "policy_load_state":
       pick("category", "executionKind", "ready", "runtimeChecked", "modelId", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "robotWalkingVerified","evidence")
+      localPolicyState()
       return out
     case 'policy_activate':
       pick('status','identity','snapshot','world','match','behaviorVerified','executionStarted')
       return out
     case "policy_load_local": case "policy_download_bundle":
-      pick("status", "category", "executionKind", "ready", "runtimeChecked", "modelId", "identity", "source", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "robotWalkingVerified", "code", "message", "retryable", "fallbackAction", "fallback", "reusedFiles", "downloadedFiles", "serverSideInference")
+      pick("status", "category", "executionKind", "ready", "runtimeChecked", "modelId", "identity", "source", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "robotWalkingVerified", "code", "message", "retryable", "fallbackAction", "fallback", "reusedFiles", "downloadedFiles", "serverSideInference", "evidence")
+      localPolicyState()
       return out
     case "policy_download":
     case "policy_files":

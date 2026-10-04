@@ -1,5 +1,5 @@
-import {copyFile,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises'
-import {basename,dirname,extname,join,resolve} from 'node:path'
+import {copyFile,mkdir,readFile,readdir,realpath,rename,rm,stat,writeFile} from 'node:fs/promises'
+import {basename,dirname,extname,isAbsolute,join,relative,resolve,sep} from 'node:path'
 import {hashFile,policyFile,type PolicyManifest} from './source.ts'
 import {inspectLocalPolicyFile} from './local-policy-file.ts'
 import {localPolicyFileKind,type LocalPolicyLibraryEntry} from './local-policy-file-contract.ts'
@@ -93,4 +93,15 @@ export async function listLocalPolicyEntries(dataDirectory:string):Promise<Local
  }
  await visit(base,0)
  return entries.sort((a,b)=>b.registeredAt.localeCompare(a.registeredAt)||a.id.localeCompare(b.id))
+}
+
+/** entryId 只匹配当前账户已有 manifest；不拼用户路径，不赋新的文件访问能力。 */
+export async function resolveLocalPolicyEntry(dataDirectory:string,entryId:unknown):Promise<LocalPolicyLibraryEntry>{
+ if(typeof entryId!=='string'||!entryId||entryId.length>256)throw Error('POLICY_LOCAL_ENTRY_INVALID: Supply a registered local entryId')
+ const entry=(await listLocalPolicyEntries(dataDirectory)).find(row=>row.id===entryId)
+ if(!entry)throw Error('POLICY_LOCAL_ENTRY_NOT_FOUND: The entry is not registered in this account cache')
+ if(!entry.available)throw Error('POLICY_LOCAL_ENTRY_FILE_MISSING: The registered cached weights are missing; import the original file again')
+ const base=await realpath(join(resolve(dataDirectory),'policies')),file=await realpath(entry.filePath),within=relative(base,file)
+ if(!within||isAbsolute(within)||within==='..'||within.startsWith('..'+sep))throw Error('POLICY_LOCAL_ENTRY_OUTSIDE_CACHE: The entry is outside this account policy cache')
+ return {...entry,filePath:file}
 }

@@ -1,9 +1,9 @@
 import {expect,test} from 'bun:test'
-import {mkdtemp,writeFile,readFile,mkdir,rm} from 'node:fs/promises'
+import {mkdtemp,writeFile,readFile,mkdir,rm,symlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {inspectLocalPolicyFile} from '../src/local-policy-file.ts'
-import {listLocalPolicyEntries,registerLocalPolicyWeights,resolveLocalPolicyPath} from '../src/local-policy-library.ts'
+import {listLocalPolicyEntries,registerLocalPolicyWeights,resolveLocalPolicyPath,resolveLocalPolicyEntry} from '../src/local-policy-library.ts'
 test('坏权重与截断ZIP一次拒绝，未知pickle不执行',async()=>{const dir=await mkdtemp(join(tmpdir(),'policy-format-'));try{
  for(const [name,data] of [['bad.pt',Buffer.from('not-a-model-file-header')],['truncated.pt',Buffer.from('PK\x03\x04'+'x'.repeat(100))],['bad.onnx',Buffer.from('not-onnx-model-header')]] as const){const p=join(dir,name);await writeFile(p,data);const result=await inspectLocalPolicyFile(p);expect(result.valid).toBe(false);expect(result.code).toBe('POLICY_FILE_FORMAT_INVALID')}
  expect((await inspectLocalPolicyFile(join(dir,'absent.pt'))).code).toBe('POLICY_FILE_MISSING')
@@ -27,5 +27,16 @@ test('完整目录只解析根bundle，不递归猜策略；无bundle给精确�
   await expect(resolveLocalPolicyPath(root)).rejects.toThrow('POLICY_BUNDLE_REQUIRED')
   await writeFile(join(root,'bundle.json'),'{}');expect(await resolveLocalPolicyPath(root)).toBe(join(root,'bundle.json'))
   await expect(resolveLocalPolicyPath(join(root,'nested','config.json'))).rejects.toThrow('POLICY_FILE_MISSING')
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+test('entryId仅解析本账户既有缓存；缺id与越界符号链接不授文件访问',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'policy-entry-capability-'));try{
+  const original=join(root,'own.safetensors');await writeFile(original,safetensorsFixture())
+  const entry=await registerLocalPolicyWeights(root,original,new AbortController().signal)
+  expect((await resolveLocalPolicyEntry(root,entry.id)).filePath).toBe(entry.filePath)
+  await expect(resolveLocalPolicyEntry(join(root,'another-account'),entry.id)).rejects.toThrow('POLICY_LOCAL_ENTRY_NOT_FOUND')
+  await expect(resolveLocalPolicyEntry(root,'../../outside.pt')).rejects.toThrow('POLICY_LOCAL_ENTRY_NOT_FOUND')
+  await rm(entry.filePath);await symlink(original,entry.filePath)
+  await expect(resolveLocalPolicyEntry(root,entry.id)).rejects.toThrow('POLICY_LOCAL_ENTRY_OUTSIDE_CACHE')
  }finally{await rm(root,{recursive:true,force:true})}
 })

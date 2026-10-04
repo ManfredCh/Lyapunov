@@ -152,6 +152,17 @@ describe("主控回归：不依赖密钥前缀的出站边界", () => {
       globalThis.fetch = originalFetch
     }
   })
+  test('正式策略条目与来源只投影安全续链字段，不暴露Host缓存路径或任意嵌套凭据',()=>{
+    const entry={id:'local-entry',label:MARKER_OUTSIDE_PATH,registeredAt:'2026-10-04',available:true,sourceBytesVerified:true,filePath:MARKER_OUTSIDE_PATH,entryPath:'private/weights.pt',packageRoot:'/home/alice/private',password:opaqueSecret,identity:{provider:'github',modelId:'public/source',revision:'pin',token:opaqueSecret,filePath:MARKER_OUTSIDE_PATH},missingLicense:[MARKER_OUTSIDE_PATH]}
+    const source={status:'registered-weights',prepareFrom:'weights',sourceBytesVerified:true,identity:entry.identity,packageRoot:'/home/alice/private',bundlePath:MARKER_OUTSIDE_PATH,token:opaqueSecret,missingLicense:[MARKER_OUTSIDE_PATH]}
+    const listing=commandRouteResponse('policy_download_sources',{kind:'success',text:JSON.stringify({status:'REGISTERED_SOURCES',models:[],localEntries:[entry]})},'formal')
+    expect(listing.ui?.localEntries).toEqual([{id:'local-entry',label:'model.onnx',registeredAt:'2026-10-04',available:true,sourceBytesVerified:true,identity:{provider:'github',modelId:'public/source',revision:'pin'},licenseUnchecked:true}])
+    for(const name of ['policy_load_local','policy_load_state']){
+      const response=commandRouteResponse(name,{kind:'success',text:JSON.stringify({category:'weights_need_adapter',ready:false,localEntry:entry,localSource:source})},'formal')
+      expect(response.ui?.localEntry).toEqual((listing.ui?.localEntries as unknown[])[0]);expect(response.ui?.localSource).toMatchObject({status:'registered-weights',prepareFrom:'weights',licenseUnchecked:true})
+      const serialized=JSON.stringify(response);expect(serialized).not.toContain(opaqueSecret);expect(serialized).not.toContain('/home/alice');expect(serialized).not.toContain('filePath');expect(serialized).not.toContain('entryPath');expect(serialized).not.toContain('bundlePath')
+    }
+  })
 })
 
 /** 一份带全标记的策略装配回执：形状取自 policy-registry 的真实字段名。 */

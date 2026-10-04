@@ -58,6 +58,11 @@ test('Go1/Go2裸文件准备读完整缓存，不传G123专属weightsPath',()=>{
   expect(args).not.toHaveProperty('weightsPath');expect(args).not.toHaveProperty('localSource');expect(args).toMatchObject({sceneId:'s',entityId:'r',modelId})
  }
 })
+test('登记条目准备只携entryId与实例绑定，不把显示路径当成Host权重路径',()=>{
+ const args=policyPrepareArgs({entryId:'local-entry',filePath:'display-only.pt',directoryPath:'display-only',identity:{provider:'github',modelId:'jloganolson/g1_23dof_locomotion_isaac',revision:'fbfa38706b817e2d4b19e444db95ae7fb2537b46'},sceneId:'s',entityId:'r'})
+ expect(args.entryId).toBe('local-entry');expect(args.sceneId).toBe('s');expect(args.entityId).toBe('r')
+ for(const field of ['filePath','directoryPath','manifestPath','weightsPath'])expect(args).not.toHaveProperty(field)
+})
 test('本体按钮只取asset，不因策略runtime预检阻断本体或翻整包许可',async()=>{
  const calls:Array<{name:string;input:any}>=[]
  const result=await policyPanelAction({command:async(name,input)=>{calls.push({name,input});return name==='policy_download_bundle'?{status:'ASSET_DOWNLOADED',modelPath:'/verified/body.xml',source:{provider:'github',modelId:'fixed/source',resolvedRevision:'pin'},assetBytesVerified:true,fullBundleReady:false,policyPrepared:false}:{category:'missing_files_or_runtime',ready:false}}},'asset',{modelId:'unitree_g1_23dof_75obs'})
