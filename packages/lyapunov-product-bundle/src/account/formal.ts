@@ -25,7 +25,7 @@ export function formalModelRows(account:Pick<VerifiedAccount,"apiUrl">){
   const llm:PiAiConfig={providers:{"lyapunov-plans":{
     displayName:"peiri",apiKeyEnv:"LYAPUNOV_ACCOUNT_TOKEN",api:"openai-completions",baseURL:account.apiUrl+"/v1",
     compat:{supportsStore:false,supportsUsageInStreaming:true,supportsReasoningEffort:false},
-    retryPolicy:{mode:'normal',maxRetries:5,requestPhaseTimeoutMs:150000},
+    retryPolicy:{mode:'normal',maxRetries:5},
     models:[{id:"peiri",name:"Peiri",input:["text","image"],contextWindow:262144,maxTokens:8192}],
   }}}
   return [
