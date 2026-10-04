@@ -7,6 +7,7 @@ import mujoco as mj
 
 MAX_NODE_BYTES = 64 * 1024 * 1024
 SURFACE_RADIUS_M = 1e-9
+MAX_STATIC_ARENA_BYTES = 128 * 1024 * 1024
 
 
 def declared_static_surface(collision, binding, rigid, eid, error):
@@ -85,7 +86,36 @@ def add_static_surface(spec, body, name, path, linear, collision, friction, solr
                          friction=friction, solref=solref, solimp=solimp)
     flex.contype = int(collision.get('contype', 1)) if collision.get('enabled', True) else 0
     flex.conaffinity = int(collision.get('conaffinity', 1)) if collision.get('enabled', True) else 0
-    return flex
+    return len(indices) // 3
+
+
+def configure_static_surface_arena(spec, triangle_counts, explicit_sources, error):
+    """Mu3.13树遍历按两棵BVH节点数保留栈；百万面不能沿用约16MiB自动估计。"""
+    if not triangle_counts:
+        return None
+    # 二叉树至多2N-1节点；mjCollisionTree含两个int32，最大两树遍历按8B/node保留。
+    largest_tree = max(2 * max(triangle_counts) - 1, 2 * len(list(spec.geoms)) - 1)
+    tree_stack_bytes = 2 * largest_tree * 8
+    required = 32 * 1024 * 1024 + tree_stack_bytes  # 其余接触/solver和同时在栈上的查询有界余量
+    if required > MAX_STATIC_ARENA_BYTES:
+        raise error('STATIC_TRIANGLE_ARENA_BUDGET', '原三角树遍历需要至少' + str(required) +
+                    'B，超过128MiB工作arena上限；请采用明确的碰撞资产/分件预算，未删面或粗化')
+    for eid, memory, nstack, njmax, nconmax in explicit_sources:
+        if any(value >= 0 for value in (nstack, njmax, nconmax)):
+            raise error('STATIC_TRIANGLE_ARENA_EXPLICIT_LIMIT', eid +
+                        ' 原件声明legacy nstack/njmax/nconmax；未自动覆盖，需明确兼容原三角树的memory限制')
+        if memory >= 0:
+            if memory < required:
+                raise error('STATIC_TRIANGLE_ARENA_EXPLICIT_LIMIT', eid + ' 原件memory=' + str(memory) +
+                            'B不足树遍历至少' + str(required) + 'B；未自动提高原件限制')
+            spec.memory = memory if spec.memory < 0 else min(spec.memory, memory)
+    if spec.memory >= 0:
+        if spec.memory < required:
+            raise error('STATIC_TRIANGLE_ARENA_EXPLICIT_LIMIT', 'world memory不足至少' + str(required) + 'B；未覆盖')
+    else:
+        spec.memory = 64 * 1024 * 1024 if required <= 64 * 1024 * 1024 else MAX_STATIC_ARENA_BYTES
+    return {'source':'static-triangle-bvh-bound','arenaBytes':spec.memory,
+            'requiredBytes':required,'treeStackBytes':tree_stack_bytes,'largestTreeNodesAtMost':largest_tree}
 
 
 def contact_side(model, contact, side):

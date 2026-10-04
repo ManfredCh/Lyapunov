@@ -989,6 +989,7 @@ class World:
         frames = collision_frame_maps(scene, poses)
         maps = {}
         child_specs = []
+        static_triangle_counts, explicit_arena_sources = [], []
         # 实体的真实装配 body（eid → (spec body, 该 body 在实体局部帧中的 pos/quat)），
         # 供 Scene 声明相机挂载：相机进的是父实体的真实 body，随物理 FK 一起动。
         spec_bodies = {}
@@ -1006,6 +1007,7 @@ class World:
                 else:
                     assets = {name: Path(path_from_uri(path)).read_bytes() for name, path in cfg.get('assets', {}).items()}
                     child = mj.MjSpec.from_string(cfg['xml'], assets=assets)
+                explicit_arena_sources.append((eid, child.memory, child.nstack, child.njmax, child.nconmax))
                 native_camera_sources, native_camera_refusals = {}, []
                 camera_urdf_path = urdf_source_path(cfg)
                 if camera_urdf_path:
@@ -1152,7 +1154,7 @@ class World:
                         if not os.path.isfile(path):
                             raise SimError('COLLISION_MESH_NOT_FOUND', '实体 ' + eid + ' 的碰撞网格文件不存在: ' + path)
                         if native_surface:
-                            add_static_surface(spec, body, prefix + 'surface' + str(i), path, linear, c, friction, solref, solimp, eid, SimError)
+                            static_triangle_counts.append(add_static_surface(spec, body, prefix + 'surface' + str(i), path, linear, c, friction, solref, solimp, eid, SimError))
                             continue
                         # 先用一次性 spec 真实解析该 OBJ：把文件级解析失败在此归因为
                         # 实体+文件名结构化错误，而不是让 spec.compile() 抛出无法归因的原始错误。
@@ -1268,6 +1270,10 @@ class World:
         from robot_authoring import compile_bindings, initialize_bindings
         pending_base_bindings = compile_bindings(spec, scene, maps, poses, spec_bodies, SimError)
         scene_cameras = self.compile_scene_cameras(spec, scene, poses, spec_bodies, skipped)
+        from static_triangle_surface import configure_static_surface_arena
+        surface_arena = configure_static_surface_arena(spec, static_triangle_counts, explicit_arena_sources, SimError)
+        if surface_arena:
+            skipped.append({'code':'STATIC_TRIANGLE_ARENA','message':'Static triangle BVH uses a bounded work arena',**surface_arena})
         model = spec.compile()
         if pending_hfield is not None:
             # spec 阶段的 hfield 只有占位数据；把归一化高程写进编译产物的 hfield_data。

@@ -37,7 +37,31 @@ for count in (0,1,3,16384):
   assert original>1000 and balanced<20
 print('静态原三角重复原件消费和逐面位坐标不变通过')`
   const probe=spawnSync(python,['-c',script,resolve(root,'packages/sim-mujoco/python')],{encoding:'utf8',timeout:15000})
-  assert.equal(probe.status,0,probe.stderr);assert.ok(probe.stdout.includes('逐面位坐标不变通过'))
+ assert.equal(probe.status,0,probe.stderr);assert.ok(probe.stdout.includes('逐面位坐标不变通过'))
+ })
+ test('大静态三角BVH有限arena推导保显式原件限制，旧无三角world不改默认',()=>{
+  const script=`import sys,mujoco as mj
+sys.path.insert(0,sys.argv[1])
+from static_triangle_surface import configure_static_surface_arena
+class E(Exception):
+ def __init__(self,code,msg):self.code=code;super().__init__(msg)
+s=mj.MjSpec();assert configure_static_surface_arena(s,[],[],E)is None and s.memory==-1
+small=configure_static_surface_arena(s,[8],[],E);assert small['arenaBytes']==64*1024**2
+s=mj.MjSpec();large=configure_static_surface_arena(s,[1161264],[],E)
+assert large['treeStackBytes']==2*(2*1161264-1)*8 and large['arenaBytes']==128*1024**2
+s=mj.MjSpec();s.memory=64*1024**2;assert configure_static_surface_arena(s,[8],[],E)['arenaBytes']==64*1024**2
+for source in [('source',8*1024**2,-1,-1,-1),('source',-1,100000,-1,-1),('source',-1,-1,1000,100)]:
+ s=mj.MjSpec()
+ try:configure_static_surface_arena(s,[1161264],[source],E)
+ except E as e:assert e.code=='STATIC_TRIANGLE_ARENA_EXPLICIT_LIMIT' and s.memory==-1
+ else:raise AssertionError('显式原件限制被覆盖')
+s=mj.MjSpec()
+try:configure_static_surface_arena(s,[4000000],[],E)
+except E as e:assert e.code=='STATIC_TRIANGLE_ARENA_BUDGET' and s.memory==-1
+else:raise AssertionError('默认arena超过128MiB边界')
+print('有限arena及显式限制边界通过')`
+  const probe=spawnSync(python,['-c',script,resolve(root,'packages/sim-mujoco/python')],{encoding:'utf8',timeout:15000})
+  assert.equal(probe.status,0,probe.stderr);assert.ok(probe.stdout.includes('显式限制边界通过'))
  })
  test('明确静态原三角rigid-flex保孔、接触归属与禁用；动态及未知拓扑明确拒绝',async()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'static-triangles-')),file=resolve(directory,'ring.obj')
