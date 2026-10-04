@@ -203,8 +203,8 @@ export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Tran
   </div>}
   {snapshot&&<p style={{margin:0,opacity:.6,fontSize:12}}>
    {showSwitch
-    ? tr("已有兼容的 Isaac Sim 可直接选择本地安装；产品安装选项包含全部主要组件与扩展缓存，下载体积较大。Isaac 仍需用户接受 NVIDIA Omniverse 许可；一般场景与碰撞可使用 MuJoCo。",
-        "Reuse a compatible local Isaac Sim installation when available. The product installer includes all main components and extension caches, requiring a large download. Isaac requires the user's NVIDIA Omniverse license acceptance; general scenes and collision can use MuJoCo.")
+    ? tr("已有兼容的 Isaac Sim 可直接选择本地安装；产品安装只选择当前物理、机器人导入及 RTX 相机所需的官方组件与扩展缓存，依赖仍会完整安装。机器人和环境素材按任务准备。Isaac 需用户接受 NVIDIA Omniverse 许可；一般场景与碰撞可在本页显式选择 MuJoCo，重启后生效。",
+        "Reuse a compatible local Isaac Sim installation when available. The installer selects official components and extension caches for physics, robot import and RTX cameras, with their complete dependencies. Robot and environment assets are prepared per task. Isaac requires the user's NVIDIA Omniverse license acceptance. For general scenes and collision, explicitly select MuJoCo here; it takes effect after restart.")
     : tr("基准测试（LIBERO / Gymnasium）是「评测负载」，不在这个清单里：它们不是 provider，仍用 `./lyapunov install-provider benchmark-*` 安装、`./lyapunov benchmark --provider …` 运行。",
         "These are evaluation workloads with their own Python environments, not physics engines: the engine computes the world, the benchmark decides which tasks to grade it on.")}
   </p>}

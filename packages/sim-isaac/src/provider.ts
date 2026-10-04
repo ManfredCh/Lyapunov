@@ -197,8 +197,9 @@ export class IsaacProvider implements SimWorlds {
       const cacheRoot=await Promise.race([this.resolveCacheRoot(),cancelled])
       if(this.closed)throw new SimError('PROVIDER_CLOSED','Isaac Provider已关闭')
       if(reservation.signal.aborted)throw reservation.signal.reason
-      this.warnIfShaderCacheCold(cacheRoot)
       const pythonPath=this.config.pythonPath??process.env.LYAPUNOV_ISAAC_PYTHON??resolve(root,'.runtime/conda/envs/isaac/bin/python')
+      if(!existsSync(pythonPath))throw new SimError('PROVIDER_UNAVAILABLE',`Isaac Sim 6.0.1 当前 Python 入口不存在：${pythonPath}。请在「设置 → 物理引擎」安装 Isaac，或检查并登记已有的兼容本地安装。需要先使用一般物理仿真时，可在同页核对并显式选择 MuJoCo，重启工作台后生效。`,{engineId:'isaac',stage:'python-path',availability:'missing',pythonPath,physicalExecution:false,settingsSection:'lyapunov-engine'})
+      this.warnIfShaderCacheCold(cacheRoot)
       const child=new ProcessSimProvider({pythonPath,workerPath:this.config.workerPath??resolve(here,'../python/worker.py'),engineName:'Isaac Sim 6.0.1',env:{...isaacLoaderEnvironment(pythonPath),LYAPUNOV_ISAAC_CACHE:cacheRoot,LYAPUNOV_ISAAC_DEVICE:this.config.physicsDevice??'cpu',LYAPUNOV_ISAAC_RENDERING:this.config.rendering??'none',XDG_CACHE_HOME:resolve(cacheRoot,'xdg-cache'),XDG_CONFIG_HOME:resolve(cacheRoot,'xdg-config'),XDG_DATA_HOME:resolve(cacheRoot,'xdg-data')},...(this.config.launch===undefined?{}:{launch:this.config.launch}),...(this.config.startupBudgetMs===undefined?{}:{startupBudgetMs:this.config.startupBudgetMs})})
       this.lastStarted=child
       this.starts.set(worldId,child)

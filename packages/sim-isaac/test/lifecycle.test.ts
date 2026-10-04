@@ -120,6 +120,24 @@ describe.skipIf(!existsSync(PYTHON))('ProcessSimProvider lifecycle', () => {
 })
 
 describe('IsaacProvider lifecycle reservations', () => {
+  test('缺少解释器给出准备入口，保留错误码且不启动 worker 或改变引擎', async () => {
+    const { root, workerPath } = await fixture()
+    const pythonPath = join(root, 'not-installed/bin/python')
+    let launches = 0
+    const provider = new IsaacProvider({pythonPath, workerPath, cacheRoot: root, launch: async () => { launches++; throw new Error('缺少 SDK 不得启动 worker') }})
+    try {
+      const first = await rejection(provider.open(scene(), {worldId: 'missing-sdk'}))
+      expect(first.code).toBe('PROVIDER_UNAVAILABLE')
+      expect(first.message).toContain('设置 → 物理引擎')
+      expect(first.details).toMatchObject({engineId: 'isaac', stage: 'python-path', availability: 'missing', pythonPath, physicalExecution: false})
+      expect(launches).toBe(0)
+      expect(provider.lifecyclePhases()).toEqual([])
+      expect(provider.config.pythonPath).toBe(pythonPath)
+      expect((await rejection(provider.open(scene(), {worldId: 'missing-sdk'}))).code).toBe('PROVIDER_UNAVAILABLE')
+      expect(provider.orphanedWorkers()).toEqual([])
+    } finally { await provider.dispose() }
+  })
+
   test('duplicate world IDs are reserved before cache resolution; dispose does not wait for the hook', async () => {
     const { root, workerPath } = await fixture()
     const cache = deferred<string>()

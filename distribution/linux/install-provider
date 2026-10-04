@@ -128,7 +128,12 @@ elif [ "$provider" = newton ]; then
   # Newton 自带的复用前缀可能由 uv 创建且没有 pip；统一由上方 ensure_pip 修复。
   pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0"
 elif [ "$provider" = isaac ]; then
-  pip_install --index-url https://pypi.org/simple --extra-index-url https://pypi.nvidia.com 'isaacsim[all,extscache]==6.0.1.0' $transport_pins -r "$assetbake_requirements"
+  # 按当前 worker 的真实依赖选择官方组件：Kit/App、核心、MJCF/URDF 导入、RTX 传感器与扩展缓存。
+  # 正常解析各组件的全部依赖；不请求 all 中的 ROS、训练、示例、基准及测试等额外主包。
+  # core 的官方 pin 仍包括 MuJoCo 3.8/torch/Newton，必须留在本 Isaac 独立前缀。
+  pip_install --index-url https://pypi.org/simple --extra-index-url https://pypi.nvidia.com \
+    'isaacsim[extscache]==6.0.1.0' 'isaacsim-app==6.0.1.0' 'isaacsim-core==6.0.1.0' \
+    'isaacsim-asset==6.0.1.0' 'isaacsim-sensor==6.0.1.0' $transport_pins -r "$assetbake_requirements"
   # 只有本次显式许可参数允许写当前 SDK 自有许可标记。
   "$prefix/bin/python" -c 'import importlib.metadata,pathlib; p=pathlib.Path(importlib.metadata.distribution("isaacsim").locate_file("isaacsim/kit/EULA_ACCEPTED")); p.write_text("yes\n")'
 elif [ "$provider" = benchmark-libero ]; then
