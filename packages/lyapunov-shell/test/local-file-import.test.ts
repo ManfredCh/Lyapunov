@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
-import { importLocalFiles, localFileKind, localDropIsImport, LOCAL_IMPORT_FILE_FILTERS, type LocalFileConvertResult, type LocalFileImportPort } from "../src/local-file-import.ts"
+import { importLocalFiles, localFileKind, localDropIsImport, localImportPathFromReceipt, LOCAL_IMPORT_FILE_FILTERS, type LocalFileConvertResult, type LocalFileImportPort } from "../src/local-file-import.ts"
+import {commandRouteResponse} from '../../lyapunov-contracts/src/command-privacy.ts'
 import {copyFile,mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -186,7 +187,7 @@ test("源工程转换完成但挂载失败时如实保留GLB回执，不误报�
 test('机器人目录唯一原生入口分派scene_import，保留原文件及相对meshes路径',async()=>{
  const directory=join(import.meta.dir,'../../scene-kit/test/fixtures/mjcf-g1')
  const resolved=await resolveLocalImportPath(directory)
- expect(resolved).toEqual({path:join(directory,'g1_29dof_with_hand.xml'),kind:'robot-directory'})
+ expect(resolved).toEqual({path:join(directory,'g1_29dof_with_hand.xml'),kind:'robot-directory',entryName:'g1_29dof_with_hand.xml'})
  const h=harness();h.port.resolvePath=resolveLocalImportPath
  const result=await importLocalFiles(h.port,[directory],'scene')
  expect(result.errors).toEqual([]);expect(result.imported).toEqual(['g1_29dof_with_hand.xml'])
@@ -241,4 +242,27 @@ test('宿主路径解析离开当前scope后不续派，解析失败仍继续下
  const leaving=harness();leaving.port.resolvePath=async path=>{leaving.leave();return {path,kind:'file'}}
  await importLocalFiles(leaving.port,['/robot.xml','/other.xml'],'scene')
  expect(leaving.calls).toHaveLength(0)
+})
+
+test('正式命令回执只给入口名，原选择目录正确续链且不回显Host路径',async()=>{
+ const directory=join(import.meta.dir,'../../scene-kit/test/fixtures/mjcf-g1')
+ const resolved=await resolveLocalImportPath(directory)
+ const response=commandRouteResponse('scene_import_resolve',{kind:'success',text:JSON.stringify({...resolved,internalMarker:'private'})},'formal')
+ expect(response.ui).toEqual({kind:'robot-directory',entryName:'g1_29dof_with_hand.xml'})
+ expect(JSON.stringify(response)).not.toContain(directory)
+ const h=harness();h.port.resolvePath=async path=>localImportPathFromReceipt(path,response.ui!)
+ await importLocalFiles(h.port,[directory],'library')
+ expect(h.calls[0]!.input.path).toBe(resolved.path)
+ expect(localImportPathFromReceipt('/a/robot.xml',{kind:'file'}).path).toBe('/a/robot.xml')
+ expect(localImportPathFromReceipt('file:///a/robot%20folder',{kind:'robot-directory',entryName:'main robot.xml'}).path).toBe('file:///a/robot%20folder/main%20robot.xml')
+ expect(()=>localImportPathFromReceipt('/a',{kind:'robot-directory',entryName:'../other.xml'})).toThrow('LOCAL_IMPORT_ENTRY_INVALID')
+ const blocked=commandRouteResponse('scene_import_resolve',{kind:'success',text:JSON.stringify({kind:'blocked',reason:'ROBOT_ENTRY_SELECTION_REQUIRED: one.xml、two.xml；请选择入口'})},'formal')
+ expect(()=>localImportPathFromReceipt('/a',blocked.ui!)).toThrow('one.xml、two.xml')
+})
+
+test('策略已经登记但当前实例兼容失败仍保留登记回执并给具体错误',async()=>{
+ const h=harness();h.port.loadPolicy=async filePath=>({filePath,entry:{id:'policy-entry',label:'bundle',filePath,sourceBytesVerified:true,registeredAt:new Date().toISOString(),available:true},face:{failure:{status:'BLOCKED',code:'ROBOT_CONTRACT_INCOMPATIBLE',message:'当前实例关节不匹配'}}})
+ const result=await importLocalFiles(h.port,['/bundle.json'],'library')
+ expect(result.policyFiles).toEqual(['bundle.json']);expect(result.errors[0]).toContain('策略已登记')
+ expect(result.errors[0]).toContain('ROBOT_CONTRACT_INCOMPATIBLE');expect(h.calls).toHaveLength(0)
 })

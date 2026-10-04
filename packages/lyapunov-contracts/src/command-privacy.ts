@@ -490,6 +490,10 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
     case 'scene_physics_update':
       pick('status','snapshot','entityId','changed','worldNeedsSync')
       return out
+    case 'scene_import_resolve':
+      // 用户原选择路径由客户端持有；目录续链只需basename，正式面不回显Host绝对路径。
+      pick('kind','entryName','reason')
+      return out
     case "scene_import": case "scene_import_url": case "scene_open": case "scene_package_import":
       pick("sceneId", "resourceId", "resource", "snapshot", "revision", "name", "ref", "entityId")
       return out

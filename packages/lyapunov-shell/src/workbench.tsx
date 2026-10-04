@@ -3,7 +3,7 @@ import {controlGestureKey,upsertControlActionRow,type ControlGestureDisplay} fro
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useCallback,useSyncExternalStore} from "react"
 import type {ReactNode,DragEvent} from "react"
 import type {DesktopBridge} from "../../desktop/src/bridge.ts"
-import {importLocalFiles,localDropIsImport,DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY,localImportUsageDefault,type LocalImportPhysicsUsage} from "./local-file-import.ts"
+import {importLocalFiles,localDropIsImport,localImportPathFromReceipt,DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY,localImportUsageDefault,type LocalImportPhysicsUsage} from "./local-file-import.ts"
 import {ImportPurposeChoice} from './import-purpose-choice.tsx'
 import type {ResourcePhysicsProgress} from './physics-binding-settings.ts'
 import {importLocalPolicy,type LocalPolicyImportReceipt} from './local-policy-import.ts'
@@ -455,7 +455,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const [removal,setRemoval]=useState<SceneRemovalTarget>(),[removing,setRemoving]=useState(false)
  useEffect(()=>{setRemoval(undefined);setRemoving(false)},[sessionId])
  const [importBusy,setImportBusy]=useState(false)
- const [localPolicyImport,setLocalPolicyImport]=useState<{sceneId:string;entityId:string;receipt:LocalPolicyImportReceipt}>()
+ const [localPolicyImport,setLocalPolicyImport]=useState<{sessionId:string;receipt:LocalPolicyImportReceipt}>()
  const policySurfaceAlive=useRef(true)
  useEffect(()=>{policySurfaceAlive.current=true;return()=>{policySurfaceAlive.current=false}},[])
  useEffect(()=>{setLocalPolicyImport(undefined)},[sessionId,worldHostEpoch])
@@ -1490,17 +1490,20 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   localImportBusy.current=true;setImportBusy(true)
   setImportTextureWarnings([]);setImportTextureDetails([])
   let targetScene=sceneRef.current?.sceneId,sequence=sceneLoadSeq.current
-  const current=()=>policySurfaceAlive.current&&apiRef.current===api&&sceneRef.current?.sceneId===targetScene&&sceneLoadSeq.current===sequence
+  const scopeCurrent=()=>policySurfaceAlive.current&&apiRef.current===api
+  const current=()=>scopeCurrent()&&sceneRef.current?.sceneId===targetScene&&sceneLoadSeq.current===sequence
   try{
    const result=await importLocalFiles({current,sourceTexturePolicy,physicalizeUsage:importUsage,
-    resolvePath:path=>api.command("scene_import_resolve",{path}),
+    resolvePath:async path=>localImportPathFromReceipt(path,await api.command("scene_import_resolve",{path})),
     loadPolicy:async path=>{
-     const snapshot=sceneRef.current,robot=snapshot?.entities.find(item=>item.entityId===selectedRef.current)
-     if(readOnlyRef.current||replayActive||!snapshot||!robot||!robotEntity(robot))throw Error('POLICY_ROBOT_SELECTION_REQUIRED: 请先选择当前可编辑场景的真实机器人实例')
-     const boundWorld=worldRef.current,boundHost=hostId.current,revision=snapshot.revision
-     const policyCurrent=()=>current()&&hostId.current===boundHost&&sceneRef.current?.revision===revision&&selectedRef.current===robot.entityId&&worldRef.current?.worldId===boundWorld?.worldId&&worldRef.current?.worldGeneration===boundWorld?.worldGeneration
-     const receipt=await importLocalPolicy({current:policyCurrent,command:(name,input)=>api.command<any>(name,input,{sceneId:snapshot.sceneId,worldId:boundWorld?.worldId})},path,{sceneId:snapshot.sceneId,entityId:robot.entityId,expectedRevision:revision,...boundWorld?{worldId:boundWorld.worldId,expectedGeneration:boundWorld.worldGeneration}:{}})
-     if(policyCurrent()&&!receipt.face.cancelled){setLocalPolicyImport({sceneId:snapshot.sceneId,entityId:robot.entityId,receipt});ui.openTool('robot')}
+     if(readOnlyRef.current||replayActive)throw Error('POLICY_REGISTRATION_READ_ONLY: 当前入口只读，请切到可编辑任务登记策略')
+     const snapshot=sceneRef.current,candidate=snapshot?.entities.find(item=>item.entityId===selectedRef.current)
+     const robot=candidate&&robotEntity(candidate)?candidate:undefined
+     const boundWorld=worldRef.current,boundHost=hostId.current,revision=snapshot?.revision
+     const policyCurrent=()=>scopeCurrent()&&hostId.current===boundHost&&(!robot||(sceneRef.current?.sceneId===snapshot?.sceneId&&sceneRef.current?.revision===revision&&selectedRef.current===robot.entityId&&worldRef.current?.worldId===boundWorld?.worldId&&worldRef.current?.worldGeneration===boundWorld?.worldGeneration))
+     const context=robot&&snapshot?{sceneId:snapshot.sceneId,entityId:robot.entityId,expectedRevision:revision,...boundWorld?{worldId:boundWorld.worldId,expectedGeneration:boundWorld.worldGeneration}:{}}:{}
+     const receipt=await importLocalPolicy({current:policyCurrent,command:(name,input)=>api.command<any>(name,input,{sceneId:snapshot?.sceneId,worldId:robot?boundWorld?.worldId:undefined})},path,context)
+     if(policyCurrent()&&!receipt.face.cancelled){setLocalPolicyImport({sessionId,receipt});ui.openTool('robot')}
      return receipt
     },
     command:async<T,>(name:string,input:unknown)=>{
@@ -1531,7 +1534,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    }},paths,target,targetScene)
    if(!current())return
    if(result.policyFiles.length>0&&result.imported.length===0&&result.sources.length===0){
-    setAssetImportOpen(false);setAssetPath('');setNotice(result.policyFiles.length?tr(`已读取 ${result.policyFiles.length} 个策略文件，请查看当前机器人的兼容与缺项。`,`Read ${result.policyFiles.length} policy files; review compatibility and missing requirements for this robot.`):'')
+    setAssetImportOpen(false);setAssetPath('');setNotice(result.policyFiles.length?tr(`已登记 ${result.policyFiles.length} 个策略文件；选择机器人后可检查兼容与缺项。`,`Registered ${result.policyFiles.length} policy files; select a robot to review compatibility and missing requirements.`):'')
     if(result.errors.length)setError(result.errors.join('；'))
     return
    }
@@ -1712,7 +1715,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    :robotSelected&&entity
     ?<p className="lya-help">{tr(`已选中机器人「${entity.name}」。启动模拟后即可调整关节与执行动作。`,`${entity.name} selected. Start simulation to adjust its joints and run actions.`)}</p>
     :<p className="lya-help">{tr("在场景中选择一个机器人，启动模拟后即可调整关节与执行动作；也可以从下方机器人库把它加入当前场景。","Select a robot in the scene and start simulation to use its controls; or add one from the robot library below.")}</p>}
-  <PolicyLibraryPanel key={`${worldHostEpoch}:${scene?.sceneId}:${selected}`} available={Boolean(sessionId)} canLoad={!readOnly&&robotSelected} canLoadAsset={!readOnly&&Boolean(scene?.sceneId)} onAssetLoaded={(modelPath,downloadModelId,provenance)=>loadPackModel(modelPath,downloadModelId,provenance)} importReceipt={localPolicyImport&&localPolicyImport.sceneId===scene?.sceneId&&localPolicyImport.entityId===selected?localPolicyImport.receipt:undefined} sceneId={scene?.sceneId} expectedRevision={scene?.revision} entityId={robotSelected?entity?.entityId:undefined} worldId={world?.worldId} worldStatus={world?.status} expectedGeneration={world?.worldGeneration} command={(name,input)=>api.command<any>(name,input)} onActivated={result=>{if(sceneRef.current?.sceneId!==result.snapshot.sceneId)return;applySceneIfCurrent(sceneWritePort,result.snapshot.sceneId,result.snapshot);setWorld(result.world);worldRef.current=result.world;setFrame(undefined);setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,result.world);setNotice(tr('所选实例已应用策略映射并建立固定步长世界；实际行走还需执行与回执。','Policy mapping applied and a fixed-step world created; walking still needs an execution receipt.'))}} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/>
+  <PolicyLibraryPanel key={`${worldHostEpoch}:${scene?.sceneId}:${selected}`} available={Boolean(sessionId)} canLoad={!readOnly&&robotSelected} canRegister={!readOnly&&!replayActive} canLoadAsset={!readOnly&&Boolean(scene?.sceneId)} onAssetLoaded={(modelPath,downloadModelId,provenance)=>loadPackModel(modelPath,downloadModelId,provenance)} importReceipt={localPolicyImport&&localPolicyImport.sessionId===sessionId?localPolicyImport.receipt:undefined} sceneId={scene?.sceneId} expectedRevision={scene?.revision} entityId={robotSelected?entity?.entityId:undefined} worldId={world?.worldId} worldStatus={world?.status} expectedGeneration={world?.worldGeneration} command={(name,input)=>api.command<any>(name,input)} onActivated={result=>{if(sceneRef.current?.sceneId!==result.snapshot.sceneId)return;applySceneIfCurrent(sceneWritePort,result.snapshot.sceneId,result.snapshot);setWorld(result.world);worldRef.current=result.world;setFrame(undefined);setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,result.world);setNotice(tr('所选实例已应用策略映射并建立固定步长世界；实际行走还需执行与回执。','Policy mapping applied and a fixed-step world created; walking still needs an execution receipt.'))}} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/>
   <DomainAssetList domain="robot" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} openLibrary={()=>ui.openTool("asset")} instanceControls={assetInstanceControls}/>
   <PackLibraryPanel scene={scene} available={Boolean(sessionId)} canLoad={!readOnly} busy={importBusy} tr={tr} command={(name,args)=>api.command<any>(name,args)} load={(modelPath,packId,provenance)=>loadPackModel(modelPath,packId,provenance)}/>
  </>

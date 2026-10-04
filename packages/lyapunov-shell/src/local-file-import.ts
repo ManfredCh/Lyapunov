@@ -43,6 +43,16 @@ export function localDropIsImport(files:readonly Pick<File,'name'>[],items:reado
   return modelTarget||files.some(file=>localFileKind(file.name)!==undefined)||items.some(item=>item.webkitGetAsEntry?.()?.isDirectory===true)
 }
 
+/** 正式UI只回入口文件名；继续使用用户本次明确选择的原路径，不依赖绝对路径回显。 */
+export function localImportPathFromReceipt(requestedPath:string,receipt:{kind?:unknown;entryName?:unknown;reason?:unknown}):LocalImportPathResolution{
+  if(receipt.kind==='blocked')throw Error(typeof receipt.reason==='string'?receipt.reason:'LOCAL_IMPORT_ENTRY_REQUIRED: 请直接选择原生入口文件')
+  if(receipt.kind==='file')return {path:requestedPath,kind:'file'}
+  if(receipt.kind!=='robot-directory'&&receipt.kind!=='policy-directory')throw Error('LOCAL_IMPORT_RESOLUTION_INVALID: 宿主没有给出有效目录入口')
+  const entry=receipt.entryName
+  if(typeof entry!=='string'||!entry||entry==='.'||entry==='..'||/[\\/]/.test(entry))throw Error('LOCAL_IMPORT_ENTRY_INVALID: 宿主没有给出有效入口文件名')
+  return {path:`${requestedPath.replace(/[\\/]+$/,'')}/${requestedPath.startsWith('file:')?encodeURIComponent(entry):entry}`,kind:receipt.kind,entryName:entry}
+}
+
 /** 转换请求：只带**本会话已登记源资源**的身份，不带路径。 */
 export interface LocalFileConvertRequest {
   resourceId: string
@@ -105,8 +115,8 @@ export async function importLocalFiles(port: LocalFileImportPort, paths: string[
         if(!port.loadPolicy)throw Error('POLICY_IMPORT_UNAVAILABLE: 当前入口没有接上策略登记服务')
         const receipt=await port.loadPolicy(path)
         if(!port.current()||receipt.face.cancelled)break
-        if(receipt.face.failure)errors.push(`${name}：${receipt.face.failure.code??'POLICY_LOAD_BLOCKED'} · ${receipt.face.failure.message??'文件加载被阻断'}`)
-        else policyFiles.push(name)
+        if(receipt.entry||!receipt.face.failure)policyFiles.push(name)
+        if(receipt.face.failure)errors.push(`${name}：${receipt.entry?'策略已登记；当前实例兼容检查未完成 · ':''}${receipt.face.failure.code??'POLICY_LOAD_BLOCKED'} · ${receipt.face.failure.message??'文件加载被阻断'}`)
         continue
       }
       if (kind === "scene") {
