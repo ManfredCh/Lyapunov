@@ -178,7 +178,7 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(report.providers.isaac.code).toBe("PROVIDER_UNAVAILABLE")
     const actualArgs=readFileSync(pipArgs,"utf8").trim().split("\n")
     expect(actualArgs).toContain("isaacsim[extscache]==6.0.1.0")
-    for(const component of ["app","core","asset","sensor"])expect(actualArgs).toContain(`isaacsim-${component}==6.0.1.0`)
+    for(const component of ["app","core","asset","sensor","test"])expect(actualArgs).toContain(`isaacsim-${component}==6.0.1.0`)
     expect(actualArgs.some(argument=>argument.includes("[all"))).toBe(false)
     expect(actualArgs).not.toContain("--no-deps")
     expect(actualArgs).not.toContain("mujoco==3.13.0")
