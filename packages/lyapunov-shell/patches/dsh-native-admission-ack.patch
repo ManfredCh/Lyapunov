@@ -1,0 +1,543 @@
+diff --git a/packages/client/ui-conversation/src/client/contract/input.ts b/packages/client/ui-conversation/src/client/contract/input.ts
+--- a/packages/client/ui-conversation/src/client/contract/input.ts
++++ b/packages/client/ui-conversation/src/client/contract/input.ts
+@@ -303,7 +303,7 @@
+   /** The editor applied a claim-token replacement: enter claimed. */
+   | { readonly type: 'claim'; readonly claim: CommandClaim }
+   /** Enter submission with the current clipboard projection. */
+-  | { readonly type: 'enter'; readonly mode: InputSubmitMode; readonly draft: string }
++  | { readonly type: 'enter'; readonly mode: InputSubmitMode; readonly draft: string; readonly hasAttachments?: boolean }
+   | { readonly type: 'adjudicated'; readonly attempt: SubmitAttempt; readonly outcome: PickOutcome }
+   | { readonly type: 'adjudication-failed'; readonly attempt: SubmitAttempt; readonly message: string }
+   /** Settlement carries the live clipboard projection for suffix-retention and claim re-entry decisions. */
+diff --git a/packages/client/ui-conversation/src/client/input/facade.ts b/packages/client/ui-conversation/src/client/input/facade.ts
+--- a/packages/client/ui-conversation/src/client/input/facade.ts
++++ b/packages/client/ui-conversation/src/client/input/facade.ts
+@@ -95,7 +95,7 @@
+ /** No-pipeline lexicon: zero text-ref decorations. */
+ const EMPTY_LEXICON: ReadonlyMap<'/' | '@', readonly string[]> = new Map()
+ 
+-/** Editor and attachment snapshot owned by one detached default send. */
++/** Editor and attachment snapshot owned by one default-send admission. */
+ interface DetachedDraft {
+   readonly draft: string
+   readonly occurrences: readonly Occurrence[]
+@@ -140,19 +140,8 @@
+   private mirrorFn: ((text: string) => void) | undefined
+   /** The mounted composer's file-picker opener (scoped pick-files event target). */
+   private filePicker: Parameters<ComposerKeyboard['bindFilePicker']>[0] | undefined
+-  /** Default sends retained until admission settles or scope disposal releases their attachments. */
++  /** Default-send snapshots retained until admission settles or scope disposal releases their attachments. */
+   private readonly detachedDrafts = new Map<number, DetachedDraft>()
+-  /** Failed default sends waiting to be restored together in submission order. */
+-  private readonly failedDetached = new Map<number, DetachedDraft>()
+-  /** Revision of the last automatic failure restoration. */
+-  private failedRestoreRev: number | undefined
+-  private restoringFailures = false
+-  private attachmentFlightSeq = 0
+-  /** Attachment-only sends retained until admission settles or scope disposal releases their attachments. */
+-  private readonly attachmentFlights = new Map<number, {
+-    readonly controller: AbortController
+-    readonly attachmentIds: readonly DraftAttachmentId[]
+-  }>()
+ 
+   constructor(private readonly deps: SessionInputDeps) {
+     this.draftEditor = new DraftEditorRuntime({
+@@ -179,10 +168,6 @@
+     // caret motion and subscribers do not re-render per caret move.
+     if (projectionContentChanged(prev, this.projection)) {
+       this.rev += 1
+-      if (!this.restoringFailures && this.failedRestoreRev !== undefined) {
+-        this.failedDetached.clear()
+-        this.failedRestoreRev = undefined
+-      }
+       this.dispatchRun(({ type: 'draft-changed', draft: this.projection.clipboardText }))
+     }
+     const caret = this.projection.caret
+@@ -270,27 +255,6 @@
+    * dismisses and the menu tracks frozen.
+    */
+   submit(mode: InputSubmitMode = 'queue'): void {
+-    if (this.snapshot.draft.trim() === '' && this.attachmentIds.length > 0) {
+-      if (this.snapshot.phase === 'plain') {
+-        const attachmentIds = [...this.attachmentIds]
+-        const controller = new AbortController()
+-        this.attachmentFlightSeq += 1
+-        const flight = this.attachmentFlightSeq
+-        this.attachmentFlights.set(flight, { controller, attachmentIds })
+-        this.commitSend(attachmentIds)
+-        void this.deps.defaultSink('', attachmentIds, mode, controller.signal).then((outcome) => {
+-          if (this.disposed || !this.attachmentFlights.delete(flight)) return
+-          if (outcome.kind === 'success') return
+-          this.restoreAttachments(attachmentIds)
+-          if (outcome.text !== undefined) this.notify('error', outcome.text)
+-        }, (error: unknown) => {
+-          if (this.disposed || !this.attachmentFlights.delete(flight)) return
+-          this.restoreAttachments(attachmentIds)
+-          this.notify('error', error instanceof Error ? error.message : String(error))
+-        })
+-      }
+-      return
+-    }
+     // Claimed pre-gate: a claim that does not declare attachment acceptance never
+     // submits while attachments are present — one notice, everything retained.
+     // Enter-time adjudication applies the same policy for unclaimed lines
+@@ -300,7 +264,7 @@
+       this.notify('error', this.deps.commandAttachments.unsupportedNotice(before.claim?.token ?? before.draft))
+       return
+     }
+-    this.dispatchRun(({ type: 'enter', mode, draft: this.projection.clipboardText }))
++    this.dispatchRun(({ type: 'enter', mode, draft: this.projection.clipboardText, hasAttachments: this.attachmentIds.length > 0 }))
+     const phase = this.snapshot.phase
+     if (phase === 'adjudicating' || phase === 'submitting') {
+       this.deps.popup?.()?.dismiss()
+@@ -464,16 +428,10 @@
+     for (const record of this.detachedDrafts.values()) {
+       for (const attachmentId of record.attachmentIds) retained.add(attachmentId)
+     }
+-    for (const flight of this.attachmentFlights.values()) {
+-      for (const attachmentId of flight.attachmentIds) retained.add(attachmentId)
+-      flight.controller.abort()
+-    }
+     this.disposed = true
+     this.dispatchRun(({ type: 'release' }))
+     this.unregister()
+     this.detachedDrafts.clear()
+-    this.failedDetached.clear()
+-    this.attachmentFlights.clear()
+     return [...retained]
+   }
+ 
+@@ -593,8 +551,8 @@
+   /**
+    * Prompt serialization before the sink: expand each chip occurrence to its
+    * owner's model form via the session controller's codec routing. Owner
+-   * missing or serialization failure rejects the detached send and restores
+-   * its editor snapshot. Chip-free drafts skip the async detour.
++   * missing or serialization failure rejects admission and retains the native
++   * editor snapshot. Chip-free drafts skip the async detour.
+    */
+   private sinkSerialized(
+     attempt: SubmitAttempt,
+@@ -602,16 +560,11 @@
+     mode: InputSubmitMode,
+   ): void {
+     const attachmentIds = [...this.attachmentIds]
+-    this.attachmentIds = []
+     const occurrences = this.projection.occurrences
+     const record = { draft, occurrences, attachmentIds }
+     this.detachedDrafts.set(attempt.seq, record)
+-    if (this.failedRestoreRev === this.rev) {
+-      this.failedDetached.clear()
+-      this.failedRestoreRev = undefined
+-    }
+     if (occurrences.length === 0) {
+-      this.settleSink(attempt, this.deps.defaultSink(draft.trim(), attachmentIds, mode, attempt.signal))
++      this.startSink(attempt, draft.trim(), attachmentIds, mode)
+       return
+     }
+     const inputTriggers = this.deps.inputTriggers?.()
+@@ -635,7 +588,7 @@
+           cursor = part.offset + part.length
+         }
+         out += draft.slice(cursor)
+-        this.settleSink(attempt, this.deps.defaultSink(out.trim(), attachmentIds, mode, attempt.signal))
++        this.startSink(attempt, out.trim(), attachmentIds, mode)
+       },
+       (error: unknown) => {
+         if (this.dead(attempt)) return
+@@ -645,7 +598,13 @@
+     )
+   }
+ 
+-  /** Settle one detached default send independently of other sends. */
++  /** A synchronous intake rejection has the same retained-draft outcome as an RPC failure. */
++  private startSink(attempt: SubmitAttempt, text: string, attachmentIds: readonly DraftAttachmentId[], mode: InputSubmitMode): void {
++    try { this.settleSink(attempt, this.deps.defaultSink(text, attachmentIds, mode, attempt.signal)) }
++    catch (error) { this.settleDetachedFailure(attempt, error instanceof Error ? error.message : String(error)) }
++  }
++
++  /** Consume the submitted native draft and attachments only after admission ACK. */
+   private settleSink(
+     attempt: SubmitAttempt,
+     pending: Promise<SubmitOutcome>,
+@@ -657,7 +616,10 @@
+           this.settleDetachedFailure(attempt, outcome.text)
+           return
+         }
++        const record = this.detachedDrafts.get(attempt.seq)
+         this.detachedDrafts.delete(attempt.seq)
++        const submitted = new Set(record?.attachmentIds ?? [])
++        this.attachmentIds = this.attachmentIds.filter(id => !submitted.has(id))
+         this.dispatchRun(({ type: 'sink-settled', attempt, ok: true, outcome }))
+       },
+       (error: unknown) => {
+@@ -667,52 +629,10 @@
+     )
+   }
+ 
+-  /** Restore one failed detached send without overwriting text entered after a restoration. */
++  /** Failed admission leaves the original text, chips, and attachment rail in place. */
+   private settleDetachedFailure(attempt: SubmitAttempt, message?: string): void {
+-    const record = this.detachedDrafts.get(attempt.seq)
+-    if (record === undefined) return
+-    this.detachedDrafts.delete(attempt.seq)
+-    this.restoreAttachments(record.attachmentIds)
+-    this.failedDetached.set(attempt.seq, record)
+-    if (this.projection.clipboardText === '' || this.failedRestoreRev === this.rev) {
+-      this.restoreFailedDrafts()
+-    }
++    if (!this.detachedDrafts.delete(attempt.seq)) return
+     this.dispatchRun(({ type: 'sink-settled', attempt, ok: false, ...(message === undefined ? {} : { message }) }))
+-  }
+-
+-  /** Rebuild all currently failed snapshots in submission order. */
+-  private restoreFailedDrafts(): void {
+-    const records = [...this.failedDetached.entries()].sort(([a], [b]) => a - b).map(([, record]) => record)
+-    if (records.length === 0) return
+-    const separator = '\n\n'
+-    let draft = ''
+-    const occurrences: Occurrence[] = []
+-    for (const record of records) {
+-      const base = draft.length + (draft === '' ? 0 : separator.length)
+-      if (draft !== '') draft += separator
+-      draft += record.draft
+-      for (const occurrence of record.occurrences) {
+-        occurrences.push({ ...occurrence, offset: base + occurrence.offset })
+-      }
+-    }
+-    this.restoringFailures = true
+-    try {
+-      this.draftEditor.restoreDraft(draft, occurrences)
+-      this.draftEditor.clearHistory()
+-      this.failedRestoreRev = this.rev
+-    } finally {
+-      this.restoringFailures = false
+-    }
+-  }
+-
+-  /** Return failed-send attachments to the head of the rail; release happens only after success. */
+-  private restoreAttachments(attachmentIds: readonly DraftAttachmentId[]): void {
+-    if (attachmentIds.length === 0) return
+-    const current = new Set(this.attachmentIds)
+-    const restored = attachmentIds.filter(id => !current.has(id))
+-    if (restored.length === 0) return
+-    this.attachmentIds = [...restored, ...this.attachmentIds]
+-    this.publish()
+   }
+ 
+   /** Enter adjudication: poll the session controller; failure = notice + draft retained (never a silent downgrade). */
+diff --git a/packages/client/ui-conversation/src/client/input/machine.ts b/packages/client/ui-conversation/src/client/input/machine.ts
+--- a/packages/client/ui-conversation/src/client/input/machine.ts
++++ b/packages/client/ui-conversation/src/client/input/machine.ts
+@@ -3,9 +3,9 @@
+  * Events in, effects out; zero React / DOM / cordis. Package-private; the
+  * SessionInput shell owns editor state and executes the returned effects.
+  *
+- * Claimed commands occupy the frozen in-flight slot. Ordinary messages detach
+- * at Enter, so the editor can clear immediately and accept another message
+- * while earlier admissions remain in flight.
++ * Command and ordinary-message admissions occupy the same frozen slot.
++ * Keep the native draft visible until Host admission ACK; accepted running
++ * messages then appear through the existing Session queue/submission projection.
+  */
+ import type { InputSubmitMode } from '../contract/composer-submission.ts'
+ import type { CommandClaim, InputEffect, InputEvent, InputState, SubmitAttempt } from '../contract/input.ts'
+@@ -47,8 +47,6 @@
+     readonly attempt: SubmitAttempt
+     readonly controller: AbortController
+   } | undefined
+-  /** Ordinary sends detached from the editor, retained for settlement validation and cancellation. */
+-  private readonly detached = new Map<number, AbortController>()
+ 
+   /** Read-only snapshot of the submit-plane state. */
+   get state(): SubmitSnapshot {
+@@ -77,7 +75,7 @@
+     switch (ev.type) {
+       case 'draft-changed': return this.onDraftChanged(ev.draft)
+       case 'claim': return this.onClaim(ev.claim)
+-      case 'enter': return this.onEnter(ev.mode, ev.draft)
++      case 'enter': return this.onEnter(ev.mode, ev.draft, ev.hasAttachments === true)
+       case 'adjudicated': return this.onAdjudicated(ev.attempt, ev.outcome)
+       case 'adjudication-failed': return this.onAdjudicationFailed(ev.attempt, ev.message)
+       case 'submit-settled': return this.onSubmitSettled(ev)
+@@ -125,24 +123,23 @@
+     return flight.attempt
+   }
+ 
+-  /** Mint an ordinary send that leaves the phase plain. */
+-  private beginDetached(mode: InputSubmitMode, draft: string): SubmitAttempt {
++  /** Mint a default-send admission while retaining its native draft. */
++  private beginDefault(mode: InputSubmitMode, draft: string): SubmitAttempt {
+     const flight = this.mintAttempt(mode, draft)
+-    this.detached.set(flight.attempt.seq, flight.controller)
+-    this.claim = undefined
+-    this.phase = 'plain'
++    this.inflight = flight
++    this.claim = undefined
++    this.phase = 'submitting'
+     return flight.attempt
+   }
+ 
+-  /** Default-send effects capture the sink input before the editor commit. */
+-  private detachedEffects(attempt: SubmitAttempt): readonly InputEffect[] {
++  /** Host admission is the only authority that permits consuming the native draft. */
++  private defaultEffects(attempt: SubmitAttempt): readonly InputEffect[] {
+     return [
+       { type: 'default-sink', attempt, draft: attempt.draftSnapshot, mode: attempt.mode },
+-      { type: 'commit-draft', retainSuffixOf: attempt.draftSnapshot },
+     ]
+   }
+ 
+-  private onEnter(mode: InputSubmitMode, draft: string): readonly InputEffect[] {
++  private onEnter(mode: InputSubmitMode, draft: string, hasAttachments: boolean): readonly InputEffect[] {
+     if (this.phase === 'adjudicating' || this.phase === 'submitting') return []
+     if (this.phase === 'claimed' && this.claim !== undefined) {
+       const attempt = this.beginAttempt(mode, draft)
+@@ -150,13 +147,13 @@
+       return [{ type: 'begin-submit', attempt, claim: this.claim, args: argsAfter(draft, this.claim.token) }]
+     }
+     const trimmed = draft.trim()
+-    if (trimmed === '') return []
++    if (trimmed === '' && !hasAttachments) return []
+     if (trimmed.startsWith('/')) {
+       const attempt = this.beginAttempt(mode, draft)
+       this.phase = 'adjudicating'
+       return [{ type: 'adjudicate', attempt, draft }]
+     }
+-    return this.detachedEffects(this.beginDetached(mode, draft))
++    return this.defaultEffects(this.beginDefault(mode, draft))
+   }
+ 
+   private onAdjudicated(
+@@ -175,11 +172,13 @@
+         args: argsAfter(attempt.draftSnapshot, outcome.claim.token),
+       }]
+     }
+-    this.inflight = undefined
+-    this.phase = 'plain'
+-    if (outcome !== undefined) return []
+-    this.detached.set(attempt.seq, flight.controller)
+-    return this.detachedEffects(attempt)
++    if (outcome !== undefined) {
++      this.inflight = undefined
++      this.phase = 'plain'
++      return []
++    }
++    this.phase = 'submitting'
++    return this.defaultEffects(attempt)
+   }
+ 
+   private onAdjudicationFailed(attempt: SubmitAttempt, message: string): readonly InputEffect[] {
+@@ -214,12 +213,19 @@
+     return text === undefined ? [] : [{ type: 'notice', level: 'error', text }]
+   }
+ 
+-  /** Settle one ordinary send independently of current phase and other detached sends. */
++  /** Settle only the current admission; rejected or aborted sends retain their draft. */
+   private onSinkSettled(ev: Extract<InputEvent, { type: 'sink-settled' }>): readonly InputEffect[] {
+-    if (!this.detached.delete(ev.attempt.seq)) return []
++    const flight = this.inflight
++    if (this.phase !== 'submitting' || flight?.attempt.seq !== ev.attempt.seq) return []
++    this.inflight = undefined
++    this.phase = 'plain'
++    this.claim = undefined
++    const effects: InputEffect[] = ev.ok
++      ? [{ type: 'commit-draft', retainSuffixOf: flight.attempt.draftSnapshot }]
++      : []
+     const text = ev.message ?? ev.outcome?.text
+-    if (text === undefined) return []
+-    return [{ type: 'notice', level: ev.ok && ev.outcome?.kind !== 'error' ? 'info' : 'error', text }]
++    if (text !== undefined) effects.push({ type: 'notice', level: ev.ok && ev.outcome?.kind !== 'error' ? 'info' : 'error', text })
++    return effects
+   }
+ 
+   /** Clear after an accepted attachment-only send; it has no text suffix to retain. */
+@@ -234,8 +240,6 @@
+       this.inflight.controller.abort()
+       this.inflight = undefined
+     }
+-    for (const controller of this.detached.values()) controller.abort()
+-    this.detached.clear()
+     this.phase = 'plain'
+     this.claim = undefined
+     return []
+diff --git a/packages/client/ui-conversation/tests/input-bar.client.spec.tsx b/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
+--- a/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
++++ b/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
+@@ -459,13 +459,14 @@
+     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
+     fireEvent.keyDown(textarea, { key: 'Enter' })
+     expect(sink).toHaveBeenCalledWith('', ['draft-1'], 'queue', expect.any(AbortSignal))
+-    // Optimistic commit: the rail clears at submit, before the admission settles.
+-    expect(attachmentOwner(result.slotCalls).attachments).toEqual([])
++    // The native rail stays visible until Host admission ACK.
++    expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
++    expect(textarea.getAttribute('contenteditable')).toBe('false')
+     await act(async () => { settle({ kind: 'success' }) })
+     expect(attachmentOwner(result.slotCalls).attachments).toEqual([])
+   })
+ 
+-  it('returns an image-only draft to the rail when its admission fails', async () => {
++  it('retains an image-only draft in the rail when its admission fails', async () => {
+     const file = new File([Uint8Array.of(1)], 'pixel.png', { type: 'image/png' })
+     const attachments = [
+       { kind: 'image' as const, id: 'draft-1' as DraftAttachmentId, file, previewUrl: 'blob:draft-1' },
+@@ -475,7 +476,7 @@
+     let fail!: (outcome: SubmitOutcome) => void
+     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { fail = resolve }))
+     fireEvent.keyDown(textarea, { key: 'Enter' })
+-    expect(attachmentOwner(result.slotCalls).attachments).toEqual([])
++    expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
+     await act(async () => { fail({ kind: 'error', text: '图片发送失败' }) })
+     await vi.waitFor(() => {
+       expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
+diff --git a/packages/client/ui-conversation/tests/input-matrix.client.spec.tsx b/packages/client/ui-conversation/tests/input-matrix.client.spec.tsx
+--- a/packages/client/ui-conversation/tests/input-matrix.client.spec.tsx
++++ b/packages/client/ui-conversation/tests/input-matrix.client.spec.tsx
+@@ -122,15 +122,18 @@
+ }
+ 
+ describe('matrix row: plain', () => {
+-  it('enter falls to the default sink; no claim on the currency; edits free', async () => {
++  it('enter retains the native draft until intake ACK; then the editor is free', async () => {
+     const { textarea, shell, sink } = bench()
+     act(() => { shell.setDraft('普通消息') })
+     expect(shell.snapshot.claim).toBeUndefined()
+     fireEvent.keyDown(textarea, { key: 'Enter' })
+     expect(sink).toHaveBeenCalledWith('普通消息', [], 'queue', expect.any(AbortSignal))
+-    // The detached default send never freezes the composer.
+-    expect(shell.snapshot.phase).toBe('plain')
++    expect(shell.snapshot.phase).toBe('submitting')
++    expect(shell.snapshot.draft).toBe('普通消息')
++    expect(textarea.getAttribute('contenteditable')).toBe('false')
++    await vi.waitFor(() => { expect(shell.snapshot.phase).toBe('plain') })
+     expect(shell.snapshot.draft).toBe('')
++    expect(textarea.getAttribute('contenteditable')).toBe('true')
+     expect(shell.snapshot.claim).toBeUndefined()
+   })
+ })
+diff --git a/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts b/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
+--- a/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
++++ b/packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts
+@@ -129,13 +129,9 @@
+     })
+ 
+     shell.submit('queue')
+-    // Optimistic commit: the composer clears at enter and stays unlocked
+-    // while the detached flight runs.
+-    expect(shell.snapshot.phase).toBe('plain')
+-    expect(shell.snapshot.draft).toBe('')
+-    await vi.waitFor(() => {
+-      expect(shell.snapshot.draft).toBe(`${mention} `)
+-    })
++    expect(shell.snapshot.phase).toBe('submitting')
++    expect(shell.snapshot.draft).toBe(`${mention} `)
++    await vi.waitFor(() => { expect(shell.snapshot.phase).toBe('plain') })
+     expect(sink).toHaveBeenNthCalledWith(1, mention, [], 'queue', expect.any(AbortSignal))
+     expect(shell.snapshot).toMatchObject({
+       draft: `${mention} `,
+@@ -147,8 +143,10 @@
+     })
+ 
+     shell.submit('queue')
+-    expect(shell.snapshot.draft).toBe('')
++    expect(shell.snapshot.draft).toBe(`${mention} `)
+     await vi.waitFor(() => {
++      expect(shell.snapshot.phase).toBe('plain')
++      expect(shell.snapshot.draft).toBe('')
+       expect(sink).toHaveBeenNthCalledWith(2, mention, [], 'queue', expect.any(AbortSignal))
+     })
+     expect(shell.snapshot.occurrences).toEqual([])
+@@ -170,10 +168,9 @@
+     })
+     chip(shell)
+     shell.submit()
+-    // The serializer rejection restores the optimistic commit with its chip.
+-    await vi.waitFor(() => {
+-      expect(shell.snapshot.draft).toBe(`${mention} `)
+-    })
++    // Serialization rejection retains the native chip without an optimistic clear.
++    await vi.waitFor(() => { expect(shell.snapshot.phase).toBe('plain') })
++    expect(shell.snapshot.draft).toBe(`${mention} `)
+     expect(sink).not.toHaveBeenCalled()
+     expect(shell.snapshot.occurrences).toHaveLength(1)
+     expect(shell.notices.getSnapshot()).toMatchObject({
+@@ -198,9 +195,8 @@
+     shell.dispose()
+     expect(signal?.aborted).toBe(true)
+     expect(shell.snapshot.phase).toBe('plain')
+-    // The optimistic commit stands: disposal drops the settlement, so the
+-    // sent draft is not restored into the dying composer.
+-    expect(shell.snapshot.draft).toBe('')
++    // Disposal aborts the pending admission without consuming the unaccepted draft.
++    expect(shell.snapshot.draft).toBe('send this')
+   })
+ 
+   it('retains a rejected default message without duplicating its prompt error notice', async () => {
+@@ -218,23 +214,40 @@
+     expect(shell.notices.getSnapshot()).toBeNull()
+   })
+ 
+-  it('restores concurrent failed messages in submission order', async () => {
++  it('retains the native draft until ACK and blocks duplicate admission', async () => {
+     const settlements: Array<(outcome: SubmitOutcome) => void> = []
+-    const shell = new SessionInputShell({
+-      actx: {} as Context,
+-      defaultSink: () => new Promise<SubmitOutcome>((resolve) => { settlements.push(resolve) }),
+-      commandAttachments,
+-    })
+-    shell.setDraft('first')
+-    shell.submit()
+-    shell.setDraft('second')
+-    shell.submit()
+-    expect(shell.snapshot.draft).toBe('')
+-
+-    settlements[0]?.({ kind: 'error' })
+-    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('first') })
+-    settlements[1]?.({ kind: 'error' })
+-    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('first\n\nsecond') })
++    const sink = vi.fn(() => new Promise<SubmitOutcome>((resolve) => { settlements.push(resolve) }))
++    const shell = new SessionInputShell({ actx: {} as Context, defaultSink: sink, commandAttachments })
++    shell.setDraft('下载一个宇树机器人g1放到场景中心地面上')
++    shell.addAttachments(['native-robot-file' as DraftAttachmentId])
++    shell.submit('queue')
++    shell.submit('queue')
++    expect(sink).toHaveBeenCalledTimes(1)
++    expect(shell.snapshot.phase).toBe('submitting')
++    expect(shell.snapshot.draft).toBe('下载一个宇树机器人g1放到场景中心地面上')
++    expect(shell.snapshot.attachmentIds).toEqual(['native-robot-file'])
++    settlements[0]?.({ kind: 'error', text: 'admission rejected' })
++    await vi.waitFor(() => { expect(shell.snapshot.phase).toBe('plain') })
++    expect(shell.snapshot.draft).toBe('下载一个宇树机器人g1放到场景中心地面上')
++    expect(shell.snapshot.attachmentIds).toEqual(['native-robot-file'])
++    expect(shell.notices.getSnapshot()?.text).toBe('admission rejected')
++    shell.submit('steer')
++    expect(sink).toHaveBeenCalledTimes(2)
++    settlements[1]?.({ kind: 'success' })
++    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('') })
++    expect(shell.snapshot.phase).toBe('plain')
++    expect(shell.snapshot.attachmentIds).toEqual([])
++    shell.dispose()
++  })
++
++  it('surfaces synchronous intake rejection and keeps the original draft', () => {
++    const shell = new SessionInputShell({ actx: {} as Context, defaultSink: () => { throw Error('intake unavailable') }, commandAttachments })
++    shell.setDraft('original draft')
++    shell.submit()
++    expect(shell.snapshot.phase).toBe('plain')
++    expect(shell.snapshot.draft).toBe('original draft')
++    expect(shell.notices.getSnapshot()?.text).toBe('intake unavailable')
++    shell.dispose()
+   })
+ })
+ 
+@@ -251,6 +264,8 @@
+     shell.submit('queue')
+     shell.submit('queue')
+     expect(sink).toHaveBeenCalledTimes(1)
++    expect(shell.snapshot.attachmentIds).toEqual(['img-1'])
++    expect(shell.snapshot.phase).toBe('submitting')
+     settle({ kind: 'success' })
+     await vi.waitFor(() => {
+       expect(shell.snapshot.attachmentIds).toEqual([])

@@ -17,6 +17,29 @@ const upstream = join(root, '.upstream/deepseek-harness-20260911-candidate')
 const native = 'packages/api/session-controller/src'
 const isolatedTestTimeoutMs = 120_000
 
+test('原生提交ACK补丁只消费完整pre/post，草稿事务未知改动与缺件均拒绝保留',()=>{
+ const file=join(root,'packages/lyapunov-shell/patches/dsh-native-admission-ack.patch')
+ const patch={file,package:'@deepseek-ai/dsh-client-ui-conversation'}
+ const manifest=JSON.parse(readFileSync(file+'.json','utf8'))
+ const scratch=mkdtempSync(join(root,'.tmp-admission-ack-'))
+ try{
+  run('git',['init','--quiet',scratch])
+  for(const row of manifest.files){const target=join(scratch,row.path);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,readFileSync(join(upstream,row.path)))}
+  assert.equal(applySignedFilesPatch(root,scratch,patch).status,'already-applied')
+  run('git',['apply','--reverse',file],{cwd:scratch})
+  assert.equal(applySignedFilesPatch(root,scratch,patch).status,'applied')
+  const changed=join(scratch,manifest.files[0].path),bytes=readFileSync(changed)
+  writeFileSync(changed,Buffer.concat([bytes,Buffer.from('\n/* unknown admission mutation */\n')]))
+  const mutated=readFileSync(changed)
+  assert.throws(()=>applySignedFilesPatch(root,scratch,patch),/pre\/postimage/)
+  assert.deepEqual(readFileSync(changed),mutated)
+  writeFileSync(changed,bytes)
+  const missing=join(scratch,manifest.files.at(-1).path);rmSync(missing)
+  assert.throws(()=>applySignedFilesPatch(root,scratch,patch),/pre\/postimage/)
+  assert.equal(existsSync(missing),false)
+ }finally{rmSync(scratch,{recursive:true,force:true})}
+})
+
 test('电脑目录flow精确补丁真实消费、幂等及未知或缺件保留',()=>{
  const file=join(root,'packages/lyapunov-shell/patches/dsh-files-directory-flow.patch')
  const patch={file,package:'@deepseek-ai/dsh-client-ui-directory-picker-browse'}

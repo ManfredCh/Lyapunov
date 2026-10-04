@@ -434,7 +434,7 @@
   },
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity.json",
-    "sha256": "7db656f98483521a97e648eb0162f69b0e9633bf353047bb4f8f85c628361266",
+    "sha256": "23e852d7873ad044fc5e51d89f69e03dd4d23d130818927eb36ba52a295a08f1",
     "baseCommit": "7c3f05885033aa3aed74904d59a94692d12a47f7",
     "scope": "固定7c全部tracked未覆本体＋已签完整registry合法stage/final；unknown新增源码拒绝，标准ignoreddeps/cache/build按实际Git约束保留"
   },
@@ -454,5 +454,15 @@
       "@deepseek-ai/dsh-client-ui-directory-picker-browse"
     ],
     "scope": "原生目录选择器的 scoped 文件页入口、当前绝对路径与完整祖先导航；浏览不改 Session.cwd 或 Agent/fs/sandbox 权限；确认后由原生工作区与会话导航处理。"
+  },
+  "nativeAdmissionAckPatch": {
+    "file": "packages/lyapunov-shell/patches/dsh-native-admission-ack.patch",
+    "sha256": "d6b02d78bb735d03c0b77300d58fe1b1f77d4812ead0e0f6e4931f110598d61b",
+    "manifest": "packages/lyapunov-shell/patches/dsh-native-admission-ack.patch.json",
+    "manifestSha256": "dcbacf632c4c07f6ff040c9584567f9735ab0ab43112ba165420cd7be1571500",
+    "packages": [
+      "@deepseek-ai/dsh-client-ui-conversation"
+    ],
+    "scope": "普通文本、引用与附件统一沿原生提交事务保留草稿至Host准入ACK；失败原件保留、重复提交受同一事务约束。既有registry先完整消费验final，再应用精确后继delta并验新全源final；不改原生Queue、Session事件格式或模型请求预算。"
   }
 }

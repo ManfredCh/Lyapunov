@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "patchSha256": "d6b02d78bb735d03c0b77300d58fe1b1f77d4812ead0e0f6e4931f110598d61b",
+  "files": [
+    {
+      "path": "packages/client/ui-conversation/src/client/contract/input.ts",
+      "beforeSha256": "e75e61bb6ecd1480db23f3e703597f05eba484fde119a4c9c226772388826665",
+      "afterSha256": "6afc59b1cdcdcde217b9d05f91f341e40b9ffdf547fcd7f8970668abb9909921"
+    },
+    {
+      "path": "packages/client/ui-conversation/src/client/input/facade.ts",
+      "beforeSha256": "35d636621cf3d4ed9776d1892fc3cce3f699e057030a5bbf1fe71a220d2b6828",
+      "afterSha256": "b4038a821c0b0be7655cae90658b1892bb8dca37efb5e5b43d7158a4844d6d0e"
+    },
+    {
+      "path": "packages/client/ui-conversation/src/client/input/machine.ts",
+      "beforeSha256": "9ef6e23919b2527340afa76b6b8f1954db9138a7b62c94c6178e166734ff55ff",
+      "afterSha256": "9aa98a8e56e9c96b0273b24dec1d89d92095970650f385c5aa330f158696874d"
+    },
+    {
+      "path": "packages/client/ui-conversation/tests/input-bar.client.spec.tsx",
+      "beforeSha256": "05e7c98355b748fe876b67abb76bb3b07ac84355c149f28bcc7c62518e3ecba1",
+      "afterSha256": "db260f0fbd247505ddfe45a4a7ba2d106d98473f08efabb99f1f07f33c31e51d"
+    },
+    {
+      "path": "packages/client/ui-conversation/tests/input-matrix.client.spec.tsx",
+      "beforeSha256": "092ae42b43578d248c071b39ddd02e7d1a68f026e2379fb13ee020920021980a",
+      "afterSha256": "c71771f0b27edc49af3f163414d667469b836f3aedaf70a0112a855d00850ea1"
+    },
+    {
+      "path": "packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts",
+      "beforeSha256": "cb1dba499f2d42d49f57bbe392a53e0bed74357b996efe6fa8331641a47ec1bf",
+      "afterSha256": "03ccd29f5e628acd9544115da861bb599999282e5e40b1135d7fc0f2fde733f9"
+    }
+  ]
+}

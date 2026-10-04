@@ -6,7 +6,7 @@ import {join,basename} from 'node:path'
 import {readFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import {applyPublicModelDiagnosticsPatch} from './public-model-patch.mjs'
-import {verifySDKSourceIntegrity,sdkSourceIsFinal} from './sdk-source-integrity.mjs'
+import {verifySDKSourceIntegrity,sdkSourceIsFinal,sdkFileBytes} from './sdk-source-integrity.mjs'
 import {applyFormalEnglishUpgrade} from './formal-english-upgrade.mjs'
 
 
@@ -132,11 +132,29 @@ export function upstreamPatches(root){
     {file:join(root,'packages/lyapunov-shell/patches/dsh-formal-model-input.patch'),package:'@deepseek-ai/dsh-session-title-llm'},
     {file:join(root,'packages/desktop/patches/dsh-guest-own-provider.patch'),package:'@deepseek-ai/dsh-llm-pi-ai'},
     {file:join(root,'packages/lyapunov-shell/patches/dsh-files-directory-flow.patch'),package:'@deepseek-ai/dsh-client-ui-directory-picker-browse'},
+    {file:join(root,'packages/lyapunov-shell/patches/dsh-native-admission-ack.patch'),package:'@deepseek-ai/dsh-client-ui-conversation'},
   ]
 }
 
 export function applyUpstreamPatches(root,upstream){
   const patches=upstreamPatches(root)
+  const admission=patches.find(patch=>basename(patch.file)==='dsh-native-admission-ack.patch')
+  if(!admission)return applyPatchRegistry(root,upstream,patches)
+  const digest=value=>createHash('sha256').update(value).digest('hex')
+  const record=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).nativeAdmissionAckPatch
+  if(!record||record.file!=='packages/lyapunov-shell/patches/dsh-native-admission-ack.patch'||record.sha256!==digest(readFileSync(admission.file))||record.manifestSha256!==digest(readFileSync(admission.file+'.json')))throw Error('SDK_ADMISSION_ACK_SIGNATURE_INVALID')
+  const manifest=JSON.parse(readFileSync(admission.file+'.json','utf8'))
+  const already=manifest.files.every(row=>{const bytes=sdkFileBytes(upstream,row.path);return bytes!==null&&digest(bytes)===row.afterSha256})
+  if(already)return applyPatchRegistry(root,upstream,patches)
+  // 固定旧registry仍完整验base/stage/final；只有真实旧final才消费这份精确后继，未知或混合本体照旧拒绝。
+  const previous=patches.filter(patch=>patch!==admission)
+  const results=applyPatchRegistry(root,upstream,previous)
+  results.push(applySignedFilesPatch(root,upstream,admission))
+  verifySDKSourceIntegrity(root,upstream,patches,true)
+  return results
+}
+
+function applyPatchRegistry(root,upstream,patches){
   const sourceProof=verifySDKSourceIntegrity(root,upstream,patches)
   const results=[]
   // fork 分支把补丁逐个成 commit("patch: <name> [<pkg>]"),浅克隆下用提交主题判定已在分支内;
@@ -145,7 +163,7 @@ export function applyUpstreamPatches(root,upstream){
   const subjects=log.status===0?new Set(log.stdout.split('\n').map(line=>line.trim())):new Set()
   const patchName=file=>basename(file).replace(/\.patch$/,'')
   for(const patch of patches){
-    if(['dsh-native-files-operations.patch','dsh-files-directory-flow.patch'].includes(basename(patch.file))){results.push(applySignedFilesPatch(root,upstream,patch));continue}
+    if(['dsh-native-files-operations.patch','dsh-files-directory-flow.patch','dsh-native-admission-ack.patch'].includes(basename(patch.file))){results.push(applySignedFilesPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-guest-own-provider.patch'){results.push(applySignedGuestOwnProviderPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-guest-empty-model.patch'){results.push(applySignedGuestPatch(root,upstream,patch));continue}
     if(basename(patch.file)==='dsh-public-model-diagnostics.patch'){results.push(applyPublicModelDiagnosticsPatch(root,upstream,patch,sourceProof));continue}
