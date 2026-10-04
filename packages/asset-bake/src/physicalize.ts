@@ -25,6 +25,23 @@ async function writeOBJ(path:string,vertices:Float64Array,faces:Uint32Array){
  const line=async(text:string)=>{block+=text;if(block.length>=1024*1024){await file.write(block);block=''}}
  try{for(let i=0;i<vertices.length;i+=3)await line(`v ${vertices[i]} ${vertices[i+1]} ${vertices[i+2]}\n`);for(let i=0;i<faces.length;i+=3)await line(`f ${faces[i]+1} ${faces[i+1]+1} ${faces[i+2]+1}\n`);if(block)await file.write(block)}finally{await file.close()}
 }
+export interface StaticTriangleSurface {
+ schema:'lyapunov.static-triangle-surface.v1';sourceTriangles:number;triangles:number;removedDegenerateTriangles:number
+ /** 自动表面盒的真实失败；改用原三角不代表这次体素尝试通过。 */
+ voxelAttempt?:{status:'failed';reason:string;diagnostics?:Record<string,unknown>}
+}
+/** 只去掉精确零面积面：这些面没有表面，rigid-flex 不能接收重复顶点的 element。 */
+function nondegenerateTriangles(vertices:Float64Array,faces:Uint32Array):Uint32Array{
+ const output=new Uint32Array(faces.length);let count=0
+ for(let i=0;i<faces.length;i+=3){
+  const a=faces[i]!*3,b=faces[i+1]!*3,c=faces[i+2]!*3
+  const ux=vertices[b]!-vertices[a]!,uy=vertices[b+1]!-vertices[a+1]!,uz=vertices[b+2]!-vertices[a+2]!
+  const vx=vertices[c]!-vertices[a]!,vy=vertices[c+1]!-vertices[a+1]!,vz=vertices[c+2]!-vertices[a+2]!
+  if(uy*vz-uz*vy===0&&uz*vx-ux*vz===0&&ux*vy-uy*vx===0)continue
+  output[count++]=faces[i]!;output[count++]=faces[i+1]!;output[count++]=faces[i+2]!
+ }
+ return output.subarray(0,count)
+}
 /** 同一文件判定：path.resolve 只做词法归一；realpath 覆盖符号链接，dev+ino 覆盖硬链接。 */
 async function sameFile(left:string,right:string){
  if(resolve(left)===resolve(right))return true
@@ -50,14 +67,14 @@ function surfaceAreaM2(vertices:Float64Array,faces:Uint32Array){
  *  （asset_bake 允许指定 outputDirectory）目录里原有的 reference.png / part-99.obj 之类一律不碰：
  *  它们不在本次声明里，就不属于本次。源文件与不属于本管线的文件同样一概不动（不做全库清理）。
  *  bake.json 是本次扫描的原始记录，清完后按存活件重写，免得记录指向已删文件。 */
-async function pruneUnreferencedParts(outputDirectory:string,items:Array<{node:string;selected:string;target?:string}>,...sources:Array<{parts?:Array<{path:string}>}>):Promise<string[]>{
+async function pruneUnreferencedParts(outputDirectory:string,items:Array<{node:string;selected:string;target?:string}>,...sources:Array<{parts?:Array<{path:string;sourceNode?:string}>}>):Promise<string[]>{
  const directory=resolve(outputDirectory)
  const referenced=new Set<string>()
  const written=new Set<string>()
  for(const item of items)if(item.target){referenced.add(resolve(item.target));written.add(resolve(item.target))}
  for(const item of items)if(item.selected==='coacd'||item.selected==='triangle_mesh'||item.selected==='sdf'){
   const source=item.selected==='coacd'?sources[sources.length-1]:sources[0]
-  for(const part of source?.parts??[])if(part.path)referenced.add(resolve(part.path))
+  for(const part of source?.parts??[])if(part.path&&part.sourceNode===item.node)referenced.add(resolve(part.path))
  }
  for(const source of sources)for(const part of source?.parts??[])if(part.path)written.add(resolve(part.path))
  const pruned:string[]=[];const prunedPaths=new Set<string>()
@@ -109,19 +126,26 @@ export async function physicalize(input:PhysicalizeInput,options:{python?:string
  const globalVoxelBudget=input.maxBoxes??2048
  if(!Number.isSafeInteger(globalVoxelBudget)||globalVoxelBudget<1||globalVoxelBudget>10000)throw new Error('INVALID_VOXEL_BOX_BUDGET: maxBoxes 必须是 1..10000 的整数，应用于全部节点总盒数')
  let globalVoxelBoxes=0
- let totalVoxelTiles=0,totalVoxelSamples=0
+ let totalVoxelTiles=0,totalVoxelSamples=0,failedVoxelTiles=0,failedVoxelSamples=0
  const addBoxes=(count:number,node:string)=>{globalVoxelBoxes+=count;if(globalVoxelBoxes>globalVoxelBudget)throw new Error(`VOXEL_GLOBAL_BOX_BUDGET_EXCEEDED: ${node} 累计 ${globalVoxelBoxes} 盒超过整个结果 maxBoxes=${globalVoxelBudget}；未截断、未退回凸包`)}
- type Prepared={g:(typeof geometries)[number];measured:ShapeMeasure|undefined;surfaceAreaM2:number;selected:string;target?:string;result?:PointDecomposition;primitive?:PrimitiveFit;colliderHull?:HullMesh;hullSafe:boolean;solid:boolean;routeReason?:string}
+ type Prepared={g:(typeof geometries)[number];measured:ShapeMeasure|undefined;surfaceAreaM2:number;selected:string;target?:string;result?:PointDecomposition;primitive?:PrimitiveFit;colliderHull?:HullMesh;hullSafe:boolean;solid:boolean;routeReason?:string;staticTriangleSurface?:StaticTriangleSurface}
  /** 凸包即自身（concavity ≤ 此值）才算"按凸包消费不改变几何"。真凸网格的 concavity 是浮点噪声级 0。 */
  const CONVEX_TOLERANCE=1e-3
  const prepared:Prepared[]=[]
+ // 仅无明确精度/预算的 static/environment auto 可选择原三角表面。明确体素/预算继续严格失败。
+ // 新表示必须由消费方明确支持（Mu3.13 rigid-flex / Isaac native none），不能当普通凸包 mesh。
+ const nativeSurfaceEligible=staticSurfaceDefault&&['voxelSizeM','maxBoxes','maxOccupiedVoxels','maxTiles','maxSamples','maxFaceVisits','maxWorkingBytes','maxWorkingBoxes','pointCloudTiling'].every(key=>(input as unknown as Record<string,unknown>)[key]===undefined)
  let compute:GeometryComputeSession|undefined
  const worker=()=>compute??=new GeometryComputeSession({signal:options.signal,onProgress:options.onProgress})
  const voxelOptions={fillInterior:input.usage!=='environment'&&input.usage!=='static',voxelSizeM:input.voxelSizeM,maxTiles:input.maxTiles,maxSamples:input.maxSamples,maxFaceVisits:input.maxFaceVisits,maxWorkingBytes:input.maxWorkingBytes,maxWorkingBoxes:input.maxWorkingBoxes}
  const voxel=async(vertices:Float64Array,faces:Uint32Array,maxBoxes:number|undefined,node:string)=>{
-  const detail=await worker().voxel(vertices,faces,{...voxelOptions,maxBoxes},node)
+  const remainingTiles=(input.maxTiles??4096)-totalVoxelTiles,remainingSamples=1_000_000_000-totalVoxelSamples
+  if(remainingTiles<=0||remainingSamples<=0)throw new Error(`VOXEL_GLOBAL_WORK_BUDGET: ${JSON.stringify({node,totalVoxelTiles,totalVoxelSamples})}`,{cause:{stage:'global-work-budget',totalVoxelTiles,totalVoxelSamples}})
+  const detail=await worker().voxel(vertices,faces,{...voxelOptions,maxBoxes,maxTiles:Math.min(input.maxTiles??4096,remainingTiles),maxSamples:Math.min(input.maxSamples??128_000_000,remainingSamples)},node)
+  const tiles=detail.status==='ok'?detail.result.tiles:detail.diagnostics.tiles,samples=detail.diagnostics.samplesProcessed
+  totalVoxelTiles+=tiles;totalVoxelSamples+=samples
+  if(detail.status==='failed'){failedVoxelTiles+=tiles;failedVoxelSamples+=samples}
   if(detail.status==='failed')throw new Error(`VOXEL_${detail.reason}: ${JSON.stringify({node,...detail.diagnostics,globalBoxesUsed:globalVoxelBoxes,globalMaxBoxes:globalVoxelBudget})}`,{cause:detail.diagnostics})
-  totalVoxelTiles+=detail.result.tiles;totalVoxelSamples+=detail.diagnostics.samplesProcessed
   if(totalVoxelTiles>(input.maxTiles??4096)||totalVoxelSamples>1_000_000_000)throw new Error(`VOXEL_GLOBAL_WORK_BUDGET: ${JSON.stringify({node,totalVoxelTiles,maxTotalTiles:input.maxTiles??4096,totalVoxelSamples,maxTotalSamples:1_000_000_000})}`)
   return detail.result
  }
@@ -176,9 +200,24 @@ export async function physicalize(input:PhysicalizeInput,options:{python?:string
    return {g,measured,surfaceAreaM2:surfaceArea,selected,target:join(input.outputDirectory,`hull-${index}.obj`),colliderHull,hullSafe,solid,routeReason}
   }
   if(selected==='voxel_boxes'){
-   const nodeBudget=input.maxBoxes??(input.usage==='environment'?2048:undefined)
-   const result=await voxel(vertices,faces,nodeBudget,g.node)
-   return {g,measured,surfaceAreaM2:surfaceArea,selected,target:join(input.outputDirectory,`voxel-${index}.json`),result,hullSafe,solid,routeReason}
+   const remaining=globalVoxelBudget-globalVoxelBoxes
+   const native=(reason:string,diagnostics?:Record<string,unknown>):Prepared=>{
+    const triangles=nondegenerateTriangles(vertices,faces).length/3
+    if(!triangles)throw new Error('EMPTY_GEOMETRY: '+g.node)
+    return{g,measured,surfaceAreaM2:surfaceArea,selected:'triangle_surface',target:join(input.outputDirectory,`surface-${index}.obj`),hullSafe,solid,
+     routeReason:`AUTO_STATIC_TRIANGLES: Surface voxel attempt failed (${reason}); preserve all nondegenerate source triangles. Requires a static triangle consumer; no convexification, voxel coarsening or engine switch.`,
+     staticTriangleSurface:{schema:'lyapunov.static-triangle-surface.v1',sourceTriangles:faces.length/3,triangles,removedDegenerateTriangles:faces.length/3-triangles,voxelAttempt:{status:'failed',reason,...diagnostics?{diagnostics}:{}}}}
+   }
+   if(nativeSurfaceEligible&&remaining===0)return native('GLOBAL_BOX_BUDGET',{globalBoxesUsed:globalVoxelBoxes,globalMaxBoxes:globalVoxelBudget})
+   const nodeBudget=nativeSurfaceEligible?Math.min(remaining,input.usage==='environment'?2048:VOXEL_DECOMPOSE_DEFAULTS.maxBoxes):input.maxBoxes??(input.usage==='environment'?2048:undefined)
+   try{
+    const result=await voxel(vertices,faces,nodeBudget,g.node)
+    return {g,measured,surfaceAreaM2:surfaceArea,selected,target:join(input.outputDirectory,`voxel-${index}.json`),result,hullSafe,solid,routeReason}
+   }catch(error){
+    const reason=error instanceof Error?/^VOXEL_([A-Z_]+):/.exec(error.message)?.[1]:undefined
+    if(!nativeSurfaceEligible||!reason||!reason.endsWith('BUDGET'))throw error
+    return native(reason,error instanceof Error&&error.cause&&typeof error.cause==='object'?error.cause as Record<string,unknown>:undefined)
+   }
   }
   return {g,measured,surfaceAreaM2:surfaceArea,selected,hullSafe,solid,routeReason}
   }
@@ -212,6 +251,15 @@ export async function physicalize(input:PhysicalizeInput,options:{python?:string
  if(strategy==='auto'&&!staticSurfaceDefault)for(const item of prepared)if(item.selected==='coacd'&&item.g.watertight){
   if(coacdRaw.parts.filter((part:any)=>part.sourceNode===item.g.node).length>=sdfAutoParts)item.selected='sdf'
  }
+ // 同一个collision.parts采用同一明确消费拓扑。其余等价凸源面也导出原三角并去精确退化面，
+ // 防止把“部分静态原面、部分普通凸包”的声明混在一个没有逐part模式的mesh组件里。
+ if(prepared.some(item=>item.staticTriangleSurface))for(const [index,item]of prepared.entries())if(item.selected==='triangle_mesh'){
+  const {vertices,faces}=await geometry.load(item.g),triangles=nondegenerateTriangles(vertices,faces).length/3
+  if(!triangles)throw new Error('EMPTY_GEOMETRY: '+item.g.node)
+  item.selected='triangle_surface';item.target=join(input.outputDirectory,`surface-${index}.obj`)
+  item.staticTriangleSurface={schema:'lyapunov.static-triangle-surface.v1',sourceTriangles:faces.length/3,triangles,removedDegenerateTriangles:faces.length/3-triangles}
+  item.routeReason='STATIC_TRIANGLE_CONSUMER: Preserve nondegenerate source triangles in the same declared static-triangle consumer as other mesh parts; no ordinary mesh convexification.'
+ }
  // 源文件保护：先算出本次将写出的全部路径（hull-*/voxel-*/physicalization.json）并在任何写之前核对。
  // 返工已派生产物是普通场景（源可能就是上一次的 hull-0.obj），固定输出名会直接覆盖源；同一文件的
  // 符号链接/硬链接别名也算同一原件（realpath 或 dev+ino 相同），一并拒绝。
@@ -226,6 +274,10 @@ export async function physicalize(input:PhysicalizeInput,options:{python?:string
    const target=item.target!;await writeOBJ(target,item.colliderHull!.vertices,item.colliderHull!.faces);parts=[target]
   }else if(selected==='voxel_boxes'){
    const result=item.result!;boxes=result.boxes;decomposition={voxelSizeM:result.voxelSizeM,gridDims:result.gridDims,tiles:result.tiles,fillInterior:result.fillInterior,...g.kind!=='point_cloud'?{sourceTriangles:(g.index?.count??g.faces!.length)/3}:{}};const target=item.target!;await writeFile(target,JSON.stringify(result,null,2));parts=[target]
+  }else if(selected==='triangle_surface'){
+   const {vertices,faces}=await geometry.load(g),filtered=nondegenerateTriangles(vertices,faces)
+   if(filtered.length/3!==item.staticTriangleSurface!.triangles)throw new Error('STATIC_TRIANGLE_SURFACE_CHANGED')
+   await writeOBJ(item.target!,vertices,filtered);parts=[item.target!]
   }
   // 碰撞产物包围盒（实体局部帧、Z-up 米）：落地对齐的物理基准。primitive 直接由定义给出；
   // hull 取实际写出的碰撞网格顶点（含外凸包过冲）；voxel 取盒组并集；coacd/sdf 取 part 文件并集。
@@ -247,11 +299,11 @@ export async function physicalize(input:PhysicalizeInput,options:{python?:string
   const partsVolume=rawParts.reduce((sum:number,part:any)=>sum+(typeof part.volumeM3==='number'&&Number.isFinite(part.volumeM3)?Math.abs(part.volumeM3):0),0)
   const volumeRatio=selected==='coacd'&&measured&&measured.meshVolumeM3>0?Number((partsVolume/measured.meshVolumeM3).toFixed(4)):undefined
   const pointMetadata:{sourceKind?:'point_cloud';pointCloud?:Record<string,unknown>;sampledSurfaceAreaM2?:number}=g.kind==='point_cloud'?{sourceKind:'point_cloud',pointCloud:item.result!.pointCloud}:g.sourceKind==='point_cloud'?{sourceKind:'point_cloud',pointCloud:g.pointCloud,sampledSurfaceAreaM2:item.surfaceAreaM2}:{}
-  outputs.push({node:g.node,selected,hullSafe:item.hullSafe,...pointMetadata,...item.routeReason?{routeReason:item.routeReason}:{},...volumeRatio!==undefined?{volumeRatio}:{},...consumerNotice?{consumerNotice}:{},...item.primitive?{primitive:item.primitive}:{},...bounds?{bounds}:{},parts,...boxes?{boxes}:{},...decomposition?{decomposition}:{},material,materialProperties:properties,...volume,...surfaceMode&&g.kind!=='point_cloud'&&g.sourceKind!=='point_cloud'?{surfaceAreaM2:item.surfaceAreaM2}:{},watertight:g.watertight,...mass??{massKg:null,massReason:g.kind==='point_cloud'||g.sourceKind==='point_cloud'?'点云只有测得采样位置，不能据此计算实际质量':measured?'源网格不封闭，不能把有向三角体积当成实际质量':'表面几何无封闭体积，不能据此计算质量'}})
+  outputs.push({node:g.node,selected,hullSafe:item.hullSafe,...pointMetadata,...item.staticTriangleSurface?{staticTriangleSurface:item.staticTriangleSurface}:{},...item.routeReason?{routeReason:item.routeReason}:{},...volumeRatio!==undefined?{volumeRatio}:{},...consumerNotice?{consumerNotice}:{},...item.primitive?{primitive:item.primitive}:{},...bounds?{bounds}:{},parts,...boxes?{boxes}:{},...decomposition?{decomposition}:{},material,materialProperties:properties,...volume,...surfaceMode&&g.kind!=='point_cloud'&&g.sourceKind!=='point_cloud'?{surfaceAreaM2:item.surfaceAreaM2}:{},watertight:g.watertight,...mass??{massKg:null,massReason:g.kind==='point_cloud'||g.sourceKind==='point_cloud'?'点云只有测得采样位置，不能据此计算实际质量':measured?'源网格不封闭，不能把有向三角体积当成实际质量':'表面几何无封闭体积，不能据此计算质量'}})
  }
  const prunedParts=await pruneUnreferencedParts(input.outputDirectory,prepared.map(item=>({node:item.g.node,selected:item.selected,target:item.target})),raw,coacdRaw)
  options.signal?.throwIfAborted()
- const geometryTransport={...geometry.transport,readBytes:geometry.transport.readBytes+(coacdGeometry?.transport.readBytes??0),verified:geometry.transport.verified&&(!coacdGeometry||coacdGeometry.transport.verified),compute:{totalVoxelTiles,totalVoxelSamples,totalVoxelBoxes:globalVoxelBoxes,maxTotalTiles:input.maxTiles??4096,maxTotalSamples:1_000_000_000}}
+ const geometryTransport={...geometry.transport,readBytes:geometry.transport.readBytes+(coacdGeometry?.transport.readBytes??0),verified:geometry.transport.verified&&(!coacdGeometry||coacdGeometry.transport.verified),compute:{totalVoxelTiles,totalVoxelSamples,failedVoxelTiles,failedVoxelSamples,totalVoxelBoxes:globalVoxelBoxes,maxTotalTiles:input.maxTiles??4096,maxTotalSamples:1_000_000_000}}
  const result={sourcePath:raw.sourcePath??input.sourcePath,sourcePreserved:raw.sourcePreserved,units:'m',upAxis:'Z',strategy,objects:outputs,prunedParts,geometryTransport}
  const target=join(input.outputDirectory,'physicalization.json')
  let text=JSON.stringify(result,null,2)

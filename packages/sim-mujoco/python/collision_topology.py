@@ -75,5 +75,29 @@ def collision_topology(world,request):
                 row['geometry']={'kind':'unsupported','sizeM':value['sizeM'],'reason':'选中对象的实际碰撞网格超过总预览预算；未重新读取原件或替换成包围盒。'}
             else:row['geometry']=value
         geoms.append(row)
+    for fid in range(model.nflex):
+        if not int(model.flex_contype[fid]) and not int(model.flex_conaffinity[fid]):continue
+        name=mj.mj_id2name(model,mj.mjtObj.mjOBJ_FLEX,fid) or 'flex_'+str(fid);entity=world.entity_of_geom(name)
+        if only and entity not in only:continue
+        if len(geoms)>=MAX_GEOMS:omitted+=1;continue
+        row={'geomId':model.ngeom+fid,'name':name,'ground':False,'positionM':[0.,0.,0.],
+             'quaternionXyzw':[0.,0.,0.,1.],'collisionEnabled':True,
+             'collisionMask':{'contype':int(model.flex_contype[fid]),'conaffinity':int(model.flex_conaffinity[fid]),'explicitPair':False}}
+        if entity is not None:row['entityId']=entity
+        vnum=int(model.flex_vertnum[fid]);vadr=int(model.flex_vertadr[fid]);enum=int(model.flex_elemnum[fid]);eadr=int(model.flex_elemdataadr[fid])
+        bodies=model.flex_vertbodyid[vadr:vadr+vnum]
+        row['dynamic']=bool(np.any(model.body_weldid[bodies]!=0))
+        if include_geometry:
+            if int(model.flex_dim[fid])!=2 or row['dynamic']:
+                value={'kind':'unsupported','sizeM':[0.,0.,0.],'reason':'当前预览只支持静态二维原三角flex，未猜可变形表面。'}
+            elif vnum>MAX_VERTICES-vertex_count or enum*3>MAX_INDICES-index_count:
+                value={'kind':'unsupported','sizeM':[0.,0.,0.],'reason':'真实原三角flex超过选中对象总预览预算，未简化为bbox。'}
+            else:
+                value={'kind':'triangle-mesh','sizeM':[0.,0.,0.],
+                       'vertices':world.data.flexvert_xpos[vadr:vadr+vnum].reshape(-1).tolist(),
+                       'indices':model.flex_elem[eadr:eadr+enum*3].tolist()}
+                vertex_count+=vnum;index_count+=enum*3
+            row['geometry']=value
+        geoms.append(row)
     return {'source':'mujoco-compiled','worldId':world.id,'generation':world.generation,'sceneRevision':world.applied_revision,
             'stepIndex':world.step_index,'geoms':geoms,'omitted':omitted,'geometryIncluded':include_geometry}

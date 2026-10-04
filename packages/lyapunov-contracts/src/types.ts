@@ -186,7 +186,7 @@ export interface Frame {
   collisionTopology?: CollisionTopology
 }
 export interface ColliderGeometry {
-  kind:"box"|"sphere"|"capsule"|"cylinder"|"ellipsoid"|"plane"|"convex-hull"|"unsupported"
+  kind:"box"|"sphere"|"capsule"|"cylinder"|"ellipsoid"|"plane"|"convex-hull"|"triangle-mesh"|"unsupported"
   sizeM:Vec3
   vertices?:number[]
   indices?:number[]

@@ -1122,6 +1122,8 @@ class World:
                 solref = np.asarray(c.get('solref', [.002, 1.]), dtype=float)
                 solimp = np.asarray(c.get('solimp', [.99, .99, .001, .5, 2.]), dtype=float)
                 if shape in ('mesh', 'sdf'):
+                    from static_triangle_surface import declared_static_surface, add_static_surface
+                    native_surface = shape == 'mesh' and declared_static_surface(c, component.get('physicsBinding') or {}, rigid, eid, SimError)
                     # asset-bake 凸包产物（source=asset-bake-hull）：每个 part 一个网格资产，
                     # MuJoCo 对 mesh geom 按凸包碰撞。实体 scale 烘焙进网格顶点（不像原生
                     # articulation 那样拒绝 scale≠1）；声明质量在 parts 间均摊，刚体总质量
@@ -1149,6 +1151,9 @@ class World:
                         path = path_from_uri(part)
                         if not os.path.isfile(path):
                             raise SimError('COLLISION_MESH_NOT_FOUND', '实体 ' + eid + ' 的碰撞网格文件不存在: ' + path)
+                        if native_surface:
+                            add_static_surface(spec, body, prefix + 'surface' + str(i), path, linear, c, friction, solref, solimp, eid, SimError)
+                            continue
                         # 先用一次性 spec 真实解析该 OBJ：把文件级解析失败在此归因为
                         # 实体+文件名结构化错误，而不是让 spec.compile() 抛出无法归因的原始错误。
                         try:
@@ -1947,6 +1952,7 @@ class World:
             from collision_topology import collision_topology
             frame['collisionTopology']=collision_topology(self,selection['collisionTopology'])
         if selection.get('contacts'):
+            from static_triangle_surface import contact_side
             contacts = []
             pairs = {}
             for i in range(self.data.ncon):
@@ -1954,14 +1960,16 @@ class World:
                 f = np.zeros(6)
                 mj.mj_contactForce(self.model, self.data, i, f)
                 geom1, geom2 = int(contact.geom1), int(contact.geom2)
-                name1, name2 = self.model.geom(geom1).name, self.model.geom(geom2).name
+                side1, side2 = contact_side(self.model, contact, 0), contact_side(self.model, contact, 1)
+                name1, name2 = side1[2], side2[2]
                 contacts.append({'geom1': name1, 'geom2': name2, 'distanceM': float(contact.dist), 'forceN': f[:3].tolist(), 'sourceStep': self.step_index, 'persistent': False})
                 if contact.dist < 0:
                     # 穿透（负 dist）按 geom 对聚合取最小 dist：逐帧接触列表只罗列现象，
                     # 聚合后的穿透对才是调用方纠正初始穿模所需的异常信号。
-                    pair = pairs.get((geom1, geom2))
+                    identity = (side1[:2], side2[:2])
+                    pair = pairs.get(identity)
                     if pair is None:
-                        pairs[(geom1, geom2)] = {'geom1': name1, 'geom2': name2, 'geom1Id': geom1, 'geom2Id': geom2, 'minDistanceM': float(contact.dist)}
+                        pairs[identity] = {'geom1': name1, 'geom2': name2, 'geom1Id': geom1, 'geom2Id': geom2, **({'flex1Id':side1[1]} if side1[0]=='flex' else {}), **({'flex2Id':side2[1]} if side2[0]=='flex' else {}), 'minDistanceM': float(contact.dist)}
                     else:
                         pair['minDistanceM'] = min(pair['minDistanceM'], float(contact.dist))
             frame['contacts'] = contacts
@@ -2502,12 +2510,13 @@ class World:
         """本物理步的真实接触，按"被接触对象"聚合：只统计 actor 实体 geom ↔ 其他实体 geom 的接触对。
         接触来自引擎 data.contact，力来自 mj_contactForce；不推断抓取、不判定任务成功。"""
         summary = {}
+        from static_triangle_surface import contact_side
         if self.data is None:
             return summary
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
-            first = self.entity_of_geom(self.model.geom(int(contact.geom1)).name)
-            second = self.entity_of_geom(self.model.geom(int(contact.geom2)).name)
+            first = self.entity_of_geom(contact_side(self.model, contact, 0)[2])
+            second = self.entity_of_geom(contact_side(self.model, contact, 1)[2])
             if first == actor:
                 other = second
             elif second == actor:
@@ -3912,7 +3921,7 @@ def main():
     worlds = {}
     facts = execution_facts()
     record_execution_facts(facts)
-    emit({'event': 'ready', 'engine': 'mujoco', 'version': mj.__version__, 'pid': os.getpid(), 'runtime': facts,'capabilities':{'engine':'mujoco','supported':{'convexTriangleMesh':True},'unsupported':{'nonconvexTriangleMesh':'MUJOCO_TRIANGLE_SURFACE_UNSUPPORTED','sampledVoxelSurface':'MUJOCO_SAMPLED_SURFACE_UNSUPPORTED'},'notes':['仅已核闭合凸表面与Mu普通mesh等价；明确凹/开放三角面或采样union边界在装配前拒绝；旧default/auto不改变，不自动切引擎']}})
+    emit({'event': 'ready', 'engine': 'mujoco', 'version': mj.__version__, 'pid': os.getpid(), 'runtime': facts,'capabilities':{'engine':'mujoco','supported':{'convexTriangleMesh':True,'declaredStaticTriangleSurface':tuple(int(v) for v in mj.__version__.split('.')[:2])>=(3,13) and hasattr(mj.MjSpec,'add_flex')},'unsupported':{'nonconvexTriangleMesh':'MUJOCO_TRIANGLE_SURFACE_UNSUPPORTED','sampledVoxelSurface':'MUJOCO_SAMPLED_SURFACE_UNSUPPORTED'},'notes':['明确meshTopology=static-triangles的静态/环境表示使用Mu3.13刚性三角flex，半厚度1e-9m；未声明拓扑的普通mesh保持既有凸包规则，明确凹/开放三角面或采样union边界仍拒绝；不自动切引擎，真实接触以当前世界Frame为准']}})
     running = True
     while running:
         batch = []

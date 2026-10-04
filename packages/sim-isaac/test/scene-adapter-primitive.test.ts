@@ -423,6 +423,8 @@ def main():
                              {'type':'dynamic','massKg':2,'massScalePolicy':'density','gravityEnabled':False},[0,0,1],[2,1,1]))
         triangle=Path(directory)/'surface.obj';triangle.write_text(chr(10).join(['v 0 0 0','v 1 0 0','v 0 1 0','f 1 2 3'])+chr(10))
         scenarios.append(run('explicit-static-triangle',{'shape':'mesh','parts':[triangle.as_uri()]},{'type':'static'},[0,0,0],[1,1,1],{'usage':'environment','strategy':'triangle_mesh'}))
+        scenarios.append(run('auto-native-static-triangle',{'shape':'mesh','parts':[triangle.as_uri()],'meshTopology':'static-triangles','surfaceRadiusM':1e-9},{'type':'static'},[0,0,0],[1,1,1],{'usage':'environment','strategy':'auto'}))
+        scenarios.append(run('auto-native-dynamic-rejected',{'shape':'mesh','parts':[triangle.as_uri()],'meshTopology':'static-triangles','surfaceRadiusM':1e-9},{'type':'dynamic','massKg':1},[0,0,0],[1,1,1],{'usage':'environment','strategy':'auto'}))
         scenarios.append(run('dynamic-triangle-rejected',{'shape':'mesh','parts':[mesh.as_uri()]},{'type':'dynamic','massKg':1},[0,0,0],[1,1,1],{'usage':'environment','strategy':'triangle_mesh'}))
     print(json.dumps({'mode': scenarios[0]['dump']['mode'], 'scenarios': scenarios}, sort_keys=True))
 
@@ -671,6 +673,12 @@ for (const probe of probes) {
       expect(prim(native,'/World/entities/e0').schemas).not.toContain('PhysicsRigidBodyAPI')
       expect(rejected.error?.code).toBe('UNSUPPORTED_CAPABILITY');expect(rejected.error?.message).toContain('ISAAC_STATIC_TRIANGLE_MESH_REQUIRED')
       expect(rejected.dump.prims).toHaveLength(0)
+      const automatic=scenario('auto-native-static-triangle'),bad=scenario('auto-native-dynamic-rejected')
+      expect(automatic.error).toBeUndefined()
+      expect(prim(automatic,'/World/entities/e0/geometry').attrs['physics:approximation']?.value).toBe('none')
+      expectVector(prim(automatic,'/World/entities/e0/geometry').attrs['faceVertexCounts']?.value,[3])
+      expect(prim(automatic,'/World/entities/e0').schemas).not.toContain('PhysicsRigidBodyAPI')
+      expect(bad.error?.code).toBe('UNSUPPORTED_CAPABILITY');expect(bad.dump.prims).toHaveLength(0)
     })
 
     test('声明源码不再用沉默的 0.1 米默认盒', () => {

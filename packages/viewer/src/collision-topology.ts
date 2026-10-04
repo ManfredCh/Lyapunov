@@ -30,7 +30,7 @@ export function compiledColliderGeometry(value:ColliderGeometry):THREE.BufferGeo
   case "cylinder":return s[0]>0&&s[1]>0?new THREE.CylinderGeometry(s[0],s[0],2*s[1],24).rotateX(Math.PI/2):undefined
   // plane 的碰撞是无限平面；此矩形仅取引擎 geom_size 的参考范围，状态明确标记无限。
   case "plane":return new THREE.PlaneGeometry(2*(s[0]||1),2*(s[1]||1))
-  case "convex-hull":{
+  case "convex-hull":case "triangle-mesh":{
    const vertices=value.vertices,indices=value.indices
    if(!vertices||!indices||vertices.length%3||indices.length%3||vertices.length>600000||indices.length>600000||vertices.some(v=>!Number.isFinite(v))||indices.some(i=>!Number.isInteger(i)||i<0||i>=vertices.length/3))return undefined
    const geometry=new THREE.BufferGeometry()

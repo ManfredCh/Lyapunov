@@ -49,8 +49,10 @@ def convex_surface(path,error,eid):
     return {'status':'SUPPORTED_CONVEX_EQUIVALENT','vertices':len(points),'triangles':len(faces),'proof':'closed-oriented-edges-and-supporting-face-halfspaces'}
 
 def validate_exact_triangle_surfaces(scene,error):
+    from static_triangle_surface import declared_static_surface
     for entity in scene.get('entities',[]):
         components=entity.get('components')or{};collision=components.get('collision')or{};binding=components.get('physicsBinding')or{}
+        if declared_static_surface(collision,binding,components.get('rigidBody')or{},entity['entityId'],error):continue
         if collision.get('shape',collision.get('type'))!='mesh' or binding.get('strategy')!='triangle_mesh':continue
         eid=entity['entityId'];samples=binding.get('pointCloud')or[]
         if not isinstance(samples,list):raise error('MUJOCO_TRIANGLE_CONVEXITY_UNVERIFIED',eid+' pointCloud来源回执结构无效；未退凸')

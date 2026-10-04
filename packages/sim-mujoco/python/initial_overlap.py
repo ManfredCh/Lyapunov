@@ -80,6 +80,7 @@ def compiled_distance(model, data, first, second):
 
 
 def initial_overlap(world, maximum_queries=MAX_QUERIES):
+    from static_triangle_surface import contact_side
     model, data = world.model, world.data
     pairs, unverified = {}, []
     names = [model.geom(i).name for i in range(model.ngeom)]
@@ -103,7 +104,17 @@ def initial_overlap(world, maximum_queries=MAX_QUERIES):
 
     for index in range(data.ncon):
         contact = data.contact[index]
-        record(int(contact.geom1), int(contact.geom2), float(contact.dist))
+        first, second = int(contact.geom1), int(contact.geom2)
+        if first >= 0 and second >= 0:
+            record(first, second, float(contact.dist))
+        elif math.isfinite(contact.dist) and contact.dist < -TOUCH_EPS_M:
+            sides = [contact_side(model, contact, side) for side in (0, 1)]
+            entities = [world.entity_of_geom(side[2]) for side in sides]
+            if entities[0] != entities[1]:
+                pairs[tuple(side[:2] for side in sides)] = {'geom1':sides[0][2], 'geom2':sides[1][2], 'depthM':-float(contact.dist), **({'entity1':entities[0]} if entities[0] else {}), **({'entity2':entities[1]} if entities[1] else {})}
+    # flex 无 mj_geomDistance 包含查询。已有真实接触可报相交；未生成接触不能推断静态面完整 CLEAR。
+    if any((model.flex_contype[fid] or model.flex_conaffinity[fid]) for fid in range(model.nflex)):
+        unverified.append('静态原三角flex仅核首帧真实接触，未完成所有原三角与其它形状的包含/轻触距离检查')
     groups = {}
     for gid in active:
         groups.setdefault(owners[gid], []).append(gid)

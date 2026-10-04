@@ -14,7 +14,7 @@
  * 需要 LYAPUNOV_ALGORITHM_PYTHON 指向带 trimesh 的解释器；没有就整组跳过（跳过不等于通过）。
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { physicalize, type PhysicalizeInput } from "../src/physicalize.ts"
@@ -84,6 +84,36 @@ async function derive(input: Omit<PhysicalizeInput, "sourcePath" | "outputDirect
 }
 
 withProvider("环境派生的显式 auto 与省略策略", () => {
+  test('默认密集静态表面改用真实原三角；明确精度/预算仍执行体素硬限',async()=>{
+    const triangles:V3[]=[]
+    // 分散的微表面不能合成大盒；中心孔与两侧表面给真实拓扑的正负对照。
+    for(let y=0;y<46;y++)for(let x=0;x<46;x++){
+      const px=2+x*.1,py=2+y*.1
+      triangles.push([px,py,0],[px+.004,py,0],[px,py+.004,0])
+    }
+    triangles.push([-.9,-.1,0],[-.7,-.1,0],[-.8,.1,0],[.7,-.1,0],[.9,-.1,0],[.8,.1,0])
+    // 精确退化面计数必须留账，而非伪称导出了原件中所有 face。
+    triangles.push([8,8,0],[8,8,0],[8,8,0])
+    const directory=await mkdtemp(join(tmpdir(),'physicalize-native-static-'))
+    try{
+      const sourcePath=join(directory,'surfaces.glb');await writeFile(sourcePath,meshGLB('dense-surfaces',triangles))
+      const input={sourcePath,outputDirectory:join(directory,'auto'),sourceUpAxis:'Z' as const,usage:'environment' as const,strategy:'auto' as const}
+      const result=await physicalize(input,{python:provider}),item=result.objects[0]!
+      expect(item.selected).toBe('triangle_surface');expect(item.consumerNotice).toBeUndefined()
+      expect(item.staticTriangleSurface).toMatchObject({schema:'lyapunov.static-triangle-surface.v1',sourceTriangles:2119,triangles:2118,removedDegenerateTriangles:1,voxelAttempt:{status:'failed',reason:'BOX_BUDGET'}})
+      expect(result.geometryTransport.compute.failedVoxelSamples).toBeGreaterThan(0)
+      expect(result.geometryTransport.compute.totalVoxelSamples).toBe(result.geometryTransport.compute.failedVoxelSamples)
+      expect(result.geometryTransport.compute.totalVoxelTiles).toBe(result.geometryTransport.compute.failedVoxelTiles)
+      expect(item.parts).toHaveLength(1);expect(item.boxes).toBeUndefined()
+      const obj=await readFile(item.parts[0]!,'utf8'),source=await readFile(sourcePath)
+      expect(obj.split('\n').filter(line=>line.startsWith('f '))).toHaveLength(2118)
+      expect(obj).toContain('v -0.');expect(result.geometryTransport.verified).toBe(true)
+      await expect(physicalize({...input,outputDirectory:join(directory,'fixed'),voxelSizeM:.03},{python:provider})).rejects.toThrow('VOXEL_BOX_BUDGET')
+      await expect(physicalize({...input,outputDirectory:join(directory,'limited'),maxBoxes:2048},{python:provider})).rejects.toThrow('VOXEL_BOX_BUDGET')
+      expect(await readFile(sourcePath)).toEqual(source)
+      expect((await readdir(join(directory,'auto'))).some(name=>name.startsWith('part-'))).toBe(false)
+    }finally{await rm(directory,{recursive:true,force:true})}
+  },120000)
   test('A08 无体积的平面环仍有孔：缺省实际表面体素保孔，显式三角面如实报告凸化',async()=>{
     const triangles:V3[]=[]
     const quad=(x0:number,y0:number,x1:number,y1:number)=>{const a:V3=[x0,y0,0],b:V3=[x1,y0,0],c:V3=[x1,y1,0],d:V3=[x0,y1,0];triangles.push(a,b,c,a,c,d)}

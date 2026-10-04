@@ -296,9 +296,10 @@ describe("用途/策略解析与产物变体落位", () => {
     expect(resolvePhysicalization("dynamic", "voxel_boxes")).toBe("voxel_boxes")
     expect(resolvePhysicalization("static")).toBe("auto")
     // 变体目录名是产物身份：策略/体素/口径任一变了就是另一个目录（旧引用文件因此不会被改写）。
-    expect(physicalizationVariant("auto")).toBe("auto@cavity-safe-4")
+    expect(physicalizationVariant("auto")).toBe("auto@cavity-safe-5")
+    expect(physicalizationVariant("auto")).not.toBe(physicalizationVariant("auto",undefined,"cavity-safe-4"))
     expect(physicalizationVariant("auto", undefined, "other")).toBe("auto@other")
-    expect(physicalizationVariant("voxel_boxes", 0.5)).toBe("voxel_boxes-voxel0.5@cavity-safe-4")
+    expect(physicalizationVariant("voxel_boxes", 0.5)).toBe("voxel_boxes-voxel0.5@cavity-safe-5")
     expect(physicalizationVariant("auto")).not.toBe(physicalizationVariant("triangle_mesh"))
   }, 120_000)
 
@@ -324,6 +325,31 @@ describe("用途/策略解析与产物变体落位", () => {
 })
 
 withProvider("环境碰撞用途（真实 asset-bake 派生）", () => {
+  test('密集默认环境原三角声明进入真实资源/Scene绑定与独立variant，体素失败保持可审',async()=>{
+    const triangles:V3[]=[]
+    for(let y=0;y<46;y++)for(let x=0;x<46;x++){
+      const px=2+x*.1,py=2+y*.1;triangles.push([px,py,0],[px+.004,py,0],[px,py+.004,0])
+    }
+    const path=await fixture('dense-native.glb',meshGLB([{name:'dense-surfaces',triangles},{name:'convex-source',boxes:[{min:[-.2,-.2,0],max:[.2,.2,.2]}]}],'native-static-contract'))
+    await operations.create({sceneId:'native-static'})
+    const placed=await operations.import({path,sceneId:'native-static',entityId:'dense',resourceId:'res_dense',source:Z_UP,physicalizeUsage:'environment'})
+    const record=await derived(placed.resource.ref.resourceId,1,1)
+    expect(record.physicalization).toMatchObject({status:'ok',strategy:'auto',usage:'environment',policy:'cavity-safe-5',interiorPreserved:true,passageVerified:false,selection:{triangle_surface:2}})
+    expect(record.physicalization!.staticTriangleSurfaces).toHaveLength(2)
+    expect(record.physicalization!.staticTriangleSurfaces![0]!.voxelAttempt).toMatchObject({status:'failed',reason:'BOX_BUDGET'})
+    expect(record.componentDefaults!.collision).toMatchObject({shape:'mesh',meshTopology:'static-triangles',surfaceRadiusM:1e-9})
+    await operations.reconcilePhysics({sceneId:'native-static',waitForPending:true})
+    const entity=(await operations.scene.snapshot('native-static')).entities.find(entity=>entity.entityId==='dense')!
+    expect(entity.components.physicsBinding).toMatchObject({status:'BOUND',strategy:'auto',usage:'environment'})
+    expect(entity.components.collision).toMatchObject({meshTopology:'static-triangles',surfaceRadiusM:1e-9})
+    expect(entity.components.rigidBody?.type).toBe('static')
+    const before=await collisionTriangles(record)
+    expect(before.length/9).toBe(2116+12)
+    const attempt=record.physicalization!.attempts
+    await schedulePhysicalization(operations.resources,record.ref,{usage:'environment',strategy:'auto'})
+    expect((await operations.resources.get('res_dense',1)).physicalization!.attempts).toBe(attempt)
+    expect(await collisionTriangles(record)).toEqual(before)
+  },120000)
   test("两个排队用途各自返回实际派生快照，不把后续request的用途套给先前实例",async()=>{
     const path=await fixture("queue-portal.glb",portalGLB("queue"))
     const record=await operations.resources.import({path,resourceId:"res_queue",source:Z_UP,physicalizationRequest:{usage:"environment",strategy:"triangle_mesh"}})

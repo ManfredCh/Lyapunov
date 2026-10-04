@@ -56,7 +56,7 @@ let queue: Promise<void> = Promise.resolve()
  *  缺省从"逐面网格直出"改成"逐节点判凸包即自身后再选表示"），旧记录不能按参数相同就复用。
  *  记录里存 policy，去重时一并比对——口径变了就重派生一次（supersedes 记账），不让旧产物继续顶着
  *  新的回执口径。只在口径真的变时才改这个值。 */
-export const PHYSICALIZATION_POLICY = "cavity-safe-4"
+export const PHYSICALIZATION_POLICY = "cavity-safe-5"
 
 const flightKey=(library:ResourceLibrary,ref:{resourceId:string;version:number},options:PhysicalizationOptions)=>`${library.directory}:${ref.resourceId}@${ref.version}#${options.usage??'dynamic'}#${options.strategy??'auto'}#${physicalizationBudgetIdentity(options)}`
 /** 后挂载只接已经存在的同参数作业，读 failed 不自动重跑大件。 */
@@ -122,6 +122,7 @@ interface PhysicalizedObject {
   node: string
   sourceKind?: "point_cloud"
   selected: string
+  staticTriangleSurface?:import('../../asset-bake/src/physicalize.ts').StaticTriangleSurface
   /** 源网格在"引擎把 mesh geom 当凸包"的消费下是否还是同一个形状（asset-bake 实测得出）。 */
   hullSafe?: boolean
   /** 逐节点改派原因（非等价源面→未填充体素表面）：请求策略与实产物不同时留账。 */
@@ -192,7 +193,7 @@ function collisionContract(objects: PhysicalizedObject[], massFromVolume: (volum
   // source 只作来源标注（引擎按 shape 分支处理）：环境逐表面产物与物体的凸包/体素产物分开标注，
   // 回执里能一眼看出这份 collision 到底是哪条派生出来的。
   const collision: Record<string, unknown> = parts.length
-    ? { shape: "mesh", parts: parts.map(part => pathToFileURL(part).href), friction, material, source: usage === "environment" ? "asset-bake-surface" : "asset-bake-hull", ...(shapes.length ? { shapes } : {}) }
+    ? { shape: "mesh", parts: parts.map(part => pathToFileURL(part).href), friction, material, source: usage === "environment"||objects.some(object=>object.staticTriangleSurface) ? "asset-bake-surface" : "asset-bake-hull", ...(objects.some(object=>object.staticTriangleSurface)?{meshTopology:'static-triangles',surfaceRadiusM:1e-9}:{}), ...(shapes.length ? { shapes } : {}) }
     : { shape: "box", shapes, friction, material, source: usage === "environment" ? "asset-bake-environment" : "asset-bake-voxel" }
   return withMass(collision, object => object.boxes
     ? object.boxes.reduce((sum, box) => sum + 8 * box.halfExtents[0] * box.halfExtents[1] * box.halfExtents[2], 0)
@@ -312,7 +313,7 @@ async function runPhysicalization(library: ResourceLibrary, resourceId: string, 
     // 空区保留由实际派生事实推导：未填充表面盒不填远离源面的室内，实测hull等价源面按原表面消费。
   // 表面盒仍有pitch量化厚度，不能据此声称源solid材料体积精确保全；usage和策略名不证明输出保孔。
   // 策略名 coacd/sdf 不能证明实际派生孔洞还在；盒组要有生产者的真实 fillInterior=false 回执。
-  const cavitySafe = (object: PhysicalizedObject) => !object.consumerNotice && (object.hullSafe === true || object.selected === "voxel_boxes" && object.decomposition?.fillInterior === false)
+  const cavitySafe = (object: PhysicalizedObject) => !object.consumerNotice && (object.hullSafe === true || object.selected === "voxel_boxes" && object.decomposition?.fillInterior === false || object.selected==='triangle_surface'&&object.staticTriangleSurface?.schema==='lyapunov.static-triangle-surface.v1')
   const interiorPreserved = usage !== "dynamic" && objects.length > 0 && objects.every(cavitySafe)
   // 通行没被实测：本工具不求解净通道宽/全场连通性，interiorPreserved 只是"所选表示不填补内部"的
   // **推导**值——实测里 0.25 m 体素把 0.7 m 门洞量化成 0.5 m 净宽，0.5 m 车过不去，而它仍是 true。
@@ -321,7 +322,7 @@ async function runPhysicalization(library: ResourceLibrary, resourceId: string, 
   const passage = usage !== "dynamic"
     ? {
         passageVerified: false as const,
-        passageNote: "Passage is unverified: clearance and scene connectivity are not measured. interiorPreserved is inferred only from actual unfilled surface voxels or a measured hull-equivalent source surface. voxelResolutionM reports finite surface thickness; a strategy name alone does not prove preserved cavities.",
+        passageNote: "Passage is unverified: clearance and scene connectivity are not measured. interiorPreserved is inferred from unfilled surface voxels, a measured hull-equivalent source or declared native static triangles. Native triangles require a supported consumer (MuJoCo >=3.13 rigid-flex, radius 1e-9 m; Isaac static none); ordinary mesh convexification is not equivalent. voxelResolutionM reports finite voxel thickness.",
       }
     : {}
   // 选用策略/近似误差的实测账：逐节点表示计数、被改派的节点、体素实际分辨率、凸分解体积比。
@@ -356,6 +357,7 @@ async function runPhysicalization(library: ResourceLibrary, resourceId: string, 
       ...transport?{geometryTransport:transport}:{},
       ...physicalizationBudgets(options),
       ...objects.some(object=>object.pointCloud)?{pointCloud:objects.flatMap(object=>object.pointCloud?[{node:object.node,...object.sourceKind?{sourceKind:object.sourceKind}:{},...object.pointCloud}]:[])}:{},
+      ...objects.some(object=>object.staticTriangleSurface)?{staticTriangleSurfaces:objects.flatMap(object=>object.staticTriangleSurface?[{node:object.node,...object.staticTriangleSurface}]:[])}:{},
       ...(supersedes ? { supersedes: true } : {}),
       ...(collisionBounds ? { collisionBounds } : {}),
     })

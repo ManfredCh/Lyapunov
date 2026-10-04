@@ -61,15 +61,15 @@ suite("真 MuJoCo 编译碰撞几何 → Three 世界米制线框",()=>{
    const object=layer.root.children.find(o=>o.userData.entityId===id)!
    const actual=bounds(object).getSize(new THREE.Vector3()).toArray();actual.forEach((value,i)=>expect(value).toBeCloseTo(size[i]!,5))
   }
-  // 显式兼容 ground:true 现编译为有限盒，独立 model.geom_type/size 见证不能继续假定无限平面。
+  // 当前 ground:true 是无限地面。类型独立读model，零size只产生显示参考面，不代表物理边界。
   const ground=f.topology.geoms.find(g=>g.name==="__ground")!,nativeGround=f.truth.find(row=>row.geomId===ground.geomId)!
-  expect(nativeGround.kind).toBe(6) // mjGEOM_BOX；读取真 model，不以拓扑自身作为类型见证。
-  expect(nativeGround.sizeM).toEqual([50,50,.05])
-  expect(ground).toMatchObject({ground:true,positionM:[0,0,-.05],geometry:{kind:"box",sizeM:nativeGround.sizeM}})
+  expect(nativeGround.kind).toBe(0) // mjGEOM_PLANE；读取真 model，不以拓扑自身作为类型见证。
+  expect(nativeGround.sizeM).toEqual([0,0,.1])
+  expect(ground).toMatchObject({ground:true,positionM:[0,0,0],geometry:{kind:"plane",sizeM:nativeGround.sizeM,infinite:true}})
   const groundObject=layer.root.children.find(o=>o.userData.geomId===ground.geomId)!
   expect(groundObject.position.toArray()).toEqual(nativeGround.positionM);expect(groundObject.scale.toArray()).toEqual([1,1,1])
-  expect(bounds(groundObject).getSize(new THREE.Vector3()).toArray()).toEqual([expect.closeTo(100,6),expect.closeTo(100,6),expect.closeTo(.1,6)])
-  expect(layer.status().infinitePlanes).toBe(0);layer.dispose()
+  expect(bounds(groundObject).getSize(new THREE.Vector3()).toArray()).toEqual([expect.closeTo(2,6),expect.closeTo(2,6),expect.closeTo(0,6)])
+  expect(layer.status().infinitePlanes).toBe(1);layer.dispose()
  })
  test("Panda 使用编译凸包面和 geom_xpos/xmat，几何世界边界与真实 mesh 顶点独立读数相同",()=>{
   const layer=new CollisionTopologyLayer();layer.setContext(f.scene,f.handle,"arm",true);expect(layer.receive(f.topology)).toBe(true)

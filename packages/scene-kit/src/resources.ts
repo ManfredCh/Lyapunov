@@ -140,6 +140,7 @@ export interface ResourceMaterializedHome {
  */
 export interface ResourcePhysicalization extends PhysicalizationBudgetOptions {
   status: "pending" | "ok" | "failed" | "skipped"
+  staticTriangleSurfaces?:Array<{node:string}&import('../../asset-bake/src/physicalize.ts').StaticTriangleSurface>
   /** 请求侧解析出来的策略（与产物变体目录、去重判据同一个值）。 */
   strategy?: string
   /** asset-bake 回的执行口径：只有与请求侧不同才出现——environment 缺省请求记 auto，而它自己的缺省口径
@@ -205,7 +206,7 @@ export interface ResourcePhysicalization extends PhysicalizationBudgetOptions {
 }
 export type ResourcePhysicalizationPatch = PhysicalizationBudgetOptions & (
   | { status: "pending"; strategy: string; usage?: string; policy?: string; voxelSizeM?: number }
-  | { status: "ok"; strategy: string; derivedStrategy?: string; representations: Representation[]; componentDefaults: Entity["components"]; collisionBounds?: { min: [number, number, number]; max: [number, number, number] }; usage?: string; sourcePath?: string; nodes?: number; parts?: number; boxes?: number; primitives?: number; interiorPreserved?: boolean; passageVerified?: boolean; passageNote?: string; selection?: Record<string, number>; routed?: Array<{ node: string; selected: string; reason: string }>; voxelResolutionM?: number[]; volumeRatios?: number[]; cavityLostNodes?: Array<{ node: string; selected: string; notice: string }>; prunedParts?: string[]; policy?: string; voxelSizeM?: number; supersedes?: boolean;geometryTransport?:ResourcePhysicalization['geometryTransport'];pointCloud?:Array<Record<string,unknown>> }
+  | { status: "ok"; strategy: string; derivedStrategy?: string; representations: Representation[]; componentDefaults: Entity["components"]; collisionBounds?: { min: [number, number, number]; max: [number, number, number] }; usage?: string; sourcePath?: string; nodes?: number; parts?: number; boxes?: number; primitives?: number; interiorPreserved?: boolean; passageVerified?: boolean; passageNote?: string; selection?: Record<string, number>; routed?: Array<{ node: string; selected: string; reason: string }>; voxelResolutionM?: number[]; volumeRatios?: number[]; cavityLostNodes?: Array<{ node: string; selected: string; notice: string }>; prunedParts?: string[]; policy?: string; voxelSizeM?: number; supersedes?: boolean;geometryTransport?:ResourcePhysicalization['geometryTransport'];pointCloud?:Array<Record<string,unknown>>;staticTriangleSurfaces?:ResourcePhysicalization['staticTriangleSurfaces'] }
   | { status: "failed"; strategy?: string; usage?: string; error: string;errorDetails?:Record<string,unknown> }
   | { status: "skipped"; strategy?: string }
  )
@@ -1284,6 +1285,7 @@ export class ResourceLibrary {
         ...(patch.status === "ok" ? {
           artifactUris:patch.representations.filter(rep=>rep.role==='collision').map(rep=>rep.uri),
           ...patch.geometryTransport?{geometryTransport:structuredClone(patch.geometryTransport)}:{},
+          ...patch.staticTriangleSurfaces?{staticTriangleSurfaces:structuredClone(patch.staticTriangleSurfaces)}:{},
           ...patch.pointCloud?{pointCloud:structuredClone(patch.pointCloud)}:{},
           ...(patch.sourcePath ? { sourcePath: patch.sourcePath } : {}),
           ...(patch.nodes !== undefined ? { nodes: patch.nodes } : {}),

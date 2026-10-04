@@ -698,10 +698,13 @@ def collision_scalar(value,where,positive=True):
         raise SceneError('INVALID_ARGUMENT',where+' 必须是有限'+('正' if positive else '非负')+'数值，收到 '+repr(value))
     return float(value)
 
-def scene_mesh_approximation(rigid,binding):
+def scene_mesh_approximation(rigid,binding,collision=None):
     """只消费既有Scene明确策略；静态原始三角面不退为凸包，动态请求明确拒绝。"""
     binding=binding or{}
-    if binding.get('strategy')!='triangle_mesh':return 'convexHull'
+    topology=(collision or{}).get('meshTopology')
+    if topology not in (None,'static-triangles'):raise SceneError('UNSUPPORTED_CAPABILITY','未支持的明确碰撞拓扑：'+str(topology))
+    if topology=='static-triangles' and (collision or{}).get('surfaceRadiusM')!=1e-9:raise SceneError('INVALID_ARGUMENT','static-triangles 缺明确 surfaceRadiusM=1e-9 m 来源合同')
+    if topology is None and binding.get('strategy')!='triangle_mesh':return 'convexHull'
     if binding.get('usage')not in ('static','environment')or rigid.get('type','static')!='static':
         raise SceneError('UNSUPPORTED_CAPABILITY','ISAAC_STATIC_TRIANGLE_MESH_REQUIRED: triangle_mesh只支持明确static/environment静态绑定；动态体需凸件或已标定SDF，不回退凸包')
     return 'none'
@@ -912,7 +915,7 @@ class SceneAdapter:
         既不塞进恢复系数也不静默丢弃。恢复系数与 massKg 未声明时按源语义取默认并记 default。
         """
         shape=collision.get('shape',collision.get('type','box'));entries=collision.get('shapes');declarations=[]
-        approximation=scene_mesh_approximation(rigid,binding)if shape=='mesh'else None
+        approximation=scene_mesh_approximation(rigid,binding,collision)if shape=='mesh'else None
         for field,value in [('gravityEnabled',rigid.get('gravityEnabled',True)),('collision.enabled',collision.get('enabled',True))]:
             if not isinstance(value,bool):raise SceneError('INVALID_ARGUMENT',path+' 的 '+field+' 必须是布尔值')
         if shape=='mesh':
