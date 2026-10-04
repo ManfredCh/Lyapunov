@@ -989,7 +989,7 @@ class World:
         frames = collision_frame_maps(scene, poses)
         maps = {}
         child_specs = []
-        static_triangle_counts, explicit_arena_sources = [], []
+        static_triangle_counts, explicit_arena_sources, explicit_island_choices, derived_surface_prefixes = [], [], [], []
         # 实体的真实装配 body（eid → (spec body, 该 body 在实体局部帧中的 pos/quat)），
         # 供 Scene 声明相机挂载：相机进的是父实体的真实 body，随物理 FK 一起动。
         spec_bodies = {}
@@ -1008,6 +1008,9 @@ class World:
                     assets = {name: Path(path_from_uri(path)).read_bytes() for name, path in cfg.get('assets', {}).items()}
                     child = mj.MjSpec.from_string(cfg['xml'], assets=assets)
                 explicit_arena_sources.append((eid, child.memory, child.nstack, child.njmax, child.nconmax))
+                from static_triangle_surface import authored_island_selection
+                if any(entity.get('components',{}).get('collision',{}).get('meshTopology')=='static-triangles' for entity in scene['entities']):
+                    explicit_island_choices.append((eid, authored_island_selection(cfg, child, SimError)))
                 native_camera_sources, native_camera_refusals = {}, []
                 camera_urdf_path = urdf_source_path(cfg)
                 if camera_urdf_path:
@@ -1126,6 +1129,8 @@ class World:
                 if shape in ('mesh', 'sdf'):
                     from static_triangle_surface import declared_static_surface, add_static_surface
                     native_surface = shape == 'mesh' and declared_static_surface(c, component.get('physicsBinding') or {}, rigid, eid, SimError)
+                    if native_surface and c.get('source')=='asset-bake-surface':
+                        derived_surface_prefixes.append(prefix)
                     # asset-bake 凸包产物（source=asset-bake-hull）：每个 part 一个网格资产，
                     # MuJoCo 对 mesh geom 按凸包碰撞。实体 scale 烘焙进网格顶点（不像原生
                     # articulation 那样拒绝 scale≠1）；声明质量在 parts 间均摊，刚体总质量
@@ -1275,6 +1280,10 @@ class World:
         if surface_arena:
             skipped.append({'code':'STATIC_TRIANGLE_ARENA','message':'Static triangle BVH uses a bounded work arena',**surface_arena})
         model = spec.compile()
+        from static_triangle_surface import configure_static_surface_islands
+        surface_islands = configure_static_surface_islands(model, derived_surface_prefixes, explicit_island_choices, SimError)
+        if surface_islands:
+            skipped.append({'code':'STATIC_TRIANGLE_ISLAND_COMPAT','message':'Mu3.13 static zero-DOF contacts use the non-island solver; interactive contacts exclude static-only pairs',**surface_islands})
         if pending_hfield is not None:
             # spec 阶段的 hfield 只有占位数据；把归一化高程写进编译产物的 hfield_data。
             # 碰撞面 = geom z + data×size[2]，精确落在补丁声明的绝对高程（米）上。
@@ -1958,11 +1967,13 @@ class World:
             from collision_topology import collision_topology
             frame['collisionTopology']=collision_topology(self,selection['collisionTopology'])
         if selection.get('contacts'):
-            from static_triangle_surface import contact_side
+            from static_triangle_surface import contact_side, zero_dof_contact
             contacts = []
             pairs = {}
             for i in range(self.data.ncon):
                 contact = self.data.contact[i]
+                if any(w.get('code')=='STATIC_TRIANGLE_ISLAND_COMPAT' for w in self.warnings) and zero_dof_contact(self.model,contact):
+                    continue
                 f = np.zeros(6)
                 mj.mj_contactForce(self.model, self.data, i, f)
                 geom1, geom2 = int(contact.geom1), int(contact.geom2)
@@ -2516,11 +2527,13 @@ class World:
         """本物理步的真实接触，按"被接触对象"聚合：只统计 actor 实体 geom ↔ 其他实体 geom 的接触对。
         接触来自引擎 data.contact，力来自 mj_contactForce；不推断抓取、不判定任务成功。"""
         summary = {}
-        from static_triangle_surface import contact_side
+        from static_triangle_surface import contact_side, zero_dof_contact
         if self.data is None:
             return summary
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
+            if any(w.get('code')=='STATIC_TRIANGLE_ISLAND_COMPAT' for w in self.warnings) and zero_dof_contact(self.model,contact):
+                continue
             first = self.entity_of_geom(contact_side(self.model, contact, 0)[2])
             second = self.entity_of_geom(contact_side(self.model, contact, 1)[2])
             if first == actor:

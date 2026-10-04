@@ -13,6 +13,33 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const python=process.env.LYAPUNOV_MUJOCO_PYTHON??resolve(root,".runtime/sim-python/bin/python")
 const suite=existsSync(python)?describe:describe.skip
 suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
+ test('Scene静态原三角zero-DOF兼容不改原件mask，保动态重力接触/停用且拒明确island启用',async()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'static-island-')),file=resolve(directory,'triangle.obj')
+  writeFileSync(file,'v -1 -1 -0.01\nv 1 -1 -0.01\nv 0 1 -0.01\nf 1 2 3\n')
+  const provider=new MuJoCoProvider({pythonPath:python,workerPath:resolve(root,'packages/sim-mujoco/python/worker.py')})
+  const surface:SceneSnapshot['entities'][number]={entityId:'surface',name:'surface',transform:identityTransform(),resources:[],components:{collision:{shape:'mesh',source:'asset-bake-surface',parts:[pathToFileURL(file).href],meshTopology:'static-triangles',surfaceRadiusM:1e-9},rigidBody:{type:'static'},physicsBinding:{status:'BOUND',usage:'environment',strategy:'auto'}}}
+  const native=(enabled=true):SceneSnapshot['entities'][number]=>({entityId:'native',name:'native',transform:identityTransform(),resources:[],components:{mujoco:{xml:`<mujoco><worldbody><geom name="original-plane" type="plane" size="0 0 .1" contype="${enabled?1:0}" conaffinity="${enabled?1:0}"/><body name="actor" pos="0 0 .3"><freejoint/><geom name="original-sphere" type="sphere" size=".04" mass="1" contype="1" conaffinity="1"/></body></worldbody></mujoco>`}}})
+  const scene:SceneSnapshot={sceneId:'static-compat',revision:1,coordinates:SCENE_COORDINATES,entities:[surface,native()]}
+  try{
+   let handle=await provider.open(scene,{clock:'realtime',startPaused:true,ground:false,timestepS:.001})
+   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
+   let frame=await provider.observe(handle.worldId,{contacts:true,collisionTopology:{entityIds:['native'],includeGeometry:true}})
+   assert.equal(frame.contacts!.length,0) // 实际zero-DOF静态重叠不是互动成功
+   assert.ok(frame.collisionTopology!.geoms.filter(g=>g.entityId==='native').every(g=>g.collisionMask?.contype===1&&g.collisionMask?.conaffinity===1))
+   await provider.setPaused(handle.worldId,false,handle.worldGeneration)
+   const end=Date.now()+4000
+   do{await new Promise(resolve=>setTimeout(resolve,100));frame=await provider.observe(handle.worldId,{contacts:true})}while(Date.now()<end&&!frame.contacts!.some(c=>c.geom1.includes('original-sphere')||c.geom2.includes('original-sphere')))
+   assert.ok(frame.contacts!.some(c=>[c.geom1,c.geom2].some(name=>name.includes('original-sphere'))))
+   assert.ok(frame.contacts!.every(c=>!([c.geom1,c.geom2].some(name=>name.startsWith('surface/'))&&[c.geom1,c.geom2].some(name=>name.includes('original-plane')))))
+   await provider.close(handle.worldId)
+   handle=await provider.open({...scene,sceneId:'static-disabled',entities:[{...surface,components:{...surface.components,collision:{...surface.components.collision,enabled:false}}},native(false)]},{clock:'realtime',startPaused:true,ground:false,timestepS:.001})
+   assert.ok(!handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
+   await provider.setPaused(handle.worldId,false,handle.worldGeneration);await new Promise(resolve=>setTimeout(resolve,500));frame=await provider.observe(handle.worldId,{contacts:true})
+   assert.equal(frame.contacts!.length,0);await provider.close(handle.worldId)
+   const explicit={...native(),components:{mujoco:{xml:'<mujoco><option><flag island="enable"/></option><worldbody><geom type="plane" size="0 0 .1"/></worldbody></mujoco>'}}}
+   await assert.rejects(provider.open({...scene,sceneId:'explicit-island',entities:[surface,explicit]},{clock:'manual',ground:false}),/明确启island/)
+  }finally{await provider.dispose();rmSync(directory,{recursive:true,force:true})}
+ })
  test('静态原三角内部编号确定性重载、逐面位坐标及绕序不变，空/单顶点和小面也保真',()=>{
   const script=`import sys,numpy as np
 sys.path.insert(0,sys.argv[1])

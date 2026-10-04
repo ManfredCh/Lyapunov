@@ -1,7 +1,9 @@
 """明确的静态原三角表示：刚性 flex 不经普通 mesh 凸包，不改变引擎或源文件。"""
 from array import array
 import math
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.parse import urlparse, unquote
 import numpy as np
 import mujoco as mj
 
@@ -116,6 +118,91 @@ def configure_static_surface_arena(spec, triangle_counts, explicit_sources, erro
         spec.memory = 64 * 1024 * 1024 if required <= 64 * 1024 * 1024 else MAX_STATIC_ARENA_BYTES
     return {'source':'static-triangle-bvh-bound','arenaBytes':spec.memory,
             'requiredBytes':required,'treeStackBytes':tree_stack_bytes,'largestTreeNodesAtMost':largest_tree}
+
+
+def authored_island_selection(cfg, child, error):
+    """仅检测原件及include是否明确选择island；有效值仍由Mu已解析的option决定。"""
+    visited, pending, found, size = set(), [], False, 0
+    def local_xml_path(value):
+        if str(value).startswith('file:'):
+            parsed = urlparse(str(value))
+            if parsed.netloc not in ('', 'localhost'):
+                raise error('STATIC_TRIANGLE_ISLAND_SELECTION_UNVERIFIED', '原件求解声明必须为本地文件')
+            return Path(unquote(parsed.path))
+        return Path(value)
+    if cfg.get('sourcePath'):
+        pending.append((local_xml_path(cfg['sourcePath']), None))
+    else:
+        pending.append((None, cfg.get('xml', '')))
+    while pending:
+        path, text = pending.pop()
+        if path is not None:
+            key = path.resolve()
+            if key in visited:
+                continue
+            visited.add(key)
+            if len(visited) > 64:
+                raise error('STATIC_TRIANGLE_ISLAND_SELECTION_UNVERIFIED', '原件include超过64文件，未猜求解选择')
+            text = path.read_text(encoding='utf-8')
+        size += len(text.encode('utf-8'))
+        if size > 8 * 1024 * 1024:
+            raise error('STATIC_TRIANGLE_ISLAND_SELECTION_UNVERIFIED', '原件求解声明超过8MiB，未猜island选择')
+        root = ET.fromstring(text)
+        found |= any('island' in flag.attrib for option in root.iter('option') for flag in option.findall('flag'))
+        for include in root.iter('include'):
+            filename = include.get('file')
+            if filename:
+                asset = (cfg.get('assets') or {}).get(filename)
+                pending.append((local_xml_path(asset) if asset else (path.parent / filename if path else Path(filename)), None))
+    if not found:
+        return None
+    return 'disable' if child.option.disableflags & int(mj.mjtDisableBit.mjDSBL_ISLAND) else 'enable'
+
+
+def body_has_dofs(model, body):
+    return int(model.body_dofnum[int(model.body_weldid[body])]) > 0
+
+
+def configure_static_surface_islands(model, derived_prefixes, explicit_choices, error):
+    """仅Scene派生静态rigid-flex与zero-DOF静态形状相遇的3.13兼容路径，不改mask。"""
+    active_static = [gid for gid in range(model.ngeom)
+                     if (model.geom_contype[gid] or model.geom_conaffinity[gid])
+                     and not body_has_dofs(model, int(model.geom_bodyid[gid]))]
+    risky = []
+    for fid in range(model.nflex):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_FLEX, fid) or ''
+        if not model.flex_rigid[fid] or not any(name.startswith(prefix) for prefix in derived_prefixes):
+            continue
+        body = int(model.flex_vertbodyid[int(model.flex_vertadr[fid])])
+        if body_has_dofs(model, body):
+            continue
+        if any((model.flex_contype[fid] & model.geom_conaffinity[gid]) or
+               (model.geom_contype[gid] & model.flex_conaffinity[fid]) for gid in active_static):
+            risky.append(fid)
+    if not risky:
+        return None
+    enabled = [eid for eid, choice in explicit_choices if choice == 'enable']
+    if enabled:
+        raise error('STATIC_TRIANGLE_ISLAND_EXPLICIT_CONFLICT', ','.join(enabled) +
+                    ' 原件明确启island，与Mu3.13静态原三角zero-DOF接触不兼容；未覆盖选择或mask')
+    model.opt.disableflags |= int(mj.mjtDisableBit.mjDSBL_ISLAND)
+    return {'source':'mujoco-3.13-zero-dof-static-contact','mode':'non-island-solver',
+            'derivedStaticFlexes':len(risky),'geometryPreserved':True,'masksPreserved':True}
+
+
+def zero_dof_contact(model, contact):
+    """纯静态接触不是客户的可交互接触；未知/可变形侧保守保留。"""
+    for side in (0, 1):
+        geom, flex = int(contact.geom[side]), int(contact.flex[side])
+        if geom >= 0:
+            if body_has_dofs(model, int(model.geom_bodyid[geom])):
+                return False
+        elif flex >= 0 and model.flex_rigid[flex]:
+            if body_has_dofs(model, int(model.flex_vertbodyid[int(model.flex_vertadr[flex])])):
+                return False
+        else:
+            return False
+    return True
 
 
 def contact_side(model, contact, side):
