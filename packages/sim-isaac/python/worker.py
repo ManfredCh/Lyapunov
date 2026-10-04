@@ -1844,6 +1844,16 @@ class World:
         if xform.GetResetXformStack() or not parent.IsValid() or str(parent.GetPath())=='/':return Gf.Matrix4d(1.)
         return self._native_world_matrix(parent)
     def _native_world_matrix(self,prim):
+        # The native root tensor is current even before PhysX writes back USD
+        # after initialization or an explicit root-pose update. Reuse the same
+        # root pose as observe/freeBase; USD still owns static authoring data.
+        path=str(prim.GetPath())
+        entry=next((entry for entry in self.entities.values() if entry.get('nativePosePath')==path),None)
+        if entry and (entry['articulation'] is not None or entry['rigidPaths']):
+            with use_backend('tensor',raise_on_fallback=True):position,quaternion=entry['pose'].get_world_poses()
+            position=array(position).reshape(-1);quaternion=array(quaternion).reshape(-1)
+            scale=Gf.Transform(UsdGeom.XformCache().GetLocalToWorldTransform(prim)).GetScale()
+            return Gf.Matrix4d(1).SetScale(scale)*self._matrix_from_pose(position,[*quaternion[1:].tolist(),float(quaternion[0])])
         if not rendering:return UsdGeom.XformCache().GetLocalToWorldTransform(prim)
         fabric=getattr(SM,'_physx_fabric_interface',None)
         if fabric is None:raise SceneError('SENSOR_UNAVAILABLE','RTX Fabric接口未初始化')
