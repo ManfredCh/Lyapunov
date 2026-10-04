@@ -30,6 +30,7 @@ import {sceneBindPhysicsParameters,scenePhysicsUpdateParameters,sceneReconcilePh
 import {scenePrepareWorkspaceParameters,scenePrepareWorldParameters,sceneConfigurePhysicsParameters} from './tool-schema.ts'
 import {physicalizationBudgets} from './physicalization-parameters.ts'
 import {resourcePhysicalizationProgress,publicPhysicalizationFacts} from './physicalization-progress.ts'
+import {resolveLocalImportPath} from './local-import-entry.ts'
 
 export const name = "lyapunov-scene"
 export const inject = ["tools", "commands"]
@@ -337,6 +338,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       return { ...snapshot, resourcePhysicalization }
     } },
+    { name: "scene_import_resolve", description: "Read the explicitly selected local file or directory before import. A root bundle.json selects policy import; otherwise require exactly one native URDF/MJCF/XML root. Ambiguous or absent entries report a concrete selection error without registering or mounting anything.", operation: (_operations,input,signal,scope) => resolveLocalImportPath(sessionPath(scope,input.path,"path"),signal) },
     { name: "scene_list", description: "List scenes for the current account.", operation: (operations) => operations.list() },
     { name: "scene_history", description: "List complete Scene history metadata bound to sceneId. Read the current revision before restoring.", operation: (operations, input) => operations.versions(input.sceneId) },
     { name: "scene_restore", persists: true, description: "Restore the complete Scene document using sceneId, revision and expectedRevision. Restoration creates a new revision; stale expectedRevision never overwrites the current version.", operation: (operations, input) => operations.restore(input) },
@@ -393,6 +395,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       : definition.name==='scene_reconcile_physics'?sceneReconcilePhysicsParameters
       : definition.name==='scene_physics_update'?scenePhysicsUpdateParameters
       : definition.name==='scene_open'||definition.name==='scene_package_import'?sceneOpenParameters
+      : definition.name==='scene_import_resolve'?{input:{type:'object',required:true,additionalProperties:false,properties:{path:{type:'string',required:true}}}} as const
       : definition.name==='scene_edit'?sceneEditParameters
       : definition.name==='scene_import'?sceneImportParameters
       : definition.name==='scene_mount'?sceneMountParameters

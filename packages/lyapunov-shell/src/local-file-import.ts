@@ -6,6 +6,7 @@ import type { SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { registrableConvertSourceOf, REGISTRABLE_SOURCE_EXTENSIONS } from "../../lyapunov-workspace/src/model-source.ts"
 import {LOCAL_POLICY_WEIGHT_EXTENSIONS,localPolicyFileKind} from '../../policy-registry/src/local-policy-file-contract.ts'
 import type {LocalPolicyImportReceipt} from './local-policy-import.ts'
+import type {LocalImportPathResolution} from '../../scene-kit/src/local-import-entry.ts'
 
 /** 用户打开模型默认保留几何与现有材质；工具/API 自身的 strict 缺省不由此改变。 */
 export const DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY = 'available' as const
@@ -37,6 +38,11 @@ export function localFileKind(path: string): "visual" | "source" | "scene" | "po
   return undefined
 }
 
+/** 文件夹有明确的浏览器目录标记；普通对话图片/文档继续作为原生附件。 */
+export function localDropIsImport(files:readonly Pick<File,'name'>[],items:readonly Pick<DataTransferItem,'webkitGetAsEntry'>[],modelTarget:boolean):boolean{
+  return modelTarget||files.some(file=>localFileKind(file.name)!==undefined)||items.some(item=>item.webkitGetAsEntry?.()?.isDirectory===true)
+}
+
 /** 转换请求：只带**本会话已登记源资源**的身份，不带路径。 */
 export interface LocalFileConvertRequest {
   resourceId: string
@@ -54,6 +60,8 @@ export interface LocalFileConvertResult {
 }
 
 export interface LocalFileImportPort {
+  /** 宿主只读解析明确选择的目录入口；客户端不枚举或改写原件及 meshes。 */
+  resolvePath?(path:string):Promise<LocalImportPathResolution>
   /** 用户打开 OBJ/FBX 默认保留几何与现有材质；高级 strict 选择不在失败后自动降级。 */
   sourceTexturePolicy?:'strict'|'available'
   /** 从可见的人类入口选择冻结，工具/API未指定用途的兼容缺省不由此改写。 */
@@ -82,14 +90,19 @@ export async function importLocalFiles(port: LocalFileImportPort, paths: string[
   const orientationEntityIds: string[] = []
   let orientationRevision: number | undefined
   const usage=port.physicalizeUsage??localImportUsageDefault(target)
-  for (const path of [...new Set(paths)]) {
+  for (const requestedPath of [...new Set(paths)]) {
     if (!port.current()) break
+    let path=requestedPath
+    if(port.resolvePath){
+      try{path=(await port.resolvePath(requestedPath)).path;if(!port.current())break}
+      catch(error){errors.push(`${requestedPath.split(/[\\/]/).pop()??requestedPath}：${messageOf(error)}`);continue}
+    }
     const name = path.split(/[\\/]/).pop() ?? path, kind = localFileKind(path)
     if (!kind) { errors.push(/\.max$/i.test(path)?`${name}：MAX需要在3ds Max导出FBX（含材质/纹理）或GLB后导入，不能改后缀冒充支持`:`${name}：尚不支持此格式的直接导入`); continue }
     port.progress(`正在导入 ${name}（${imported.length + errors.length + 1}/${new Set(paths).size}）…`)
     try {
       if(kind==='policy'){
-        if(!port.loadPolicy)throw Error('POLICY_ROBOT_SELECTION_REQUIRED: 请先选择真实机器人，再加载策略文件')
+        if(!port.loadPolicy)throw Error('POLICY_IMPORT_UNAVAILABLE: 当前入口没有接上策略登记服务')
         const receipt=await port.loadPolicy(path)
         if(!port.current()||receipt.face.cancelled)break
         if(receipt.face.failure)errors.push(`${name}：${receipt.face.failure.code??'POLICY_LOAD_BLOCKED'} · ${receipt.face.failure.message??'文件加载被阻断'}`)

@@ -1,5 +1,9 @@
 import { test, expect } from "bun:test"
-import { importLocalFiles, localFileKind, LOCAL_IMPORT_FILE_FILTERS, type LocalFileConvertResult, type LocalFileImportPort } from "../src/local-file-import.ts"
+import { importLocalFiles, localFileKind, localDropIsImport, LOCAL_IMPORT_FILE_FILTERS, type LocalFileConvertResult, type LocalFileImportPort } from "../src/local-file-import.ts"
+import {copyFile,mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {resolveLocalImportPath} from '../../scene-kit/src/local-import-entry.ts'
 import type { SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 const snapshot=(sceneId:string)=>({sceneId,revision:1,entities:[],coordinates:{units:"m",upAxis:"Z",handedness:"right",quaternion:"xyzw"}} as SceneSnapshot)
 function harness(convert?:LocalFileImportPort["convert"]){
@@ -29,9 +33,9 @@ test('正规bundle和支持权重先分派策略，不由scene_import吞文件�
  expect(localFileKind('/config.json')).toBeUndefined();expect(localFileKind('/scene.json')).toBe('scene')
  expect(LOCAL_IMPORT_FILE_FILTERS.some(filter=>filter.extensions.includes('pt'))).toBe(true)
 })
-test('缺真实机器人入口和许可阻断原样反馈，策略不触普通Scene命令',async()=>{
+test('登记服务缺失和许可阻断原样反馈，策略不触普通Scene命令',async()=>{
  const h=harness();const missing=await importLocalFiles(h.port,['/bundle.json'],'scene')
- expect(missing.errors[0]).toContain('POLICY_ROBOT_SELECTION_REQUIRED');expect(h.calls).toHaveLength(0)
+ expect(missing.errors[0]).toContain('POLICY_IMPORT_UNAVAILABLE');expect(h.calls).toHaveLength(0)
  h.port.loadPolicy=async filePath=>({filePath,face:{failure:{status:'BLOCKED',code:'ROBOT_DOWNLOAD_NOT_READY',message:'具体权重许可未核'}}})
  const blocked=await importLocalFiles(h.port,['/bundle.json'],'scene')
  expect(blocked.errors[0]).toContain('ROBOT_DOWNLOAD_NOT_READY');expect(blocked.policyFiles).toHaveLength(0);expect(h.calls).toHaveLength(0)
@@ -177,4 +181,64 @@ test("源工程转换完成但挂载失败时如实保留GLB回执，不误报�
  expect(result.convertedSources).toEqual(["rig.fbx"])
  expect(result.errors[0]).toContain("GLB已生成并保留在素材库")
  expect(result.errors[0]).not.toContain("没有生成")
+})
+
+test('机器人目录唯一原生入口分派scene_import，保留原文件及相对meshes路径',async()=>{
+ const directory=join(import.meta.dir,'../../scene-kit/test/fixtures/mjcf-g1')
+ const resolved=await resolveLocalImportPath(directory)
+ expect(resolved).toEqual({path:join(directory,'g1_29dof_with_hand.xml'),kind:'robot-directory'})
+ const h=harness();h.port.resolvePath=resolveLocalImportPath
+ const result=await importLocalFiles(h.port,[directory],'scene')
+ expect(result.errors).toEqual([]);expect(result.imported).toEqual(['g1_29dof_with_hand.xml'])
+ expect(h.calls.map(call=>call.name)).toEqual(['scene_create','scene_import'])
+ expect(h.calls[1]!.input).toEqual({path:resolved.path,sceneId:'new'})
+ expect(localFileKind('/robot/meshes/pelvis.STL')).toBeUndefined()
+})
+
+test('目录多入口和仅meshes均给明确选择反馈，不创建空场景',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'lya-robot-drop-'))
+ try{
+  const source=join(import.meta.dir,'../../scene-kit/test/fixtures/mjcf-g1/g1_29dof_with_hand.xml')
+  await copyFile(source,join(directory,'one.xml'));await copyFile(source,join(directory,'two.xml'))
+  const h=harness();h.port.resolvePath=resolveLocalImportPath
+  const result=await importLocalFiles(h.port,[directory],'scene')
+  expect(result.errors[0]).toContain('ROBOT_ENTRY_SELECTION_REQUIRED')
+  expect(result.errors[0]).toContain('one.xml');expect(result.errors[0]).toContain('two.xml')
+  expect(h.calls).toHaveLength(0)
+  await rm(join(directory,'one.xml'));await rm(join(directory,'two.xml'));await mkdir(join(directory,'meshes'))
+  await writeFile(join(directory,'meshes/pelvis.STL'),'依赖文件仅用于无入口负例')
+  await expect(resolveLocalImportPath(directory)).rejects.toThrow('ROBOT_ENTRY_REQUIRED')
+ }finally{await rm(directory,{recursive:true,force:true})}
+})
+
+test('含bundle与本体的目录只登记策略；纯权重目录缺bundle具体反馈',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'lya-policy-directory-drop-'))
+ try{
+  await writeFile(join(directory,'model.pt'),'目录分派负例')
+  await expect(resolveLocalImportPath(directory)).rejects.toThrow('POLICY_BUNDLE_REQUIRED')
+  await writeFile(join(directory,'bundle.json'),'{}')
+  await copyFile(join(import.meta.dir,'../../scene-kit/test/fixtures/mjcf-g1/g1_29dof_with_hand.xml'),join(directory,'robot.xml'))
+  const h=harness(),loaded:string[]=[];h.port.resolvePath=resolveLocalImportPath
+  h.port.loadPolicy=async filePath=>{loaded.push(filePath);return {filePath,face:{state:{category:'weights_need_adapter',ready:false}}}}
+  const result=await importLocalFiles(h.port,[directory],'scene')
+  expect(loaded).toEqual([join(directory,'bundle.json')]);expect(result.policyFiles).toEqual(['bundle.json'])
+  expect(h.calls).toHaveLength(0);expect(result.imported).toHaveLength(0)
+ }finally{await rm(directory,{recursive:true,force:true})}
+})
+
+test('目录拖入聊天区域由工作台接管，普通图片/文档保留原生附件',()=>{
+ const directory={webkitGetAsEntry:()=>({isDirectory:true})} as Pick<DataTransferItem,'webkitGetAsEntry'>
+ expect(localDropIsImport([{name:'robot'}],[directory],false)).toBe(true)
+ expect(localDropIsImport([{name:'model.xml'}],[],false)).toBe(true)
+ expect(localDropIsImport([{name:'参考.png'},{name:'说明.pdf'}],[],false)).toBe(false)
+ expect(localDropIsImport([{name:'unknown.bin'}],[],true)).toBe(true)
+})
+
+test('宿主路径解析离开当前scope后不续派，解析失败仍继续下一个有效文件',async()=>{
+ const h=harness();h.port.resolvePath=async path=>{if(path==='/missing')throw Error('ENOENT');return {path,kind:'file'}}
+ const result=await importLocalFiles(h.port,['/missing','/robot.xml'],'library')
+ expect(result.errors[0]).toContain('ENOENT');expect(result.imported).toEqual(['robot.xml'])
+ const leaving=harness();leaving.port.resolvePath=async path=>{leaving.leave();return {path,kind:'file'}}
+ await importLocalFiles(leaving.port,['/robot.xml','/other.xml'],'scene')
+ expect(leaving.calls).toHaveLength(0)
 })

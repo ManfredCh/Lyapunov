@@ -3,7 +3,7 @@ import {controlGestureKey,upsertControlActionRow,type ControlGestureDisplay} fro
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useCallback,useSyncExternalStore} from "react"
 import type {ReactNode,DragEvent} from "react"
 import type {DesktopBridge} from "../../desktop/src/bridge.ts"
-import {importLocalFiles,localFileKind,DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY,localImportUsageDefault,type LocalImportPhysicsUsage} from "./local-file-import.ts"
+import {importLocalFiles,localDropIsImport,DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY,localImportUsageDefault,type LocalImportPhysicsUsage} from "./local-file-import.ts"
 import {ImportPurposeChoice} from './import-purpose-choice.tsx'
 import type {ResourcePhysicsProgress} from './physics-binding-settings.ts'
 import {importLocalPolicy,type LocalPolicyImportReceipt} from './local-policy-import.ts'
@@ -1493,6 +1493,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const current=()=>policySurfaceAlive.current&&apiRef.current===api&&sceneRef.current?.sceneId===targetScene&&sceneLoadSeq.current===sequence
   try{
    const result=await importLocalFiles({current,sourceTexturePolicy,physicalizeUsage:importUsage,
+    resolvePath:path=>api.command("scene_import_resolve",{path}),
     loadPolicy:async path=>{
      const snapshot=sceneRef.current,robot=snapshot?.entities.find(item=>item.entityId===selectedRef.current)
      if(readOnlyRef.current||replayActive||!snapshot||!robot||!robotEntity(robot))throw Error('POLICY_ROBOT_SELECTION_REQUIRED: 请先选择当前可编辑场景的真实机器人实例')
@@ -1529,7 +1530,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
      setViewerVisible(true);ui.showCentre("canvas");ui.closeTool();revealScene?.()
    }},paths,target,targetScene)
    if(!current())return
-   if(paths.every(path=>localFileKind(path)==='policy')){
+   if(result.policyFiles.length>0&&result.imported.length===0&&result.sources.length===0){
     setAssetImportOpen(false);setAssetPath('');setNotice(result.policyFiles.length?tr(`已读取 ${result.policyFiles.length} 个策略文件，请查看当前机器人的兼容与缺项。`,`Read ${result.policyFiles.length} policy files; review compatibility and missing requirements for this robot.`):'')
     if(result.errors.length)setError(result.errors.join('；'))
     return
@@ -1588,7 +1589,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 普通图片/文档在对话区仍是附件；模型文件在工作台直接进入确定性的导入链。
   const library=Boolean((event.target as HTMLElement).closest?.(".lya-library"))
   const canvas=Boolean((event.target as HTMLElement).closest?.(".lya-wb-canvas"))
-  if(!files.length||(!library&&!canvas&&!files.some(file=>localFileKind(file.name))))return
+  if(!localDropIsImport(files,Array.from(event.dataTransfer.items),library||canvas))return
   event.preventDefault();event.stopPropagation()
   // 附件层用 window.dragend 释放整页拖入提示；此处已接管 drop，不再把文件交给附件上传。
   window.dispatchEvent(new Event("dragend"))
@@ -1596,7 +1597,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   perform(async()=>{
    if(!desktop?.getDroppedFilePaths)throw new Error("此入口需要新版桌面客户端；也可在素材库填写本地文件路径。")
    const paths=desktop.getDroppedFilePaths(files)
-   if(paths.some(path=>!path))throw new Error("无法取得本地文件路径，请从系统文件管理器拖入。")
+   if(!paths.length||paths.some(path=>!path))throw new Error("无法取得本地文件或目录路径，请从系统文件管理器拖入，或在素材库填写本地路径。")
    await importLocalPaths(paths,library?"library":"scene")
   })
  }

@@ -72,6 +72,24 @@ afterEach(async () => {
 })
 
 describe("命令桥 scene_open / scene_save：path 缺失或类型不对 → 结构化 SCENE_PATH_INVALID", () => {
+  test('正常原生命令面从目录解析入口，登记完整机器人和相对mesh依赖', async () => {
+    const directory=join(import.meta.dir,'fixtures','mjcf-include-fragments')
+    const command=async(name:string,input:Record<string,unknown>)=>{
+      const execution=await ctx.commands.execute(agent,`/${name} ${JSON.stringify(input)}`,[],signal)
+      const result=execution?.result as {kind:string;text?:string}|undefined
+      expect(result?.kind).toBe('success')
+      return JSON.parse(result!.text!)
+    }
+    const resolved=await command('scene_import_resolve',{path:directory})
+    expect(resolved.kind).toBe('robot-directory');expect(resolved.path).toBe(join(directory,'scene.xml'))
+    const created=await command('scene_create',{})
+    const imported=await command('scene_import',{sceneId:created.sceneId,path:resolved.path})
+    expect(imported.resource.parsed.kind).toBe('robot')
+    expect(imported.resource.parsed.dependencies.some((item:{path:string})=>item.path.endsWith('meshes/a.stl'))).toBe(true)
+    const robot=imported.snapshot.entities.find((item:{entityId:string})=>item.entityId===imported.entityId)
+    expect(robot.components.visual.kind).toBe('robot')
+    expect(robot.components.mujoco).toBeDefined()
+  })
   test("真机同形：scene_open 只给 sceneId（缺必填 path）不再漏原生 TypeError", async () => {
     const receipt = await bridge("scene_open", { sceneId: SCENE_ID })
     expect(receipt).toContain("invalid arguments: ")
