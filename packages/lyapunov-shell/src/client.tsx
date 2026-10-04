@@ -17,7 +17,7 @@ import {applyFilesNavigationClient} from "./files-navigation-client.tsx"
 declare module "@deepseek-ai/dsh-client-ui-slots" {
  interface LocaleNamespaceMap {lyapunov:"open"|"sceneTab"|"balance"|"credits"|"refresh"|"openAccount"|"signinHint"|"devHint"}
 }
-export const inject=["slots","locale","layout","sidebarRightTabs","sidebarRight","sessions","workspaces","uiWorkspace"]
+export const inject=["slots","locale","settingsScope","layout","sidebarRightTabs","sidebarRight","sessions","workspaces","uiWorkspace"]
 export function apply(ctx:Context){
  applyProductUI(ctx)
  applyPreferencesClient(ctx)

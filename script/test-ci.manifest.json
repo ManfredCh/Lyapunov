@@ -2565,6 +2565,13 @@
       "reason": "R-019：仓内真实PNG字节/深浅欢迎组件、短句一次选择与稳定身份、Linux desktop名称配对；离线SSR与源码接线，不触碰登录、账号、联网或当前窗口。"
     },
     {
+      "path": "packages/lyapunov-shell/test/desktop-locale-activation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha4：真实Cordis注入边界与Electron桥接分支的locale激活；离线临时Context，不触碰账号、模型、网络或用户窗口。"
+    },
+    {
       "path": "packages/robot-workflows/test/flight-controller.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
