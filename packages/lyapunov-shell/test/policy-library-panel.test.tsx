@@ -16,10 +16,23 @@ test('完整包安装后按已验来源检查实际状态，不把DOWNLOADED标R
  const result=await policyPanelAction({command:async(name,input)=>{calls.push({name,input});return name==='policy_load_local'?{status:'DOWNLOADED',identity:{provider:'github',modelId:'x/y',revision:'pin'}}:{category:'model_incompatible',ready:false}}},'load',{filePath:'/user/bundle.json',sceneId:'s',entityId:'r'})
  expect(calls.map(c=>c.name)).toEqual(['policy_load_local','policy_load_state']);expect(calls[1]!.input.identity.modelId).toBe('x/y');expect(result.state.ready).toBe(false)
 })
+test('登记成功后兼容检查失败保留登记回执和真实错误，不自动准备或应用',async()=>{
+ const entry={id:'local-id',label:'策略',filePath:'/cache/weights.pt',registeredAt:'2026-10-04',available:true,sourceBytesVerified:true},calls:string[]=[]
+ const result=await policyPanelAction({command:async name=>{calls.push(name);if(name==='policy_load_local')return {status:'LOCAL_WEIGHTS_ADOPTED',localEntry:entry};throw Error('POLICY_WORLD_BINDING_MISMATCH: world属于另一Scene')}},'load',{filePath:'/chosen.pt',sceneId:'s',entityId:'r'})
+ expect(result.entry).toEqual(entry);expect(result.failure.code).toBe('POLICY_WORLD_BINDING_MISMATCH');expect(result.failure.message).toContain('策略已登记')
+ expect(calls).toEqual(['policy_load_local','policy_load_state'])
+})
 test('侧栏有策略/VLA文件与来源入口，原生控制不被强制下载流程',()=>{
  const html=renderToStaticMarkup(<PolicyLibraryPanel available canLoad sceneId="s" entityId="r" command={async()=>{throw new Error('SSR不得请求模型或下载')}} tr={cn=>cn}/>)
- expect(html).toContain('robot-policy-vla-library');expect(html).toContain('加载本地文件');expect(html).toContain('检查状态 / 兼容');expect(html).toContain('原生关节和夹爪控制无需训练策略')
+ expect(html).toContain('robot-policy-vla-library');expect(html).toContain('登记本地文件 / 目录');expect(html).toContain('检查状态 / 兼容');expect(html).toContain('原生关节和夹爪控制无需训练策略')
  expect(Object.values(policyCategoryLabels)).toHaveLength(4)
+})
+test('无机器人仍可选择登记；准备与应用保留真实实例限制，登记未执行',()=>{
+ const entry={id:'local-id',label:'自己的控制策略',filePath:'/cache/weights.pt',available:true,registeredAt:'2026-10-04',sourceBytesVerified:false}
+ const html=renderToStaticMarkup(<PolicyLibraryPanel available canLoad={false} chooseFile={async()=>undefined} importReceipt={{filePath:entry.filePath,entry,face:{state:{category:'weights_need_adapter',ready:false,dimensions:{},missing:[],nextActions:[],policyPrepared:false}}}} command={async()=>{throw Error('SSR不得请求')}} tr={cn=>cn}/>)
+ expect(html).not.toMatch(/<button data-policy-register="choose"[^>]*disabled/);expect(html).not.toMatch(/<button data-policy-register="path"[^>]*disabled/)
+ expect(html).toContain('自己的控制策略');expect(html).toContain('来源与接口待验证');expect(html).toContain('机器人应用尚未执行')
+ expect(html).toMatch(/<button disabled="">准备已登记适配器/);expect(html).toMatch(/<button disabled="">应用到所选实例/)
 })
 test('准备按钮保留选定权重与实体/世界绑定，仅把filePath转换成weightsPath',async()=>{
  const identity={provider:'github',modelId:'jloganolson/g1_23dof_locomotion_isaac',revision:'fbfa38706b817e2d4b19e444db95ae7fb2537b46'}

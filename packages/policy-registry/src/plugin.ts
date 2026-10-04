@@ -22,6 +22,9 @@ import { matchPolicy, resolvePolicyWorldBinding } from './match.ts'
 import {policyLoadState} from './load-state.ts'
 import {IMPLEMENTED_POLICY_ADAPTERS} from './pack-contract.ts'
 import {resolveLocalPolicySource,verifyRegisteredPolicyFiles,type LocalPolicySource} from './local-policy-source.ts'
+import {listLocalPolicyEntries,recordLocalPolicyEntry,registerLocalPolicyWeights,resolveLocalPolicyPath,readLocalPolicyBundle,verifyLocalPolicyBundle} from './local-policy-library.ts'
+import {localPolicyFileKind} from './local-policy-file-contract.ts'
+import {G1_23_75_ID} from './g1-23-75.ts'
 import {adoptLocalG1Policy} from './g1-local-policy.ts'
 import {installRobotDownload,robotDownloadManifest,registeredRobotDownloads,RobotDownloadFailure,type RobotDownloadFetcher} from './robot-download.ts'
 import { executePolicy } from './execution.ts'
@@ -256,25 +259,39 @@ export function apply(ctx:Context,config:Config={}){
   return prepared
  }
  const operations:Record<string,{description:string;execute:(input:any,exec:any)=>Promise<any>}>= {
-  policy_download_sources:{description:"Read registered policy sources and exact file-fetch paths at a pinned revision. Do not access the network, scan caches, or claim adaptation/runtime success.",execute:async()=>({status:"REGISTERED_SOURCES",models:registeredRobotDownloads()})},
+  policy_download_sources:{description:"Read registered fixed sources and this local policy cache's imported entries. Read manifest metadata only; do not access the network or search user directories. Registration does not establish adaptation/runtime success.",execute:async()=>({status:"REGISTERED_SOURCES",models:registeredRobotDownloads(),localEntries:await listLocalPolicyEntries(root())})},
   policy_load_local:{description:"Load explicitly selected local files. Read the complete dependency closure only for a valid bundle or an exact package root matching registered relative paths; do not scan directories. Registered original G123 bytes may be adopted locally, while whole-bundle redistribution licensing remains independently blocked. Prepare Go1/Go2 from complete bundles or verified caches. Unknown files receive only format preflight, without execution or body replacement.",execute:async(input,exec)=>{try{
-   const path=localPath(input.manifestPath??input.filePath,exec),isBundle=/^(?:bundle|[^/]+\.bundle)\.json$/i.test(basename(path))
+   const path=await resolveLocalPolicyPath(localPath(input.manifestPath??input.directoryPath??input.filePath,exec)),isBundle=localPolicyFileKind(path)==='bundle'
    const declared=input.identity!==undefined||input.modelId?identity(input):undefined
    let manifest,localSource:LocalPolicySource|undefined,bundlePath=isBundle?path:undefined
    if(!isBundle){const selected=await resolveLocalPolicySource(path,declared);localSource=selected.source;manifest=selected.manifest
-    if(localSource.identity&&localSource.prepareFrom==='weights'&&input.kind!=='vla'){await adoptLocalG1Policy(root(),path);return {status:'LOCAL_WEIGHTS_ADOPTED',identity:localSource.identity,localSource}}
-    if(localSource.prepareFrom!=='bundle'||!manifest)return operations.policy_load_state!.execute({...input,...localSource.identity?{identity:localSource.identity}:{},filePath:path,manifestPath:undefined},exec)
+    if(localSource.identity?.provider==='github'&&localSource.prepareFrom==='weights'&&input.kind!=='vla'){await adoptLocalG1Policy(root(),path);const cached=policyDirectory(root(),'github',localSource.identity.modelId,localSource.identity.revision!),localEntry=await recordLocalPolicyEntry(cached,localSource.selectedRelativePath!,path,localSource);return {status:'LOCAL_WEIGHTS_ADOPTED',identity:localSource.identity,localSource:{...localSource,missingLicense:localEntry.missingLicense},localEntry,filePath:localEntry.filePath}}
+    if(localSource.prepareFrom!=='bundle'||!manifest){const localEntry=await registerLocalPolicyWeights(root(),path,exec.signal,localSource),{identity:_,provider:_provider,modelId:_modelId,revision:_revision,...context}=input;return {...await operations.policy_load_state!.execute({...context,...localSource.identity?{identity:localSource.identity}:{},filePath:localEntry.filePath,manifestPath:undefined},exec),localEntry,filePath:localEntry.filePath}}
     bundlePath=localSource.bundlePath
    }
-   manifest=robotDownloadManifest(manifest??JSON.parse(await readFile(bundlePath!,'utf8')))
+   manifest=robotDownloadManifest(manifest??await readLocalPolicyBundle(bundlePath!),{localRegistration:true})
    const selected={provider:manifest.source.provider,modelId:manifest.source.modelId,revision:manifest.source.resolvedRevision}
    if(declared&&(declared.provider!==selected.provider||declared.modelId!==selected.modelId||declared.revision!==selected.revision))throw Error('POLICY_LOCAL_PACKAGE_SOURCE_MISMATCH: bundle与所选来源不一致')
+   await verifyLocalPolicyBundle(dirname(bundlePath!),manifest)
+   const registered=IMPLEMENTED_POLICY_ADAPTERS.find(pin=>pin.id===manifest.adapter?.id),entryPath=registered?.requires.files.find(path=>localPolicyFileKind(path)==='weights')??manifest.files.find(f=>localPolicyFileKind(f.path)==='weights')?.path
+   if(!entryPath)throw Error('POLICY_DEPENDENCY_MISSING: bundle 没有支持的策略权重入口')
    const checks=await verifyRegisteredPolicyFiles(dirname(bundlePath!),selected)
    if(checks.some(c=>!c.valid))throw Error('POLICY_LOCAL_PACKAGE_SOURCE_MISMATCH: 固定来源必需件缺失或字节不符 '+checks.filter(c=>!c.valid).map(c=>c.path).join('、'))
+   if(manifest.adapter?.id===G1_23_75_ID&&input.kind!=='vla'){
+    const weights=manifest.files.find(f=>f.path==='deployment/policy.pt')
+    if(!weights)throw Error('POLICY_DEPENDENCY_MISSING: bundle 缺 deployment/policy.pt')
+    const weightsPath=join(dirname(bundlePath!),'deployment/policy.pt'),resolved=await resolveLocalPolicySource(weightsPath,selected)
+    await adoptLocalG1Policy(root(),weightsPath)
+    localSource=resolved.source
+    const localEntry=await recordLocalPolicyEntry(policyDirectory(root(),'github',selected.modelId,selected.revision),'deployment/policy.pt',bundlePath!,localSource)
+    return {status:'LOCAL_WEIGHTS_ADOPTED',identity:selected,localSource,localEntry,filePath:localEntry.filePath}
+   }
    const result=await installRobotDownload({manifest,endpoint:"http://127.0.0.1/local-only",modelId:manifest.packId,dataDirectory:root(),signal:exec.signal,localFiles:new Map(manifest.files.map(f=>[f.path,join(dirname(bundlePath!),f.path)]))})
    localSource??={status:'registered-package',identity:selected,adapterId:manifest.adapter?.id,packageRoot:dirname(bundlePath!),bundlePath,sourceBytesVerified:checks.length>0&&checks.every(c=>c.valid),prepareFrom:'cache',bundleDownloadReady:manifest.downloadReady,missingLicense:manifest.missingLicense??[]}
    // 完整包已安装后，准备读既有缓存，不再把原始裸filePath送成weightsPath。
-   return {...result,identity:selected,localSource:{...localSource,prepareFrom:'cache' as const}}
+   const cacheSource={...localSource,prepareFrom:'cache' as const}
+   const localEntry=await recordLocalPolicyEntry(result.root,entryPath,bundlePath!,cacheSource)
+   return {...result,identity:selected,localSource:cacheSource,localEntry,filePath:localEntry.filePath}
   }catch(error){return blocked(error)}}},
   policy_download_bundle:{description:"Fetch a specific model from the Host-configured unified robot-downloads endpoint. The default is a complete bundle; explicit pieces:[\"asset\"] fetches only the body dependency closure whose license was verified, returning modelPath for Scene/Resource registration. Policy licensing/runtime dependencies remain separate. The model cannot change authenticated endpoints. Return BLOCKED/original code and an exact web_fetch at the first error; do not retry the entire repository. Installing bytes is not adaptation or motion success.",execute:async(input,exec)=>{try{productServices();return await installRobotDownload({endpoint:config.robotDownloadEndpoint??"https://vorynel.com/lyaup-unified/v1/robot-downloads",fetcher:config.robotDownloadFetcher,modelId:input.modelId,token:packBearer(),dataDirectory:root(),signal:exec.signal,...input.pieces!==undefined?{pieces:input.pieces}:{}})}catch(error){return blocked(error)}}},
   policy_load_state:{description:"Read the four policy/VLA state categories and all missing requirements. Distinguish the current Scene body, complete bundle bytes, weights, implemented code/prepared cache, instance matching, ready/running/paused world, and behavior not established by those states. Native joints require no policy. Check only explicit paths/caches and the actual current world; do not search or download automatically.",execute:async(input,exec)=>{
@@ -283,7 +300,7 @@ export function apply(ctx:Context,config:Config={}){
    try{if(input.manifest)manifest=robotDownloadManifest(input.manifest);if(input.manifestPath){const path=localPath(input.manifestPath,exec);if(!/^(?:bundle|[^/]+\.bundle)\.json$/i.test(basename(path)))throw new Error("ROBOT_BUNDLE_FILE_REQUIRED: 请选择正规bundle.json");manifest=robotDownloadManifest(JSON.parse(await readFile(path,"utf8")))}}
    catch(error){const refusal=blocked(error);return {category:"missing_files_or_runtime",executionKind:"unsupported_vla",ready:false,runtimeChecked:false,dimensions:{},missing:[{code:refusal.code,field:input.manifestPath?'manifestPath':'manifest',detail:refusal.message,nextAction:"local_load"}],nextActions:[{kind:'local_load',label:'一次补齐已列出的完整闭包或许可；不要重复搜索已选本体'}],worldBound:false,policyPrepared:false,robotWalkingVerified:false}}
    let selected=input.identity!==undefined||input.modelId?identity(input):undefined,localSource:LocalPolicySource|undefined
-   if(filePath){try{const resolved=await resolveLocalPolicySource(filePath,selected);localSource=resolved.source;if(!selected&&localSource.identity)selected=identity({identity:localSource.identity})}catch(error){return {category:'model_incompatible',executionKind:'unsupported_vla',ready:false,runtimeChecked:false,dimensions:{},missing:[{code:'POLICY_LOCAL_SOURCE_MISMATCH',field:'filePath',detail:error instanceof Error?error.message:String(error),nextAction:'local_load'}],nextActions:[],worldBound:false,policyPrepared:false,robotWalkingVerified:false}}}
+   if(filePath){try{const resolved=await resolveLocalPolicySource(filePath,selected);localSource=resolved.source;if(localSource.status==='unidentified')selected=undefined;else if(!selected&&localSource.identity)selected=identity({identity:localSource.identity})}catch(error){return {category:'model_incompatible',executionKind:'unsupported_vla',ready:false,runtimeChecked:false,dimensions:{},missing:[{code:'POLICY_LOCAL_SOURCE_MISMATCH',field:'filePath',detail:error instanceof Error?error.message:String(error),nextAction:'local_load'}],nextActions:[],worldBound:false,policyPrepared:false,robotWalkingVerified:false}}}
    const binding=input.binding??(input.sceneId&&input.entityId?{sceneId:input.sceneId,entityId:input.entityId,worldId:input.worldId,expectedGeneration:input.expectedGeneration,...selected??{provider:"github",modelId:"native/control"}}:undefined)
    let currentJointNames:string[]|undefined
    if(binding){const bound=sim?await resolvePolicyWorldBinding(binding,sim):binding;if(bound.worldId&&sim)try{const w=(await sim.listWorlds()).find((w:any)=>w.worldId===bound.worldId&&w.sceneId===binding.sceneId);if(w)currentJointNames=(await sim.describe(bound.worldId,bound.entityId)).controlledJointNames}catch{};if(!currentJointNames&&scene)try{const e=(await scene.inspect(binding.sceneId)).entities.find((e:any)=>e.entityId===binding.entityId);currentJointNames=e?.components?.articulation?.jointNames??e?.components?.mujoco?.jointNames}catch{}}

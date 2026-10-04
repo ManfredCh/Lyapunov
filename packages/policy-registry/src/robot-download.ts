@@ -54,11 +54,12 @@ function fileSource(f:RobotDownloadFile,m:RobotDownloadManifest):{revision:strin
   return {revision,url:f.url??raw}
 }
 
-export function robotDownloadManifest(value:unknown,options:{assetOnly?:boolean}={}):RobotDownloadManifest {
+export function robotDownloadManifest(value:unknown,options:{assetOnly?:boolean;localRegistration?:boolean}={}):RobotDownloadManifest {
   let m=value as RobotDownloadManifest
   if(!m||!['g1-policy-download/v1','robot-download/v1'].includes(m.schema))fail('ROBOT_DOWNLOAD_PROTOCOL_UNSUPPORTED','下载清单协议未登记')
   const ready=options.assetOnly?m.pieceReadiness?.asset:m
-  if(ready?.downloadReady!==true||options.assetOnly&&(ready.missingFiles?.length||ready.missingLicense?.length)){const missing={missingFiles:Array.isArray(ready?.missingFiles)?ready.missingFiles.filter(p=>typeof p==='string'):[],missingLicense:Array.isArray(ready?.missingLicense)?ready.missingLicense.filter(p=>typeof p==='string'):[]};throw new RobotDownloadFailure('ROBOT_DOWNLOAD_NOT_READY',`该具体型号${options.assetOnly?'本体资产':'完整包'}尚无已核下载闭包${missing.missingFiles.length?'；缺文件：'+missing.missingFiles.join('、'):''}${missing.missingLicense.length?'；许可未核：'+missing.missingLicense.join('、')+'，补齐许可前不取件':''}`,m.fallback,missing)}
+  // 明确本地登记只读来源与格式；完整包的联网分发仍要求 downloadReady/许可原规则。
+  if(!options.localRegistration&&(ready?.downloadReady!==true||options.assetOnly&&(ready.missingFiles?.length||ready.missingLicense?.length))){const missing={missingFiles:Array.isArray(ready?.missingFiles)?ready.missingFiles.filter(p=>typeof p==='string'):[],missingLicense:Array.isArray(ready?.missingLicense)?ready.missingLicense.filter(p=>typeof p==='string'):[]};throw new RobotDownloadFailure('ROBOT_DOWNLOAD_NOT_READY',`该具体型号${options.assetOnly?'本体资产':'完整包'}尚无已核下载闭包${missing.missingFiles.length?'；缺文件：'+missing.missingFiles.join('、'):''}${missing.missingLicense.length?'；许可未核：'+missing.missingLicense.join('、')+'，补齐许可前不取件':''}`,m.fallback,missing)}
   if(m.serverSideInference!==false)fail('ROBOT_DOWNLOAD_LOCAL_INFERENCE_REQUIRED','此接口只分发文件，本地推理')
   if(m.source?.provider!=='github'||!/^[\w.-]+\/[\w.-]+$/.test(m.source.modelId)||!/^[a-f0-9]{40}$/.test(m.source.resolvedRevision))fail('ROBOT_DOWNLOAD_SOURCE_INVALID','需要固定公开来源与完整 revision')
   const expected=registeredRobotDownloads().find(row=>row.downloadModelId===m.packId)

@@ -61,7 +61,7 @@ export async function policyLoadState(config:{dataDirectory:string}&PolicyRuntim
  if(input.filePath){const fact=await inspectLocalPolicyFile(input.filePath)
   if(!fact.valid){add(fact.code!,'filePath',fact.detail!,'local_load');return out}
   evidence.weightsPresent=true
-  if(!input.identity&&!input.manifest){out.category='weights_need_adapter';add('POLICY_ADAPTER_REQUIRED','adapter',input.kind==='vla'?'VLA文件格式头存在，仍缺已登记的图像/状态观测、动作与本体映射；不执行未知权重':'文件格式头存在，仍缺已登记来源、观测与动作映射；维度/图未验证，不执行未知权重','prepare');out.nextActions=[{kind:'prepare',label:'提供正规bundle/已注册适配器与当前机器人映射'}];return out}
+  if(!input.identity&&!input.manifest){out.category='weights_need_adapter';add('POLICY_ADAPTER_REQUIRED','adapter',input.kind==='vla'?'VLA文件格式头存在，仍缺已登记的图像/状态观测、动作与本体映射；不执行未知权重':'文件格式头存在，仍缺已登记来源、观测与动作映射；维度/图未验证，不执行未知权重','prepare');add('POLICY_SOURCE_UNVERIFIED','source','请提供固定来源与正规 bundle.json；文件名不能证明模型身份','local_load');add('POLICY_OBSERVATION_MAPPING_REQUIRED','observations','缺观测维度、顺序、单位与当前本体状态映射','prepare');add('POLICY_ACTION_MAPPING_REQUIRED','actions','缺动作维度、顺序、单位与关节控制映射','prepare');out.nextActions=[{kind:'local_load',label:'选择含固定来源及观测/动作接口的 bundle.json；登记的未知权重不会自动应用'}];return out}
  }
  if(!input.nativeControl&&!input.identity&&!input.manifest){add('POLICY_SOURCE_MISSING','source','尚未选择本地文件或固定来源bundle','local_load');return out}
  let runtime:ReadonlySet<string>|undefined=ports.runtimeModules
@@ -76,7 +76,8 @@ export async function policyLoadState(config:{dataDirectory:string}&PolicyRuntim
   else add('WORLD_BINDING_UNCHECKED','worldId','尚未读到真实世界绑定；不要为了关节控制下载policy','native_controls')
   out.runtimeChecked=out.worldBound;out.ready=out.missing.length===0;evidence.runtimeReady=out.ready;evidence.worldMatched=out.ready;out.nextActions=[{kind:'native_controls',label:'使用机器人原生关节/夹爪控制；无需训练policy，腿式行走另需匹配策略'}];return out
  }
- if(input.manifest){const p=robotDownloadPreflight(input.manifest,{runtimeModules:runtime,currentJointNames:input.currentJointNames});out.modelId=p.modelId;if(input.manifest.adapter){out.dimensions.requiredJointCount=input.manifest.adapter.controlledJointCount;out.dimensions.action=input.manifest.adapter.controlledJointCount}
+ if(!input.binding)add('POLICY_ROBOT_SELECTION_REQUIRED','entityId','策略已登记；选择当前场景的真实机器人后核对本体、观测/动作与世界兼容性','match')
+ if(input.manifest){const p=robotDownloadPreflight(input.manifest,{runtimeModules:runtime,currentJointNames:input.currentJointNames});out.modelId=p.modelId;if(input.manifest.adapter){out.dimensions.requiredJointCount=input.manifest.adapter.controlledJointCount;out.dimensions.action=input.manifest.adapter.actionDim??input.manifest.adapter.controlledJointCount;out.dimensions.observation=input.manifest.adapter.observationDim}
   for(const path of p.missingFiles)add('POLICY_DEPENDENCY_MISSING',path,'完整清单缺文件，不能逐件试错当成准备成功','web_fetch')
   for(const name of p.missingRuntime)add('RUNTIME_MISSING',name,'本地运行依赖未满足，不继续搜索机器人','install_runtime')
   if(p.modelMismatch){out.category='model_incompatible';add('ROBOT_MODEL_MISMATCH','jointNames','当前本体与策略受控关节不一致，不自动替换模型','local_load');return out}

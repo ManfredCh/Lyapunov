@@ -12,6 +12,7 @@ test('明确本地权重存在但无来源映射：待适配，不假执行',asy
  const root=await mkdtemp(join(tmpdir(),'load-state-'));try{const path=join(root,'own.safetensors');const header=Buffer.from(JSON.stringify({value:{dtype:'F32',shape:[1],data_offsets:[0,4]}})),size=Buffer.alloc(8);size.writeBigUInt64LE(BigInt(header.length));await writeFile(path,Buffer.concat([size,header,Buffer.alloc(4)]))
   const s=await policyLoadState({dataDirectory:root,pythonPath:'/not-used'},{filePath:path},{runtimeModules})
   expect(s.category).toBe('weights_need_adapter');expect(s.ready).toBe(false);expect(s.missing[0]!.code).toBe('POLICY_ADAPTER_REQUIRED')
+  expect(s.missing.map(item=>item.field)).toEqual(['adapter','source','observations','actions']);expect(s.policyPrepared).toBe(false)
  }finally{await rm(root,{recursive:true,force:true})}
 })
 test('缺文件一次反馈，状态检查不下载或清空用户目录',async()=>{
