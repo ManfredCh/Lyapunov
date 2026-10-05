@@ -2,6 +2,8 @@
 
 终端复用 DSH 原生 Session、Commands、Jobs、审批和权限。它不建立第二套 Agent、会话或历史数据库。
 
+RC2 的预设类型与远端方法由 `@deepseek-ai/dsh-agent-preset-registry` 提供，继续使用原生 `agentPresets` 服务与 Session 选择记录；不引用退役的 `dsh-agent-presets` 包。
+
 ## 启动
 
 源码开发入口：

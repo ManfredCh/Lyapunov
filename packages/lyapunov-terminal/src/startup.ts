@@ -5,7 +5,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { ModelSelection, SessionSummary } from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { highestReasoningEffort } from './format.ts'
 
