@@ -1,6 +1,6 @@
 {
-  "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-  "commit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+  "repository": "https://github.com/ManfredCh/deepseek-harness.git",
+  "commit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
   "version": "0.2.0-rc.2",
   "directory": ".upstream/deepseek-harness-20260911-candidate",
   "registryStatus": "Alpha5：按用户stable优先/无stable则最新RC规则固定官方0.2.0-rc.2。旧产品补丁逐项语义迁移；以新的完整性记录和实际测试签收，不使用Alpha，也不复用Alpha4验收声明。",
@@ -8,7 +8,7 @@
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
     "commit": "639ed015397290b3745d163aafe02ffee4aa3f84",
     "tag": "dsh-v0.2.0-rc.2",
-    "patchedBranch": "lyapunov-alpha5-rc2"
+    "patchedBranch": "lyapunov-patched-0.2.0-rc.2"
   },
   "productPackageManager": "bun@1.3.13",
   "upstreamPackageManager": "pnpm@11.7.0",
@@ -434,8 +434,8 @@
   },
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity-rc2.json",
-    "baseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
-    "sha256": "ee6b87570f0593a91a41b62431cfb95d1072e01303af061b3d6a42b6c6e11887"
+    "baseCommit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
+    "sha256": "77c63dce19eebd309b104e754cc27ae137598a67ca4f665532706803b8bcaf2b"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -472,7 +472,20 @@
   },
   "sdkProductPatch": {
     "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
+    "baseCommit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
+    "sha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1",
+    "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "includedInFork": true
+  },
+  "forkSnapshot": {
+    "repository": "https://github.com/ManfredCh/deepseek-harness.git",
+    "branch": "lyapunov-patched-0.2.0-rc.2",
+    "tag": "lyapunov-dsh-v0.2.0-rc.2-20261005",
+    "commit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
+    "tree": "741263d144884ef4fa9483a785c36f97917895ae",
     "baseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
-    "sha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1"
+    "affectedPaths": 267,
+    "patchSha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1",
+    "scope": "固定自有fork完整集成快照；官方RC2祖先与追溯补丁保留"
   }
 }

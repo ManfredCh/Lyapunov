@@ -3,7 +3,8 @@ import {createHash} from 'node:crypto'
 import {join,relative} from 'node:path'
 import {spawnSync} from 'node:child_process'
 
-export const SDK_BASE_COMMIT='639ed015397290b3745d163aafe02ffee4aa3f84'
+/** 自有fork的完整已验证快照；官方RC2祖先另由版本锁保留。 */
+export const SDK_BASE_COMMIT='6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a'
 export const LEGACY_SDK_BASE_COMMIT='7c3f05885033aa3aed74904d59a94692d12a47f7'
 export const RC2_PRODUCT_PATCH='script/patches/dsh-v0.2.0-rc.2-product.patch'
 export const RC2_INTEGRITY_MANIFEST='script/sdk-source-integrity-rc2.json'

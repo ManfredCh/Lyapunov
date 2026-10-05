@@ -43,19 +43,20 @@ jobs:
           test -x "$bun_path"
           echo "TESTCI_BUN=$bun_path" >> "$GITHUB_ENV"
 
-      # 固定官方RC2；完整历史对象仅供隔离7c3源码fixture，不安装旧底座。
-      - name: Seed exact official RC2 checkout and historical source objects
+      # 固定自有fork完整RC2快照；保留官方祖先与隔离7c3源码fixture，不安装旧底座。
+      - name: Seed exact owned RC2 fork snapshot and historical source objects
         run: |
           set -eu
           dir=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).directory")
           commit=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).commit")
           repo=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).repository")
-          test "$repo" = "https://github.com/deepseek-ai/deepseek-harness.git"
-          test "$commit" = "639ed015397290b3745d163aafe02ffee4aa3f84"
+          test "$repo" = "https://github.com/ManfredCh/deepseek-harness.git"
+          test "$commit" = "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a"
           node --input-type=module -e "import {preflightUpstreamPatches} from './script/upstream-patches.mjs'; preflightUpstreamPatches(process.cwd())"
           mkdir -p "$(dirname "$dir")"
           git clone --no-checkout "$repo" "$dir"
           git -C "$dir" checkout --detach "$commit"
+          git -C "$dir" merge-base --is-ancestor '639ed015397290b3745d163aafe02ffee4aa3f84' "$commit"
           git -C "$dir" cat-file -e '7c3f05885033aa3aed74904d59a94692d12a47f7^{commit}'
 
       - name: Restore pnpm store cache
