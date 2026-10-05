@@ -2374,7 +2374,8 @@
       "declaredRunner": "node:test",
       "markers": [],
       "decision": "include",
-      "reason": "只解析本地补丁并验证外发投影补丁注册/调用点；不启动 Host、不修改 upstream、不联网"
+      "reason": "在固定Git对象的本地隔离副本验证完整源码、补丁组合和拒绝负对照；不启动Host、不修改实际SDK或用户数据、不联网。per-entry 超时300000ms：RC2约14134个源码文件，干净runner的反复clone／字节验签在120000ms上限终止，已有断言通过但入口未完。仅延长此离线入口的有界等待，不改断言、负对照、真实Provider预算或其他入口。",
+      "timeoutMs": 300000
     },
     {
       "path": "script/verify-asset-layout.test.ts",
