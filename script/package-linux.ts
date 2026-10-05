@@ -12,7 +12,7 @@ import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRunti
 // 纯逻辑在 distribution/licenses/mamba-license.ts，这里只注入有界取件器并 fail-closed。
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
 import {checkedRuntimeManifest,checkedReleaseManifest,releaseManifestTsv,type LinuxReleaseManifest} from '../distribution/linux/release-manifest.ts'
-import {prepareLinuxNativeSystem} from './native-system.ts'
+import {prepareLinuxNativeSystem,LINUX_NATIVE_LOADER_PACKAGES,verifyLinuxNativeLoaders} from './native-system.ts'
 
 const root=resolve(import.meta.dirname,'..')
 const {values}=parseArgs({options:{output:{type:'string',default:join(root,'.runtime/releases')},node:{type:'string',default:process.env.LYAPUNOV_PACKAGE_NODE??'node'},micromamba:{type:'string',default:join(root,'.runtime/bin/micromamba')},'check-source':{type:'boolean',default:false},root:{type:'string'},'release-id':{type:'string'},'mujoco-runtime-archive':{type:'string'},'mujoco-runtime-manifest':{type:'string'}}})
@@ -210,6 +210,13 @@ for(const item of (await readdir(join(root,'packages'))).sort()){
   const node=await requirePackage(dir);rootLinks.set(node.manifest.name,node)
 }
 for(const name of Object.keys(product.dependencies??{}))rootLinks.set(name,await requirePackage(await locate(name,root)))
+// 原生入口委托共享加载器执行 require；预编译包须在两者共同的发行根可解析。
+// 不改第三方模块字节，不使用 --preserve-symlinks，也不依赖开发机的 pnpm hoist。
+for(const name of ['node-addon-require-builtin',...LINUX_NATIVE_LOADER_PACKAGES]){
+  const matches=[...nodes.values()].filter(node=>node.manifest.name===name)
+  if(matches.length!==1)throw new Error(`发行原生加载依赖必须唯一：${name}（${matches.length}）`)
+  rootLinks.set(name,matches[0]!)
+}
 console.log(JSON.stringify({phase:'dependency-closure',packages:nodes.size,missingOptional:missingOptional.length,skippedSelfLinksInClosure:skippedSelfLinksInClosure.length,stage}))
 
 async function copyPayload(source:string,destination:string){
@@ -406,6 +413,7 @@ provenance:{head:provenanceAtWrite.head,changed:provenanceAtWrite.changed?.lengt
 const archive=join(publicOutput,`lyapunov-linux-x64-${releaseId}.tar.gz`),pendingArchive=archive+'.partial-'+stamp
 const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory)
 if(nativeProblems.length)throw new Error(nativeProblems.join('；'))
+verifyLinuxNativeLoaders(stage,join(stage,'runtime/node/bin/node'))
 const tar=spawnSync('tar',['-czf',pendingArchive,'-C',dirname(stage),name],{stdio:'inherit'})
 if(tar.status!==0)throw new Error('tar 打包失败')
 await rename(pendingArchive,archive)

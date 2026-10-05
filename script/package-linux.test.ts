@@ -12,17 +12,45 @@
  * （R3 预修产物 → 冲突；R4 修复产物 → 启动成功且链接切到新安装；用户自定义链接仍被拒）。
  */
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { prepareLinuxNativeSystem } from './native-system.ts'
+import { prepareLinuxNativeSystem, verifyLinuxNativeLoaders } from './native-system.ts'
 
 const root = join(import.meta.dirname, '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
 const productLink = readFileSync(join(root, 'script/product-link.ts'), 'utf8')
 
 describe('发行原生构建与归档接线', () => {
+  test('共享加载器不能借入口包的局部平台链接；发行根链接恢复正常realpath解析', () => {
+    const stage=mkdtempSync(join(tmpdir(),'lyapunov-native-loader-'))
+    const platform='node-addon-require-builtin-linux-x64-gnu'
+    const put=(path:string,text:string)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,text)}
+    const base=join(stage,'.modules/base/node_modules/node-addon-require-builtin')
+    const shared=join(stage,'.modules/shared/node_modules/node-addon-native-custom-loader')
+    const binary=join(stage,'.modules/platform/node_modules',platform)
+    const link=(name:string,target:string)=>{mkdirSync(dirname(name),{recursive:true});symlinkSync(target,name,'dir')}
+    try{
+      const nodeProbe=spawnSync('node',['-p','process.execPath'],{encoding:'utf8'})
+      if(nodeProbe.status!==0)throw new Error('原生加载器验收需要 Node')
+      const node=nodeProbe.stdout.trim()
+      put(join(stage,'package.json'),'{}')
+      for(const [dir,name,body] of [
+        [base,'node-addon-require-builtin',"module.exports=require('node-addon-native-custom-loader')"],
+        [shared,'node-addon-native-custom-loader',`module.exports={getBindingInfo(){return require('${platform}')}}`],
+        [binary,platform,"module.exports={backend:'fixture'}"],
+      ]){put(join(dir!,'package.json'),JSON.stringify({name,main:'index.cjs'}));put(join(dir!,'index.cjs'),body!)}
+      link(join(stage,'node_modules/node-addon-require-builtin'),base)
+      link(join(dirname(base),'node-addon-native-custom-loader'),shared)
+      link(join(dirname(base),platform),binary)
+      expect(()=>verifyLinuxNativeLoaders(stage,node)).toThrow('发行原生加载器不可用')
+      link(join(stage,'node_modules',platform),binary)
+      expect(()=>verifyLinuxNativeLoaders(stage,node)).not.toThrow()
+      rmSync(join(binary,'index.cjs'))
+      expect(()=>verifyLinuxNativeLoaders(stage,node)).toThrow('发行原生加载器不可用')
+    }finally{rmSync(stage,{recursive:true,force:true})}
+  })
   test('原生构建在依赖收闭前执行，真实载荷缺件检查紧邻tar之前', () => {
     const prepareAt = packager.indexOf('const nodeRuntime=prepareLinuxNativeSystem(upstream,values.node!)')
     const closureAt = packager.indexOf('const nodes=new Map<string,PackageNode>()')

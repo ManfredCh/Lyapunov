@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "baseCommit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
+  "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "805fc7efd2bee96f5043058a64b0a80dd136a9754f2504bc4eeb016d241628ca": {
+    "762f4cf323593f7b08cf91f5bd66c6dfca0636842b06b3c666024b3c73d7e69f": {
       "affectedPaths": [
         "apps/cli/src/profile-boot.ts",
         "apps/cli/tests/resolved-profile-boot.spec.ts",
@@ -273,9 +273,9 @@
         "pnpm-lock.yaml"
       ],
       "stageHashes": [
-        "21c0260353673d3c64e23bd2a16273bc17b5683028d38f080fd43a8af4eecdd9"
+        "c444c9651c129ad682ab969342d10528d09f1dc18551545e9412354ba6e7bef4"
       ],
-      "finalHash": "21c0260353673d3c64e23bd2a16273bc17b5683028d38f080fd43a8af4eecdd9",
+      "finalHash": "c444c9651c129ad682ab969342d10528d09f1dc18551545e9412354ba6e7bef4",
       "finalPostimages": {
         "apps/cli/src/profile-boot.ts": "0564c534ea5c504e8f4781eacb4dd7c6d0317b498d32d635ed3a6dd68d840bb9",
         "apps/cli/tests/resolved-profile-boot.spec.ts": "5eb40b2c596b3a75a66bc0a6a8fe753aef6054dc20cb090e5ec241c392e2cf6c",
@@ -527,7 +527,7 @@
         "packages/session/session-format-v3-to-v4/src/migration.ts": "1274dfe06b82e690331eca6a585fa83d6082a9835ed7a69902582ab8c17b1be0",
         "packages/session/session-format-v3-to-v4/src/relationships.ts": "7ebe54cf533e5e8148320d003f2fe1eb83f6490f8c43294b7632221a790d9647",
         "packages/session/session-format-v3-to-v4/src/validation.ts": "588bdc45cb4bee3229c62a3201ab6377685b6488a80abfdd62b6691412db1857",
-        "packages/session/session-format-v3-to-v4/tests/product-history.spec.ts": "de259a020cb7909895bfde9eb3d1d85686d3d906b5bc7c3a3b29281d6e340111",
+        "packages/session/session-format-v3-to-v4/tests/product-history.spec.ts": "befe89ef7812e8d1e4cc7d90ec301727f8ace83ecc27a0a493fee41d219e0a9c",
         "packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts": "5b28b24dee6106187d79c1292bf17f380df3c24927219b000925c98446c14989",
         "packages/session/session-projection/README.zh.md": "5d3bba2909ad05d82d2c935605ad3fc08b217e3548b653e7a424573f5a911140",
         "packages/session/session-projection/package.json": "00e2ed83421fe35af6a474b82e6e3d613476127e6b666294f8fc3806665370db",

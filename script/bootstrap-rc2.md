@@ -1,6 +1,6 @@
 **RC2 固定源码重放与签名生成**
 
-当前版本锁固定自有 fork `https://github.com/ManfredCh/deepseek-harness.git` 的完整集成提交 `6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a`，保留分支 `lyapunov-patched-0.2.0-rc.2` 与标签 `lyapunov-dsh-v0.2.0-rc.2-20261005`。官方 `dsh-v0.2.0-rc.2` / `639ed015397290b3745d163aafe02ffee4aa3f84` 是其可验证祖先，记录在 upstreamBase。bootstrap 先验同代 artifact，再从自有 fork clone/install/build；267 个已验证差异已经进入该提交，冷 checkout 直接验证完整 final，不重复应用。原固定补丁保留为集成差异的追溯材料，sdkProductPatch.includedInFork 明确这一点。旧 7c3 的 53 项与原完整性记录只留在显式 legacy 入口。
+当前版本锁固定自有 fork `https://github.com/ManfredCh/deepseek-harness.git` 的完整集成提交 `54312dc5a8c4a63b60b3b92f51109f7bd1c1e852`，保留分支 `lyapunov-patched-0.2.0-rc.2` 与标签 `lyapunov-dsh-v0.2.0-rc.2-20261005-ci1`。官方 `dsh-v0.2.0-rc.2` / `639ed015397290b3745d163aafe02ffee4aa3f84` 是其可验证祖先，记录在 upstreamBase。bootstrap 先验同代 artifact，再从自有 fork clone/install/build；267 个集成文件已经进入该提交，包含干净 checkout 的历史文件夹具修正，冷 checkout 直接验证完整 final，不重复应用。原固定补丁保留为集成差异的追溯材料，sdkProductPatch.includedInFork 明确这一点。旧 7c3 的 53 项与原完整性记录只留在显式 legacy 入口。
 
 签名文件不是“遇到冲突就继续”的凭据。冷 checkout 必须满足完整自有 fork 快照字节、固定追溯 patch 字节与 registry 签名、全部 affected 文件的精确 final，以及没有未注册的新 source。当前已包含差异的 fork 快照不接受官方未集成的中间态。缺件、未知尾字节、混合 hunk、私有 ignore 隐藏新增、错误 base/HEAD、无签名或被修改的 artifact 都拒绝；不使用三路 apply，不删除完整性校验。
 
@@ -26,7 +26,7 @@ node script/generate-rc2-sdk-patch.mjs --sdk /绝对路径/固定RC2工作区 --
 node --test --test-name-pattern=RC2 script/upstream-patches.test.mjs
 ~~~
 
-旧 postimage 与旧补丁组合测试默认自包含：legacy-sdk-fixture 从 bootstrap 已取得的官方 Git 对象，在系统临时目录 clone 到固定 7c3，重放仓库已跟踪的 53 项，再校验原完整签名。不安装依赖、不构建、不启动旧产品；进程结束清理。当前上游为 blob:none 时，隔离仓按固定原 tree/blob 从官方补齐，checkout 即使退出 0 但报 error 也拒绝，不能用当前 RC2 工作文件代替旧 blob。显式旧 fixture 环境变量仍可用于诊断，但公开 CI 不依赖它。
+旧 postimage 与旧补丁组合测试默认自包含：legacy-sdk-fixture 从 bootstrap 已取得的自有 fork 中保留的 Git 对象，在系统临时目录 clone 到固定 7c3，重放仓库已跟踪的 53 项，再校验原完整签名。不安装依赖、不构建、不启动旧产品；进程结束清理。当前上游为 blob:none 时，隔离仓按固定原 tree/blob 从自有 fork 补齐，checkout 即使退出 0 但报 error 也拒绝，不能用当前 RC2 工作文件代替旧 blob。显式旧 fixture 环境变量仍可用于诊断，但公开 CI 不依赖它。
 
 CI seed 直接读取自有 fork 的精确提交并检验官方 RC2 祖先，不靠可移动分支或上游继续保留版本。当前源码编译/outbound 行为使用当前真实源码与本 SDK 声明，原七条 page/follow/live/reconnect/raw/处置拒绝断言保留。正式快照必须从真实锁签名在干净 checkout 核完整 final 与幂等；合成生成器 fixture 不能替代它。
 
@@ -37,3 +37,5 @@ bun test --no-env-file --tsconfig-override=/绝对产品根/tsconfig.json script
 ~~~
 
 缺旧Git对象、缺当前SDK hook/声明、缺当前正式bundle签名均失败，不skip、不降低既有test-ci清单或CI门槛。主控统一重建SDK Host后再签真实RC2，安装/测试程序不签用户数据或生产。
+
+发行包将固定 SDK 的 Linux x64 glibc 预编译依赖放在入口模块与共享加载器均能解析的发行根。归档前用随包 Node 执行原生模块的正常加载入口；缺件、只有局部链接或二进制不能加载均阻断，不依赖开发机的 pnpm hoist，也不添加 Node 的 preserve-symlinks 启动参数。

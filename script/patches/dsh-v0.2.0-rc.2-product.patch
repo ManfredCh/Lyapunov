@@ -13389,10 +13389,10 @@ index 8c0e74d61de7c94a2cc37131912c96fe3288b544..ca4134174e73cb4104478fca3a4766ed
      assertV4RetiredSyntax(event)
 diff --git a/packages/session/session-format-v3-to-v4/tests/product-history.spec.ts b/packages/session/session-format-v3-to-v4/tests/product-history.spec.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17fbfac226
+index 0000000000000000000000000000000000000000..74307f6ef307b2fec24ff0da0eaeeb4a20b3e3db
 --- /dev/null
 +++ b/packages/session/session-format-v3-to-v4/tests/product-history.spec.ts
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,151 @@
 +import { describe, expect, it } from 'vitest'
 +import { Context } from '@deepseek-ai/cordis'
 +import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -13404,7 +13404,6 @@ index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17
 +import { assertProductHistoryEvent, remapProductHistoryReferences, restoreReleasedV3Artifact } from '@deepseek-ai/dsh-session-format-v2-to-v3'
 +import { RELEASED_V3_EVENT_TYPES } from '../src/index.ts'
 +import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-+import { generationLogPath } from '@deepseek-ai/dsh-session-persistence-jsonl/src/format.ts'
 +
 +const header = { type: 'session', version: 3, id: 'alpha4-product-fixture', createdAt: 1, isSeeded: false, delegationDepth: 0 }
 +const image = { type: 'image', attachment: { attachmentId: 'fixture-image', mediaType: 'image/png', bytes: 1, width: 1, height: 1 } }
@@ -13449,8 +13448,8 @@ index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17
 +    const root = await mkdtemp(join(tmpdir(), 'alpha4-product-history-'))
 +    const ctx = new Context(), id = SessionId(header.id)
 +    try {
-+      const source = generationLogPath(root, undefined, id, 3, 'none')
-+      const successor = generationLogPath(root, undefined, id, 4, 'none')
++      const source = join(root, '_no-cwd', header.id, 'session.v3.jsonl')
++      const successor = join(root, '_no-cwd', header.id, 'session.v4.jsonl')
 +      const bytes = Buffer.from([header, ...fixture()].map(value => JSON.stringify(value)).join('\n') + '\n')
 +      await mkdir(dirname(source), { recursive: true }); await writeFile(source, bytes)
 +      await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
@@ -13473,7 +13472,7 @@ index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17
 +    const root = await mkdtemp(join(tmpdir(), 'alpha4-product-refusal-'))
 +    const ctx = new Context(), id = SessionId(header.id)
 +    try {
-+      const source = generationLogPath(root, undefined, id, 3, 'none')
++      const source = join(root, '_no-cwd', header.id, 'session.v3.jsonl')
 +      const rows = [...fixture(), { type: 'lyapunov/not-listed', seq: 30, time: 31, data: {} }]
 +      const bytes = Buffer.from([header, ...rows].map(value => JSON.stringify(value)).join('\n') + '\n')
 +      await mkdir(dirname(source), { recursive: true }); await writeFile(source, bytes)
@@ -13518,7 +13517,9 @@ index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17
 +    const unknown = [...fixture(), { ...row('worktree/not-listed', {}), seq: 30, time: 31 }] as SessionFormatEvent[]
 +    expect(() => restore(unknown)).toThrow(/unknown event type.*worktree\/not-listed/)
 +    const target = restore(fixture())
-+    expect(() => restoreReleasedV3Artifact({ ...target, header: { ...target.header, version: 3 } }, new Set(RELEASED_V3_EVENT_TYPES))).toThrow()
++    expect(() => restoreReleasedV3Artifact(
++      { ...target, header: { ...target.header, version: 3 } }, new Set(RELEASED_V3_EVENT_TYPES),
++    )).toThrow()
 +  })
 +
 +  it.each([
@@ -13537,7 +13538,9 @@ index 0000000000000000000000000000000000000000..2b6c60abf1071846ed34d8167eec8a17
 +
 +  it('remaps -1 and null cursors without guessing missing earlier references', () => {
 +    const source = { type: 'worktree/history-operation', seq: 3, time: 1, ignorable: true, data: { version: 1, operationId: 'empty', action: 'undo', throughSeq: -1, restoreUserSeq: null, nextRedo: [{ throughSeq: -1, userSeq: 1, snapshot: null, paths: [] }], files: { mode: 'disabled', paths: [] } } } as SessionFormatEvent
-+    expect(remapProductHistoryReferences(source, 4, [0, 2, 3]).data).toMatchObject({ throughSeq: -1, restoreUserSeq: null, nextRedo: [{ throughSeq: -1, userSeq: 2 }] })
++    expect(remapProductHistoryReferences(source, 4, [0, 2, 3]).data).toMatchObject({
++      throughSeq: -1, restoreUserSeq: null, nextRedo: [{ throughSeq: -1, userSeq: 2 }],
++    })
 +    expect(() => remapProductHistoryReferences(source, 4, [0])).toThrow(/missing from the source prefix/)
 +  })
 +})

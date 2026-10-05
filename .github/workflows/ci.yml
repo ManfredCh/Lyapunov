@@ -51,7 +51,7 @@ jobs:
           commit=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).commit")
           repo=$(node -p "JSON.parse(require('fs').readFileSync('UPSTREAM_LOCK.json','utf8')).repository")
           test "$repo" = "https://github.com/ManfredCh/deepseek-harness.git"
-          test "$commit" = "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a"
+          test "$commit" = "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852"
           node --input-type=module -e "import {preflightUpstreamPatches} from './script/upstream-patches.mjs'; preflightUpstreamPatches(process.cwd())"
           mkdir -p "$(dirname "$dir")"
           git clone --no-checkout "$repo" "$dir"

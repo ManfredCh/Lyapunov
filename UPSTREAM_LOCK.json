@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/ManfredCh/deepseek-harness.git",
-  "commit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
+  "commit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "version": "0.2.0-rc.2",
   "directory": ".upstream/deepseek-harness-20260911-candidate",
   "registryStatus": "Alpha5：按用户stable优先/无stable则最新RC规则固定官方0.2.0-rc.2。旧产品补丁逐项语义迁移；以新的完整性记录和实际测试签收，不使用Alpha，也不复用Alpha4验收声明。",
@@ -434,8 +434,8 @@
   },
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity-rc2.json",
-    "baseCommit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
-    "sha256": "77c63dce19eebd309b104e754cc27ae137598a67ca4f665532706803b8bcaf2b"
+    "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
+    "sha256": "f8230c43a065c1dd62dae44a804959d25523597b78101b01bad70d0897a9b1fa"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -472,20 +472,20 @@
   },
   "sdkProductPatch": {
     "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
-    "baseCommit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
-    "sha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1",
+    "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
+    "sha256": "cdd4299d0fc265edecfdd29be58c0cc89d6642deaaf9417539f8868c003b555a",
     "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
     "includedInFork": true
   },
   "forkSnapshot": {
     "repository": "https://github.com/ManfredCh/deepseek-harness.git",
     "branch": "lyapunov-patched-0.2.0-rc.2",
-    "tag": "lyapunov-dsh-v0.2.0-rc.2-20261005",
-    "commit": "6a90cdb159a08b6f1faf36a0eefbf7ff8a80c73a",
-    "tree": "741263d144884ef4fa9483a785c36f97917895ae",
+    "tag": "lyapunov-dsh-v0.2.0-rc.2-20261005-ci1",
+    "commit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
+    "tree": "9f0119b0cef5405f3a7b0127eed7a5b9f50de528",
     "baseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
     "affectedPaths": 267,
-    "patchSha256": "c134993005839f19e0f16e273c7011e3d47f2475d9317a097ce63c6fd044fcb1",
+    "patchSha256": "cdd4299d0fc265edecfdd29be58c0cc89d6642deaaf9417539f8868c003b555a",
     "scope": "固定自有fork完整集成快照；官方RC2祖先与追溯补丁保留"
   }
 }

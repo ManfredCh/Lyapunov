@@ -11,6 +11,22 @@ export interface NativeSystemPreparation {
   command: string[]
 }
 
+/** 当前固定 SDK 在 Linux x64 glibc 上所需的预编译包；共享加载器也必须能解析它。 */
+export const LINUX_NATIVE_LOADER_PACKAGES = [
+  'node-addon-require-builtin-linux-x64-gnu',
+] as const
+
+/** 用载荷自己的 Node 从正常模块入口加载二进制；依赖存在但不可加载同样阻断归档。 */
+export function verifyLinuxNativeLoaders(stage: string, node: string): void {
+  const probe = spawnSync(node, ['--input-type=module', '-e',
+    "import {createRequire} from 'node:module';const require=createRequire(process.argv[1]);" +
+    "require('node-addon-require-builtin').getBindingInfo();",
+    join(stage, 'package.json'),
+  ], { cwd: stage, encoding: 'utf8' })
+  if (probe.error) throw probe.error
+  if (probe.status !== 0) throw new Error('发行原生加载器不可用：' + probe.stderr)
+}
+
 /** 用所选发行 Node 执行固定 SDK 的 host-addon-only 构建，并核验 Linux x64 glibc 产物。 */
 export function prepareLinuxNativeSystem(upstream: string, node: string): NativeSystemPreparation {
   const probe = spawnSync(node, ['-p', 'JSON.stringify({executable:process.execPath,version:process.version,platform:process.platform,arch:process.arch,glibc:process.report.getReport().header.glibcVersionRuntime})'], { encoding: 'utf8' })
