@@ -8,7 +8,7 @@
  * 入口、Provider 与链接判据是纯函数；沙箱依赖判据直接读取真实 staging 中的文件。
  * `script/package-linux.ts` 在归档前调用，违约即 fail-closed。负对照见 `payload-contract.test.ts`。
  */
-import { lstatSync, readFileSync } from 'node:fs'
+import { lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 
@@ -224,4 +224,60 @@ export function payloadLinkTarget(input: { inside: string; destination: string; 
   if (input.inside === '' || input.inside === '.') return null
   if (input.inside === '..' || input.inside.startsWith('../') || isAbsolute(input.inside)) throw new Error(`包内容存在未声明外部符号链接：${input.source}`)
   return relative(dirname(input.dest), join(input.destination, input.inside))
+}
+
+/**
+ * 应用包清单在载荷里的固定逻辑位置：Electron `app.getVersion()`（欢迎页 `api.version` 的来源）
+ * 读的就是 `runtime/electron/resources/app/package.json` —— 它是指向 `packages/desktop` 的链接。
+ *
+ * 为什么需要这组函数（真实缺陷）：发行清单 `RELEASE.json.version` 取根 `package.json` 的
+ * `product.version`，而欢迎页取应用包自己的 `version`；两者是**两个文件里的两个字段**。
+ * 源桌面包停在 `0.1.0-alpha.4` 时，真实安装包的欢迎页就停在旧版本，而清单已写新版本 ——
+ * 归档前没有任何判据会把两者对上。这里在**已复制的 staging** 上把应用清单 `version`
+ * 同步为冻结来源（开工时读到的根 `product.version`），其余字段/依赖原样保留；源文件不动，
+ * Electron 取值逻辑不动（不做运行时伪装）。
+ */
+export const DESKTOP_APP_MANIFEST_PATH = 'packages/desktop/package.json'
+
+/** 只替换 `version`、其余字段/依赖逐字保留的新清单对象；非对象或空版本 fail-closed。 */
+export function desktopAppManifestWithVersion(source: unknown, version: string): Record<string, unknown> {
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) throw new Error('desktop app manifest must be a JSON object')
+  if (typeof version !== 'string' || version.trim() === '') throw new Error('release version must be a non-empty string')
+  return { ...(source as Record<string, unknown>), version }
+}
+
+/** 在真实 staging 上把应用清单 `version` 同步为发行版本；只改 `version`，写回 2 空格 JSON + 换行。 */
+export function stampDesktopAppVersion(stage: string, version: string): void {
+  const file = join(stage, DESKTOP_APP_MANIFEST_PATH)
+  let source: unknown
+  try {
+    source = JSON.parse(readFileSync(file, 'utf8'))
+  } catch (error) {
+    throw new Error(`desktop app manifest missing or unreadable: ${DESKTOP_APP_MANIFEST_PATH} (${(error as Error)?.message ?? String(error)})`)
+  }
+  writeFileSync(file, JSON.stringify(desktopAppManifestWithVersion(source, version), null, 2) + '\n')
+}
+
+/** 读回真实 staging 应用清单的 `version`；缺失/非串即抛（不让假版本过关）。 */
+export function readDesktopAppVersion(stage: string): string {
+  const file = join(stage, DESKTOP_APP_MANIFEST_PATH)
+  let manifest: unknown
+  try {
+    manifest = JSON.parse(readFileSync(file, 'utf8'))
+  } catch (error) {
+    throw new Error(`desktop app manifest missing or unreadable: ${DESKTOP_APP_MANIFEST_PATH} (${(error as Error)?.message ?? String(error)})`)
+  }
+  const version = (manifest as { version?: unknown } | null)?.version
+  if (typeof version !== 'string' || version.trim() === '') throw new Error(`desktop app manifest has no version: ${DESKTOP_APP_MANIFEST_PATH}`)
+  return version
+}
+
+/** 归档前断言：真实应用清单版本必须与 `RELEASE.json` 的发行版本逐字一致；不可核验也算违约（fail-closed）。 */
+export function desktopAppVersionViolations(stage: string, expected: string): string[] {
+  try {
+    const actual = readDesktopAppVersion(stage)
+    return actual === expected ? [] : [`desktop app manifest version mismatch: application=${actual} release=${expected} (${DESKTOP_APP_MANIFEST_PATH})`]
+  } catch (error) {
+    return [`desktop app manifest version unverifiable, refusing to archive: ${(error as Error)?.message ?? String(error)}`]
+  }
 }

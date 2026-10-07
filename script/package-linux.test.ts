@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { prepareLinuxNativeSystem, verifyLinuxNativeLoaders } from './native-system.ts'
+import { DESKTOP_APP_MANIFEST_PATH, desktopAppManifestWithVersion, desktopAppVersionViolations, readDesktopAppVersion, stampDesktopAppVersion } from '../distribution/linux/payload-contract.ts'
 
 const root = join(import.meta.dirname, '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
@@ -317,5 +318,101 @@ describe('出处守卫：载荷相关的脏拒绝、载荷无关的脏放行', (
     expect(packager).toContain("'UPSTREAM_LOCK.json','LICENSE','NOTICE']")
     // 收尾快照：打包期间树动了 ⇒ 默认拒绝（`LYAPUNOV_PACKAGE_ALLOW_DIRTY=1` 时才如实记两个快照）
     expect(packager).toContain('if(provenanceMoved&&!allowDirty)throw new Error(')
+  })
+})
+
+/**
+ * 欢迎页版本与 `RELEASE.json` 同源（真实缺陷：源桌面包停在 `0.1.0-alpha.4`，而根 `product.version`
+ * 已到 `0.1.0-alpha.6` ⇒ 真实安装包清单写新版本、欢迎页 `app.getVersion()` 仍显示旧版本）。
+ *
+ * 这里**真在 staging 上做修改**：复制真实 `packages/desktop/package.json` 到临时 staging，
+ * 用打包脚本同一个 `stampDesktopAppVersion()` 改它，再核其余字段、读回与归档前判据。
+ * 不是读源码字面量的镜像自检 —— 字段保留与 fail-closed 都由真实文件内容证明。
+ */
+describe('desktop app version stamp: welcome page and RELEASE share one source (real staging edit)', () => {
+  const desktopSource = join(root, 'packages/desktop/package.json')
+  const stageDesktop = (stage: string): string => {
+    const file = join(stage, DESKTOP_APP_MANIFEST_PATH)
+    mkdirSync(dirname(file), { recursive: true })
+    copyFileSync(desktopSource, file)
+    return file
+  }
+  const readStaged = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+  const withoutVersion = (manifest: Record<string, unknown>): Record<string, unknown> => {
+    const copy = { ...manifest }
+    delete copy.version
+    return copy
+  }
+
+  test('stamps only version on the copied staging manifest and keeps every other source field/dependency', () => {
+    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    try {
+      const sourceBefore = readFileSync(desktopSource, 'utf8')
+      const original = JSON.parse(sourceBefore) as Record<string, unknown>
+      const file = stageDesktop(stage)
+      stampDesktopAppVersion(stage, '0.1.0-alpha.6.1')
+      const stamped = readStaged(file)
+      expect(stamped.version).toBe('0.1.0-alpha.6.1')
+      expect(withoutVersion(stamped)).toEqual(withoutVersion(original))
+      expect(stamped.dependencies).toEqual(original.dependencies)
+      expect(stamped.devDependencies).toEqual(original.devDependencies)
+      // 旧资源/源桌面包不动：打包只改 staging 副本，不回写源文件
+      expect(readFileSync(desktopSource, 'utf8')).toBe(sourceBefore)
+      // 读回与归档前判据读的是同一个字段
+      expect(readDesktopAppVersion(stage)).toBe('0.1.0-alpha.6.1')
+      expect(desktopAppVersionViolations(stage, '0.1.0-alpha.6.1')).toEqual([])
+      // 空/非对象清单 fail-closed，不会被当成"没版本就放行"
+      expect(() => desktopAppManifestWithVersion(null, '1.0.0')).toThrow('desktop app manifest must be a JSON object')
+      expect(() => desktopAppManifestWithVersion({}, '')).toThrow('release version must be a non-empty string')
+    } finally { rmSync(stage, { recursive: true, force: true }) }
+  })
+
+  test('different root product.version values enter the real app manifest through the same stamp rule', () => {
+    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    try {
+      const file = stageDesktop(stage)
+      const original = readStaged(file)
+      for (const version of ['0.1.0-alpha.6.1', '0.2.0-beta.2']) {
+        stampDesktopAppVersion(stage, version)
+        const stamped = readStaged(file)
+        expect(stamped.version).toBe(version)
+        expect(readDesktopAppVersion(stage)).toBe(version)
+        expect(desktopAppVersionViolations(stage, version)).toEqual([])
+        expect(withoutVersion(stamped)).toEqual(withoutVersion(original))
+      }
+    } finally { rmSync(stage, { recursive: true, force: true }) }
+  })
+
+  test('pre-archive gate fails closed when the staging manifest is stale, missing or malformed (no fake version)', () => {
+    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    try {
+      const file = stageDesktop(stage)
+      // 模拟真实的旧 alpha4 残留：staging 里还是源版本
+      writeFileSync(file, JSON.stringify({ ...readStaged(file), version: '0.1.0-alpha.4' }, null, 2) + '\n')
+      const mismatch = desktopAppVersionViolations(stage, '0.1.0-alpha.6.1')
+      expect(mismatch).toHaveLength(1)
+      expect(mismatch[0]).toContain('application=0.1.0-alpha.4')
+      expect(mismatch[0]).toContain('release=0.1.0-alpha.6.1')
+      // 清单缺失 ⇒ 不可核验，同样拒绝归档
+      rmSync(file)
+      expect(desktopAppVersionViolations(stage, '0.1.0-alpha.6.1')).toHaveLength(1)
+      expect(desktopAppVersionViolations(stage, '0.1.0-alpha.6.1')[0]).toContain(DESKTOP_APP_MANIFEST_PATH)
+      // 清单不是合法 JSON ⇒ 同样拒绝归档
+      writeFileSync(file, '{ not json')
+      expect(desktopAppVersionViolations(stage, '0.1.0-alpha.6.1')).toHaveLength(1)
+    } finally { rmSync(stage, { recursive: true, force: true }) }
+  })
+
+  test('wiring anchors: stamp after copy, archive check after RELEASE.json and immediately before tar', () => {
+    const copyAt = packager.indexOf('await copyPayload(node.source,join(stage,node.destination))')
+    const stampAt = packager.indexOf('stampDesktopAppVersion(stage,product.version)')
+    const releaseAt = packager.indexOf("join(stage,'RELEASE.json')")
+    const checkAt = packager.indexOf('desktopAppVersionViolations(stage,release.version)')
+    const tarAt = packager.indexOf("const tar=spawnSync('tar'")
+    expect(copyAt).toBeGreaterThan(-1)
+    expect(stampAt).toBeGreaterThan(copyAt)
+    expect(releaseAt).toBeGreaterThan(stampAt)
+    expect(checkAt).toBeGreaterThan(releaseAt)
+    expect(checkAt).toBeLessThan(tarAt)
   })
 })

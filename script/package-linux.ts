@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process'
 import {parseArgs} from 'node:util'
 // 发行载荷结构契约（顶层单一可执行入口 + 随包 Provider 定义）：纯函数在 distribution/linux/payload-contract.ts，
 // 这里只做取数与 fail-closed；守卫/负对照见 distribution/linux/payload-contract.test.ts。
-import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,frontendRuntimeViolations,nativeSystemRuntimeViolations,workspacePayloadDestination,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
+import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,frontendRuntimeViolations,nativeSystemRuntimeViolations,workspacePayloadDestination,stampDesktopAppVersion,desktopAppVersionViolations,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
 // micromamba 许可证的**取件顺序与身份校验**（env 覆盖 → 入库件 → 缓存 → 网络兜底）：
 // 纯逻辑在 distribution/licenses/mamba-license.ts，这里只注入有界取件器并 fail-closed。
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
@@ -252,6 +252,12 @@ for(const node of nodes.values()){
   }
 }
 for(const [name,node] of rootLinks)await link(join(stage,'node_modules',name),join(stage,node.destination))
+// 欢迎页 `api.version` 走 Electron `app.getVersion()`，读的是**应用包** `packages/desktop/package.json`；
+// 发行清单 `RELEASE.json.version` 走根 `product.version`。两个字段不同源曾让真实安装包的欢迎页停在
+// 旧版本（源桌面包 `0.1.0-alpha.4`）而清单已写新版本。这里在**已复制的 staging** 上把应用清单
+// `version` 同步到开工时冻结读到的根 `product.version`，只改这一个字段；源桌面包与其余字段/依赖
+// 逐字保留，Electron 取值逻辑不动（不做运行时伪装）。归档前再由 desktopAppVersionViolations 核一次。
+stampDesktopAppVersion(stage,product.version)
 // 发行根清单名必须是产品安装身份 `lyapunov-dsh`：`script/product-link.ts:42` 的归属判定要求
 // 既有安装根的 `package.json.name === 'lyapunov-dsh'`（悬空链接才走恢复分支）。写 worktree 的
 // `product.name`（`lyapunov`）会让该判定对**任何真实发行安装**都不成立——于是"换目录解包新版本 +
@@ -414,6 +420,11 @@ const archive=join(publicOutput,`lyapunov-linux-x64-${releaseId}.tar.gz`),pendin
 const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory)
 if(nativeProblems.length)throw new Error(nativeProblems.join('；'))
 verifyLinuxNativeLoaders(stage,join(stage,'runtime/node/bin/node'))
+// 归档前显式核对：真实应用清单（欢迎页 `app.getVersion()` 的来源）的 version 必须与 `RELEASE.json`
+// 的 `release.version` 逐字一致。读不到或对不上都 fail-closed —— 宁可不出包，也不让"清单写新版本、
+// 欢迎页显示旧版本"的包流出去（错误无法显示假版本）。
+const appVersionProblems=desktopAppVersionViolations(stage,release.version)
+if(appVersionProblems.length)throw new Error('desktop application manifest version contract violated: '+appVersionProblems.join('; '))
 const tar=spawnSync('tar',['-czf',pendingArchive,'-C',dirname(stage),name],{stdio:'inherit'})
 if(tar.status!==0)throw new Error('tar 打包失败')
 await rename(pendingArchive,archive)
