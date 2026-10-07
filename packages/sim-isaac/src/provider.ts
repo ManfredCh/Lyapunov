@@ -198,7 +198,11 @@ export class IsaacProvider implements SimWorlds {
       if(this.closed)throw new SimError('PROVIDER_CLOSED','Isaac Provider已关闭')
       if(reservation.signal.aborted)throw reservation.signal.reason
       const pythonPath=this.config.pythonPath??process.env.LYAPUNOV_ISAAC_PYTHON??resolve(root,'.runtime/conda/envs/isaac/bin/python')
-      if(!existsSync(pythonPath))throw new SimError('PROVIDER_UNAVAILABLE',`Isaac Sim 6.0.1 当前 Python 入口不存在：${pythonPath}。请在「设置 → 物理引擎」安装 Isaac，或检查并登记已有的兼容本地安装。需要先使用一般物理仿真时，可在同页核对并显式选择 MuJoCo，重启工作台后生效。`,{engineId:'isaac',stage:'python-path',availability:'missing',pythonPath,physicalExecution:false,settingsSection:'lyapunov-engine'})
+      // 这是 **Isaac 专属** 的入口缺失（不是"请求内容要调整"的通用 PROVIDER_UNAVAILABLE）：
+      // 用 ISAAC_SDK_UNAVAILABLE，让 publicCommandError 走既有 P500 固定说明（安装或检查并登记已有
+      // 兼容 SDK、保存后重启），而不是被 UNAVAILABLE 段泛化成 P422「请调整请求内容」。物理未启动、
+      // 不伪造成功；原始解释器路径只进这句内部诊断，出站投影不显示它。
+      if(!existsSync(pythonPath))throw new SimError('ISAAC_SDK_UNAVAILABLE',`Isaac Sim 6.0.1 当前 Python 入口不存在：${pythonPath}。请在「设置 → 物理引擎」安装 Isaac，或检查并登记已有的兼容本地安装。需要先使用一般物理仿真时，可在同页核对并显式选择 MuJoCo，重启工作台后生效。`,{engineId:'isaac',stage:'python-path',availability:'missing',pythonPath,physicalExecution:false,settingsSection:'lyapunov-engine'})
       this.warnIfShaderCacheCold(cacheRoot)
       const child=new ProcessSimProvider({pythonPath,workerPath:this.config.workerPath??resolve(here,'../python/worker.py'),engineName:'Isaac Sim 6.0.1',env:{...isaacLoaderEnvironment(pythonPath),LYAPUNOV_ISAAC_CACHE:cacheRoot,LYAPUNOV_ISAAC_DEVICE:this.config.physicsDevice??'cpu',LYAPUNOV_ISAAC_RENDERING:this.config.rendering??'none',XDG_CACHE_HOME:resolve(cacheRoot,'xdg-cache'),XDG_CONFIG_HOME:resolve(cacheRoot,'xdg-config'),XDG_DATA_HOME:resolve(cacheRoot,'xdg-data')},...(this.config.launch===undefined?{}:{launch:this.config.launch}),...(this.config.startupBudgetMs===undefined?{}:{startupBudgetMs:this.config.startupBudgetMs})})
       this.lastStarted=child

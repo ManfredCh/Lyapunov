@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
 import { SimError } from '../../sim-contract/src/index.ts'
+import { commandRouteResponse } from '../../lyapunov-contracts/src/command-privacy.ts'
 import { IsaacProvider } from '../src/provider.ts'
 import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 
@@ -127,13 +128,25 @@ describe('IsaacProvider lifecycle reservations', () => {
     const provider = new IsaacProvider({pythonPath, workerPath, cacheRoot: root, launch: async () => { launches++; throw new Error('缺少 SDK 不得启动 worker') }})
     try {
       const first = await rejection(provider.open(scene(), {worldId: 'missing-sdk'}))
-      expect(first.code).toBe('PROVIDER_UNAVAILABLE')
+      // Isaac 专属：不是通用的 PROVIDER_UNAVAILABLE（那会被 UNAVAILABLE 段泛化成 P422）。
+      expect(first.code).toBe('ISAAC_SDK_UNAVAILABLE')
       expect(first.message).toContain('设置 → 物理引擎')
       expect(first.details).toMatchObject({engineId: 'isaac', stage: 'python-path', availability: 'missing', pythonPath, physicalExecution: false})
+      // 真实的命令边界（robot-tools 把 `code: message` 交给 commandRouteResponse）：
+      // 这个码必须落 P500 的固定说明——安装或检查并登记已有兼容 SDK、保存后重启；
+      // 不落 P422「请调整请求内容」，也不把原始解释器路径投影给用户。
+      const projected = commandRouteResponse('sim_open', {kind: 'error', text: `${first.code}: ${first.message}`}, 'formal')
+      expect(projected.kind).toBe('error')
+      expect(projected.text.startsWith('P500:')).toBe(true)
+      expect(projected.text).not.toContain('P422')
+      expect(projected.text).toContain('安装 Isaac')
+      expect(projected.text).not.toContain('请求内容')
+      expect(projected.text).not.toContain(pythonPath)
+      expect(projected.ui).toBeNull()
       expect(launches).toBe(0)
       expect(provider.lifecyclePhases()).toEqual([])
       expect(provider.config.pythonPath).toBe(pythonPath)
-      expect((await rejection(provider.open(scene(), {worldId: 'missing-sdk'}))).code).toBe('PROVIDER_UNAVAILABLE')
+      expect((await rejection(provider.open(scene(), {worldId: 'missing-sdk'}))).code).toBe('ISAAC_SDK_UNAVAILABLE')
       expect(provider.orphanedWorkers()).toEqual([])
     } finally { await provider.dispose() }
   })

@@ -2,6 +2,7 @@ import {expect,test} from 'bun:test'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {SceneWorldLifecycle,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
 import {SceneWorldStatus} from '../src/scene-world-status.tsx'
+import {ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE} from '../../lyapunov-contracts/src/command-privacy.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
 const scene=(id='s'):SceneSnapshot=>({sceneId:id,revision:0,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'robot',name:'arm',resources:[],components:{mujoco:{sourcePath:'/fixture/robot.xml'}},transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]}}]})
 const world=(id='w',s='s'):WorldHandle=>({worldId:id,sceneId:s,engineId:'mujoco',engineVersion:'fixture',worldGeneration:1,appliedSceneRevision:0,status:'ready',clock:'realtime'})
@@ -189,4 +190,14 @@ test('A08 物理卡隐藏单worldselector并显示manual/paused及真实重力',
 test('A08 compact阻断原因不需展开详情即可见，原始长详情仍独立保留',()=>{
  const html=renderToStaticMarkup(<SceneWorldStatus compact state={{phase:'blocked',code:'SCENE_PHYSICS_NOT_READY',detail:'当前原件尚未派生\n长详情'}} tr={cn=>cn} retry={()=>{}} cancel={()=>{}}/>)
  expect(html).toContain('SCENE_PHYSICS_NOT_READY');expect(html).toContain('当前原件尚未派生');expect(html).not.toContain('<pre>');expect(html).toContain('查看详情')
+ // Isaac 缺 SDK：公开投影（P500 固定句）按界面语言显示——中文设置显示中文、英文设置显示英文，
+ // 不堆中英混排，也不把原始解释器路径带到公共状态。
+ const isaac={phase:'failed' as const,code:'P500',detail:`P500: ${ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE}`}
+ const zh=renderToStaticMarkup(<SceneWorldStatus compact state={isaac} tr={cn=>cn} retry={()=>{}} cancel={()=>{}}/>)
+ expect(zh).toContain(ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE)
+ expect(zh).not.toContain('The selected Isaac SDK')
+ const en=renderToStaticMarkup(<SceneWorldStatus compact state={isaac} tr={(_cn,en)=>en} retry={()=>{}} cancel={()=>{}}/>)
+ expect(en).toContain('The selected Isaac SDK is unavailable')
+ expect(en).not.toContain('当前选择的 Isaac SDK')
+ expect(en).not.toContain('/home/')
 })

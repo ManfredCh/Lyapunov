@@ -295,9 +295,19 @@ export function publicErrorCode(internal: string): string {
   return "P500"
 }
 
+/**
+ * Isaac 缺 SDK 的**公开固定句**（人类面，见 `publicErrorMessage`）。
+ *
+ * 出站投影在服务端、没有界面语言，所以这句固定为中文；底部状态在英文界面下要有英文对应，
+ * 由 shell 的 `scene-world-status.tsx` **复用同一个常量**按已有 `tr` 回译，不新建第二套错误/
+ * 国际化服务。这句话只说明"安装或检查并登记已有兼容 SDK、保存后重启"，不含解释器路径——
+ * 原始路径只留在内部诊断与模型日志，出站投影不显示它。
+ */
+export const ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE = "当前选择的 Isaac SDK 不可用；请在物理设置中安装 Isaac，或检查并登记已有的兼容本地安装，保存后重新启动 Lyapunov。"
+
 function publicErrorMessage(internal: string, raw: string): string {
   const isaacMessage: Readonly<Record<string, string>> = {
-    ISAAC_SDK_UNAVAILABLE: "当前选择的 Isaac SDK 不可用，请在物理设置中选择已有安装，保存后重新启动 Lyapunov。",
+    ISAAC_SDK_UNAVAILABLE: ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE,
     ISAAC_SDK_VERSION_INCOMPATIBLE: "当前 Isaac SDK 版本不兼容，请在物理设置中选择 Isaac Sim 6.0.1。",
     ISAAC_LICENSE_CONFIRMATION_REQUIRED: "当前 Isaac SDK 需要你确认 NVIDIA Omniverse 许可，请在物理设置中查看许可状态。",
     ISAAC_ENGINE_CONFIG_UNSUPPORTED: "当前 Isaac 设备或渲染配置不受支持，请检查物理引擎设置。",

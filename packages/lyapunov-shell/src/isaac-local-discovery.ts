@@ -1,6 +1,6 @@
 import {opendirSync} from "node:fs"
 import {homedir, userInfo} from "node:os"
-import {join} from "node:path"
+import {basename, dirname, join} from "node:path"
 import {writeSdkPythonPreference} from "../../../script/engine-preference.ts"
 import {readSdkPythonPreference, resolveSdkPython} from "../../lyapunov-product-bundle/src/sdk-python.mjs"
 import {clearIsaacSdkProbeCache, inspectIsaacPython, resolveIsaacLocalEntry} from "../../lyapunov-product-bundle/src/isaac-sdk-probe.mjs"
@@ -24,6 +24,21 @@ function loginHome(): string {
   try { return userInfo().homedir } catch { return homedir() }
 }
 
+/**
+ * 本产品自己的 `versions` 根（每个子目录是一版安装）。打包后 `productRoot` 形如
+ * `<prefix>/versions/<release>`，父目录就是 versions 根；源码检出（`productRoot` 不是版本目录）
+ * 时退回安装前缀 `<LYAPUNOV_INSTALL_ROOT 或 ~/.local/share/lyapunov>/versions`（与
+ * `distribution/linux/install.sh` 的默认前缀一致）。只用来找**产品自己的**默认入口，
+ * 不当作通用 Python 搜索根。
+ */
+function productVersionRoots(options: IsaacLocalOptions, home: string, env: NodeJS.ProcessEnv): string[] {
+  const roots = new Set<string>()
+  const parent = dirname(options.productRoot)
+  if (basename(parent) === "versions") roots.add(parent)
+  roots.add(join(env.LYAPUNOV_INSTALL_ROOT?.trim() || join(home, ".local/share/lyapunov"), "versions"))
+  return [...roots]
+}
+
 /** 每目录最多读取 128 项，最多探测 16 个入口；只在用户点击时执行，不递归全盘。 */
 export function isaacCandidatePaths(options: IsaacLocalOptions): {paths: string[]; limited: boolean} {
   const env = options.env ?? process.env
@@ -43,14 +58,14 @@ export function isaacCandidatePaths(options: IsaacLocalOptions): {paths: string[
   const home = options.home ?? loginHome()
   const direct = options.scanRoots ?? [join(home, "isaacsim"), join(home, "isaac-sim"), "/opt/isaacsim", "/opt/isaac-sim"]
   for (const directory of direct) add(directory)
-  const children = (directory: string, matches: (name: string) => boolean) => {
+  const children = (directory: string, matches: (name: string) => boolean, candidate: (directory: string, name: string) => string = (parent, name) => join(parent, name)) => {
     let handle: ReturnType<typeof opendirSync> | undefined
     try {
       handle = opendirSync(directory)
       let count = 0
       for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
         if (++count > 128) { limited = true; break }
-        if ((entry.isDirectory() || entry.isSymbolicLink()) && matches(entry.name)) add(join(directory, entry.name))
+        if ((entry.isDirectory() || entry.isSymbolicLink()) && matches(entry.name)) add(candidate(directory, entry.name))
       }
     } catch { /* 常见根不存在属于正常情况 */ }
     finally { handle?.closeSync() }
@@ -58,6 +73,11 @@ export function isaacCandidatePaths(options: IsaacLocalOptions): {paths: string[
   if (options.scanRoots) {
     for (const directory of options.scanRoots) children(directory, () => true)
   } else {
+    // 本产品 versions 下的已有版本：每个版本**只认产品自己的默认入口**
+    //   <version>/.runtime/conda/envs/isaac/bin/python，
+    // 不把任意旧包 Python 当成 Isaac（旧包自己的 bin/python 不在这里登记）。只在用户主动点
+    // "检查本地安装"时走到这里；只加入候选，不自动保存/选择、不复制或重下大环境，保持 128/16 有界。
+    for (const versions of productVersionRoots(options, home, env)) children(versions, () => true, (parent, name) => join(parent, name, ".runtime/conda/envs/isaac/bin/python"))
     for (const directory of [home, join(home, "Downloads"), join(home, ".local/share/ov/pkg"), "/opt"]) children(directory, name => /isaac[-_]?sim/i.test(name))
     for (const directory of [join(options.productRoot, ".runtime/conda/envs"), ...["miniconda3", "miniforge3", "anaconda3", "mambaforge", ".conda"].map(name => join(home, name, "envs"))]) children(directory, () => true)
   }

@@ -38,7 +38,7 @@ case "$provider" in
        [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
      done ;;
   benchmark-*) [ -f "$root/distribution/linux/benchmark.js" ] || [ "$dev_checkout" = true ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/distribution/linux/benchmark.js；请重新完整解包。" ;;
-  *) for file in distribution/linux/doctor.mjs distribution/linux/sandbox.mjs packages/lyapunov-product-bundle/src/sdk-python.mjs; do
+  *) for file in distribution/linux/doctor.mjs distribution/linux/sandbox.mjs distribution/linux/register-managed-sdk.mjs packages/lyapunov-product-bundle/src/sdk-python.mjs; do
        [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
      done ;;
 esac
@@ -193,5 +193,20 @@ if [ "$provider" = benchmark-libero ] || [ "$provider" = benchmark-gymnasium ]; 
   exec "$node_bin" "$root/distribution/linux/benchmark.js" --provider gymnasium --check
 fi
 # 本次安装的验收只能指向刚处理的包内前缀，不能借父环境的已有 SDK 报安装成功。
-unset LYAPUNOV_MUJOCO_PYTHON LYAPUNOV_ISAAC_PYTHON LYAPUNOV_NEWTON_PYTHON
-exec "$node_bin" "$root/distribution/linux/doctor.mjs" "$provider" --managed-sdk
+# doctor 在**子 shell**里临时清空三套 SDK 覆盖（验收只认包内），但父 shell 保留用户的显式覆盖：
+# 收尾登记据此判断"是否该保留用户的 ENV 选择"。
+set +e
+(
+  unset LYAPUNOV_MUJOCO_PYTHON LYAPUNOV_ISAAC_PYTHON LYAPUNOV_NEWTON_PYTHON
+  exec "$node_bin" "$root/distribution/linux/doctor.mjs" "$provider" --managed-sdk
+)
+doctor_status=$?
+set -e
+# 只有本次 managed doctor 成功（exit 0 = status AVAILABLE）才登记这条已验证的产品托管路径，
+# 让后续版本升级沿同一 SDK 选择读回；失败/partial（非零）一律不写。已有 ENV 覆盖或已保存
+# 外置/旧 SDK 时由 helper 保留用户选择。登记失败单独报告，不能冒充完整安装/跨版本登记成功。
+if [ "$doctor_status" -eq 0 ] && [ "$provider" = isaac ]; then
+  "$node_bin" "$root/distribution/linux/register-managed-sdk.mjs" "$provider" ||
+    json_blocked "$provider" SDK_SELECTION_SAVE_FAILED 'The Isaac SDK was installed and checked, but its selection could not be saved. Existing settings were preserved. Select this installation in Physics settings.'
+fi
+exit "$doctor_status"

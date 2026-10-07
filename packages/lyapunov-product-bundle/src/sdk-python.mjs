@@ -11,9 +11,10 @@
  * doctor、Host runtime-patch 装配与 physics-check 都从这里取同一结果，避免
  * “doctor 报 AVAILABLE、运行侧却 BLOCKED”。
  */
-import {readFileSync} from 'node:fs'
+import {mkdirSync,readFileSync,renameSync,rmSync,writeFileSync} from 'node:fs'
+import {randomUUID} from 'node:crypto'
 import {homedir} from 'node:os'
-import {isAbsolute,join,resolve} from 'node:path'
+import {dirname,isAbsolute,join,resolve} from 'node:path'
 
 /** 各引擎解释器的正式覆盖变量（同时登记进 runtime-paths.ts 的 RUNTIME_ENV）。 */
 export const SDK_PYTHON_ENV = {
@@ -44,6 +45,43 @@ export function readSdkPythonPreference(engine, env = process.env) {
     const value = parsed?.sdkPython?.[engine]
     return typeof value === 'string' && isAbsolute(value.trim()) ? value.trim() : undefined
   } catch { return undefined }
+}
+
+/**
+ * 写入用户显式保存的 SDK 解释器路径，落**同一份** engine.json（`sdkPreferenceFile`）。
+ *
+ * 只动 `sdkPython[engine]` 一个键：`engine`、`licenses` 等其它字段与写入前完全一致
+ * （最终以 `{...existing, sdkPython, updatedAt}` 落盘）。`python === null` 表示清除该引擎的保存选择。
+ *
+ * 为什么读写放在同一文件：设置页保存（`script/engine-preference.ts` 转调本函数）与安装收尾
+ * （`distribution/linux/register-managed-sdk.mjs`）必须共用一份读写口径，否则"保存的路径"与
+ * "能不能读回"会漂移成两套。这里**不复制、不改写、不替换任何 SDK 目录**，只登记一个绝对路径。
+ */
+export function writeSdkPythonPreference(engine, python, env = process.env) {
+  if (!SDK_PYTHON_PACKAGE_PATH[engine]) throw new Error("SDK_ENGINE_INVALID")
+  if (python !== null && (typeof python !== "string" || !python.trim() || !isAbsolute(python.trim()))) {
+    throw new Error("SDK_PYTHON_PATH_INVALID: 需要绝对路径")
+  }
+  const file = sdkPreferenceFile(env)
+  let existing = {}
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"))
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existing = parsed
+  } catch (error) {
+    // 安装收尾也调用此写入口：损坏/不可读的配置必须保留，不能把它当作首次安装覆盖。
+    if (error?.code !== 'ENOENT') throw new Error('SDK_PREFERENCE_UNREADABLE: Existing SDK settings could not be read and were preserved.', {cause: error})
+  }
+  const previous = existing.sdkPython && typeof existing.sdkPython === "object" && !Array.isArray(existing.sdkPython) ? existing.sdkPython : {}
+  const sdkPython = {...previous}
+  if (python === null) delete sdkPython[engine]
+  else sdkPython[engine] = python.trim()
+  mkdirSync(dirname(file), {recursive: true})
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporary, JSON.stringify({...existing, sdkPython, updatedAt: new Date().toISOString()}, null, 2) + "\n", {mode: 0o600, flag: 'wx'})
+    renameSync(temporary, file)
+  } finally { rmSync(temporary, {force: true}) }
+  return file
 }
 
 /**

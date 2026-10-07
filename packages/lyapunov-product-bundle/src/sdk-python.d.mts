@@ -16,4 +16,5 @@ export declare const SDK_PYTHON_PACKAGE_PATH: {
 }
 export declare function sdkPreferenceFile(env?: NodeJS.ProcessEnv): string
 export declare function readSdkPythonPreference(engine: SdkEngine, env?: NodeJS.ProcessEnv): string | undefined
+export declare function writeSdkPythonPreference(engine: SdkEngine, python: string | null, env?: NodeJS.ProcessEnv): string
 export declare function resolveSdkPython(root: string, engine: SdkEngine, env?: NodeJS.ProcessEnv, options?: {managed?: boolean}): SdkPythonResolution

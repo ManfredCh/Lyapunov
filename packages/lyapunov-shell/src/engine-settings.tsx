@@ -35,6 +35,38 @@ async function localSdkRequest<T>(action:string,body?:Record<string,unknown>):Pr
  return value
 }
 
+/**
+ * 选择来源的界面措辞：宿主只给稳定取值（`nextSource`），中文/英文都在这里配。
+ * 三档必须一眼分清：显式 ENV 覆盖 > 已保存外置/旧版本 > 本版本产品托管。
+ */
+function isaacSourceLabel(tr:Translate,source:IsaacLocalSelection["nextSource"]):string{
+ return source==="env-override"?tr("显式环境变量覆盖","explicit environment override")
+  :source==="saved-preference"?tr("已保存的本地/旧版本 SDK","saved local/legacy SDK")
+  :tr("本版本产品托管默认","this version's product-managed default")
+}
+
+/** 当前选择说明：本地化文案由结构化字段（`nextSource`）推出，宿主返回的固定中文 detail 不直接上屏。 */
+function isaacSelectionDetail(tr:Translate,selection:IsaacLocalSelection):string{
+ if(selection.nextSource==="env-override")return tr("显式 LYAPUNOV_ISAAC_PYTHON 覆盖优先于保存选择与本版本产品托管安装；取消该覆盖并重启后才会使用已保存的路径。","The explicit LYAPUNOV_ISAAC_PYTHON override wins over a saved choice and this version's product-managed install; the saved path is used only after that override is removed and the app restarts.")
+ if(selection.nextSource==="saved-preference")return tr("下次启动实际使用的就是这条已保存路径（可能是本产品旧版本，或你自己下载的 SDK）。本页保存选择不会改变当前会话正在使用的引擎。","This saved path (an older product version, or an SDK you downloaded) is exactly what the next startup uses. Saving here does not change the engine the current session is running.")
+ return tr("本版本产品托管安装是下次启动的默认路径；当前会话不因保存 SDK 而改变。","This version's product-managed install is the default path for the next startup; saving an SDK does not change the current session.")
+}
+
+/** 候选说明：只用结构化字段（`compatible`/`state`/版本/kind）拼中英文本，不直接渲染宿主的固定中文 detail。 */
+function isaacCandidateDetail(tr:Translate,candidate:IsaacLocalCandidate):string{
+ const kind=candidate.kind==="standalone"?tr("standalone python.sh","standalone python.sh"):tr("Conda/venv bin/python","Conda/venv bin/python")
+ if(candidate.compatible)return tr(`发现兼容的 Isaac Sim ${candidate.sdkVersion} / Python ${candidate.pythonVersion}（${kind}）；可登记为下次启动路径。物理世界、许可与 RTX 仍需按实际运行检查。`,`Compatible Isaac Sim ${candidate.sdkVersion} / Python ${candidate.pythonVersion} found (${kind}); it can be registered for the next startup. Physics, license and RTX are still verified at run time.`)
+ if(candidate.state==="timeout")return tr("SDK 发现检查超时，未启动物理引擎；可重试或改选其它安装。","The SDK discovery check timed out; no physics engine was started. Retry or choose another installation.")
+ if(candidate.state==="unavailable")return tr("无法运行所选解释器；可重试或改选其它安装。","The selected interpreter could not be started. Retry or choose another installation.")
+ if(candidate.state==="incompatible"){
+  const version=candidate.sdkVersion??tr("未读到","unread"),python=candidate.pythonVersion??tr("未读到","unread")
+  return /^3\.12\./.test(candidate.pythonVersion??"")
+   ?tr(`发现 isaacsim，但版本 ${version} 或安装布局不符合本版锁定的 6.0.1；本版不采用该 SDK。`,`isaacsim was found, but version ${version} or its install layout does not match the 6.0.1 this build pins; this build will not use it.`)
+   :tr(`Isaac Sim 6.0.1 需要 Python 3.12，当前解释器为 ${python}。`,`Isaac Sim 6.0.1 requires Python 3.12; this interpreter is ${python}.`)
+ }
+ return tr("当前解释器未发现 isaacsim；请检查路径，或改选包含 Isaac Sim 的目录、python.sh 或 Conda/venv 的 bin/python。","This interpreter did not find isaacsim; check the path, or choose a directory, python.sh or Conda/venv bin/python that contains Isaac Sim.")
+}
+
 /** 本地发现由用户按钮触发；打开设置只读保存选择，不扫描、不下载、不启动引擎。 */
 function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disabled:boolean;installing:boolean;onChanged:()=>Promise<void>}){
  const [path,setPath]=useState("")
@@ -46,7 +78,7 @@ function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disab
  useEffect(()=>{let active=true;void localSdkRequest<IsaacLocalSelection>("selection").then(value=>{if(active){setSelection(value);setPath(value.savedPython??"")}}).catch(reason=>{if(active)setError(String(reason instanceof Error?reason.message:reason))});return()=>{active=false}},[])
  const discover=async(manual:boolean)=>{
   setBusy(true);setError("");setMessage(tr("正在检查本地安装…","Checking local installations…"))
-  try{const value=await localSdkRequest<IsaacLocalDiscovery>("discover",manual?{path:path.trim()}:{});setCandidates(value.candidates);setSelection(value.selection);setMessage(value.detail+(value.limited?tr(" 搜索数量已达上限；未列出的安装可以输入路径检查。"," Search limit reached; enter a path to check an installation not listed."):""))}
+  try{const value=await localSdkRequest<IsaacLocalDiscovery>("discover",manual?{path:path.trim()}:{});setCandidates(value.candidates);setSelection(value.selection);setMessage(value.candidates.length?tr(`已检查 ${value.scanned} 个安装入口。`,"Checked "+value.scanned+" installation entries.")+(value.limited?tr(" 搜索数量已达上限；未列出的安装可以输入路径检查。"," Search limit reached; enter a path to check an installation not listed."):""):tr("常见目录未发现可检查的安装入口。可以输入已有 Python、python.sh 或安装目录的绝对路径。","No installable entry was found in common locations. Enter the absolute path of an existing Python, python.sh or installation directory."))}
   catch(reason){setError(String(reason instanceof Error?reason.message:reason))}finally{setBusy(false)}
  }
  const select=async(python:string|null)=>{
@@ -60,19 +92,20 @@ function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disab
    <strong style={{fontSize:13}}>{tr("已有 Isaac Sim？直接使用本地安装","Already have Isaac Sim? Use a local installation")}</strong>
    <button type="button" disabled={blocked} onClick={()=>void discover(false)}>{busy?tr("检查中…","Checking…"):tr("发现本地安装","Find local installation")}</button>
   </div>
+  <p style={{margin:0,fontSize:12,opacity:.75}}>{tr("Isaac 路径按固定优先级解析：① 显式环境变量 LYAPUNOV_ISAAC_PYTHON；② 已保存的本地/旧版本 SDK；③ 本版本产品托管安装。下面保存只写选择，当前会话与运行中的世界不变，下次启动才使用新路径。安装目录、python.sh 或 Conda/venv 的 bin/python 都可以先检查再登记。","Isaac paths resolve in a fixed order: (1) the explicit LYAPUNOV_ISAAC_PYTHON environment override; (2) a saved local/legacy SDK; (3) this version's product-managed install. Saving below only records the choice: the current session and the running world are unchanged, and the new path is used on the next startup. A directory, python.sh or a Conda/venv bin/python can all be checked and then registered.")}</p>
   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
    <input aria-label={tr("Isaac Sim 安装目录或 Python 路径","Isaac Sim directory or Python path")} value={path} onChange={event=>setPath(event.target.value)} placeholder={tr("安装目录、python.sh 或 bin/python 的绝对路径","Absolute path to installation directory, python.sh or bin/python")} style={{flex:1,minWidth:180}}/>
    <button type="button" disabled={blocked||!path.trim()} onClick={()=>void discover(true)}>{tr("检查此路径","Check this path")}</button>
   </div>
   {selection&&<div style={{fontSize:12,opacity:.75,wordBreak:"break-all"}}>
    {tr("下次启动 SDK：","SDK for next startup: ")}{selection.nextPython}
-   {"（"}{selection.nextSource==="env-override"?tr("环境变量覆盖","environment override"):selection.nextSource==="saved-preference"?tr("已保存的本地安装","saved local installation"):tr("产品默认","product default")}{"）"}
-   <div>{selection.detail}</div>
+   {"（"}{isaacSourceLabel(tr,selection.nextSource)}{"）"}
+   <div>{isaacSelectionDetail(tr,selection)}</div>
    {selection.savedPython&&<button type="button" disabled={blocked||installing} onClick={()=>void select(null)}>{tr("恢复产品默认路径","Restore product default path")}</button>}
   </div>}
   {candidates.map(candidate=><div key={candidate.python} style={{display:"grid",gap:4,padding:8,background:"var(--dsw-alias-bg-l1,#0001)",borderRadius:6}}>
    <code style={{wordBreak:"break-all"}}>{candidate.python}</code>
-   <span style={{fontSize:12}}>{candidate.detail}</span>
+   <span style={{fontSize:12}}>{isaacCandidateDetail(tr,candidate)}</span>
    <button type="button" disabled={blocked||installing||!candidate.compatible||selection?.savedPython===candidate.python} onClick={()=>void select(candidate.python)}>{selection?.savedPython===candidate.python?tr("已保存此安装","Installation saved"):tr("使用此安装（下次启动）","Use this installation (next startup)")}</button>
   </div>)}
   {message&&<p role="status" style={{margin:0,fontSize:12}}>{message}</p>}

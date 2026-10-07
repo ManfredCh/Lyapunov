@@ -96,12 +96,12 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
   const fixture = (provider:'mujoco'|'isaac',geometryFails=false,pipFails=false) => {
     const directory=mkdtempSync(join(tmpdir(),'lyapunov-geometry-install-')),product=join(directory,'product')
     const put=(file:string,text:string,executable=false)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,text);if(executable)chmodSync(file,0o755)}
-    for(const file of ['distribution/linux/install-provider','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt']){
+    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt']){
       mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(root,file),join(product,file))
     }
     put(join(product,'script/package-linux.ts'),'// 离线安装路由夹具\n')
     put(join(product,'distribution/linux/sandbox.mjs'),'export {}\n')
-    put(join(product,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),'export {}\n')
+    put(join(product,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),readFileSync(join(root,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),'utf8'))
     const doctor=join(directory,'doctor.json'),log=join(directory,'pip.jsonl'),imports=join(directory,'imports.log')
     put(join(product,'distribution/linux/doctor.mjs'),`import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(doctor)},JSON.stringify(process.argv.slice(2)));console.log(JSON.stringify({status:'AVAILABLE',scope:'离线安装路由夹具'}))\n`)
     const prefix=join(product,provider==='isaac'?'.runtime/conda/envs/isaac':'.runtime/sim-python')
@@ -113,8 +113,11 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
     // 此 Python、pip、micromamba 与 doctor 均为明确的离线替身，不下载、不执行 Isaac、不接受真实许可。
     put(join(prefix,'bin/python'),`#!/bin/sh\nif [ "$1" = -c ];then\ncase "$2" in\n*sys.prefix*) printf '%s\\n' ${quote(prefix)};;\n*coacd*) printf '%s\\n' "$2" >> ${quote(imports)};${geometryFails?"printf '%s\\n' 'ModuleNotFoundError: coacd' >&2;exit 17":"exit 0"};;\nesac\nexit 0\nfi\nif [ "$1" = -m ] && [ "$2" = pip ] && [ "$3" = --version ];then printf '%s\\n' 'offline pip';exit 0;fi\nexec ${quote(node)} ${quote(logger)} "$@"\n`,true)
     const micromamba=join(directory,'micromamba');put(micromamba,'#!/bin/sh\nexit 91\n',true)
-    const run=()=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[])],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
-    return {directory,product,prefix,doctor,log,imports,run}
+    // 安装收尾会读/写 engine.json：这里钉到临时文件，绝不碰真人配置；本夹具又设了 ENV 覆盖，
+    // 收尾 helper 必须保留 ENV 选择、不登记产品托管路径（用 preference 不存在来断言）。
+    const preference=join(directory,'engine.json')
+    const run=()=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[])],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_ENGINE_PREFERENCE_FILE:preference,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
+    return {directory,product,prefix,doctor,log,imports,preference,run}
   }
 
   test('MuJoCo与Isaac真实shell安装入口复用自己的前缀、递归依赖声明与pip缓存',()=>{
@@ -137,6 +140,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(readFileSync(requirement,'utf8')).toContain(provider==='isaac'?'trimesh==4.11.1':'trimesh==5.1.0')
         expect(readFileSync(f.imports,'utf8')).toContain('import numpy,scipy,trimesh,coacd')
         expect(JSON.parse(readFileSync(f.doctor,'utf8'))).toEqual([provider,'--managed-sdk'])
+        expect(existsSync(f.preference)).toBe(false)
       }finally{rmSync(f.directory,{recursive:true,force:true})}
     }
   })

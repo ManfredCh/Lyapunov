@@ -55,6 +55,30 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     const check=spawnSync(standalone.python,[join(PRODUCT_ROOT,"packages/sim-isaac/python/check.py")],{encoding:"utf8",env:{PYTHONDONTWRITEBYTECODE:"1",PYTHONNOUSERSITE:"1"}})
     expect(check.status).toBe(2)
     expect(JSON.parse(check.stdout).code).toBe("LICENSE_CONFIRMATION_REQUIRED")
+    // 本产品 versions 下的已有版本：只在用户主动检查时进入候选，且每个版本**只认产品自己的默认入口**
+    //   <version>/.runtime/conda/envs/isaac/bin/python。
+    // 旧包自己的 bin/python 不算 Isaac；不自动保存/选择。源码检出用安装前缀
+    //   <LYAPUNOV_INSTALL_ROOT 或 ~/.local/share/lyapunov>/versions。
+    const home=scratch(),versions=join(home,".local/share/lyapunov/versions")
+    const legacy=pipSdk(join(versions,"0.1.0-alpha.4-interactions.1/.runtime/conda/envs/isaac"))
+    const oldPackageOnly=pipSdk(join(versions,"0.1.0-alpha.2")) // 只有旧包 bin/python，没有默认入口
+    const source=createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env,home})
+    const scanned=await source.discover()
+    expect(scanned.candidates.map(row=>row.python)).toContain(legacy.python)
+    expect(scanned.candidates.find(row=>row.python===legacy.python)?.compatible).toBe(true)
+    expect(scanned.candidates.map(row=>row.python)).not.toContain(oldPackageOnly.python)
+    expect(scanned.selection.savedPython).toBeNull()
+    expect(existsSync(env.LYAPUNOV_ENGINE_PREFERENCE_FILE!)).toBe(false)
+    // 重复入口（env 覆盖与 versions 扫描指向同一路径）只算一个候选，不重复也不伪造。
+    const dedup=isaacCandidatePaths({productRoot:PRODUCT_ROOT,home,env:{...env,LYAPUNOV_ISAAC_PYTHON:legacy.python}})
+    expect(dedup.paths.filter(path=>path===legacy.python)).toHaveLength(1)
+    // 打包布局：productRoot = <prefix>/versions/<release>，versions 根取它的父目录。
+    const prefix=scratch(),packagedRoot=join(prefix,"versions/0.1.0-alpha.6.1")
+    const packagedLegacy=pipSdk(join(prefix,"versions/0.1.0-alpha.4-interactions.1/.runtime/conda/envs/isaac"))
+    const packaged=createIsaacLocalDiscovery({productRoot:packagedRoot,env,home})
+    const packagedScan=await packaged.discover()
+    expect(packagedScan.candidates.map(row=>row.python)).toContain(packagedLegacy.python)
+    expect(packagedScan.selection.savedPython).toBeNull()
   })
 
   test("保存选择保留引擎/许可，重新创建读取后 resolver、Host 装配和环境面板一致",async()=>{
@@ -101,6 +125,11 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     const {python}=standaloneSdk(join(root,"no-kit"));rmSync(join(root,"no-kit/kit"),{recursive:true})
     expect((await inspectIsaacPython(python,{productRoot:PRODUCT_ROOT,fresh:true})).compatible).toBe(false)
     expect(existsSync(envFor(root).LYAPUNOV_ENGINE_PREFERENCE_FILE!)).toBe(false)
+    // 失败能继续重选：无效选择被拒且不写文件；随后选一个兼容的 standalone 仍能登记成功。
+    const recovered=standaloneSdk(join(root,"valid"))
+    const saved=await createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env:envFor(root)}).select(recovered.python)
+    expect(saved.savedPython).toBe(recovered.python)
+    expect(readSdkPythonPreference("isaac",envFor(root))).toBe(recovered.python)
   })
 
   test("错误路径、空扫描、Python 版本不匹配与超时有明确结果，不执行命令文本",async()=>{
@@ -158,11 +187,11 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     // 本测试的许可标记只位于临时的离线 SDK fixture，不操作任何用户安装。
     writeFileSync(join(outside.site,"isaacsim/kit/EULA_ACCEPTED"),"yes\n")
     writeSdkPythonPreference("isaac",outside.python,env)
-    for(const file of ["distribution/linux/install-provider","distribution/linux/doctor.mjs","distribution/linux/sandbox.mjs","packages/lyapunov-product-bundle/src/sdk-python.mjs","packages/sim-isaac/python/check.py"]){mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(PRODUCT_ROOT,file),join(product,file))}
+    for(const file of ["distribution/linux/install-provider","distribution/linux/doctor.mjs","distribution/linux/sandbox.mjs","distribution/linux/register-managed-sdk.mjs","packages/lyapunov-product-bundle/src/sdk-python.mjs","packages/sim-isaac/python/check.py"]){mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(PRODUCT_ROOT,file),join(product,file))}
     mkdirSync(join(product,"script"),{recursive:true});writeFileSync(join(product,"script/package-linux.ts"),"// source fixture\n")
     mkdirSync(join(product,"packages/asset-bake"),{recursive:true});for(const file of ["requirements.txt","requirements-common.txt","requirements-isaac.txt"])copyFileSync(join(PRODUCT_ROOT,"packages/asset-bake",file),join(product,"packages/asset-bake",file))
-    const prefix=join(product,".runtime/conda/envs/isaac"),python=join(prefix,"bin/python"),pipArgs=join(root,"pip-install.args")
-    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;esac;fi\nexec /usr/bin/python3 "$@"\n`)
+    const prefix=join(product,".runtime/conda/envs/isaac"),python=join(prefix,"bin/python"),pipArgs=join(root,"pip-install.args"),readyMarker=join(root,"managed-isaac-ready")
+    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;esac;fi\ncase "$1" in *check.py) if [ -f ${shQuote(readyMarker)} ]; then printf '%s\\n' '{"provider":"isaac","status":"AVAILABLE","version":"6.0.1.0"}';exit 0;fi;;esac\nexec /usr/bin/python3 "$@"\n`)
     const micromamba=join(root,"micromamba");executable(micromamba,"#!/bin/sh\nexit 0\n")
     const ordinary=spawnSync("/usr/local/bin/node",[join(product,"distribution/linux/doctor.mjs"),"isaac"],{encoding:"utf8",timeout:5000,env:{...env,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(ordinary.status).toBe(0)
@@ -183,5 +212,39 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(actualArgs).not.toContain("--no-deps")
     expect(actualArgs).not.toContain("mujoco==3.13.0")
     expect(actualArgs).toContain("https://pypi.nvidia.com")
+
+    // 失败/partial 不登记：上一步 managed doctor 是 BLOCKED（exit 2），已保存的外置选择原样保留。
+    expect(readSdkPythonPreference("isaac",env)).toBe(outside.python)
+
+    // 只有 managed doctor 成功（AVAILABLE）才把本次已验证的产品托管路径写进隔离 engine.json，供升级读回；
+    // 只动 sdkPython.isaac，engine/licenses 不被改写。
+    writeFileSync(readyMarker,"yes\n")
+    const successFile=join(root,"success-engine.json")
+    writeFileSync(successFile,JSON.stringify({engine:"mujoco",licenses:{isaac:{acceptedAt:"2026-10-01T00:00:00Z",eulaUrl:"https://example.invalid/eula"}}}))
+    const successEnv={...envFor(root),LYAPUNOV_ENGINE_PREFERENCE_FILE:successFile}
+    const success=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    expect(success.status).toBe(0)
+    const successReport=JSON.parse(success.stdout.slice(success.stdout.indexOf('{'),success.stdout.lastIndexOf('}')+1))
+    expect(successReport.providers.isaac.status).toBe("AVAILABLE")
+    expect(readSdkPythonPreference("isaac",successEnv)).toBe(python)
+    expect(resolveSdkPython(product,"isaac",successEnv)).toEqual({python,source:"saved-preference"})
+    expect(resolveSdkPython(join(root,"new-product-version"),"isaac",successEnv)).toEqual({python,source:"saved-preference"})
+    const stored=JSON.parse(readFileSync(successFile,"utf8"))
+    expect(stored.engine).toBe("mujoco");expect(stored.licenses.isaac.eulaUrl).toBe("https://example.invalid/eula")
+
+    // 显式 ENV 覆盖优先：managed doctor 同样成功，但不写 engine.json、不覆盖用户的 ENV 选择。
+    const overrideFile=join(root,"override-engine.json")
+    const overrideEnv={...envFor(root),LYAPUNOV_ENGINE_PREFERENCE_FILE:overrideFile,LYAPUNOV_ISAAC_PYTHON:outside.python}
+    const override=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...overrideEnv,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    expect(override.status).toBe(0)
+    expect(existsSync(overrideFile)).toBe(false)
+    expect(resolveSdkPython(product,"isaac",overrideEnv)).toEqual({python:outside.python,source:"env-override"})
+    // 配置损坏时不覆盖原字节，也不把“SDK已装但选择未保存”冒充完整成功。
+    const corruptFile=join(root,"corrupt-engine.json"),corruptBytes='{"engine":"mujoco",broken'
+    writeFileSync(corruptFile,corruptBytes)
+    const corrupt=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    expect(corrupt.status).toBe(2)
+    expect(corrupt.stdout).toContain('SDK_SELECTION_SAVE_FAILED')
+    expect(readFileSync(corruptFile,'utf8')).toBe(corruptBytes)
   })
 })

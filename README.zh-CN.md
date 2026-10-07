@@ -21,7 +21,7 @@
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 技术版本 / releaseId | `0.1.0-alpha.6.1` |
+| 技术版本 / releaseId | `0.1.0-alpha.6.2` |
 | 文档版本日期 | 2026-10-07 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | [杭州奇异宇宙人工智能有限公司](https://vorynel.com/?lang=zh) |
@@ -36,9 +36,9 @@
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
 
-**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.6.1.md)记录本 Alpha 的变化与已知范围。
+**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.6.2.md)记录本 Alpha 的变化与已知范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.6.1.md)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.6.2.md)
 
 <!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
@@ -58,7 +58,7 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-默认安装准备 **MuJoCo 及其 Python 运行环境**，验证原生物理，并创建当前用户的启动器和桌面入口。其他物理引擎可按需选择安装 **Isaac Sim 或 Newton**，它们不会随默认安装自动准备，见[物理引擎与可选运行环境](#物理引擎与可选运行环境)。**Node.js、Electron 和固定版本的 DSH 随主归档提供**；默认安装将 MuJoCo／Python 下载到该版本目录内的专用环境。默认安装器与发行启动器不依赖 PATH 中的 Node、DSH、Python，也不依赖开发者的源码检出目录。用户会话与凭据使用产品的数据目录，升级时继续保留。消费者不需要预装系统 Node.js、DSH、Python、pip、Conda、Bun，也不需要模型 Key 才能安装。
+默认安装准备 **MuJoCo 及其 Python 运行环境**，验证原生物理，并创建当前用户的启动器和桌面入口。其他物理引擎可按需选择安装 **Isaac Sim 或 Newton**，它们不会随默认安装自动准备，见[物理引擎与可选运行环境](#物理引擎与可选运行环境)。已有 Isaac 安装的使用方法见[安装与选择说明](docs/isaac-setup.md)。**Node.js、Electron 和固定版本的 DSH 随主归档提供**；默认安装将 MuJoCo／Python 下载到该版本目录内的专用环境。默认安装器与发行启动器不依赖 PATH 中的 Node、DSH、Python，也不依赖开发者的源码检出目录。用户会话与凭据使用产品的数据目录，升级时继续保留。消费者不需要预装系统 Node.js、DSH、Python、pip、Conda、Bun，也不需要模型 Key 才能安装。
 
 安装器将不同版本保存在 `~/.local/share/lyapunov/versions/`，检查通过后才切换 `current` 链接，并保留旧版本及用户数据。如果 `~/.local/bin` 已在 PATH 中，可以用 `lyapunov` 启动；否则使用上面的用户启动器路径。下载大小和实际发布批次标识见[官网安装页](https://vorynel.com/lyapunov/)。
 
@@ -261,7 +261,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.6.1.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
+开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.6.2.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
 
 ## 许可与版权
 

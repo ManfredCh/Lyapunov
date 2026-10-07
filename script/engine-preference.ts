@@ -29,7 +29,7 @@
  * 始终给出同一个值——换引擎需要重启 Host（一个世界只能有一个 Provider 独占 model/data/clock）。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, isAbsolute } from "node:path"
+import { dirname } from "node:path"
 import { readRuntimeEnv } from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 // W21：GPU 处于哪一态（无卡/驱动未加载/设备对本会话不可见/设备可见但通信失败）只有一份判定，
 // 引擎选择在给出理由前**问**它，不自己去试 `nvidia-smi`。
@@ -43,7 +43,7 @@ import {
   type GpuRuntimeDecision,
   type SdkImportResult,
 } from "../packages/lyapunov-shell/src/environment-readiness.ts"
-import { resolveSdkPython, sdkPreferenceFile, type SdkEngine } from "../packages/lyapunov-product-bundle/src/sdk-python.mjs"
+import { resolveSdkPython, sdkPreferenceFile, writeSdkPythonPreference as writeSdkPythonPreferenceImpl, type SdkEngine } from "../packages/lyapunov-product-bundle/src/sdk-python.mjs"
 import { inspectIsaacPythonSync } from "../packages/lyapunov-product-bundle/src/isaac-sdk-probe.mjs"
 
 /** 可选引擎与 `launch.ts` 的 `--engine` 取值一一对应。 */
@@ -77,17 +77,8 @@ export function enginePreferenceFile(env: NodeJS.ProcessEnv = process.env): stri
 
 /** 用户主动选定 SDK 时只写同一个 engine.json，不改引擎/许可，也不操作 SDK 目录。 */
 export function writeSdkPythonPreference(engine: SdkEngine, python: string | null, env: NodeJS.ProcessEnv = process.env): string {
-  if (!["mujoco", "isaac", "newton"].includes(engine)) throw new Error("SDK_ENGINE_INVALID")
-  if (python !== null && (!python.trim() || !isAbsolute(python.trim()))) throw new Error("SDK_PYTHON_PATH_INVALID: 需要绝对路径")
-  const file = enginePreferenceFile(env)
-  let existing: Record<string, unknown> = {}
-  try { existing = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> } catch { /* 首次写入 */ }
-  const sdkPython = { ...(existing.sdkPython as Record<string, unknown> | undefined) }
-  if (python === null) delete sdkPython[engine]
-  else sdkPython[engine] = python.trim()
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, JSON.stringify({ ...existing, sdkPython, updatedAt: new Date().toISOString() }, null, 2) + "\n")
-  return file
+  // 唯一写入实现在 sdk-python.mjs（安装收尾 helper 也直接 import 它），这里只保留 TS 入口。
+  return writeSdkPythonPreferenceImpl(engine, python, env)
 }
 
 /** 读取用户偏好；文件不存在、不可读或取值非法时返回 `undefined`（**不猜测、不静默改默认**）。 */

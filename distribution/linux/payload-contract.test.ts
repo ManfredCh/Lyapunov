@@ -197,7 +197,7 @@ describe('沙箱运行时载荷', () => {
 
 describe('打包脚本接线（漂移守卫）', () => {
   test('沙箱模块进入发行载荷，打包前调用同一份真实 staging 判据', () => {
-    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs']")
+    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs']")
     expect(packager).toContain('const sandboxProblems=sandboxRuntimeViolations(stage)')
     expect(packager).toContain("if(sandboxProblems.length)throw new Error(sandboxProblems.join('；'))")
     expect(packager).toContain("await cp(join(electronPackage,'dist/chrome-sandbox'),join(stage,'runtime/electron/chrome-sandbox'),{dereference:true})")

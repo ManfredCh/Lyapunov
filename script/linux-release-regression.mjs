@@ -18,6 +18,7 @@ try {
   writeFileSync(join(root, 'distribution/linux/doctor.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'doctor.mjs'))))
   writeFileSync(join(root, 'distribution/linux/sandbox.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'sandbox.mjs'))))
   writeFileSync(join(root, 'packages/lyapunov-product-bundle/src/sdk-python.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, '../../packages/lyapunov-product-bundle/src/sdk-python.mjs'))))
+  writeFileSync(join(root, 'distribution/linux/register-managed-sdk.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'register-managed-sdk.mjs'))))
   writeFileSync(join(root, 'distribution/linux/physics-check.js'), 'console.log("ok")\n')
   writeFileSync(join(root, 'distribution/linux/install-provider'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'install-provider'))))
   chmodSync(join(root, 'distribution/linux/install-provider'), 0o755)
@@ -126,9 +127,12 @@ exit 0
       chmodSync(join(prefix, 'bin/python'), 0o755)
       return prefix
     }
-    const fakeEnv = { ...process.env, FAKE_PIP_LOG: pipLog, PIP_CACHE_DIR: join(fakeRuntime, 'host-cache'), LYAPUNOV_NODE_BIN: node, LYAPUNOV_MICROMAMBA: fakeMamba }
+    const preferenceFile = join(fakeRuntime, 'engine.json')
+    const fakeEnv = { ...process.env, FAKE_PIP_LOG: pipLog, PIP_CACHE_DIR: join(fakeRuntime, 'host-cache'), LYAPUNOV_NODE_BIN: node, LYAPUNOV_MICROMAMBA: fakeMamba, LYAPUNOV_ENGINE_PREFERENCE_FILE: preferenceFile, LYAPUNOV_MUJOCO_PYTHON: '', LYAPUNOV_ISAAC_PYTHON: '', LYAPUNOV_NEWTON_PYTHON: '' }
     mkdirSync(join(root, 'packages/asset-bake'), { recursive: true })
     writeFileSync(join(root, 'packages/asset-bake/requirements.txt'), '# isolated fake requirements\\n')
+    writeFileSync(join(root, 'packages/asset-bake/requirements-isaac.txt'), '# isolated fake isaac requirements\\n-r requirements-common.txt\\n')
+    writeFileSync(join(root, 'packages/asset-bake/requirements-common.txt'), '# isolated fake common requirements\\n')
     rmSync(join(root, 'RELEASE.json'))
     mkdirSync(join(root, 'script'), { recursive: true })
     writeFileSync(join(root, 'script/package-linux.ts'), '// fake dev checkout marker\\n')
@@ -162,6 +166,11 @@ exit 0
     assertExit(isaacInstall, 0, 'install-provider isaac missing pip')
     assert.match(isaacInstall.stdout, /AVAILABLE/)
     assert.equal(existsSync(join(isaacPrefix, 'lib/python3.12/site-packages/isaacsim/kit/EULA_ACCEPTED')), true)
+
+    // 安装收尾：managed doctor 成功后把本包已验证路径登记进隔离的 engine.json，供升级读回。
+    const registered = JSON.parse(readFileSync(preferenceFile, 'utf8'))
+    assert.equal(registered.sdkPython.isaac, join(isaacPrefix, 'bin/python'))
+    assert.equal(registered.sdkPython.mujoco, undefined)
 
     const pipLogText = readFileSync(pipLog, 'utf8')
     assert.equal((pipLogText.match(/^ensurepip /gm) ?? []).length, 2)
