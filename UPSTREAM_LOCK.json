@@ -435,7 +435,7 @@
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity-rc2.json",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "f8230c43a065c1dd62dae44a804959d25523597b78101b01bad70d0897a9b1fa"
+    "sha256": "165117b70b4dd06099d0de42c3d42b6cff756469bab4a07a5a47141c26e8f626"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -473,9 +473,9 @@
   "sdkProductPatch": {
     "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "cdd4299d0fc265edecfdd29be58c0cc89d6642deaaf9417539f8868c003b555a",
+    "sha256": "a33cef0f8d1be7042b99ca7d36409bd74d7c869f1ed20c78d312efda7e541b86",
     "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
-    "includedInFork": true
+    "includedInFork": false
   },
   "forkSnapshot": {
     "repository": "https://github.com/ManfredCh/deepseek-harness.git",
@@ -487,5 +487,13 @@
     "affectedPaths": 267,
     "patchSha256": "cdd4299d0fc265edecfdd29be58c0cc89d6642deaaf9417539f8868c003b555a",
     "scope": "固定自有fork完整集成快照；官方RC2祖先与追溯补丁保留"
+  },
+  "sdkProductPatchInFork": {
+    "file": "script/patches/dsh-v0.2.0-rc.2-product-in-fork.patch",
+    "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
+    "sha256": "cdd4299d0fc265edecfdd29be58c0cc89d6642deaaf9417539f8868c003b555a",
+    "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "includedInFork": true,
+    "note": "固定54312来源已包含的旧267文件delta原字节与原签名；当前产品后继单独应用，不改fork来源"
   }
 }

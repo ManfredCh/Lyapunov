@@ -50,6 +50,7 @@ try:
 except Exception as exc:
     fail_startup('ISAAC_KIT_START_FAILED',str(exc),'kit-import',causeType=type(exc).__name__)
 rendering=os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')=='rtx'
+cpu_native=not rendering and os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu'
 privacy=['--/telemetry/enableAnonymousData=false','--/telemetry/enableNVDF=false','--/telemetry/enableSentry=false','--/privacy/usage=false','--/privacy/performance=false','--/privacy/personalization=false']
 def start_kit():
     portable=Path(os.environ['LYAPUNOV_ISAAC_CACHE'])/'kit'/str(os.getpid());portable.mkdir(parents=True,exist_ok=True)
@@ -81,12 +82,18 @@ try:
     import omni.physx
     from pxr import Gf,Usd,UsdGeom,UsdLux,UsdPhysics,UsdUtils,PhysxSchema,PhysicsSchemaTools
     manager=omni.kit.app.get_app().get_extension_manager()
-    for extension in ['isaacsim.core.experimental.prims','isaacsim.asset.importer.mjcf','isaacsim.asset.importer.urdf']+(['isaacsim.sensors.experimental.rtx'] if rendering else []):
+    prims_extension='isaacsim.core.prims' if cpu_native else 'isaacsim.core.experimental.prims'
+    for extension in [prims_extension,'isaacsim.asset.importer.mjcf','isaacsim.asset.importer.urdf']+(['isaacsim.sensors.experimental.rtx'] if rendering else []):
         if not manager.set_extension_enabled_immediate(extension,True):
             fail_startup('ISAAC_EXTENSION_UNAVAILABLE','Isaac扩展未加载: '+extension,'extensions-load',extension=extension)
     from isaacsim.core.simulation_manager import SimulationManager as SM
-    from isaacsim.core.experimental.utils.backend import use_backend
-    from isaacsim.core.experimental.prims import XformPrim
+    if cpu_native:
+        # 同一原生 PhysX/SM 世界，只适配兼容 API 的数据形状；CPU 不启动 CUDA primdata。
+        SM.set_backend('numpy')
+        from cpu_prims import use_backend,XformPrim
+    else:
+        from isaacsim.core.experimental.utils.backend import use_backend
+        from isaacsim.core.experimental.prims import XformPrim
     if rendering:
         from isaacsim.sensors.experimental.rtx import CameraSensor,RtxCamera
         from isaacsim.core.experimental.objects import Camera as UsdCamera

@@ -1803,6 +1803,13 @@
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
     },
     {
+      "path": "packages/sim-isaac/test/cpu-prims.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "CPU/none 兼容原生 API 薄适配契约：记录型 core.prims 验 shape/name/backend/invalid handle，不启动 Kit、不访问网络、不代签物理；真实 SDK CPU 基础另有 VM 052 回执。"
+    },
+    {
       "path": "packages/sim-isaac/test/engine-selection-consistency.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],

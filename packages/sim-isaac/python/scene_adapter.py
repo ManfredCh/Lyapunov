@@ -5,13 +5,17 @@ from pathlib import Path
 from urllib.parse import urlparse,unquote
 import json
 import math
+import os
 import uuid
 import numpy as np
 from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdPhysics, PhysxSchema, UsdShade,PhysicsSchemaTools
 from isaacsim.asset.importer.mjcf import MJCFImporter,MJCFImporterConfig
 from isaacsim.asset.importer.urdf import URDFImporter,URDFImporterConfig
 from glb_visual import convert_glb
-from isaacsim.core.experimental.prims import Articulation,RigidPrim,XformPrim
+if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu' and os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='rtx':
+    from cpu_prims import Articulation,RigidPrim,XformPrim
+else:
+    from isaacsim.core.experimental.prims import Articulation,RigidPrim,XformPrim
 from isaacsim.core.experimental.utils import stage as stage_utils
 
 

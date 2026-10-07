@@ -26,7 +26,7 @@ def body_prim(stage, entry, name, error, target=False):
     if target and not prim.HasAPI(UsdPhysics.RigidBodyAPI):
         # 已有真实静态 collider 作为关节端点，需要 PhysX kinematic actor；不生成新形状或质量。
         UsdPhysics.RigidBodyAPI.Apply(prim).CreateKinematicEnabledAttr().Set(True)
-        from isaacsim.core.experimental.prims import RigidPrim
+        from scene_adapter import RigidPrim
         entry['rigidPaths'].append(str(prim.GetPath())); entry['pose'] = RigidPrim(str(prim.GetPath()))
     return prim
 
@@ -173,7 +173,7 @@ def install_base_bindings(stage, scene, entities, error):
                     if prim.HasAPI(UsdPhysics.ArticulationRootAPI): prim.RemoveAPI(UsdPhysics.ArticulationRootAPI)
                 UsdPhysics.ArticulationRootAPI.Apply(root); PhysxSchema.PhysxArticulationAPI.Apply(root)
         if entry['articulation'] is not None:
-            from isaacsim.core.experimental.prims import Articulation
+            from scene_adapter import Articulation
             articulation_path = entry.get('baseConstraintPath') if mode == 'fixed' and not (declaration.get('target') or {}).get('entityId') else str(root_path)
             entry['articulation'] = Articulation(articulation_path)
             entry['pose'] = entry['articulation']
