@@ -32,6 +32,11 @@ except ImportError as exc:
     sys.exit(2)
 
 
+# 原三角静态面编译进度（stderr 诊断通道，不混入 stdout NDJSON 协议）：大场景（如完整 B1 的 1595 件）
+# 的 spec 装配是单次长任务，进度行让调用方/操作者能区分"仍在编译"与"卡死"，但**不改变**任何几何、面数或预算。
+_static_surface_progress = [0]
+
+
 def emit(value):
     print(json.dumps(value, allow_nan=False, separators=(',', ':')), flush=True)
 
@@ -66,6 +71,71 @@ def joint_gain(cfg, key, name, fallback_key, default):
         return finite(table[name], key + '.' + name)
     scalar = cfg.get(fallback_key)
     return finite(scalar, fallback_key) if scalar is not None else float(default)
+
+
+def declared_joint_gain(cfg, key, name, fallback_key):
+    """只取**显式声明**的增益：controller.jointKp/jointKd 的该关节项，或标量 kp/kd；都没有返回 None。
+
+    纯力矩 `<motor>` 没有引擎侧位置伺服：位置目标只能由外部控制器闭环。任何数值增益都是控制器
+    事实，不能由本 worker 凭经验补默认值（那等于凭空造出一台源模型里不存在的位置伺服）。因此
+    这里不做任何回落猜测，缺声明即 None，由调用方按“通道不适用”明确拒绝（见 set_joint/prepare_motion）。
+    """
+    table = cfg.get(key)
+    if isinstance(table, dict) and name in table:
+        return finite(table[name], key + '.' + name)
+    scalar = cfg.get(fallback_key)
+    return finite(scalar, fallback_key) if scalar is not None else None
+
+
+def require_torque_position_gains(info, names):
+    """位置目标落在纯力矩执行器上时，核对该实体 controller 是否为每个关节显式声明了 PD 增益。
+
+    受理前调用：任一关节缺声明即抛 TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED，动作不会进入窗口。
+    缺声明意味着该位置通道不适用（本 worker 不猜未知 PD 参数），错误里点名关节与需要的声明。
+    """
+    cfg = info['controller']
+    for name in names:
+        joint = info['joints'].get(name)
+        if not joint or not joint.get('actuator'):
+            continue
+        if info['actuators'][joint['actuator']]['mode'] != 'torque':
+            continue
+        if declared_joint_gain(cfg, 'jointKp', name, 'kp') is None or declared_joint_gain(cfg, 'jointKd', name, 'kd') is None:
+            raise SimError('TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED',
+                           'Joint ' + name + ': the native actuator is a pure-torque <motor> but the entity controller declares no explicit '
+                           'position-loop gains jointKp/jointKd (or scalar kp/kd). Refusing to guess unknown PD parameters: declare verifiable '
+                           'official gains, or use a native position actuator or a policy channel')
+
+
+def native_attach_order(scene, error):
+    """实体导入顺序：把"固定到另一个实体 body"的实体排在其目标实体之后。
+
+    这样目标 body 在 attach 时已经存在于 spec，实体可以直接作为目标 body 的真实子 body 装配
+    （无关节 ⇒ 原生刚性），而不是先挂到 worldbody 再用 equality weld 软约束拉住。只重排本函数返回的
+    列表，不改 scene 本身；目标缺失/自指不在此报错（仍由后面的装配分支按原语义拒绝）。选择/配置/碰撞
+    等与顺序无关的读取都在同一次遍历里完成，依赖只有 baseBinding.target。检测到目标环时明确失败。
+    """
+    entities = list(scene['entities'])
+    by_id = {e['entityId']: e for e in entities}
+    order, state = [], {}
+
+    def visit(eid):
+        if state.get(eid) == 2:
+            return
+        if state.get(eid) == 1:
+            raise error('ROBOT_BASE_BINDING_CYCLE', 'baseBinding.target forms a cycle; rigid attachment order is undefined')
+        state[eid] = 1
+        entity = by_id.get(eid)
+        binding = ((entity or {}).get('components') or {}).get('baseBinding') or {}
+        target = (binding.get('target') or {}).get('entityId')
+        if binding.get('mode') == 'fixed' and isinstance(target, str) and target != eid and target in by_id:
+            visit(target)
+        order.append(entity)
+        state[eid] = 2
+
+    for entity in entities:
+        visit(entity['entityId'])
+    return order
 
 
 def is_ground_geom_name(name):
@@ -997,7 +1067,7 @@ class World:
         # 实体的真实装配 body（eid → (spec body, 该 body 在实体局部帧中的 pos/quat)），
         # 供 Scene 声明相机挂载：相机进的是父实体的真实 body，随物理 FK 一起动。
         spec_bodies = {}
-        for e in scene['entities']:
+        for e in native_attach_order(scene, SimError):
             eid = e['entityId']
             p, q, scale = poses[eid]
             cfg = native_source(e)
@@ -1079,19 +1149,42 @@ class World:
                 # 它的 frame——原始 MJCF 一字不动，worldbody 级 geom/相机精确落在"实体位姿 ∘ 片段局部坐标"，
                 # 且仍然静态（片段里没有关节，MJCF 的世界系 geom 本来就不动）。
                 segment_bodies = [body for body in child.bodies if body != child.worldbody]
-                mount = spec.worldbody.add_body(name=prefix + 'root', pos=p, quat=q) if not cfg.get('rootBody') and not segment_bodies else None
-                frame = spec.worldbody.add_frame(pos=p, quat=q) if mount is None else mount.add_frame()
-                child_specs.append(child)
-                spec.attach(child, prefix=prefix, frame=frame)
-                root = spec.body(prefix + cfg['rootBody']) if cfg.get('rootBody') else None
-                if root is None:
-                    root = mount if mount is not None else next((body for body in spec.bodies if body.name.startswith(prefix)), None)
-                if root is not None:
-                    # root.pos/quat 是相对实体 frame 的局部安装位姿（attach 后仍原样保留），
-                    # 父 body 的世界位姿 = 实体 frame 位姿 ∘ 该局部位姿；安装根本身就在实体 frame 上，
-                    # 它的局部安装位姿是恒等（与 collision 分支一致）。
-                    local = (np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])) if mount is not None else (np.asarray(root.pos, dtype=float), np.asarray(root.quat, dtype=float))
-                    spec_bodies[eid] = (root, local[0], local[1])
+                binding = component.get('baseBinding') or {}
+                target = binding.get('target') or {}
+                rigid_target = binding.get('mode') == 'fixed' and isinstance(target.get('entityId'), str) and target['entityId'] != eid
+                if rigid_target:
+                    # 原生刚性装配：把本实体根直接挂到目标实体真实 body 的 frame 下（无关节 ⇒ 真正刚性），
+                    # 相对位姿取 baseBinding.target。不用 equality weld 软约束。实体前缀/命名/相机/FK 全部保留。
+                    target_body = spec.body(target['entityId'] + '/' + str(target.get('bodyName', '')))
+                    if target_body is None:
+                        raise SimError('ROBOT_BASE_TARGET_MISSING', 'Rigid attachment target is not a real body of an already imported entity: ' + str(target.get('entityId')) + '/' + str(target.get('bodyName', '')))
+                    frame = target_body.add_frame()
+                    child_specs.append(child)
+                    spec.attach(child, prefix=prefix, frame=frame)
+                    root = spec.body(prefix + cfg['rootBody']) if cfg.get('rootBody') else None
+                    if root is None:
+                        root = next((body for body in spec.bodies if body.name.startswith(prefix)), None)
+                    position = np.asarray(target.get('positionM'), dtype=float)
+                    xyzw = np.asarray(target.get('quaternionXyzw'), dtype=float)
+                    if root is None or position.shape != (3,) or xyzw.shape != (4,) or not np.isfinite(position).all() or not np.isfinite(xyzw).all() or abs(np.linalg.norm(xyzw) - 1) > 1e-4:
+                        raise SimError('ROBOT_BASE_ANCHOR_INVALID', 'Rigid attachment anchor must be finite XYZ meters and a normalized quaternion')
+                    root.pos = position
+                    root.quat = xyzw[[3, 0, 1, 2]]
+                    spec_bodies[eid] = (root, np.asarray(root.pos, dtype=float), np.asarray(root.quat, dtype=float))
+                else:
+                    mount = spec.worldbody.add_body(name=prefix + 'root', pos=p, quat=q) if not cfg.get('rootBody') and not segment_bodies else None
+                    frame = spec.worldbody.add_frame(pos=p, quat=q) if mount is None else mount.add_frame()
+                    child_specs.append(child)
+                    spec.attach(child, prefix=prefix, frame=frame)
+                    root = spec.body(prefix + cfg['rootBody']) if cfg.get('rootBody') else None
+                    if root is None:
+                        root = mount if mount is not None else next((body for body in spec.bodies if body.name.startswith(prefix)), None)
+                    if root is not None:
+                        # root.pos/quat 是相对实体 frame 的局部安装位姿（attach 后仍原样保留），
+                        # 父 body 的世界位姿 = 实体 frame 位姿 ∘ 该局部位姿；安装根本身就在实体 frame 上，
+                        # 它的局部安装位姿是恒等（与 collision 分支一致）。
+                        local = (np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])) if mount is not None else (np.asarray(root.pos, dtype=float), np.asarray(root.quat, dtype=float))
+                        spec_bodies[eid] = (root, local[0], local[1])
                 source_path = cfg.get('sourcePath') or cfg.get('modelPath')
                 source_sha = hashlib.sha256(Path(path_from_uri(source_path)).read_bytes()).hexdigest() if source_path else None
                 maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': cfg.get('rootBody'), 'controller': copy.deepcopy(component.get('controller', {})), 'initialJoints': initial_joints, 'initialActuators': initial_actuators, 'sourceSha256': source_sha, 'sourceBase': source_base_state, 'nativeCameraSources': native_camera_sources, 'nativeCameraRefusals': native_camera_refusals}
@@ -1164,6 +1257,10 @@ class World:
                             raise SimError('COLLISION_MESH_NOT_FOUND', '实体 ' + eid + ' 的碰撞网格文件不存在: ' + path)
                         if native_surface:
                             static_triangle_counts.append(add_static_surface(spec, body, prefix + 'surface' + str(i), path, linear, c, friction, solref, solimp, eid, SimError))
+                            _static_surface_progress[0] += 1
+                            if _static_surface_progress[0] % 200 == 0:
+                                print('[sim-mujoco] 原三角静态面装配进度 ' + str(_static_surface_progress[0]) +
+                                      ' 件（保留原三角，未凸化/未粗化）', file=sys.stderr, flush=True)
                             continue
                         # 先用一次性 spec 真实解析该 OBJ：把文件级解析失败在此归因为
                         # 实体+文件名结构化错误，而不是让 spec.compile() 抛出无法归因的原始错误。
@@ -1768,6 +1865,84 @@ class World:
         self.scene_camera_extras(eid, name, component, pose, record, skipped, intrinsics)
         return record
 
+    def settle_fixed_bases_on_bundled_plane(self):
+        """固定基座 + 自带环境支撑面的装配校正：沿支撑面法向抬升固定根，消除静态过约束接触。
+
+        原模型（如 MuJoCo Menagerie `ur10e/scene.xml`）把世界地面 geom 与机器人放在同一份 MJCF 里，
+        固定基座的碰撞体可能与地面在原始姿态下初始穿透（原件在 stock MuJoCo 3.13 实测 0.027 m）。
+        固定基座与固定地面之间的接触在静力学上是过约束，MuJoCo 给出无意义的巨大法向力
+        （原件实测约 1.42e17 N）。这里只改静态根的**装配高度**：按 step0 实测最大穿透深度沿支撑面法向
+        平移，再 `mj_forward` 复核；不改几何/碰撞掩码/坐标轴，也不做逐 tick teleport。
+
+        作用范围严格限于**无显式安装目标的源固定基座默认装配**：
+          · 实体的 baseBinding 显式声明了 mode（fixed/free）就已经给出安装位姿/装配方式的用户意图，
+            绝不能被自动抬升覆盖；自由基座也不搬，其真实接触仍由物理求解；
+          · 只有顶层根（父就是 worldbody）才做世界系平移：body_pos 是父 frame 的局部坐标，挂到活动
+            或旋转父 body 的 child 不能按世界法向直接改；
+          · 无穿透（depth<=1e-5）不动。
+        """
+        if self.model is None or not self.native_ground_names:
+            return
+        planes = [gid for gid in range(self.model.ngeom)
+                  if self.model.geom(gid).name in self.native_ground_names
+                  and int(self.model.geom_type[gid]) == int(mj.mjtGeom.mjGEOM_PLANE)
+                  and (self.model.geom_contype[gid] or self.model.geom_conaffinity[gid])]
+        if not planes:
+            return
+        # 只对**自己拥有**原生支撑面的实体做校正：即"同一份 MJCF 里既带地面又带固定机器人"的原始
+        # 装配（如 ur10e/scene.xml）。地面是别的实体（如 Scene 的独立地面实体）时不动那个实体的位姿。
+        plane_owners = {self.entity_of_geom(self.model.geom(plane).name) for plane in planes}
+        for eid, info in self.entities.items():
+            if eid not in plane_owners:
+                continue
+            root = info['body']
+            if int(self.model.body_dofnum[root]) != 0:
+                continue
+            binding = ((info.get('entity') or {}).get('components') or {}).get('baseBinding') or {}
+            if binding.get('mode') in ('fixed', 'free'):
+                # 显式固定/自由基座：保留用户声明及原生重叠诊断，不自动抬升（不把显式 anchor 修成默认装配）。
+                continue
+            if int(self.model.body_parentid[root]) != 0:
+                # 非顶层根（挂在别的 body 下）：局部 body_pos 不等于世界坐标，不能按世界法向直接改。
+                continue
+            total = 0.0
+            need_forward = False
+            for _ in range(4):
+                if need_forward:
+                    mj.mj_forward(self.model, self.data)
+                worst = None
+                for plane in planes:
+                    normal = self.data.geom_xmat[plane].reshape(3, 3)[:, 2]
+                    for k in range(self.data.ncon):
+                        contact = self.data.contact[k]
+                        first, second = int(contact.geom1), int(contact.geom2)
+                        if first == plane:
+                            other = second
+                        elif second == plane:
+                            other = first
+                        else:
+                            continue
+                        if other < 0:
+                            # flex 接触一侧 geom=-1：不是普通 geom，跳过（不猜索引）
+                            continue
+                        if self.entity_of_geom(self.model.geom(other).name) != eid:
+                            continue
+                        depth = -float(contact.dist)
+                        if depth > 1e-5 and (worst is None or depth > worst[0]):
+                            worst = (depth, normal.copy())
+                if worst is None:
+                    break
+                self.model.body_pos[root] = self.model.body_pos[root] + worst[1] * (worst[0] + 1e-5)
+                total += worst[0] + 1e-5
+                need_forward = True
+                self.warnings.append({
+                    'code': 'ROBOT_BASE_SETTLED_ON_PLANE', 'entityId': eid,
+                    'message': 'Fixed base ' + eid + ' initially overlaps its bundled support plane by ' + format(worst[0], '.6g') +
+                               ' m; the assembly height was raised along the support-plane normal (geometry/collision unchanged) '
+                               'so the statically over-constrained contact no longer occurs'})
+            if total > 0:
+                mj.mj_forward(self.model, self.data)
+
     def sync(self, scene, force=False, initial=False, collision_patches=None):
         if self.scene and scene['sceneId'] != self.scene['sceneId']:
             raise SimError('SCENE_MISMATCH', 'world 不能绑定另一个 scene')
@@ -1809,6 +1984,7 @@ class World:
         self.step_index = 0
         self.next_tick = time.monotonic()
         self.status = 'ready'
+        self.settle_fixed_bases_on_bundled_plane()
         self.initial_overlap = self.initial_overlap_diagnostic()
         if self.initial_overlap['status'] != 'CLEAR':
             self.warnings.append({'code': 'INITIAL_OVERLAP' if self.initial_overlap['pairs'] else 'INITIAL_OVERLAP_UNVERIFIED',
@@ -1831,8 +2007,13 @@ class World:
                 actuator = info['actuators'][j['actuator']]
                 # 原生控制反馈：与set_joint相同的逐关节PD配置；位置drive则读编译参数。
                 if actuator['mode'] == 'torque':
-                    item['driveStiffness'] = joint_gain(info['controller'], 'jointKp', name, 'kp', 120)
-                    item['driveDamping'] = joint_gain(info['controller'], 'jointKd', name, 'kd', 4)
+                    # 纯力矩执行器没有引擎侧位置伺服：driveStiffness/driveDamping 只能来自
+                    # controller 的显式声明；未声明就不出现（不把经验默认值伪装成源模型事实）。
+                    kp = declared_joint_gain(info['controller'], 'jointKp', name, 'kp')
+                    kd = declared_joint_gain(info['controller'], 'jointKd', name, 'kd')
+                    if kp is not None and kd is not None:
+                        item['driveStiffness'] = kp
+                        item['driveDamping'] = kd
                 elif actuator['mode'] == 'position':
                     item['driveStiffness'] = float(self.model.actuator_gainprm[actuator['id'], 0])
                     item['driveDamping'] = float(-self.model.actuator_biasprm[actuator['id'], 2])
@@ -2131,9 +2312,11 @@ class World:
                         raise SimError('OUT_OF_RANGE', '控制参考超出执行器 ctrlrange: ' + name)
                     controls.append({'actuator': aid, 'mode': 'position', 'ctrl': target})
                 elif actuator['mode'] == 'torque':
-                    # 力矩执行器的 control 参考是**关节位置目标**：由逐关节 PD（jointKp/jointKd，
-                    # 缺省标量 kp/kd）在每个物理步折成力矩（见 set_joint）。官方力矩模型因此不必
-                    # 先派生 position 变体。ctrlrange 是力矩限不是位置限，故不按它钳制参考。
+                    # 力矩执行器的 control 参考是**关节位置目标**：由外部控制器声明的逐关节 PD
+                    # （controller.jointKp/jointKd，或标量 kp/kd）在每个物理步折成力矩（见 set_joint）。
+                    # 纯 `<motor>` 没有引擎侧位置伺服、也没有可核的模型 PD 参数：未显式声明增益时
+                    # 位置闭环通道不适用，必须明确拒绝，不能凭经验补默认值冒充位置控制。
+                    require_torque_position_gains(info, [name])
                     controls.append({'actuator': aid, 'mode': 'torque', 'joint': name, 'target': value})
                 else:
                     raise SimError('UNSUPPORTED_CAPABILITY',
@@ -2158,6 +2341,7 @@ class World:
             names = m['jointNames']
             if not names or len(set(names)) != len(names):
                 raise SimError('INVALID_ARGUMENT', '关节名称必须非空且唯一')
+            require_torque_position_gains(info, names)
             if kind == 'trajectory' and set(names) != {n for n, j in info['joints'].items() if j['actuator']}:
                 # 显式 opt-in 的部分关节轨迹（`partialJointVector:true`）：未列出的受控关节**保持上一次写入的 ctrl**
                 # ——既不归零、也不冻结在实测值（本动作不写它们的 ctrl，MuJoCo 沿用 data.ctrl 的现值），
@@ -2392,11 +2576,16 @@ class World:
         elif a['mode'] == 'velocity':
             ctrl = (target - q) * cfg.get('positionVelocityGain', 8)
         else:
+            # 复用外部控制器声明的位置闭环与重力补偿语义；控制只写目标，不私自 step。
+            # 逐关节增益（controller.jointKp/jointKd）优先，回落标量 kp/kd；**不猜默认值**：
+            # 纯力矩执行器缺显式声明时位置通道不适用（prepare_motion 已在受理前拒绝，这里兜底）。
+            kp = declared_joint_gain(cfg, 'jointKp', name, 'kp')
+            kd = declared_joint_gain(cfg, 'jointKd', name, 'kd')
+            if kp is None or kd is None:
+                raise SimError('TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED',
+                               'Joint ' + name + ': the actuator is a pure-torque <motor> but the controller declares no explicit '
+                               'jointKp/jointKd (or kp/kd); refusing to guess unknown PD parameters')
             info['heldTargets'][name]=target
-            # 复用原控制器的位置/速度反馈及重力补偿语义；控制只写目标，不私自 step。
-            # 逐关节增益（controller.jointKp/jointKd）优先，缺该关节回落标量 kp/kd（默认 120/4）。
-            kp = joint_gain(cfg, 'jointKp', name, 'kp', 120)
-            kd = joint_gain(cfg, 'jointKd', name, 'kd', 4)
             ctrl = (target - q) * kp - v * kd + (self.data.qfrc_bias[j['dof']] if cfg.get('gravityCompensation', cfg.get('type') != 'quadruped') else 0)
         if self.model.actuator_ctrllimited[a['id']]:
             ctrl = float(np.clip(ctrl, *self.model.actuator_ctrlrange[a['id']]))
@@ -2780,8 +2969,8 @@ class World:
     def torque_gains(self, info, names):
         """这些关节在力矩执行器上的位置目标实际使用的显式 PD 增益。
 
-        与 set_joint 同一解析路径（逐关节 controller.jointKp/jointKd → 标量 kp/kd → 默认 120/4），
-        所以回执里给的是真正写进 ctrl 的增益，不是请求原文的照抄。
+        与 set_joint 同一解析路径（逐关节 controller.jointKp/jointKd → 标量 kp/kd）；**没有默认值**。
+        缺声明的关节在受理阶段就被拒绝，这里如实返回 None，不编造源模型里不存在的位置伺服。
         """
         cfg = info['controller']
         gains = {}
@@ -2791,8 +2980,8 @@ class World:
                 continue
             if info['actuators'][joint['actuator']]['mode'] != 'torque':
                 continue
-            gains[name] = {'kp': joint_gain(cfg, 'jointKp', name, 'kp', 120),
-                           'kd': joint_gain(cfg, 'jointKd', name, 'kd', 4)}
+            gains[name] = {'kp': declared_joint_gain(cfg, 'jointKp', name, 'kp'),
+                           'kd': declared_joint_gain(cfg, 'jointKd', name, 'kd')}
         return gains
 
     def fail_unstable(self, dt, time_before, evidence):

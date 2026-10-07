@@ -26,7 +26,10 @@ def configure_source_base(child, source, declaration, error):
     if mode not in ('fixed', 'free'):
         raise error('ROBOT_BASE_MODE_INVALID', '基座 mode 必须为 source/free/fixed')
     target = declaration.get('target') or {}
-    want_free = mode == 'free' or bool(target.get('entityId'))
+    # 固定到另一个实体的 body（target.entityId）走**原生刚性装配**：attach 阶段直接把本实体根作为
+    # 目标 body 的真实子 body（无关节），因此这里不能保留自由关节；只有 mode='free' 的自由体才保留。
+    # 自由的"焊到实体"语义（free + target.entityId）仍保留自由关节，由 compile_bindings 的 weld 拉住。
+    want_free = mode == 'free'
     free = [joint for joint in root.joints if int(joint.type) == int(mj.mjtJoint.mjJNT_FREE)]
     changed = False
     if want_free and not free:
@@ -45,7 +48,13 @@ def configure_source_base(child, source, declaration, error):
 
 
 def compile_bindings(spec, scene, maps, poses, spec_bodies, error):
-    """实体固定是真实 mjEQ_WELD；世界固定是无根自由关节的真实 body 安装位姿。"""
+    """基座绑定装配。
+
+    mode='fixed' + target.entityId：attach 阶段已把根作为目标 body 的真实子 body（无关节 ⇒ 原生刚性），
+    这里先校验真实目标（自指/目标实体或 body 不存在必须拒绝）再跳过 equality weld；
+    mode='free' + target.entityId：保留真实的 mjEQ_WELD 软约束语义（根仍是自由关节）；
+    世界锚点（无 entityId）：把目标位姿写入根 body 的安装位姿。
+    """
     pending = []
     for entity in scene['entities']:
         declaration = (entity.get('components') or {}).get('baseBinding')
@@ -60,9 +69,17 @@ def compile_bindings(spec, scene, maps, poses, spec_bodies, error):
             raise error('ROBOT_BASE_ANCHOR_INVALID', '基座锚点必须是有限 XYZ 米和归一化四元数')
         q = xyzw[[3, 0, 1, 2]]
         if target.get('entityId'):
+            # 真实目标校验必须**先于**"是否加 weld"的判断：自指、目标实体/body 不存在都要在这里
+            # 明确拒绝。fixed 走原生刚性装配时不能跳过校验，否则会退化成普通挂载、绕过原有拒绝。
             parent = spec.body(target['entityId'] + '/' + str(target.get('bodyName', '')))
             if parent is None or target['entityId'] == eid:
-                raise error('ROBOT_BASE_TARGET_MISSING', '固定目标不是另一个实体的真实 body')
+                raise error('ROBOT_BASE_TARGET_MISSING',
+                            'Base binding target must be a real body of a different entity: '
+                            + str(target.get('entityId')) + '/' + str(target.get('bodyName', '')))
+            if declaration.get('mode') == 'fixed':
+                # 固定到另一实体：attach 阶段已把根作为目标 body 的真实子 body 刚性装配（无关节），
+                # 不再加 equality weld 软约束。保留此分支的 free 语义给 mode='free' + 目标实体。
+                continue
             # obj1=父目标，obj2=根；relpose 是父 body←根 body，MuJoCo weld 的真实定义。
             spec.add_equality(name=eid + '/__lyapunov_base_weld', type=mj.mjtEq.mjEQ_WELD, objtype=mj.mjtObj.mjOBJ_BODY,
                               name1=parent.name, name2=root.name, data=[0., 0., 0., *position.tolist(), *q.tolist(), 1.])
@@ -133,8 +150,25 @@ def authoring_description(world, info):
     declaration = (info['entity'].get('components') or {}).get('baseBinding'); source = info.get('sourceBase') or {'mode': mode, 'editable': False}
     if root_weld: mode = 'fixed'
     editable = bool(source.get('editable')) and not any(c['active'] and '__lyapunov_base_weld' not in c['name'] for c in constraints)
+    # 描述按**实际装配方式**给：只有 fixed + 实体目标才是原生刚性父子；其余实体目标仍是 equality weld
+    # 软约束（根保留自由关节）。不能只凭 target.entityId 就宣称刚性。
+    binding_target = (declaration or {}).get('target') or {}
+    target_entity = binding_target.get('entityId') if declaration else None
+    weld_to_entity = next((c for c in constraints if c.get('targetEntityId')), None)
+    if declaration and declaration.get('mode') == 'fixed' and target_entity:
+        reason = 'Rigidly attached to the target entity body as a native parent-child (no joint); not a soft constraint'
+    elif declaration and declaration.get('mode') == 'fixed':
+        reason = 'Base fixed at a world anchor; no floor binding declared'
+    elif weld_to_entity is not None:
+        reason = 'Held to the target entity body by a real equality weld (soft constraint); the base keeps its free joint'
+    elif mode == 'fixed':
+        reason = 'Base fixed at a world anchor; no floor binding declared'
+    elif mode == 'free':
+        reason = 'Base root has a real free joint, affected by gravity and contact'
+    else:
+        reason = 'Root keeps source articulation joints; cannot be treated as a freely switchable base'
     state = {'bodyName': model.body(root).name[len(prefix):], 'mode': mode, 'source': 'scene-base-binding' if declaration else 'native-constraint' if root_weld else 'native-model',
-             'sourceMode': source['mode'], 'reason': '固定到指定实体的真实焊接约束' if declaration and (declaration.get('target') or {}).get('entityId') else '基座固定在世界坐标；未声明绑定地板' if mode == 'fixed' else '根基座具有真实自由关节，受重力和接触影响' if mode == 'free' else '根上保留源本体关节，不能当作可自由切换基座',
+             'sourceMode': source['mode'], 'reason': reason,
              'constraints': constraints, 'worldFromBody': body_pose(world, root), 'editable': {'fixed': editable, 'free': editable, 'entity': editable}}
     if not editable: state['editable']['reason'] = '源根本体关节/约束或质量尚不能保真编辑；内部关节保留'
     if declaration and declaration.get('target'): state['target'] = copy.deepcopy(declaration['target'])

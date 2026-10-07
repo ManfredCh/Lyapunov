@@ -127,7 +127,8 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
   test('发散窗口：动作如实 failed（带自动重置事实），不无限等 targetReached', { timeout: 60_000 }, async () => {
     const mujoco = create()
     try {
-      await mujoco.open(scene('window-unstable', TORQUE_ARM), { worldId: 'unstable', timestepS: TIMESTEP, clock: 'manual' })
+      // 显式声明一份不可积分的 PD（kp=120/kd=4）：纯力矩执行器没有默认增益，发散必须来自请求的显式事实。
+      await mujoco.open(scene('window-unstable', TORQUE_ARM, { kp: 120, kd: 4 }), { worldId: 'unstable', timestepS: TIMESTEP, clock: 'manual' })
       const before = observed(await mujoco.observe('unstable', { entityIds: ['arm'] }))
       const targets = ['j1', 'j2'].map(name => positionOf(before, name) + 0.05)
       const started = Date.now()
@@ -146,7 +147,7 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
       assert.ok(typeof reset.maxAbsQacc === 'number' && reset.maxAbsQacc > 1e6,
         `重置前应有发散的加速度幅值（非负）：${reset.maxAbsQacc}`)
       assert.equal(reset.jointName, 'arm/j2')
-      // 有效增益是实测解析出来的（缺省 120/4），不是照抄请求原文。
+      // 有效增益是显式声明的请求值（不再有 worker 编造的 120/4 默认）。
       assert.deepEqual(reset.torqueControllerGains.arm.j1, { kp: 120, kd: 4 })
       assert.deepEqual(reset.torqueControllerGains.arm.j2, { kp: 120, kd: 4 })
       // 未完成就不是完成：不得把没到的目标报成到了。
@@ -160,7 +161,7 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
   test('终态后时钟释放：紧随其后的动作被接受，不再 WORLD_BUSY', { timeout: 60_000 }, async () => {
     const mujoco = create()
     try {
-      await mujoco.open(scene('window-release', TORQUE_ARM), { worldId: 'release', timestepS: TIMESTEP, clock: 'manual' })
+      await mujoco.open(scene('window-release', TORQUE_ARM, { kp: 120, kd: 4 }), { worldId: 'release', timestepS: TIMESTEP, clock: 'manual' })
       const before = observed(await mujoco.observe('release', { entityIds: ['arm'] }))
       const targets = ['j1', 'j2'].map(name => positionOf(before, name) + 0.05)
       const first = await mujoco.execute('release', jointMove('release-1', ['j1', 'j2'], targets)) as Record<string, any>
@@ -194,8 +195,8 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
   test('力矩执行器 + 可积分增益：位置语义仍正确控制并真实收敛', { timeout: 60_000 }, async () => {
     const mujoco = create()
     try {
-      // 与 ① 同一份夹具、同一 kind、同一目标口径，只把标量 kd 换成本模型可积分的 0.2（不改夹具、不放宽容差）。
-      await mujoco.open(scene('window-stable', TORQUE_ARM, { kd: 0.2 }), { worldId: 'stable', timestepS: TIMESTEP, clock: 'manual' })
+      // 与 ① 同一份夹具、同一 kind、同一目标口径，只把显式增益换成本模型可积分的 kp=120/kd=0.2（不改夹具、不放宽容差）。
+      await mujoco.open(scene('window-stable', TORQUE_ARM, { kp: 120, kd: 0.2 }), { worldId: 'stable', timestepS: TIMESTEP, clock: 'manual' })
       const joints = observed(await mujoco.observe('stable', { entityIds: ['arm'] }))
       // 只动 j2：这份夹具的 j1 与 base 圆柱在复位后有自接触摩擦（实测），位置语义在该自由度上不是自由运动。
       const target = positionOf(joints, 'j2') + 0.05
@@ -204,6 +205,102 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
       const motion = receipt.effect.motions[0]
       assert.equal(motion.targetReached, true, `可积分增益下必须收敛：${JSON.stringify(motion.jointErrors)}`)
       assertReached(observed(await mujoco.observe('stable', { entityIds: ['arm'] })), ['j2'], [target], motion.tolerance)
+    } finally { await mujoco.dispose() }
+  })
+
+  /**
+   * G1 23DOF 类事实：源模型只有纯 `<motor>`，且 controller 没声明任何 PD 增益。位置闭环需要控制器
+   * 事实，worker 不得凭经验补默认值。这里锁两件事：① describe 不伪造 driveStiffness/driveDamping；
+   * ② 位置动作在受理前就被明确拒绝（错误码 TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED），且拒绝不占时钟。
+   */
+  test('纯力矩执行器无显式增益：位置通道明确拒绝，不伪造 drive 读数', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    try {
+      await mujoco.open(scene('window-nogain', TORQUE_ARM), { worldId: 'nogain', timestepS: TIMESTEP, clock: 'manual' })
+      const described = await mujoco.describe('nogain', 'arm') as Record<string, any>
+      const j1 = (described.joints as Array<Record<string, any>>).find(joint => joint.name === 'j1')!
+      assert.equal(j1.controlMode, 'torque')
+      assert.equal('driveStiffness' in j1, false, '无显式增益时不得报出编造的 driveStiffness')
+      assert.equal('driveDamping' in j1, false, '无显式增益时不得报出编造的 driveDamping')
+      const before = observed(await mujoco.observe('nogain', { entityIds: ['arm'] }))
+      const target = positionOf(before, 'j2') + 0.05
+      await assert.rejects(
+        () => mujoco.execute('nogain', jointMove('nogain-1', ['j2'], [target])),
+        (error: any) => error?.code === 'TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED',
+      )
+      // 拒绝不得把世界留在 running：时钟未被占用，下一次动作仍可受理。
+      const worlds = await mujoco.listWorlds()
+      assert.notEqual(worlds.find(handle => handle.worldId === 'nogain')?.status, 'running')
+    } finally { await mujoco.dispose() }
+  })
+
+  // ---- 基座绑定装配边界（problem 3/4 修复回归；真实 MuJoCo worker，无模型替身）----
+  const inlineBody = (name: string) => `<mujoco><worldbody><body name="${name}"><geom type="box" size=".08 .08 .08" mass="1"/></body></worldbody></mujoco>`
+  const bindingEntity = (entityId: string, body: string, components: Record<string, unknown> = {}) => ({
+    entityId, name: entityId,
+    transform: { position: [0, 0, entityId === 'parent' ? 1 : 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+    resources: [], components: { mujoco: { rootBody: body, xml: inlineBody(body) }, ...components },
+  })
+  const bindingSnapshot = (sceneId: string, entities: unknown[]) => ({
+    sceneId, revision: 1,
+    coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' },
+    entities,
+  }) as never
+  const fixedBinding = (body: string, target: Record<string, unknown>) => ({ mode: 'fixed', bodyName: body, target })
+  const rigidTarget = { entityId: 'parent', bodyName: 'base', positionM: [0, 0, 0.25], quaternionXyzw: [0, 0, 0, 1] }
+
+  test('fixed+实体body：正序/反序导入都是原生刚性父子（无 weld，相对位姿正确）', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    try {
+      const cases: Array<{ worldId: string; entities: unknown[] }> = [
+        { worldId: 'binding-forward', entities: [bindingEntity('parent', 'base'), bindingEntity('child', 'mount', { baseBinding: fixedBinding('mount', { ...rigidTarget }) })] },
+        { worldId: 'binding-reverse', entities: [bindingEntity('child', 'mount', { baseBinding: fixedBinding('mount', { ...rigidTarget }) }), bindingEntity('parent', 'base')] },
+      ]
+      for (const { worldId, entities } of cases) {
+        await mujoco.open(bindingSnapshot(worldId, entities), { worldId, clock: 'manual', startPaused: true, ground: false })
+        const desc = await mujoco.describe(worldId, 'child') as Record<string, any>
+        assert.equal(desc.base.mode, 'fixed')
+        assert.equal(desc.base.target.entityId, 'parent')
+        assert.deepEqual(desc.base.constraints, [], '刚性父子不得再挂 equality weld 软约束')
+        assert.ok(Math.abs(desc.base.worldFromBody.positionM[2] - 1.25) < 1e-9,
+          `child 世界高度应为 parent(z=1)+0.25，实测 ${JSON.stringify(desc.base.worldFromBody.positionM)}`)
+        await mujoco.close(worldId)
+      }
+    } finally { await mujoco.dispose() }
+  })
+
+  test('自指/缺目标实体/缺目标 body/target 环：按原错误码明确拒绝', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    try {
+      const anchor = { positionM: [0, 0, 0], quaternionXyzw: [0, 0, 0, 1] }
+      const cases: Array<{ worldId: string; code: string; entities: unknown[] }> = [
+        { worldId: 'binding-self', code: 'ROBOT_BASE_TARGET_MISSING', entities: [bindingEntity('solo', 'base', { baseBinding: fixedBinding('base', { entityId: 'solo', bodyName: 'base', ...anchor }) })] },
+        { worldId: 'binding-ghost', code: 'ROBOT_BASE_TARGET_MISSING', entities: [bindingEntity('child', 'mount', { baseBinding: fixedBinding('mount', { entityId: 'ghost', bodyName: 'base', ...anchor }) })] },
+        { worldId: 'binding-nobody', code: 'ROBOT_BASE_TARGET_MISSING', entities: [bindingEntity('parent', 'base'), bindingEntity('child', 'mount', { baseBinding: fixedBinding('mount', { entityId: 'parent', bodyName: 'nope', ...anchor }) })] },
+        { worldId: 'binding-cycle', code: 'ROBOT_BASE_BINDING_CYCLE', entities: [bindingEntity('a', 'base', { baseBinding: fixedBinding('base', { entityId: 'b', bodyName: 'base', ...anchor }) }), bindingEntity('b', 'base', { baseBinding: fixedBinding('base', { entityId: 'a', bodyName: 'base', ...anchor }) })] },
+      ]
+      for (const { worldId, code, entities } of cases) {
+        await assert.rejects(
+          () => mujoco.open(bindingSnapshot(worldId, entities), { worldId, clock: 'manual', startPaused: true, ground: false }),
+          (error: any) => error?.code === code,
+          `${worldId} 必须以 ${code} 拒绝`,
+        )
+      }
+    } finally { await mujoco.dispose() }
+  })
+
+  test('free+实体目标：保留真实 equality weld，描述不冒充刚性', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    try {
+      const worldId = 'binding-free-weld'
+      await mujoco.open(bindingSnapshot(worldId, [
+        bindingEntity('parent', 'base'),
+        bindingEntity('child', 'mount', { baseBinding: { mode: 'free', bodyName: 'mount', initialWorldPose: { entityId: 'parent', bodyName: 'base', positionM: [0, 0, 0.25], quaternionXyzw: [0, 0, 0, 1] } } }),
+      ]), { worldId, clock: 'manual', startPaused: true, ground: false })
+      const desc = await mujoco.describe(worldId, 'child') as Record<string, any>
+      assert.ok(desc.base.constraints.some((c: any) => c.kind === 'weld' && c.targetEntityId === 'parent'), 'free+目标必须有真实 equality weld')
+      assert.match(String(desc.base.reason), /weld/i)
+      assert.doesNotMatch(String(desc.base.reason), /Rigid/i)
     } finally { await mujoco.dispose() }
   })
 })

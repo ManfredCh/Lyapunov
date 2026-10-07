@@ -1,7 +1,8 @@
 <mujoco model="torque-arm">
   <!-- 官方力矩模型（unitree h1 / BHL 同形）的最小夹具：执行器是 <motor>（biastype=none），
        不是 <position>。用于回归三件通用能力：
-         ① control 动作可以直接驱动力矩执行器（参考=关节位置目标，由逐关节 PD 折成力矩）；
+         ① control 动作可以直接驱动力矩执行器（参考=关节位置目标，由 controller 显式声明的逐关节 PD
+            折成力矩；无显式增益即明确拒绝，worker 不再补 120/4 默认值）；
          ② controller.jointKp/jointKd 逐关节增益（缺该关节回落标量 kp/kd）；
          ③ 源声明地面 geom（floor）进入 world handle 的 groundGeomNames。
        shoulder 挂整条链（负载大），elbow 只挂下段（负载小）：同一位置目标下两关节的

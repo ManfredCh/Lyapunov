@@ -153,6 +153,10 @@ Prefer native MJCF/URDF where supported. Keep includes, meshes, textures and act
 
 Multiple robots can share a Scene/world and a bounded batch action. Read each robot's result under the same world/generation; shared timing and one batch request do not establish arbitrary heterogeneous cooperation or fleet-task completion.
 
+MuJoCo position servos can accept position references directly. A source torque motor needs explicitly declared controller gains (`jointKp`/`jointKd`, or scalar `kp`/`kd`) or a compatible policy before accepting a position target; the worker does not invent gains or drive readings. Keep the world paused until the selected control path is ready.
+
+A fixed base attached to another entity uses the target body's native parent-child assembly and local installation pose. Invalid, self-referencing and cyclic targets are rejected. Explicit world or body anchors remain unchanged; automatic support-plane adjustment applies only to an unanchored source-fixed default installation and reports its measured correction.
+
 ## Cameras, annotations and editable feedback
 
 A **world-fixed camera** uses a world pose. A **body/parent-mounted camera** uses a local installation pose and follows the actual parent body. Use **Save current view installation** to persist the current camera installation and **Restore installation baseline** to restore it. **Enter camera / Enter and follow camera** and **Return to main view** control the camera view; saved Viewer views do not replace native calibration.
