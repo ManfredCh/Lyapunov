@@ -733,7 +733,7 @@ export function publicCommandShape(name: string, value: unknown, roots?: Product
     if (Array.isArray(row)) out[target] = row.length
   }
   for (const key of ["status", "reason", "provider", "valid", "stopped", "stepIndex", "startStep", "endStep",
-    "actionId", "taskAchieved", "captureId", "sceneId", "sceneRevision", "frameId", "simTime", "width", "height",
+    "actionId", "taskAchieved", "captureId", "sceneId", "revision", "sceneRevision", "frameId", "simTime", "width", "height",
     "cameraName", "resolvedCameraName", "pinhole", "worldId", "generation", "worldGeneration", "appliedSceneRevision",
     "recordingId", "frameCount", "jobId", "emptyResult", "modelEntry", "entityId", "name", "captureName", "total",
     "query", "files", "bytes", "updatedAt", "error", "resolvedRevision", "missing", "changed", "folder", "origin",

@@ -1,7 +1,7 @@
 import {describe,expect,test,afterEach} from 'bun:test'
 import type {Context} from '@deepseek-ai/cordis'
 import {startExternalInstallSession,startExternalMcpRegistrationSession} from '../src/external-install-session.ts'
-import {externalMcpConfig,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState} from '../src/external-tools-host.ts'
+import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState} from '../src/external-tools-host.ts'
 import {runBlenderMcpSupplyCommand,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 
 function fixture(ok=true,wait?:Promise<void>){
@@ -79,23 +79,44 @@ describe('游客可直接配置MCP与取得权重，不依赖模型安装会话'
   expect(externalMcpConfig({serverName:'unity',transport:'streamable-http',url:'http://localhost:8080/mcp'},'/workspace')).toMatchObject({url:'http://localhost:8080/mcp'})
   for(const url of ['file:///tmp/mcp','https://user:secret@example.org/mcp','https://example.org/mcp?token=private'])expect(()=>externalMcpConfig({serverName:'other',transport:'sse',url},'/workspace')).toThrow('MCP_URL_INVALID')
  })
- test('既有配置更新只提交用户编辑字段，保留参数、凭据和超时，旧revision拒绝',async()=>{
-  let operations:unknown,revision=7
+ test('静态配置事务保留参数凭据超时，语义旧revision拒绝',async()=>{
+  const profile={cwd:'/workspace',patchPath:'/owned-profile/cordis.patch.yml'}
   const entry={options:{id:'native-existing',name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'unity',transport:'streamable-http',url:'https://example.org/mcp?token=hidden',headers:{Authorization:'preserve-me'},toolCallTimeoutMs:999}}}
-  const ctx={get:(name:string)=>name==='profileContext'?{cwd:'/workspace'}:name==='configEditor'?{entries:()=>[entry]}:name==='settings'?{writable:true,describe:()=>[{ns:'native-existing',revision}],mutate:async(_ns:unknown,ops:unknown)=>{operations=ops}}:undefined} as unknown as Context
-  await saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:7})
-  expect(operations).toEqual([{op:'set',path:['serverName'],value:'unity'},{op:'set',path:['transport'],value:'streamable-http'}])
-  revision=8;await expect(saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:7})).rejects.toThrow('MCP_CONFIG_CONFLICT')
+  let next:any
+  const editor={entries:()=>[entry],edit:async(_entry:unknown,change:(raw:any)=>any)=>{next=change(entry.options.config)}}
+  const ctx={get:(name:string)=>name==='profileContext'?profile:name==='configEditor'?editor:name==='settings'?{writable:true}:undefined} as unknown as Context
+  const revision=externalMcpRevision(profile.patchPath,entry.options.id,entry.options.config)
+  await saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:revision})
+  expect(next).toEqual(entry.options.config)
+  entry.options.config.toolCallTimeoutMs=1000
+  await expect(saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:revision})).rejects.toThrow('MCP_CONFIG_CONFLICT')
+  const foreign=externalMcpRevision('/other-profile/cordis.patch.yml',entry.options.id,entry.options.config)
+  await expect(saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:foreign})).rejects.toThrow('MCP_CONFIG_CONFLICT')
  })
- test('已有Blender自定义端口留空保存，不会覆写为9876，原生env仅在显式改端口时更新',async()=>{
-  let operations:any[]=[]
+ test('静态MCP含原生jsTag或继承表达式时保守拒绝且不落盘',async()=>{
+  const profile={cwd:'/workspace',patchPath:'/owned-profile/cordis.patch.yml'}
+  const config:any={serverName:'blender',transport:'stdio',command:'/tools/mcp-for-blender',env:{PRIVATE:{__jsExpr:'env.FIXTURE_VALUE'}}}
+  const entry={options:{id:'existing-blender',name:'@deepseek-ai/dsh-mcp-client',config}}
+  let writes=0
+  const editor={entries:()=>[entry],edit:async(_entry:unknown,change:(raw:any,inherited:any)=>any)=>{change(entry.options.config,{env:{BASE:{__jsExpr:'env.FIXTURE_BASE'}}});writes++}}
+  const ctx={get:(name:string)=>name==='profileContext'?profile:name==='configEditor'?editor:name==='settings'?{writable:true}:undefined} as unknown as Context
+  await expect(saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',expectedRevision:externalMcpRevision(profile.patchPath,entry.options.id,config)})).rejects.toThrow('MCP_COMPLEX_CONFIG_EDIT_NATIVE')
+  config.env={PRIVATE:'keep-literal'}
+  await expect(saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',expectedRevision:externalMcpRevision(profile.patchPath,entry.options.id,config)})).rejects.toThrow('MCP_COMPLEX_CONFIG_EDIT_NATIVE')
+  expect(writes).toBe(0);expect(config.env.PRIVATE).toBe('keep-literal')
+ })
+ test('已有Blender端口空保存保留，静态编辑只改显式端口并保留私人env',async()=>{
+  const profile={cwd:'/workspace',patchPath:'/owned-profile/cordis.patch.yml'}
   const entry={options:{id:'existing-blender',name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'blender',transport:'stdio',command:'/tools/mcp-for-blender',env:{BLENDER_PORT:'9988',PRIVATE_TOKEN:'keep'}}}}
-  const ctx={get:(name:string)=>name==='profileContext'?{cwd:'/workspace'}:name==='configEditor'?{entries:()=>[entry]}:name==='settings'?{writable:true,describe:()=>[{ns:'existing-blender',revision:1}],mutate:async(_ns:unknown,ops:any[])=>{operations=ops}}:undefined} as unknown as Context
-  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',expectedRevision:1})
-  expect(operations.some(v=>v.path[0]==='env')).toBe(false)
-  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',blenderPort:9989,expectedRevision:1})
-  expect(operations).toContainEqual({op:'set',path:['env','BLENDER_PORT'],value:'9989'})
-  expect(operations.some(v=>v.path.includes('PRIVATE_TOKEN'))).toBe(false)
+  let next:any
+  const editor={entries:()=>[entry],edit:async(_entry:unknown,change:(raw:any)=>any)=>{next=change(entry.options.config)}}
+  const ctx={get:(name:string)=>name==='profileContext'?profile:name==='configEditor'?editor:name==='settings'?{writable:true}:undefined} as unknown as Context
+  const revision=externalMcpRevision(profile.patchPath,entry.options.id,entry.options.config)
+  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',expectedRevision:revision})
+  expect(next.env).toEqual({BLENDER_PORT:'9988',PRIVATE_TOKEN:'keep'})
+  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',blenderPort:9989,expectedRevision:revision})
+  expect(next.env).toMatchObject({BLENDER_PORT:'9989',PRIVATE_TOKEN:'keep'})
+  expect(entry.options.config.env.BLENDER_PORT).toBe('9988')
  })
  test('锁定桥接供给预取消不写入；实际供给子进程组取消后真实退出，不碰既有编辑器',async()=>{
   const before=new AbortController();before.abort()
@@ -202,7 +223,7 @@ async function preferencesFixture(input: { legacy?: string; overrides?: object[]
  return { ctx: await start(), start, home, profile, view }
 }
 
-test('原生profile新增MCP真实initialize/tools-list发布工具；重复namespace激活失败原子回退',async()=>{
+test('原生静态MCP新增与已有更新真实事务，旧revision与跨profile拒绝',async()=>{
  const server=createServer(async(request,response)=>{
   if(request.method!=='POST'){response.writeHead(405);response.end();return}
   let body='';for await(const chunk of request)body+=String(chunk)
@@ -220,6 +241,20 @@ test('原生profile新增MCP真实initialize/tools-list发布工具；重复name
   expect(h.ctx.tools.schemas().map(v=>v.name)).toContain('mcp__fixture__read_fixture')
   const actual=await externalToolsState(h.ctx)
   expect(actual.mcp.find(v=>v.serverName==='fixture')).toMatchObject({status:'connected',tools:['mcp__fixture__read_fixture'],detail:null})
+  const row=actual.mcp.find(v=>v.serverName==='fixture')!
+  expect(h.ctx.settings.describe().some(v=>v.ns===row.id)).toBe(false)
+  await saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',expectedRevision:row.revision??undefined})
+  const stale=row.revision!
+  await saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',url:url+'/changed',expectedRevision:stale})
+  const changed=(await externalToolsState(h.ctx)).mcp.find(v=>v.serverName==='fixture')!
+  expect(changed.url).toBe(url+'/changed')
+  expect(changed.revision).not.toBe(stale)
+  const saved=await readFile(h.profile.patchPath,'utf8')
+  await expect(saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',url,expectedRevision:stale})).rejects.toThrow('MCP_CONFIG_CONFLICT')
+  expect(await readFile(h.profile.patchPath,'utf8')).toBe(saved)
+  const foreign=externalMcpRevision('/other-profile/cordis.patch.yml',changed.id,h.ctx.configEditor.entries().find(e=>e.options.id===changed.id)!.options.config)
+  await expect(saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',expectedRevision:foreign})).rejects.toThrow('MCP_CONFIG_CONFLICT')
+  expect(await readFile(h.profile.patchPath,'utf8')).toBe(saved)
   const persisted=await readFile(h.profile.patchPath,'utf8')
   expect(persisted).toContain('@deepseek-ai/dsh-mcp-client')
   expect(persisted).toContain('lyapunov-external-mcp-fixture')

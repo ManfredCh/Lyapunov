@@ -63,4 +63,46 @@ entry['articulation'].link_paths=[['/World/fixed/wrong-root']]
 try:authoring.verify_native_origin(entry);raise AssertionError('Wrong root was accepted')
 except SceneError as error:assert error.code=='ENTITY_ORIGIN_UNVERIFIED'
 rows.append({'case':'fixed-joint-and-anchor','nativePosePath':str(body.GetPath()),'relationPreserved':True,'rootMismatchRejected':True})
+# Scope 根只在原生有序 link 元数据 ready 后选择；预初始化 USD 快照不触碰 tensor。
+class DelayedLinks:
+    def __init__(self,paths):self.paths=paths;self.ready=False;self.reads=0
+    @property
+    def link_paths(self):
+        self.reads+=1
+        if not self.ready:raise SceneError('PHYSICS_NOT_READY','view not initialized')
+        return self.paths
+stage=Usd.Stage.CreateInMemory();model=matrix([2,-3,.2],[0,0,1],35)
+container=UsdGeom.Xform.Define(stage,'/World/deferred');container.AddTransformOp().Set(model)
+scope=UsdGeom.Scope.Define(stage,'/World/deferred/articulation');UsdPhysics.ArticulationRootAPI.Apply(scope.GetPrim())
+body=UsdGeom.Xform.Define(stage,'/World/deferred/articulation/base');local=matrix([.1,.2,.7],[1,0,0],19);body.AddTransformOp().Set(local);UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+ordered=DelayedLinks([[str(body.GetPath())]])
+entry={'entity':{'entityId':'deferred-scope'},'path':'/World/deferred','articulation':ordered,'pose':types.SimpleNamespace(paths=[str(scope.GetPath())]),'rigidPaths':[str(body.GetPath())]}
+source_snapshot=authoring.snapshot_model_origin(stage,entry,model);assert ordered.reads==0
+try:authoring.capture_model_origin(stage,entry,model);raise AssertionError('uninitialized link metadata was read as ready')
+except SceneError as error:assert error.code=='PHYSICS_NOT_READY'
+# 此真实 USD 变换变更代表初始化后环境发生变化；测试不运行物理，也不作为运行证据。
+body.ClearXformOpOrder();body.AddTransformOp().Set(matrix([.6,-.2,.9],[0,1,0],14))
+ordered.ready=True
+authoring.capture_model_origin(stage,entry,source_snapshot['worldFromModel'],native_worlds=source_snapshot['worldByPath'])
+assert entry['nativePosePath']==str(body.GetPath())
+original=source_snapshot['worldByPath'][str(body.GetPath())];initial=authoring.native_initial_pose(stage,entry,native_world=original)
+np.testing.assert_allclose(initial[0],state(original)[0],atol=1e-12)
+projected=authoring.model_world_matrix(entry,*initial);np.testing.assert_allclose(np.asarray(projected),np.asarray(model.RemoveScaleShear()),atol=1e-12)
+authoring.verify_native_origin(entry)
+rows.append({'case':'deferred-scope-USD-snapshot','tensorReadsDuringSnapshot':0,'nativeRootFromOrderedLinks':True,'preInitializationOriginPreserved':True})
+
+# 原关系取源 USD；显式基座绑定后的真实 USD 初态单独用于既有预热复位。
+anchor=matrix([7,4,1.2],[1,2,1],51);body.ClearXformOpOrder();body.AddTransformOp().Set(anchor*model.GetInverse())
+binding_snapshot=authoring.snapshot_model_origin(stage,entry,model)
+authoring.capture_model_origin(stage,entry,model,native_worlds=source_snapshot['worldByPath'])
+bound_initial=authoring.native_initial_pose(stage,entry,native_world=binding_snapshot['worldByPath'][str(body.GetPath())])
+np.testing.assert_allclose(bound_initial[0],state(anchor)[0],atol=1e-12)
+np.testing.assert_allclose(np.asarray(authoring.model_world_matrix(entry,*bound_initial)),np.asarray(entry['modelFromNativeRoot'].GetInverse()*anchor),atol=1e-12)
+rows.append({'case':'binding-after-source-snapshot','authoredAnchorRestored':True,'sourceRelationPreserved':True})
+
+bad=DelayedLinks([['/World/deferred/articulation/missing']]);bad.ready=True;entry['articulation']=bad
+missing=UsdGeom.Xform.Define(stage,'/World/deferred/articulation/missing');UsdPhysics.RigidBodyAPI.Apply(missing.GetPrim())
+try:authoring.capture_model_origin(stage,entry,model,native_worlds=source_snapshot['worldByPath']);raise AssertionError('uncaptured native root accepted')
+except SceneError as error:assert error.code=='ENTITY_ORIGIN_UNVERIFIED'
+rows.append({'case':'uncaptured-native-root-rejected','errorCode':'ENTITY_ORIGIN_UNVERIFIED'})
 print(json.dumps({'status':'REAL_USD_ORIGIN_CONTRACT_PASS','scope':'Real USD/Gf contract; not Kit/PhysX/GUI','cases':rows}))

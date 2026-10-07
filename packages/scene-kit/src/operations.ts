@@ -790,10 +790,16 @@ export class SceneOperations {
     let entities: Entity[]
     let transform=input.transform??resource.mountTransform
     if(input.alignBottomToSurface!==false&&input.transform?.position&&transform){
+      // 旧登记版本可能没有新可重建的URDF视觉bounds。只读同原件重测供本次挂载，不改库或原件版本。
+      if(!resource.physicalization?.collisionBounds&&resource.parsed.kind==='robot'&&resource.parsed.metadata.format==='urdf'&&!resource.parsed.metadata.aabb){
+        const measured=await parseAsset(localPath(resource.ref.original.uri),resource.ref.source)
+        if(measured.kind!=='robot'||measured.metadata.format!=='urdf')throw Error('URDF_BOUNDS_SOURCE_FORMAT_MISMATCH')
+        resource={...resource,parsed:{...resource.parsed,metadata:{...resource.parsed.metadata,...measured.metadata}}}
+      }
       // 落地对齐优先用碰撞产物包围盒（物理基准，含凸包/盒组真实外形）；物理化未完成或无产物时退回视觉 aabb。
       // 泼溅件现在也带 aabb（formats.ts 解码自身点云），落地对齐一视同仁；仍以碰撞产物包围盒优先。
       const bounds=resource.physicalization?.collisionBounds??assetBounds(resource.parsed,resource.ref.source)
-      if(!bounds)throw new Error(`PROTOTYPE_BOUNDS_UNAVAILABLE: 资源 ${input.resourceId}@${resource.ref.version} 没有可用的几何包围盒，默认的"底面贴到 position 高度"无法执行——造型/底面/尺度都不可判定，因此不把这份原型复制进场景（ENV-21：原型不通过不铺开）。可采取的动作：先核对原型原件（几何范围/底面/法线/材质/尺度）后重新导入；确实要按原点精确落位时显式传 alignBottomToSurface:false。`)
+      if(!bounds){const facts=resource.parsed.metadata.boundsFacts as {issue?:string}|undefined;throw new Error(`PROTOTYPE_BOUNDS_UNAVAILABLE: 资源 ${input.resourceId}@${resource.ref.version} 没有可用的几何包围盒，默认的"底面贴到 position 高度"无法执行——造型/底面/尺度都不可判定，因此不把这份原型复制进场景（ENV-21：原型不通过不铺开）。可采取的动作：先核对原型原件（几何范围/底面/法线/材质/尺度）后重新导入；确实要按原点精确落位时显式传 alignBottomToSurface:false。${facts?.issue?' '+facts.issue:''}`)}
       const matrix=new Matrix4().compose(new Vector3(),new Quaternion(...transform.quaternion),new Vector3(...transform.scale))
       let lift=Infinity
       for(const x of [bounds.min[0],bounds.max[0]])for(const y of [bounds.min[1],bounds.max[1]])for(const z of [bounds.min[2],bounds.max[2]])lift=Math.min(lift,new Vector3(x,y,z).applyMatrix4(matrix).z)

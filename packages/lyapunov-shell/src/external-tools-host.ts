@@ -21,6 +21,7 @@ import {readFile,stat} from 'node:fs/promises'
 import {existsSync} from 'node:fs'
 import {join,resolve,basename,isAbsolute} from 'node:path'
 import {execFile} from 'node:child_process'
+import {createHash} from 'node:crypto'
 import {blenderMcpPaths,blenderMcpStatus,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 import {resolveBlenderExecutable} from '../../../script/runtime-patch.ts'
 import {CREATIVE_TOOLS_CATALOG,downloadPlan,HF_DEFAULT_MIRROR,type CreativeToolId} from '../../../script/creative-tools-catalog.ts'
@@ -31,6 +32,12 @@ import type {ExternalToolsState,ExternalMcpInput,ExternalMcpRow,ExternalToolRead
 
 declare module '@deepseek-ai/dsh-jobs' {interface JobKindMap {'external-install':'external-install'}}
 const MCP_PLUGIN='@deepseek-ai/dsh-mcp-client'
+/** 静态 MCP 配置的语义版本；绑定原生profile/id，不取缺失的volatile表单，也不输出秘密值。 */
+export function externalMcpRevision(profilePath:string,id:string,config:unknown):number{
+ const stable=(v:unknown):unknown=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,value])=>[key,stable(value)])):v
+ return createHash('sha256').update(JSON.stringify([profilePath,id,stable(config)])).digest().readUIntBE(0,6)
+}
+const hasMcpExpression=(v:unknown):boolean=>Array.isArray(v)?v.some(hasMcpExpression):v!==null&&typeof v==='object'?Object.hasOwn(v,'__jsExpr')||Object.values(v).some(hasMcpExpression):typeof v==='function'||typeof v==='symbol'
 const object=(v:unknown):Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{}
 const publicUrl=(v:unknown):string|null=>{try{const u=new URL(String(v));return u.origin+u.pathname}catch{return null}}
 const errorText=(e:unknown)=>redactSecretsText(e instanceof Error?e.message:String(e)).slice(0,1200)
@@ -76,16 +83,24 @@ export async function saveExternalMcp(ctx:Context,input:ExternalMcpInput):Promis
  if(matches.length>1)throw Error('MCP_NAMESPACE_AMBIGUOUS: 有多个同名配置，请在原生文档中处理。 / Resolve duplicate entries in the native document.')
  const entry=matches[0]
  if(entry){
-  const view=settings.describe({redactSecrets:true}).find(v=>v.ns===entry.options.id)
-  if(!view||input.expectedRevision!==view.revision)throw Error('MCP_CONFIG_CONFLICT: 配置已变化，请先刷新。 / Refresh before saving changed configuration.')
+  const conflict=()=>Error('MCP_CONFIG_CONFLICT: 配置已变化，请先刷新。 / Refresh before saving changed configuration.')
+  if(!profile.patchPath||typeof editor.edit!=='function')throw Error('MCP_CONFIG_READ_ONLY: 缺少原生静态配置事务。 / Native static configuration editing is unavailable.')
+  const revision=(config:unknown)=>externalMcpRevision(profile.patchPath,entry.options.id,config)
+  if(input.expectedRevision!==revision(entry.options.config))throw conflict()
+  const plain=(config:unknown)=>{if(hasMcpExpression(config))throw Error('MCP_COMPLEX_CONFIG_EDIT_NATIVE: 当前配置含原生表达式，请在原生配置文档中编辑。 / Edit native expressions in the native configuration document.')}
+  plain(entry.options.config)
   const current=object(entry.options.config)
   const next=externalMcpConfig({...input,command:input.command??current.command as string|undefined,url:input.url??publicUrl(current.url)??undefined},profile.cwd)
   // 表单没有编辑的字段不写回；保留继承值、用户参数、端点中的秘密与原有超时设置。
   for(const key of ['command','args','cwd','url'] as const)if(input[key]===undefined)delete next[key]
   delete next.failOnStartupError;delete next.toolCallTimeoutMs
   if(current.transport!==input.transport)throw Error('MCP_TRANSPORT_CHANGE: 更换 transport 请在原生配置文档中操作，避免丢失既有秘密字段。 / Change transport in the native document.')
-  const ops=Object.entries(next).flatMap(([key,value])=>key==='env'?Object.entries(object(value)).map(([name,v])=>({op:'set' as const,path:['env',name],value:v})):[{op:'set' as const,path:[key],value}])
-  await settings.mutate(view.ns,ops,view.revision)
+  // command/args/env 是上游静态 Config：原生 ConfigEditor 在自己的文件锁中校验、落盘、重载并回退。
+  await editor.edit(entry,(raw,inherited)=>{
+   if(input.expectedRevision!==revision(raw))throw conflict()
+   plain(raw);plain(inherited)
+   return {...raw,...next,...next.env===undefined?{}:{env:{...object(raw.env),...object(next.env)}}}
+  })
   return
  }
  const next=externalMcpConfig(input,profile.cwd)
@@ -129,7 +144,7 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
   // ready是原生首次启动结果，读它不会重试或创建另一连接；与当前掉线状态明确区分。
   const initial=live?.status!=='connected'&&connection?await Promise.race([connection.ready,new Promise<undefined>(r=>{const timer=setTimeout(()=>r(undefined),100);timer.unref?.()})]):undefined
   const detail=live?.status==='connected'?null:initial?.error!==undefined?'首次启动失败 / Initial startup failed: '+errorText(initial.error):live?'当前连接不可用；原生客户端管理重连。 / Connection unavailable; inspect native reconnection diagnostics.':'该配置尚无活动连接实例。 / No active native connection instance.'
-  return {id:e.options.id,serverName,transport:String(c.transport??''),command:typeof c.command==='string'?basename(c.command):null,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:tools.filter(t=>t.startsWith('mcp__'+serverName+'__')),revision:views.find(v=>v.ns===e.options.id)?.revision??null,detail}
+  return {id:e.options.id,serverName,transport:String(c.transport??''),command:typeof c.command==='string'?basename(c.command):null,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:tools.filter(t=>t.startsWith('mcp__'+serverName+'__')),revision:externalMcpRevision(ctx.get('profileContext')?.patchPath??'',e.options.id,e.options.config),detail}
  }))
  for(const live of servers)if(!mcp.some(v=>v.serverName===live.serverName))mcp.push({id:'',serverName:live.serverName,transport:'scope-owned',command:null,url:null,argsCount:0,envNames:[],headerNames:[],status:live.status==='connected'?'connected':'unavailable',tools:tools.filter(t=>t.startsWith('mcp__'+live.serverName+'__')),revision:null,detail:null})
  const blender=await version(resolveBlenderExecutable(),['--version']),unity=process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()

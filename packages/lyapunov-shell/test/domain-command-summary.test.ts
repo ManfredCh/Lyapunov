@@ -12,6 +12,8 @@ import { describe, expect, test } from "bun:test"
 
 import { domainCommandSummary } from "../src/domain-command-card.tsx"
 import { ActionCards } from "../src/robot-control-panel.tsx"
+import {commandRouteResponse} from '../../lyapunov-contracts/src/command-privacy.ts'
+import {createSessionOutboundProjection} from '../../lyapunov-contracts/src/session-event-projection.ts'
 
 /** 真实回执的字段形状（仅去掉与摘要无关的 finalState 大块）。 */
 const receipt = (targetReached: boolean) => ({
@@ -32,6 +34,30 @@ const receipt = (targetReached: boolean) => ({
 
 const summarize = (value: unknown, name = "robot_move", english = false) =>
   domainCommandSummary(name, JSON.stringify(value), "success", english)
+
+describe('Scene revision survives the actual human response and event projection', () => {
+  for (const revision of [0, 4]) {
+    test(`scene_create rev ${revision} remains visible without exposing full entities or internal fields`, () => {
+      const value = {sceneId:'scene-vm076',revision,entities:[{entityId:'lyapunov-default-ground'}],
+        password:'fixture-private-value',nextSteps:['fixture internal instruction']}
+      const before = JSON.stringify(value)
+      const response = commandRouteResponse('scene_create',{kind:'success',text:JSON.stringify(value)},'formal')
+      expect(response.ui?.revision).toBe(revision)
+      expect(JSON.parse(response.text)).toMatchObject({sceneId:'scene-vm076',revision,entities:1})
+      expect(response.text).not.toContain('fixture-private-value')
+      expect(response.text).not.toContain('fixture internal instruction')
+      expect(response.text).not.toContain('lyapunov-default-ground')
+      const event = {type:'command/done',seq:1,time:100,data:{name:'scene_create',kind:'success',text:before}}
+      const wire = createSessionOutboundProjection('formal').projectEvent(event) as typeof event
+      expect(JSON.parse(wire.data.text).revision).toBe(revision)
+      for (const text of [response.text,wire.data.text]) {
+        expect(domainCommandSummary('scene_create',text,'success',false).summary).toBe(`rev ${revision} · 1 个实体`)
+        expect(domainCommandSummary('scene_create',text,'success',true).summary).toBe(`rev ${revision} · 1 entities`)
+      }
+      expect(JSON.stringify(value)).toBe(before)
+    })
+  }
+})
 
 describe("R5：动作回执摘要", () => {
   test("completed 但 targetReached=false ⇒ 写「动作已结束，目标未到达」并点出未进容差的动作数与容差", () => {

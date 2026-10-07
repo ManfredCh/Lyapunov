@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { acquireAsset } from '../src/asset-acquisition.ts'
 import { SceneOperations } from '../src/operations.ts'
+import {assetBounds,parseAsset} from '../src/formats.ts'
 
 let workspace = ''
 beforeEach(async () => { workspace = await mkdtemp(join(tmpdir(), 'lya-env21-')) })
@@ -59,7 +60,8 @@ function triangleGLB(withNormal: boolean): Buffer {
 describe('ENV-21 原型不通过就不复制', () => {
   it('原生MJCF/URDF真实kind为robot：缺bounds默认及显式true拒写，false保用户模型原点与原件姿态',async()=>{
     const pose={position:[2,3,4] as [number,number,number],quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as [number,number,number]}
-    const sources=[['xml','mjcf','<mujoco model="arbitrary-native"><worldbody><body name="root" pos="0 0 1"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>'],['urdf','urdf','<robot name="other-native"><link name="root"><visual><origin xyz="0 0 1"/><geometry><box size=".2 .3 .4"/></geometry></visual></link></robot>']] as const
+    // MJCF 尚未派生 bounds；合法但没有 visual 的 URDF 也不能猜测底面。
+    const sources=[['xml','mjcf','<mujoco model="arbitrary-native"><worldbody><body name="root" pos="0 0 1"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>'],['urdf','urdf','<robot name="other-native"><link name="root"/></robot>']] as const
     for(const [extension,format,source] of sources){
       const path=join(workspace,`arbitrary.${extension}`);await writeFile(path,source)
       const operations=new SceneOperations(join(workspace,'data-'+extension)),scene=await operations.create({name:extension})
@@ -131,6 +133,81 @@ describe('ENV-21 原型不通过就不复制', () => {
     const scene = await operations.create({ name: 'missing' })
     await expect(operations.import({ path: join(workspace, 'nope.glb'), sceneId: scene.sceneId, physicalize: false })).rejects.toThrow(/ENOENT|not exist|不存在/i)
     expect((await operations.inspect(scene.sceneId)).entities).toEqual([])
+  })
+})
+
+describe('Native URDF initial visual bounds and ordinary bottom placement',()=>{
+  const triangleSTL=()=>{
+    const data=Buffer.alloc(134);data.writeUInt32LE(1,80)
+    ;[[0,0,-2],[1,0,0],[0,2,0]].flat().forEach((v,i)=>data.writeFloatLE(v,96+i*4))
+    return data
+  }
+  const robot=(geometry:string,joint='')=>`<robot name="bound-original"><link name="base"/><link name="tip"><visual><origin xyz="1 0 0"/><geometry>${geometry}</geometry></visual></link><joint name="hinge" type="revolute"><parent link="base"/><child link="tip"/><origin xyz="1 2 3" rpy="0 0 1.5707963267948966"/></joint>${joint}</robot>`
+  it('STL vertices, mesh scale, visual origin and zero-joint FK determine placement without a guessed robot height',async()=>{
+    const mesh=join(workspace,'original.stl'),path=join(workspace,'original.urdf')
+    await writeFile(mesh,triangleSTL());await writeFile(path,robot('<mesh filename="original.stl" scale="2 3 4"/>'))
+    const before=await readFile(mesh),operations=new SceneOperations(join(workspace,'urdf-data')),scene=await operations.create({})
+    const imported=await operations.import({path,sceneId:scene.sceneId,physicalize:false,transform:{position:[9,8,4],quaternion:[0,0,0,1],scale:[1,1,1]}})
+    const bounds=imported.resource.parsed.metadata.aabb as {min:number[];max:number[]}
+    for(const [i,n] of [-5,3,-5].entries())expect(bounds.min[i]).toBeCloseTo(n,6)
+    for(const [i,n] of [1,5,3].entries())expect(bounds.max[i]).toBeCloseTo(n,6)
+    const facts=imported.resource.parsed.metadata.boundsFacts as any
+    expect(facts).toMatchObject({status:'available',source:'urdf-visual-vertices',pose:'zero-joint-initial',dynamicPoseEvaluated:false,meshCount:1})
+    expect(facts.meshSources[0].sha256).toHaveLength(64)
+    const mounted=imported.snapshot!.entities.find(e=>e.entityId===imported.entityId)!
+    expect(mounted.transform.position).toEqual([9,8,9])
+    expect(mounted.components.articulation?.format).toBe('urdf')
+    expect(await readFile(mesh)).toEqual(before)
+    const converted=assetBounds(imported.resource.parsed,{units:'mm',upAxis:'Z',handedness:'right',metersPerUnit:0.001})!
+    expect(converted.min[2]).toBeCloseTo(-0.005,9)
+  })
+  it('existing OBJ geometry and declared primitive visuals can supply a complete initial bound',async()=>{
+    const path=join(workspace,'obj.urdf');await writeFile(join(workspace,'part.obj'),'v 0 0 -2\nv 1 0 0\nv 0 2 0\nf 1 2 3\n')
+    await writeFile(path,robot('<mesh filename="part.obj" scale="2 3 4"/>'))
+    const mesh=await parseAsset(path);expect((mesh.metadata.aabb as any).min[2]).toBeCloseTo(-5,6)
+    const box=join(workspace,'box.urdf');await writeFile(box,'<robot name="box"><link name="root"><visual><origin xyz="0 0 1"/><geometry><box size=".2 .3 .4"/></geometry></visual></link></robot>')
+    const declared=await parseAsset(box);expect((declared.metadata.aabb as any).min[2]).toBeCloseTo(.8,6)
+    const operations=new SceneOperations(join(workspace,'box-data')),scene=await operations.create({})
+    const mounted=await operations.import({path:box,sceneId:scene.sceneId,physicalize:false,transform:{position:[0,0,2],quaternion:[0,0,0,1],scale:[1,1,1]}})
+    expect(mounted.snapshot!.entities.find(e=>e.entityId===mounted.entityId)!.transform.position[2]).toBeCloseTo(1.2,6)
+  })
+  it('bad scale, unsupported mesh and invalid joint tree return a concrete issue, no partial aabb and no Scene write',async()=>{
+    await writeFile(join(workspace,'part.stl'),triangleSTL());await writeFile(join(workspace,'part.msh'),'unsupported mesh bytes')
+    const cases=[robot('<mesh filename="part.stl" scale="1 NaN 1"/>'),robot('<mesh filename="part.msh"/>'),robot('<mesh filename="part.stl"/>','<joint name="cycle" type="fixed"><parent link="tip"/><child link="base"/></joint>')]
+    for(const [i,source] of cases.entries()){
+      const path=join(workspace,`bad-${i}.urdf`);await writeFile(path,source)
+      const parsed=await parseAsset(path);expect(parsed.metadata.aabb).toBeUndefined();expect((parsed.metadata.boundsFacts as any).issue).toMatch(/^URDF_BOUNDS_/)
+      const operations=new SceneOperations(join(workspace,`bad-data-${i}`)),scene=await operations.create({})
+      await expect(operations.import({path,sceneId:scene.sceneId,physicalize:false,transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]}})).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE')
+      expect((await operations.inspect(scene.sceneId)).revision).toBe(0);expect((await operations.inspect(scene.sceneId)).entities).toHaveLength(0)
+    }
+  })
+  it('a missing registered mesh remains a dependency failure instead of an invented bound',async()=>{
+    const path=join(workspace,'missing.urdf');await writeFile(path,robot('<mesh filename="missing.stl"/>'))
+    await expect(parseAsset(path)).rejects.toThrow()
+    const operations=new SceneOperations(join(workspace,'missing-data')),scene=await operations.create({})
+    await expect(operations.import({path,sceneId:scene.sceneId,physicalize:false,transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]}})).rejects.toThrow()
+    expect((await operations.inspect(scene.sceneId)).entities).toHaveLength(0)
+  })
+  it('mixed URDF fixed-axis roll/yaw follows the document convention without calling a physics engine',async()=>{
+    const path=join(workspace,'mixed-rpy.urdf')
+    await writeFile(path,'<robot name="mixed-rpy"><link name="root"><visual><origin rpy="1.5707963267948966 0 1.5707963267948966"/><geometry><box size="2 4 6"/></geometry></visual></link></robot>')
+    const parsed=await parseAsset(path),bounds=parsed.metadata.aabb as {min:number[];max:number[]}
+    for(const [i,n] of [3,1,2].entries()){expect(bounds.max[i]).toBeCloseTo(n,6);expect(bounds.min[i]).toBeCloseTo(-n,6)}
+    expect((parsed.metadata.boundsFacts as any).dynamicPoseEvaluated).toBe(false)
+  })
+  it('mount can read missing legacy metadata without rewriting its resource identity or source bytes',async()=>{
+    const path=join(workspace,'legacy.urdf');await writeFile(path,'<robot name="legacy"><link name="root"><visual><origin xyz="0 0 1"/><geometry><box size=".2 .3 .4"/></geometry></visual></link></robot>')
+    const operations=new SceneOperations(join(workspace,'legacy-data')),scene=await operations.create({})
+    const imported=await operations.import({path,physicalize:false}),legacy=structuredClone(imported.resource)
+    delete legacy.parsed.metadata.aabb;delete legacy.parsed.metadata.boundsFacts
+    const before=await readFile(path)
+    const mounted=await operations.mount({sceneId:scene.sceneId,resourceId:legacy.ref.resourceId,version:legacy.ref.version,transform:{position:[0,0,2],quaternion:[0,0,0,1],scale:[1,1,1]}},legacy)
+    expect(mounted.snapshot.entities.find(e=>e.entityId===mounted.entityId)!.transform.position[2]).toBeCloseTo(1.2,6)
+    expect(legacy.parsed.metadata.aabb).toBeUndefined()
+    expect(mounted.snapshot.entities.find(e=>e.entityId===mounted.entityId)!.resources[0]?.resourceId).toBe(legacy.ref.resourceId)
+    expect(mounted.snapshot.entities.find(e=>e.entityId===mounted.entityId)!.resources[0]?.version).toBe(legacy.ref.version)
+    expect(await readFile(path)).toEqual(before)
   })
 })
 

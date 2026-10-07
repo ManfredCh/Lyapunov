@@ -2,6 +2,7 @@ import { open, readFile, stat } from "node:fs/promises"
 import { blendExternalFiles } from "./blend-deps.ts"
 import {geometrySourceFacts,objMaterialFiles,type SourceTexturePolicy} from './geometry-source-deps.ts'
 import { splatBounds } from "./splat-bounds.ts"
+import {urdfVisualBounds} from './urdf-bounds.ts'
 import { createReadStream, existsSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { basename, dirname, extname, relative, resolve } from "node:path"
@@ -150,7 +151,7 @@ function glbMaterials(json: any): GlbMaterialFact[] {
   })
 }
 
-/** 资源视觉包围盒换算到实体根本地坐标（含源坐标转换）；无 aabb 元数据（robot/旧登记资源、无法解码的泼溅件）返回 undefined。 */
+/** 资源视觉包围盒换算到实体根本地坐标（含源坐标转换）；无 aabb 元数据（未支持的原生文档/旧登记资源、无法解码的泼溅件）返回 undefined。 */
 export function assetBounds(parsed: ParsedAsset, source: ResourceRef["source"]): { min: Vec3; max: Vec3 } | undefined {
   const aabb = parsed.metadata.aabb as { min: Vec3; max: Vec3 } | undefined
   if (!aabb) return undefined
@@ -378,10 +379,13 @@ export async function parseAsset(path: string, override?: ResourceRef["source"],
     return { kind: "splat", mimeType: extension === ".ply" ? "application/x-ply" : `application/x-${extension.slice(1)}`, source: override ?? { ...defaultSource, upAxis: "Y" }, dependencies: [stamp], metadata: { ...metadata, ...(bounds ? { aabb: bounds } : {}) } }
   }
   if ([".xml", ".mjcf", ".urdf"].includes(extension)) {
-    const document = readXml(await readFile(path, "utf8"))
+    const text=await readFile(path,"utf8"),document=readXml(text)
     const root = document.mujoco ?? document.robot
     if (!root) throw new Error("UNSUPPORTED_ROBOT_XML_ROOT")
-    return { kind: "robot", mimeType: document.mujoco ? "application/x-mjcf+xml" : "application/x-urdf+xml", source: override ?? defaultSource, dependencies: await robotDependencies(path), metadata: { format: document.mujoco ? "mjcf" : "urdf", modelName: root.model ?? root.name ?? basename(path) } }
+    const dependencies=await robotDependencies(path)
+    if(dependencies.find(row=>resolve(row.path)===resolve(path))?.sha256!==createHash('sha256').update(text).digest('hex'))throw Error('RESOURCE_CHANGED_DURING_READ: '+path)
+    const bounds=document.robot?await urdfVisualBounds(document.robot,path,dependencies):undefined
+    return { kind: "robot", mimeType: document.mujoco ? "application/x-mjcf+xml" : "application/x-urdf+xml", source: override ?? defaultSource, dependencies, metadata: { format: document.mujoco ? "mjcf" : "urdf", modelName: root.model ?? root.name ?? basename(path),...bounds??{} } }
   }
   if ([".hdr", ".exr"].includes(extension)) {
     // HDRI（环境光照的 IBL/天空盒来源）：登记为普通资源，Viewer 按 representation 的 mimeType

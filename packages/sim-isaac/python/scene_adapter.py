@@ -883,9 +883,13 @@ class SceneAdapter:
                          # Scene 声明碰撞实际落成的东西（collider 路径、材质与质量来源）；没有声明
                          # 碰撞的实体（走导入源碰撞）这里为 None，不假装有 Scene 侧消费记录。
                          'collision':collision_record}
-        from robot_authoring import capture_model_origin
+        from robot_authoring import capture_model_origin,snapshot_model_origin
         for eid,entry in result.items():
-            capture_model_origin(stage,entry,worldposes[eid])
+            if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu' and os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='rtx':
+                # 不预读尚未存在的 PhysX view；保存源 USD 变换，稍后用真实 link 元数据核根。
+                entry['modelOriginBeforePhysics']=snapshot_model_origin(stage,entry,worldposes[eid])
+            else:
+                capture_model_origin(stage,entry,worldposes[eid])
         from world_physics import replaceable_standard_ground
         verified_planes=[]
         for eid,entry in result.items():

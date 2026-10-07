@@ -50,7 +50,21 @@ def pose_receipt(matrix):
     return {'positionM': [float(v) for v in matrix.ExtractTranslation()], 'quaternionXyzw': [*map(float, imaginary), float(q.GetReal())]}
 
 
-def capture_model_origin(stage, entry, world_from_model, native_path=None):
+def snapshot_model_origin(stage, entry, world_from_model):
+    """只记真实 USD 初态，根身份等 PhysX 初始化后由原生有序 link 元数据选择。"""
+    from scene_adapter import SceneError
+    paths = {entry['path'], *entry['pose'].paths, *entry.get('rigidPaths', [])}
+    cache = UsdGeom.XformCache()
+    worlds = {}
+    for path in paths:
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid() or not (str(path) == entry['path'] or str(path).startswith(entry['path'] + '/')):
+            raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'USD initial body is outside its entity: ' + str(path))
+        worlds[str(path)] = Gf.Matrix4d(cache.GetLocalToWorldTransform(prim)).RemoveScaleShear()
+    return {'worldFromModel': Gf.Matrix4d(world_from_model), 'worldByPath': worlds}
+
+
+def capture_model_origin(stage, entry, world_from_model, native_path=None, native_worlds=None):
     """Capture the imported body's rigid relation to the Resource origin before base edits.
 
     Gf uses row vectors: rootWorld = rootInModel * modelWorld. Scene scale is
@@ -79,14 +93,19 @@ def capture_model_origin(stage, entry, world_from_model, native_path=None):
     prim = stage.GetPrimAtPath(native_path)
     if not prim.IsValid() or not str(native_path).startswith(entry['path'] + '/') and str(native_path) != entry['path']:
         raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Native root is outside its entity: ' + str(native_path))
-    native_world = UsdGeom.XformCache().GetLocalToWorldTransform(prim).RemoveScaleShear()
+    if native_worlds is not None:
+        if str(native_path) not in native_worlds:
+            raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Native root has no pre-initialization USD pose: ' + str(native_path))
+        native_world = Gf.Matrix4d(native_worlds[str(native_path)])
+    else:
+        native_world = UsdGeom.XformCache().GetLocalToWorldTransform(prim).RemoveScaleShear()
     entry['nativePosePath'] = str(native_path)
     entry['modelFromNativeRoot'] = native_world * world_from_model.RemoveScaleShear().GetInverse()
 
 
-def native_initial_pose(stage, entry):
+def native_initial_pose(stage, entry, native_world=None):
     """Read the same root body for USD initialization and later PhysX tensor poses."""
-    matrix = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath(entry['nativePosePath'])).RemoveScaleShear()
+    matrix = (Gf.Matrix4d(native_world) if native_world is not None else UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath(entry['nativePosePath'])).RemoveScaleShear())
     q = matrix.ExtractRotationQuat()
     return list(matrix.ExtractTranslation()), [float(q.GetReal()), *map(float, q.GetImaginary())]
 

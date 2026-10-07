@@ -395,9 +395,9 @@ class World:
             self.glb_imports=glb_import_reports(self.import_warnings)
             for entry in caught:warnings.warn_explicit(entry.message,entry.category,entry.filename,entry.lineno)
             initial_rigid_poses={}
-            from robot_authoring import native_initial_pose,verify_native_origin
+            from robot_authoring import native_initial_pose,verify_native_origin,snapshot_model_origin,capture_model_origin
             for eid,e in self.entities.items():
-                if e['articulation'] is None and e['rigidPaths']:
+                if not cpu_native and e['articulation'] is None and e['rigidPaths']:
                     initial_rigid_poses[eid]=native_initial_pose(self.stage,e)
             # 同一条处方也必须落在 articulation 上，否则只做了一半：引擎装配的种子位形是
             # 「模型自带的基体位姿 + 各DOF引擎默认0」（导入产物里没有任何关节状态，见下方 configure_robots
@@ -410,8 +410,10 @@ class World:
             # 零速度起步。只复位根，关节仍由 configure_robots() 的既有通道写。
             initial_articulation_poses={}
             for eid,e in self.entities.items():
-                if e['articulation'] is not None:
+                if not cpu_native and e['articulation'] is not None:
                     initial_articulation_poses[eid]=native_initial_pose(self.stage,e)
+            # 此时显式基座绑定已按原算法装配；只读其真实 USD 初态，保留原预热后的根复位语义。
+            initial_usd_poses={eid:snapshot_model_origin(self.stage,e,poses(scene)[eid])['worldByPath'] for eid,e in self.entities.items()} if cpu_native else {}
             self.stage_id=UsdUtils.StageCache.Get().GetId(self.stage).ToLongInt()
             device=os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')
             SM.setup_simulation(dt=self.dt,device=device)
@@ -424,6 +426,15 @@ class World:
             if device!='cpu':carb.settings.get_settings().set_bool('/physics/suppressReadback',False)
             SM.enable_fabric(rendering)
             self.timeline.set_auto_update(False);self.timeline.play();self.timeline.commit();SM.initialize_physics()
+            if cpu_native:
+                for eid,e in self.entities.items():
+                    source_origin=e.pop('modelOriginBeforePhysics')
+                    capture_model_origin(self.stage,e,source_origin['worldFromModel'],native_worlds=source_origin['worldByPath'])
+                    root=e['nativePosePath']
+                    if root not in initial_usd_poses[eid]:raise SceneError('ENTITY_ORIGIN_UNVERIFIED','Native root has no authored USD initialization pose: '+root)
+                    initial=native_initial_pose(self.stage,e,native_world=initial_usd_poses[eid][root])
+                    if e['articulation'] is not None:initial_articulation_poses[eid]=initial
+                    elif e['rigidPaths']:initial_rigid_poses[eid]=initial
             self.configure_robots()
             for entry in self.entities.values():verify_native_origin(entry)
             # SDK初始化会内部预热物理。关节初态刚写入时，独立刚体也须回到
