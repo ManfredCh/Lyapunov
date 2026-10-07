@@ -17,7 +17,7 @@ After a successful check, choose **Use this installation (next startup)**, save 
 
 ## Install through Lyapunov
 
-If you have no suitable installation, read and confirm the NVIDIA license on the same page, then install. Lyapunov uses its own environment with pinned official components and extension caches. It does not change system Python.
+If you have no suitable installation, read and confirm the NVIDIA license on the same page, then install. Lyapunov uses its own environment with pinned official components and only the two extension caches the current physics runtime needs, `isaacsim-extscache-kit-sdk` and `isaacsim-extscache-physics`; it does not request the generic large Kit extension cache. Extensions that are not cached are still resolved online from the official index on first use. It does not change system Python.
 
 The installer saves the SDK path for future product versions only after its own SDK check succeeds. Partial installation, download failure or failure to save the choice is reported explicitly. An existing environment override or saved installation is preserved.
 

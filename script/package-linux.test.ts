@@ -133,6 +133,13 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(argv[argv.indexOf('--retries')+1]).toBe('3')
         expect(argv).toContain('--disable-pip-version-check')
         expect(argv[argv.indexOf('--index-url')+1]).toBe('https://pypi.org/simple')
+        if(provider==='isaac'){
+          // 固定 plain isaacsim 与两个明确扩展缓存；不请求整个 [extscache] 组或通用大 Kit 缓存。
+          expect(argv).toContain('isaacsim==6.0.1.0')
+          for(const cache of ['isaacsim-extscache-kit-sdk','isaacsim-extscache-physics'])expect(argv).toContain(`${cache}==6.0.1.0`)
+          expect(argv.some(argument=>argument.includes('[extscache'))).toBe(false)
+          expect(argv).not.toContain('isaacsim-extscache-kit==6.0.1.0')
+        }
         const requirement=argv[argv.indexOf('-r')+1]!
         expect(requirement).toBe(join(f.product,'packages/asset-bake',provider==='isaac'?'requirements-isaac.txt':'requirements.txt'))
         expect(readFileSync(requirement,'utf8')).toContain('-r requirements-common.txt')

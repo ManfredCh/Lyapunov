@@ -236,8 +236,8 @@ export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Tran
   </div>}
   {snapshot&&<p style={{margin:0,opacity:.6,fontSize:12}}>
    {showSwitch
-    ? tr("已有兼容的 Isaac Sim 可直接选择本地安装；产品安装选择当前物理、机器人导入及 RTX 相机所需的官方组件、SDK 必需的辅助组件及扩展缓存，按完整运行依赖安装。机器人和环境素材按任务准备。Isaac 需用户接受 NVIDIA Omniverse 许可；一般场景与碰撞可在本页显式选择 MuJoCo，重启后生效。",
-        "Reuse a compatible local Isaac Sim installation when available. The installer selects official components for physics, robot import and RTX cameras, required SDK support components and extension caches, with their full runtime dependencies. Robot and environment assets are prepared per task. Isaac requires the user's NVIDIA Omniverse license acceptance. For general scenes and collision, explicitly select MuJoCo here; it takes effect after restart.")
+    ? tr("已有兼容的 Isaac Sim 可直接选择本地安装；产品安装选择当前物理运行所需的官方组件（Kit/App、核心、机器人导入与测试）及两个明确的扩展缓存 isaacsim-extscache-kit-sdk、isaacsim-extscache-physics，并按完整运行依赖安装；不请求通用大 Kit 扩展缓存。首次用到未缓存扩展时仍按官方索引联网解析。机器人和环境素材按任务准备。Isaac 需用户接受 NVIDIA Omniverse 许可；一般场景与碰撞可在本页显式选择 MuJoCo，重启后生效。",
+        "Reuse a compatible local Isaac Sim installation when available. The installer selects the official components the current physics runtime needs (Kit/App, core, robot import and tests) plus the two explicit extension caches isaacsim-extscache-kit-sdk and isaacsim-extscache-physics, with their full runtime dependencies; it does not request the generic large Kit extension cache. Extensions that are not cached are still resolved online from the official index on first use. Robot and environment assets are prepared per task. Isaac requires the user's NVIDIA Omniverse license acceptance. For general scenes and collision, explicitly select MuJoCo here; it takes effect after restart.")
     : tr("基准测试（LIBERO / Gymnasium）是「评测负载」，不在这个清单里：它们不是 provider，仍用 `./lyapunov install-provider benchmark-*` 安装、`./lyapunov benchmark --provider …` 运行。",
         "These are evaluation workloads with their own Python environments, not physics engines: the engine computes the world, the benchmark decides which tasks to grade it on.")}
   </p>}

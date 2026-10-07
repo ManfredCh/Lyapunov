@@ -128,13 +128,20 @@ elif [ "$provider" = newton ]; then
   # Newton 自带的复用前缀可能由 uv 创建且没有 pip；统一由上方 ensure_pip 修复。
   pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0"
 elif [ "$provider" = isaac ]; then
-  # 按当前 worker 的真实依赖选择官方组件：Kit/App、核心、MJCF/URDF 导入、RTX 传感器与扩展缓存。
-  # core.experimental.prims 的 Kit 声明必需 isaacsim.test.docstring（位于 isaacsim-test）。
-  # 正常解析其 robot/robot-motion 等依赖；不请求 all 中的 ROS、训练、示例及基准等额外主包。
-  # core 的官方 pin 仍包括 MuJoCo 3.8/torch/Newton，必须留在本 Isaac 独立前缀。
+  # 按当前 CPU 物理 worker（packages/sim-isaac/python/physics-cpu.kit）的真实依赖选择官方组件：
+  # Kit/App、核心、MJCF/URDF 导入与测试组件，加当前 worker 需要的两个明确扩展缓存。
+  # physics-cpu.kit 声明 omni.usd/omni.physics.physx/omni.physx.tensors/
+  # isaacsim.core.simulation_manager/isaacsim.core.experimental.prims；core.experimental.prims 的
+  # Kit 声明必需 isaacsim.test.docstring（位于 isaacsim-test）。
+  # 缓存只点名 isaacsim-extscache-kit-sdk 与 isaacsim-extscache-physics；**不**安装通用大 Kit 缓存
+  # isaacsim-extscache-kit（6.0.1.0 的 wheel 约 5.88GB，非当前 worker 必需，且官方 CDN 下载不稳定）。
+  # 首次用到未缓存扩展时仍按官方索引正常联网解析。正常递归解析 robot/robot-motion 等依赖；不请求
+  # all 中的 ROS、训练、示例及基准等额外主包。core 的官方 pin 仍包括 MuJoCo 3.8/torch/Newton，
+  # 必须留在本 Isaac 独立前缀。
   pip_install --index-url https://pypi.org/simple --extra-index-url https://pypi.nvidia.com \
-    'isaacsim[extscache]==6.0.1.0' 'isaacsim-app==6.0.1.0' 'isaacsim-core==6.0.1.0' \
-    'isaacsim-asset==6.0.1.0' 'isaacsim-sensor==6.0.1.0' 'isaacsim-test==6.0.1.0' $transport_pins -r "$assetbake_requirements"
+    'isaacsim==6.0.1.0' 'isaacsim-extscache-kit-sdk==6.0.1.0' 'isaacsim-extscache-physics==6.0.1.0' \
+    'isaacsim-app==6.0.1.0' 'isaacsim-core==6.0.1.0' 'isaacsim-asset==6.0.1.0' \
+    'isaacsim-sensor==6.0.1.0' 'isaacsim-test==6.0.1.0' $transport_pins -r "$assetbake_requirements"
   # 只有本次显式许可参数允许写当前 SDK 自有许可标记。
   "$prefix/bin/python" -c 'import importlib.metadata,pathlib; p=pathlib.Path(importlib.metadata.distribution("isaacsim").locate_file("isaacsim/kit/EULA_ACCEPTED")); p.write_text("yes\n")'
 elif [ "$provider" = benchmark-libero ]; then

@@ -206,8 +206,13 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(report.providers.isaac.status).toBe("BLOCKED")
     expect(report.providers.isaac.code).toBe("PROVIDER_UNAVAILABLE")
     const actualArgs=readFileSync(pipArgs,"utf8").trim().split("\n")
-    expect(actualArgs).toContain("isaacsim[extscache]==6.0.1.0")
+    // 固定 plain isaacsim 6.0.1.0，只点名当前 worker 需要的两个明确扩展缓存；
+    // 不请求整个 [extscache] 组，也不直接点名通用大 Kit 缓存 isaacsim-extscache-kit。
+    expect(actualArgs).toContain("isaacsim==6.0.1.0")
+    for(const cache of ["isaacsim-extscache-kit-sdk","isaacsim-extscache-physics"])expect(actualArgs).toContain(`${cache}==6.0.1.0`)
     for(const component of ["app","core","asset","sensor","test"])expect(actualArgs).toContain(`isaacsim-${component}==6.0.1.0`)
+    expect(actualArgs.some(argument=>argument.includes("[extscache"))).toBe(false)
+    expect(actualArgs).not.toContain("isaacsim-extscache-kit==6.0.1.0")
     expect(actualArgs.some(argument=>argument.includes("[all"))).toBe(false)
     expect(actualArgs).not.toContain("--no-deps")
     expect(actualArgs).not.toContain("mujoco==3.13.0")
