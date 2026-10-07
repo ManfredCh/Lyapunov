@@ -187,8 +187,10 @@ def main():
             emit({'id':request['id'], 'result':{'captureId':args['captureId'],'files':1}})
         elif method == 'sync':
             # 写类操作的最小真实形态：按 worldId 回一份新句柄（真实 worker 会在这里写引擎别名/镜像）。
+            # 已 prepared 的世界（initialPauseSupport）保留自己的暂停能力位：真实引擎 sync 后仍保留它。
             sync_world = args.get('worldId') or world or 'fake-world'
-            emit({'id': request['id'], 'result': {**handle_of(sync_world), 'appliedSceneRevision': args.get('snapshot', {}).get('revision', 0)}})
+            sync_handle = prepared.get(sync_world, handle_of(sync_world))
+            emit({'id': request['id'], 'result': {**sync_handle, 'appliedSceneRevision': args.get('snapshot', {}).get('revision', 0)}})
         elif method == 'list_worlds':
             emit({'id': request['id'], 'result': [prepared.get(name, handle_of(name)) for name in worlds]})
         elif method == 'set_paused' and args.get('worldId') in prepared:

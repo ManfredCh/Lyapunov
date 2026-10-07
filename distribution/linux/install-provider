@@ -129,17 +129,33 @@ elif [ "$provider" = newton ]; then
   pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0"
 elif [ "$provider" = isaac ]; then
   # 按当前 CPU 物理 worker（packages/sim-isaac/python/physics-cpu.kit）的真实依赖选择官方组件：
-  # Kit/App、核心、MJCF/URDF 导入与测试组件，加当前 worker 需要的两个明确扩展缓存。
+  # Kit/App、核心、MJCF/URDF 导入与测试组件，加当前 worker 需要的扩展缓存。
   # physics-cpu.kit 声明 omni.usd/omni.physics.physx/omni.physx.tensors/
   # isaacsim.core.simulation_manager/isaacsim.core.experimental.prims；core.experimental.prims 的
   # Kit 声明必需 isaacsim.test.docstring（位于 isaacsim-test）。
-  # 缓存只点名 isaacsim-extscache-kit-sdk 与 isaacsim-extscache-physics；**不**安装通用大 Kit 缓存
-  # isaacsim-extscache-kit（6.0.1.0 的 wheel 约 5.88GB，非当前 worker 必需，且官方 CDN 下载不稳定）。
-  # 首次用到未缓存扩展时仍按官方索引正常联网解析。正常递归解析 robot/robot-motion 等依赖；不请求
-  # all 中的 ROS、训练、示例及基准等额外主包。core 的官方 pin 仍包括 MuJoCo 3.8/torch/Newton，
-  # 必须留在本 Isaac 独立前缀。
+  # 真实 VM 证明 CPU worker 首次加载扩展会索要 omni.assets.plugins 等通用 Kit 缓存，缺
+  # isaacsim-extscache-kit==6.0.1.0 无法完成离线闭包，因此这里显式恢复该组件（约 5.88GB）。
+  # 该大 wheel 的官方整包下载会中途断开，pip 续传不保留已完成的字节；先用固定 pin 的
+  # fetch-extscache-kit.mjs 分段续传并按官方索引长度/SHA256 校验，再把本地已验证 wheel 交给
+  # 正常 pip 递归解析；下载或校验失败会阻断安装，不报成功。若本次前缀已装同版该缓存则直接复用，
+  # 不重复下载。正常递归解析 robot/robot-motion 等依赖；不请求 all 中的 ROS、训练、示例及基准
+  # 等额外主包。core 的官方 pin 仍包括 MuJoCo 3.8/torch/Newton，必须留在本 Isaac 独立前缀。
+  extscache_pin="$root/distribution/linux/extscache-kit-wheel.json"
+  installed_extscache_kit=$("$prefix/bin/python" -c 'import importlib.metadata as m; print(m.version("isaacsim-extscache-kit"))' 2>/dev/null || :)
+  if [ "$installed_extscache_kit" = 6.0.1.0 ]; then
+    extscache_kit_requirement='isaacsim-extscache-kit==6.0.1.0'
+  else
+    [ -f "$extscache_pin" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $extscache_pin；请重新完整解包。"
+    extscache_wheels="$root/.runtime/provider-download-cache/wheels"
+    mkdir -p "$extscache_wheels"
+    if ! extscache_wheel=$("$node_bin" "$root/distribution/linux/fetch-extscache-kit.mjs" --pin "$extscache_pin" --wheels-dir "$extscache_wheels"); then
+      json_blocked "$provider" ISAAC_EXTSCACHE_KIT_DOWNLOAD_FAILED "通用 Kit 扩展缓存 isaacsim-extscache-kit==6.0.1.0 的官方 wheel 未通过分段续传与长度/SHA256 校验；安装已停止，未把未验证文件交给 pip。请检查网络后重试（已完成的分片会续传）。"
+    fi
+    extscache_kit_requirement="$extscache_wheel"
+  fi
   pip_install --index-url https://pypi.org/simple --extra-index-url https://pypi.nvidia.com \
     'isaacsim==6.0.1.0' 'isaacsim-extscache-kit-sdk==6.0.1.0' 'isaacsim-extscache-physics==6.0.1.0' \
+    "$extscache_kit_requirement" \
     'isaacsim-app==6.0.1.0' 'isaacsim-core==6.0.1.0' 'isaacsim-asset==6.0.1.0' \
     'isaacsim-sensor==6.0.1.0' 'isaacsim-test==6.0.1.0' $transport_pins -r "$assetbake_requirements"
   # 只有本次显式许可参数允许写当前 SDK 自有许可标记。

@@ -17,7 +17,9 @@ Lyapunov 当前适配 Isaac Sim 6.0.1 / 6.0.1.0，Python 3.12。MuJoCo 随默认
 
 ## 由产品安装
 
-没有已有安装时，在同页阅读并确认 NVIDIA 许可，再选择安装。产品在自己的独立环境安装固定版本及当前物理运行实际需要的官方组件；缓存只点名 `isaacsim-extscache-kit-sdk` 与 `isaacsim-extscache-physics`，不请求通用大 Kit 扩展缓存。首次用到未缓存扩展时仍按官方索引联网解析。安装不修改系统 Python。
+没有已有安装时，在同页阅读并确认 NVIDIA 许可，再选择安装。产品在自己的独立环境安装固定版本及当前物理运行实际需要的官方组件，并准备当前固定 SDK 的离线扩展闭包：除两个明确缓存 `isaacsim-extscache-kit-sdk` 与 `isaacsim-extscache-physics` 外，还包含通用 Kit 扩展缓存 `isaacsim-extscache-kit` 6.0.1.0（约 5.88GB）。该大 wheel 由固定官方索引的 pin 分段断点续传，逐段核对 206/Content-Range 后按总长度与 SHA256 校验，只有全部匹配才原子落盘并交给正常 pip；下载或校验失败会阻断安装，不报成功。安装不修改系统 Python，也不代表 Kit、PhysX 或 RTX 已实际运行。
+
+准备空间时，要同时容纳下载文件和解压后的 SDK。固定版本的通用 Kit wheel 下载约 5.88GB，解压约 11.66GB；这还不包含其余 SDK 组件和缓存。请先检查 SDK 安装目录所在磁盘的剩余空间。空间不足时保留已下载文件与半安装环境，补足空间后可正常重试。
 
 只有本次安装检查成功后，才保存该 SDK 路径供后续产品版本读取。半安装、下载失败或保存失败会明确报告；已有的显式环境变量覆盖或已保存安装不被覆盖。
 

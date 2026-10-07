@@ -30,6 +30,7 @@ import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from 'no
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { standardGroundEntity } from '../../scene-kit/src/scene-template.ts'
 import type {} from '../../sim-contract/src/index.ts'
 import { SessionSimFactory } from '../../sim-contract/src/session-provider.ts'
 import { SessionWorldProjectionCache } from '../../lyapunov-contracts/src/session-world-projection.ts'
@@ -136,13 +137,67 @@ async function callTool(name: string, input: unknown, signal: AbortSignal): Prom
 }
 
 /** 真实场景（临时 dataRoot 上的 SceneStore）：sim_open 要读的是真 Scene 文档，不是测试造的替身。 */
-async function newScene(sceneId: string, template?: 'blank'): Promise<string> {
+async function newScene(sceneId: string, template?: 'blank' | 'physics-workspace'): Promise<string> {
   const created = await callTool('scene_create', { sceneId, ...(template ? { template } : {}) }, new AbortController().signal)
   if (created.isError) throw new Error(`创建夹具场景失败：${created.error.message}`)
   return (created.value as { sceneId: string }).sceneId
 }
 
 describe.skipIf(PYTHON === undefined)('sim_open 的取消接线（真实 ToolRegistry → 真 MuJoCoProvider → 假 worker 子进程）', () => {
+  test('read-only 打开已准备模板或已有单一显式无限地面的 Scene：不写模板元数据、不改 Scene CAS', async () => {
+    process.env.FAKE_SCENARIO = scenario({ ready: 'ok', phases: true })
+    let mode = 'workspace-write'
+    ctx.reflect.provide('sandboxPolicy', { resolve: () => ({ mode, workspaceRoot: base }) } as never)
+    for (const template of ['physics-workspace', 'blank'] as const) {
+      mode = 'workspace-write'
+      const sceneId = await newScene(`scene-readonly-ground-${template}`, template)
+      if (template === 'blank') {
+        const edited = await callTool('scene_edit', { sceneId, expectedRevision: 0, patch: [{ op: 'add', entity: standardGroundEntity() }] }, new AbortController().signal)
+        if (edited.isError) throw new Error(edited.error.message)
+      }
+      const before = await callTool('scene_inspect', { sceneId }, new AbortController().signal)
+      if (before.isError) throw new Error(before.error.message)
+      mode = 'read-only'
+      const opened = await callTool('sim_open', { sceneId, options: { worldId: `world-readonly-ground-${template}` } }, new AbortController().signal)
+      if (opened.isError) throw new Error(opened.error.message)
+      const after = await callTool('scene_inspect', { sceneId }, new AbortController().signal)
+      if (after.isError) throw new Error(after.error.message)
+      expect(after.value).toEqual(before.value)
+      expect((opened.value as { worldId: string }).worldId).toBe(`world-readonly-ground-${template}`)
+    }
+    expect(startedPids()).toHaveLength(1)
+  }, 20_000)
+
+  test('read-only 未准备空白 Scene 或显式 ground=false 需要持久 CAS：拒绝写入、原 Scene 不变、不启动 worker', async () => {
+    process.env.FAKE_SCENARIO = scenario({ ready: 'ok', phases: true })
+    let mode = 'workspace-write'
+    ctx.reflect.provide('sandboxPolicy', { resolve: () => ({ mode, workspaceRoot: base }) } as never)
+    for (const variant of ['blank', 'explicit-disable', 'dynamic', 'collision-disabled', 'sideways', 'multiple'] as const) {
+      mode = 'workspace-write'
+      const sceneId = await newScene(`scene-readonly-needs-cas-${variant}`, 'blank')
+      if (variant !== 'blank') {
+        const ground = standardGroundEntity()
+        if (variant === 'dynamic') ground.components.rigidBody = { type: 'dynamic', massKg: 1 }
+        if (variant === 'collision-disabled') ground.components.collision = { ...ground.components.collision, enabled: false }
+        if (variant === 'sideways') ground.transform.quaternion = [Math.SQRT1_2, 0, 0, Math.SQRT1_2]
+        const grounds = variant === 'multiple' ? [ground, { ...standardGroundEntity(), entityId: 'second-explicit-ground' }] : [ground]
+        const edited = await callTool('scene_edit', { sceneId, expectedRevision: 0, patch: grounds.map(entity => ({ op: 'add', entity })) }, new AbortController().signal)
+        if (edited.isError) throw new Error(edited.error.message)
+      }
+      const before = await callTool('scene_inspect', { sceneId }, new AbortController().signal)
+      if (before.isError) throw new Error(before.error.message)
+      mode = 'read-only'
+      const opened = await callTool('sim_open', { sceneId, options: { ...(variant === 'explicit-disable' ? { ground: false } : {}) } }, new AbortController().signal)
+      expect(opened.isError).toBe(true)
+      if (!opened.isError) throw new Error('需要持久 CAS 的只读调用不得成功')
+      expect(opened.error.message).toContain('SCENE_POLICY_READ_ONLY')
+      const after = await callTool('scene_inspect', { sceneId }, new AbortController().signal)
+      if (after.isError) throw new Error(after.error.message)
+      expect(after.value).toEqual(before.value)
+      expect(startedPids()).toHaveLength(0)
+    }
+  }, 20_000)
+
   test('正常路径：sim_open 返回世界句柄，signal 形参不影响既有调用', async () => {
     process.env.FAKE_SCENARIO = scenario({ ready: 'ok', phases: true })
     const sceneId = await newScene('scene-open-ok')

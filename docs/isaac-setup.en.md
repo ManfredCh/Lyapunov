@@ -17,7 +17,9 @@ After a successful check, choose **Use this installation (next startup)**, save 
 
 ## Install through Lyapunov
 
-If you have no suitable installation, read and confirm the NVIDIA license on the same page, then install. Lyapunov uses its own environment with pinned official components and only the two extension caches the current physics runtime needs, `isaacsim-extscache-kit-sdk` and `isaacsim-extscache-physics`; it does not request the generic large Kit extension cache. Extensions that are not cached are still resolved online from the official index on first use. It does not change system Python.
+If you have no suitable installation, read and confirm the NVIDIA license on the same page, then install. Lyapunov uses its own environment with pinned official components the current physics runtime needs and prepares the offline extension closure for the pinned SDK: besides the two explicit caches `isaacsim-extscache-kit-sdk` and `isaacsim-extscache-physics`, it includes the generic Kit extension cache `isaacsim-extscache-kit` 6.0.1.0 (about 5.88GB). That large wheel is downloaded in resumable segments from the pinned official index; each segment is checked for 206/Content-Range, and only an exact total length and SHA256 match is atomically published and handed to normal pip. A download or verification failure blocks the install instead of reporting success. It does not change system Python, and it does not mean Kit, PhysX or RTX has actually run.
+
+Allow space for both downloaded files and the extracted SDK. The pinned generic Kit wheel is about 5.88GB to download and 11.66GB when extracted, excluding the other SDK components and caches. Check the free space on the volume containing the SDK installation directory before installing. If space runs out, downloaded files and the partial environment are retained so you can retry after making room.
 
 The installer saves the SDK path for future product versions only after its own SDK check succeeds. Partial installation, download failure or failure to save the choice is reported explicitly. An existing environment override or saved installation is preserved.
 

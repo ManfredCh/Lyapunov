@@ -168,3 +168,16 @@ test('A06：所选工具缺失要明确阻断，不暗换来源；技能缺失�
   const absent = planDomainPointers({...input('生成一件写实三维资产'),pointers:actualPointers,skillCatalog:{names:[],complete:true}})
   expect(absent).toBeUndefined()
 })
+
+test('Alpha6.2：优先实际发现的适用Blender MCP，不猜命名空间；不可见时保留batch fallback',()=>{
+ const tool={name:'mcp__custom_bridge__inspect_scene',description:'Inspect the connected Blender scene'}
+ const request={...input('用 Blender 生成一块精确地板'),pointers:actualPointers}
+ const connected=planDomainPointers({...request,hasTool:name=>name===tool.name,visibleMcpTools:[tool]})!
+ expect(connected.text).toContain(tool.name)
+ expect(connected.text).toContain('Prefer an applicable tool')
+ expect(connected.text).not.toContain('The selected generation interface is not mounted')
+ const absent=planDomainPointers({...request,hasTool:name=>name==='blender_run',visibleMcpTools:[tool]})!
+ expect(absent.text).toContain('No Blender MCP tool is currently visible')
+ expect(absent.text).toContain('blender_run batch fallback remains usable')
+ expect(absent.text).not.toContain(tool.name)
+})

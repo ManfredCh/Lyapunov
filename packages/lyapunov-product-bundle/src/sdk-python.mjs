@@ -66,7 +66,10 @@ export function writeSdkPythonPreference(engine, python, env = process.env) {
   let existing = {}
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"))
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existing = parsed
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error('Existing SDK settings must be a JSON object.')
+    }
+    existing = parsed
   } catch (error) {
     // 安装收尾也调用此写入口：损坏/不可读的配置必须保留，不能把它当作首次安装覆盖。
     if (error?.code !== 'ENOENT') throw new Error('SDK_PREFERENCE_UNREADABLE: Existing SDK settings could not be read and were preserved.', {cause: error})

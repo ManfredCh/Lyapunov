@@ -46,7 +46,7 @@ export interface SimWorkerLaunchFacts {
   /**
    * 本次执行给**受信引擎自己**保留的内部可写目录（会话私有；例如 Kit portable root 与导入缓存）。
    * 由装配方按会话唯一归属解析、在原生封装里单独挂回可写；模型/HTTP 不能指定。**用户模式不受影响**：
-   * `mode` 仍是会话的有效策略，用户的截图/数据集落盘不落进这些目录（见 `refuseUserFacingWrite`）。
+   * `mode` 仍是会话的有效策略，用户的截图/数据集落盘不落进这些目录（见 `requireUserFacingWrite`）。
    * 未配置内部目录的引擎上不出现这个字段。
    */
   internalWritableRoots?: string[]
@@ -73,12 +73,26 @@ export interface SimWorkerLaunchFacts {
 }
 
 /**
- * 已启动 worker 的**当前策略核对**（装配方按会话给出，与启动同一份接线）：worker 的沙箱在启动时绑定，
- * 会话模式可以在运行中被改；写类操作之前要能回答"这只 worker 现在还是按会话当前有效策略在跑吗"。
- * 返回 `{stale:true}` 表示它带着旧许可；**抛错**表示核不出来（例如会话已不在）——调用方按"无法证明
- * 许可是当前的"拒绝本次操作，而不是沿用旧许可继续写。
+ * 一次核对读到的会话**当前**有效策略（模式 + 授权根）。用户产物落盘边界只依据这份**当前**授权决定
+ * 这次写入允不允许——不是依据 worker 启动那一刻的旧 facts。
  */
-export type SimWorkerPolicyCheck = (facts: SimWorkerLaunchFacts) => Promise<{ stale: false } | { stale: true; detail: string }>
+export interface SimWorkerPolicySnapshot {
+  mode: SimWorkerLaunchFacts['mode']
+  workspaceRoot: string
+}
+/** 策略核对结论：`stale` 表示这只 worker 启动时携带的沙箱许可已经不再被会话现值包含；`current` 是最新解析出的现值。 */
+export type SimWorkerPolicyVerdict =
+  | { stale: false; current: SimWorkerPolicySnapshot }
+  | { stale: true; detail: string; current: SimWorkerPolicySnapshot }
+/**
+ * 已启动 worker 的**当前策略核对**（装配方按会话给出，与启动同一份接线）：worker 的沙箱在启动时绑定，
+ * 会话模式可以在运行中被改。它**只**服务于用户产物落盘边界（`capture`/`captureMulti`/`exportCameraDataset`）：
+ * 在真正派发/发布写入前回答"该会话**当前**授权允不允许这次用户产物落盘，以及这只 worker 的旧许可还包不包含在现值里"。
+ * 返回 `{stale:true}` 表示这只 worker 带着比现值更宽的旧许可（收紧过）；**抛错**表示核不出来（例如会话已不在）。
+ * 两者都只拒绝本次写入、**不**结束 worker、**不**销毁世界——物理生命周期与 Agent 模式互切解耦：
+ * 模式变化改变的是下一次写入的授权判定，不是世界的生死（真正结束走显式 close/stop 与引擎故障）。
+ */
+export type SimWorkerPolicyCheck = (facts: SimWorkerLaunchFacts) => Promise<SimWorkerPolicyVerdict>
 
 /** 装配方注入的启动接线：给出**实际要 spawn 的 argv**（已按原生策略包裹）与本次执行事实。 */
 export interface SimWorkerLaunchSpec {
@@ -362,32 +376,6 @@ export class ProcessSimProvider implements SimWorlds {
     this.policyCheck = spec.check
     return await this.spawnWorker(spec, signal)
   }
-  /**
-   * 写类产品操作前的**策略现值核对**：worker 的沙箱在启动时绑定，会话模式可能在运行中被收紧；
-   * 收紧之后，下一次相关操作绝不能沿用旧许可继续写。核对不一致时：
-   *   1. 本次操作**拒绝执行**（不产生任何写入、不落一半产物）；
-   *   2. 这只过期 worker 按**既有** worker 生命周期收尾（`failProvider`→`terminateOwned`，与取消/失败同一条
-   *      路径，不新造调度器），错误里如实写明"本会话 worker 已结束"——世界不是被无声销毁的；
-   *   3. 只动本 Provider 自己的 worker：同 Host 其它会话的 worker/世界一步不动。
-   * 下一次显式 `open` 会按**当前**策略重新建立运行空间（既有 `prepareExplicitOpen` 恢复路径）。
-   * 核不出来（会话已不在等）时同样拒绝，但**不**结束 worker——无法证明许可过期，就不拿它去冒销毁世界的风险。
-   * 未接线（没有 `check`）的 Provider 保持历史行为。
-   * @param action - 出现在错误里的动作名。
-   */
-  private async requireCurrentPolicy(action: string): Promise<void> {
-    const check = this.policyCheck, facts = this.launchFacts, child = this.process
-    if (check === undefined || facts === undefined || child === undefined) return
-    let verdict: { stale: false } | { stale: true; detail: string }
-    try {
-      verdict = await check(facts)
-    } catch (failure) {
-      throw new SimError('SIM_SESSION_POLICY_UNVERIFIED', `${this.config.engineName} 无法核对本次执行的会话有效策略（${action}）：${failure instanceof Error ? failure.message : String(failure)}；已拒绝本次操作，本次未产生任何写入，worker 与已交付的世界保持不变`)
-    }
-    if (!verdict.stale) return
-    const error = new SimError('SIM_SESSION_POLICY_CHANGED', `SIM_SESSION_POLICY_CHANGED：${this.config.engineName} ${action} 被拒绝——${verdict.detail}；本次操作没有按旧许可执行；本会话这只 worker 已按既有释放语义结束（其它会话不受影响），下一次 sim_open 会按当前策略重新建立运行空间`)
-    this.failProvider(error, child)
-    throw error
-  }
   private spawnWorker(spec: SimWorkerLaunchSpec, signal?: AbortSignal): Promise<void> {
     const { argv, env } = spec
     let budgetTimer: ReturnType<typeof setTimeout> | undefined
@@ -560,11 +548,9 @@ export class ProcessSimProvider implements SimWorlds {
       }
       await this.prepareExplicitOpen()
       if (this.closed) throw new SimError('PROVIDER_CLOSED', 'Provider 已释放')
-      // 复用**既有** worker 再建一个世界时会按它的旧许可写引擎别名/镜像，属于会落盘的操作：先核对这只
-      // worker 还带不带着旧的更宽许可。**没有**既有 worker 的 open 不是复用旧许可：它按当前策略重新启动
-      // （启动接线自己重新 resolve 一次），所以不能拿上一只 worker 的 facts 去拦它——否则一次因权限收紧
-      // 而结束的会话就再也开不回来了，正好反过来变成「收紧后旧许可继续有效」的另一种形态。
-      if (this.ready) await this.requireCurrentPolicy('sim_open（建立世界）')
+      // 建立/复用世界是**物理生命周期**，不看 Agent 模式：模式互切不结束 worker、不拦 open。复用既有 worker
+      // 时它留在启动时那份沙箱里（本层不提升、不重挂）；用户产物落盘的授权另在 `requireUserFacingWrite` 的
+      // IO 边界上按会话**当前**策略判定。真正结束世界仍只走显式 close/stop 与引擎故障。
       if (signal?.aborted) throw new SimError('CANCELLED', 'open 在启动 worker 之前已取消（未启动任何 worker）')
       if (options.worldId && this.closing.has(options.worldId) && this.worlds.has(options.worldId)) throw new SimError('WORLD_CLOSING', '世界正在关闭')
       await this.start(signal)
@@ -672,8 +658,8 @@ export class ProcessSimProvider implements SimWorlds {
   }
   async sync(worldId: string, snapshot: SceneSnapshot, options: { forceRebuild?: boolean } = {}): Promise<WorldHandle> {
     if (this.closed) throw new SimError('PROVIDER_CLOSED', 'Provider 已释放')
-    // sync 可能为新原件写引擎别名/镜像（MuJoCo 的 .mjcf 加载路径），同样先核对策略现值。
-    await this.requireCurrentPolicy('sim_sync（同步场景）')
+    // sync 是**物理世界**的同步：Agent 模式互切（readonly/write/full）本身不拦它、不结束 worker。worker
+    // 仍在自己启动时那份原生沙箱里执行，写不写引擎别名由原生沙箱说了算；本层不按模式把它拒掉。
     if (this.closing.has(worldId)) throw new SimError('WORLD_CLOSING', '世界正在关闭')
     const previous = this.syncQueues.get(worldId) ?? Promise.resolve()
     const run = previous.catch(() => undefined).then(async () => {
@@ -708,7 +694,7 @@ export class ProcessSimProvider implements SimWorlds {
   describe(worldId: string, entityId: string) { return this.request<RobotDescription>('describe', { worldId, entityId }) }
   observe(worldId: string, selection: ObservationSelection = {}) { return this.request<Frame>('observe', { worldId, selection }) }
   async setPaused(worldId:string,paused:boolean,expectedGeneration:number){
-    await this.requireCurrentPolicy('暂停/继续物理钟')
+    // 暂停/继续是**物理世界生命周期**的一部分，不看 Agent 模式：模式互切不能把它拦下或结束世界。
     const bound=this.handles.get(worldId)
     if(!bound)throw new SimError('WORLD_NOT_FOUND','暂停目标世界不存在')
     if(bound.supportsPause!==true)throw new SimError('CLOCK_CONTROL_UNSUPPORTED','当前原生世界没有自报暂停/继续能力')
@@ -813,19 +799,41 @@ export class ProcessSimProvider implements SimWorlds {
    * 它的沙箱处理，宿主一个字节都不代写（否则就成了"写出去的是别处、判定看的是原处"）。
    */
   /**
-   * 只读会话里的**用户落盘请求**（截图/多机位/数据集导出）在派发前拒绝。
+   * **用户产物落盘**（截图/多机位/数据集导出）在真正派发/发布写入前的**当前授权**断言。
    *
-   * 只读会话现在有唯一一处 OS 层可写位——受信引擎自己的内部运行目录（{@link SimWorkerLaunchFacts.internalWritableRoots}）。
-   * 那份许可是给引擎的运行文件（Kit portable root、导入缓存）的，不是给用户产物的：没有这一层判定，
-   * 用户把 `outputDir` 指到内部缓存（或产品根恰好落在里面）就能借引擎的许可把只读语义写穿。
-   * 未接线（历史直连）与 `danger-full-access` 不在这里拦：前者没有策略可依，后者策略自己说不受文件效果约束。
-   * `workspace-write` 的产物落盘走既有的 {@link stagingFor} 中转，不在此列。
+   * 物理世界生命周期与 Agent 模式互切已经解耦（见 `open`/`sync`/`setPaused`）：模式变化本身不结束 worker、
+   * 不销毁世界；但用户文件效果必须在落盘那一刻按该会话**当前**有效策略授权，不能沿用 worker 启动时的旧许可。
+   * 这里复用启动接线给出的 {@link SimWorkerPolicyCheck}（与启动同一条 resolve 链）重解析一次现值：
+   *   · 核不出来（会话已不在等）⇒ 拒绝本次写入，但**不**结束 worker、不动已交付的世界（失败关闭但保留世界）；
+   *   · 现值不再包含这只 worker 启动时携带的许可（被收紧过）⇒ 同样拒绝本次写入，老 worker 不能借旧许可写出文件；
+   *   · 现值是 read-only ⇒ 用户产物没有可写位（只读下唯一可写的是引擎内部运行目录，不面向用户产物），拒绝；
+   *   · 其余（现值 workspace-write / danger-full-access 且仍包含本 worker）⇒ 放行，交给既有 {@link stagingFor} 边界。
+   * 内部计算缓存/临时目录的写入不经过这条边界（见 {@link SimWorkerLaunchFacts.internalWritableRoots}）。
+   * 未接线（历史直连）或未给出核对时保持历史行为，不在这里新增拒绝。
    * @param action - 出现在错误里的动作名（哪个落盘请求被拒）。
+   * @param phase - 派发或发布边界；发布前拒绝不能声称 worker 尚未写过内部暂存。
    */
-  private refuseUserFacingWrite(action: string): void {
+  private async requireUserFacingWrite(action: string, phase: 'dispatch' | 'publish' = 'dispatch'): Promise<void> {
     const facts = this.launchFacts
-    if (facts === undefined || facts.mode !== 'read-only') return
-    throw new SimError('SIM_MEDIA_POLICY_READ_ONLY', `SIM_MEDIA_POLICY_READ_ONLY：${this.config.engineName} ${action} 被拒绝——本会话的有效策略是 read-only，用户产物落盘不属于引擎内部运行写入（只读下唯一可写的是按会话解析的引擎内部缓存，且不面向用户产物）；本次没有派发给 worker、没有写任何文件；要落盘请先把该会话切回可写模式`)
+    const check = this.policyCheck
+    if (facts === undefined || check === undefined) return
+    // 发布前 worker 已经可以写过内部暂存，不能再声称“没有派发/没有任何写入”。
+    const effect = phase === 'dispatch'
+      ? 'This request was denied before dispatch; no user write request was sent to the worker.'
+      : 'This request was denied before publication; internal staging files may already exist, but publication to the user target was not started.'
+    const preserved = 'The worker and existing worlds remain unchanged.'
+    let verdict: SimWorkerPolicyVerdict
+    try {
+      verdict = await check(facts)
+    } catch (failure) {
+      throw new SimError('SIM_MEDIA_POLICY_UNVERIFIED', `${this.config.engineName} ${action}: current session file authorization could not be verified (${failure instanceof Error ? failure.message : String(failure)}). ${effect} ${preserved}`)
+    }
+    if (verdict.stale) {
+      throw new SimError('SIM_MEDIA_POLICY_STALE', `${this.config.engineName} ${action}: the worker's launch authorization is no longer contained in the current session policy (${verdict.detail}). ${effect} ${preserved}`)
+    }
+    if (verdict.current.mode === 'read-only') {
+      throw new SimError('SIM_MEDIA_POLICY_READ_ONLY', `${this.config.engineName} ${action}: the current session policy is read-only; engine-internal cache permissions do not authorize user output files. ${effect} ${preserved} Switch this session to a writable mode before saving user output.`)
+    }
   }
   private stagingFor(outputDir: string): { staged: string; publish: string } | undefined {
     const facts = this.launchFacts
@@ -836,12 +844,19 @@ export class ProcessSimProvider implements SimWorlds {
     if (!(facts.productRoots ?? []).some(product => pathWithin(product, outputDir))) return undefined
     return { staged: join(facts.runtimeRoot, 'staging', `media-${++this.mediaSerial}`), publish: outputDir }
   }
-  private async stageMedia<T>(outputDir: string, run: (outputDir: string) => Promise<T>, published?: (result: T, from: string, to: string) => Promise<void>): Promise<T> {
+  /**
+   * 用户产物的暂存/发布中转。派发前已由 {@link requireUserFacingWrite} 授权；**发布前再核对一次**：
+   * worker 写暂存期间会话模式可能被收紧，宿主不能用一个已经过期的许可把它代写进产品根。拒绝时暂存目录
+   * 由 `finally` 清掉、不发布也不改写回执；worker 与已交付的世界保持不动（不 failProvider、不杀 world）。
+   * @param action - 发布前再核对的用户可见动作名；省略表示不核对（内部中转调用点）。
+   */
+  private async stageMedia<T>(outputDir: string, run: (outputDir: string) => Promise<T>, published?: (result: T, from: string, to: string) => Promise<void>, action?: string): Promise<T> {
     const plan = this.stagingFor(outputDir)
     if (plan === undefined) return run(outputDir)
     await mkdir(plan.staged, { recursive: true })
     try {
       const result = await run(plan.staged)
+      if (action !== undefined) await this.requireUserFacingWrite(action, 'publish')
       await publishDirectory(plan.staged, plan.publish)
       await published?.(result, plan.staged, plan.publish)
       return rewriteStagedUris(result, plan.staged, plan.publish)
@@ -855,22 +870,19 @@ export class ProcessSimProvider implements SimWorlds {
     await this.request('capture_publish', { worldId, captureId: result.captureId, fromDir, toDir })
   }
   async capture(worldId: string, options: CaptureOptions) {
-    await this.requireCurrentPolicy('sensor_capture（截图落盘）')
-    this.refuseUserFacingWrite('sensor_capture（截图落盘）')
-    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('capture', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishCapture(worldId, result, from, to))
+    await this.requireUserFacingWrite('sensor_capture')
+    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('capture', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishCapture(worldId, result, from, to), 'sensor_capture')
   }
   async captureMulti(worldId: string, options: MultiCaptureOptions) {
-    await this.requireCurrentPolicy('多机位采集落盘')
-    this.refuseUserFacingWrite('多机位采集落盘')
-    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('capture_multi', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishCapture(worldId, result, from, to))
+    await this.requireUserFacingWrite('camera_capture_multi')
+    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('capture_multi', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishCapture(worldId, result, from, to), 'camera_capture_multi')
   }
   listCameras(worldId: string) { return this.request<Record<string, unknown>>('camera_list', { worldId, options: {} }) }
   adjustCamera(worldId: string, options: CameraAdjustOptions) { return this.request<Record<string, unknown>>('camera_adjust', { worldId, options }) }
   projectAnnotation(worldId: string, options: CameraAnnotationOptions) { return this.request<Record<string, unknown>>('camera_project_annotation', { worldId, options }) }
   async exportCameraDataset(worldId: string, options: CameraDatasetExportOptions) {
-    await this.requireCurrentPolicy('camera_dataset_export（数据集导出）')
-    this.refuseUserFacingWrite('camera_dataset_export（数据集导出）')
-    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('camera_dataset_export', { worldId, options: { ...options, outputDir } }))
+    await this.requireUserFacingWrite('camera_dataset_export')
+    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('camera_dataset_export', { worldId, options: { ...options, outputDir } }), undefined, 'camera_dataset_export')
   }
   /**
    * 释放本 Provider 的 worker：发出 shutdown、关 stdin、等进程真实退出——等多久由 Kit 自己决定，

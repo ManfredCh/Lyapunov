@@ -13,6 +13,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -96,9 +97,16 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
   const fixture = (provider:'mujoco'|'isaac',geometryFails=false,pipFails=false) => {
     const directory=mkdtempSync(join(tmpdir(),'lyapunov-geometry-install-')),product=join(directory,'product')
     const put=(file:string,text:string,executable=false)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,text);if(executable)chmodSync(file,0o755)}
-    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt']){
+    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt']){
       mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(root,file),join(product,file))
     }
+    // 通用 Kit 大 wheel 的固定 pin 在测试里替换为本地夹具：预置一个长度/SHA 已匹配的 wheel，
+    // helper 会直接复用而不联网。这样 install-provider 的“helper 已验证本地 wheel → 正常 pip”接线
+    // 可以离线判定；真实 5.88GB 下载由主控在 VM 上执行。
+    const wheelName='isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl',wheelBytes=Buffer.from('offline extscache kit wheel fixture\n')
+    const wheel={name:wheelName,bytes:wheelBytes.length,sha256:createHash('sha256').update(wheelBytes).digest('hex')}
+    put(join(product,'.runtime/provider-download-cache/wheels',wheelName),wheelBytes.toString())
+    put(join(product,'distribution/linux/extscache-kit-wheel.json'),JSON.stringify({filename:wheelName,url:'http://127.0.0.1:0/'+wheelName,bytes:wheel.bytes,sha256:wheel.sha256}))
     put(join(product,'script/package-linux.ts'),'// 离线安装路由夹具\n')
     put(join(product,'distribution/linux/sandbox.mjs'),'export {}\n')
     put(join(product,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),readFileSync(join(root,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),'utf8'))
@@ -117,7 +125,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
     // 收尾 helper 必须保留 ENV 选择、不登记产品托管路径（用 preference 不存在来断言）。
     const preference=join(directory,'engine.json')
     const run=()=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[])],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_ENGINE_PREFERENCE_FILE:preference,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
-    return {directory,product,prefix,doctor,log,imports,preference,run}
+    return {directory,product,prefix,doctor,log,imports,preference,run,wheel}
   }
 
   test('MuJoCo与Isaac真实shell安装入口复用自己的前缀、递归依赖声明与pip缓存',()=>{
@@ -134,11 +142,22 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(argv).toContain('--disable-pip-version-check')
         expect(argv[argv.indexOf('--index-url')+1]).toBe('https://pypi.org/simple')
         if(provider==='isaac'){
-          // 固定 plain isaacsim 与两个明确扩展缓存；不请求整个 [extscache] 组或通用大 Kit 缓存。
+          // 通用大 Kit 缓存由固定 pin 的 helper 分段续传并按长度/SHA256 校验后，以本地已验证 wheel
+          // 交给正常 pip；仍不请求整个 [extscache] 组，也不把未验证的通用缓存名直接交给 pip。
           expect(argv).toContain('isaacsim==6.0.1.0')
           for(const cache of ['isaacsim-extscache-kit-sdk','isaacsim-extscache-physics'])expect(argv).toContain(`${cache}==6.0.1.0`)
           expect(argv.some(argument=>argument.includes('[extscache'))).toBe(false)
           expect(argv).not.toContain('isaacsim-extscache-kit==6.0.1.0')
+          const verifiedWheel=join(f.product,'.runtime/provider-download-cache/wheels',f.wheel.name)
+          expect(argv).toContain(verifiedWheel)
+          // 缓存下载失败必须阻断安装：删掉已验证 wheel 并把 pin 指向不可达端口，helper 失败后 pip 不得再被调用。
+          rmSync(verifiedWheel)
+          writeFileSync(join(f.product,'distribution/linux/extscache-kit-wheel.json'),JSON.stringify({filename:f.wheel.name,url:'http://127.0.0.1:0/'+f.wheel.name,bytes:f.wheel.bytes,sha256:f.wheel.sha256}))
+          const beforeLog=readFileSync(f.log,'utf8')
+          const failed=f.run()
+          expect(failed.status,failed.stderr).toBe(2)
+          expect(failed.stdout).toContain('ISAAC_EXTSCACHE_KIT_DOWNLOAD_FAILED')
+          expect(readFileSync(f.log,'utf8')).toBe(beforeLog)
         }
         const requirement=argv[argv.indexOf('-r')+1]!
         expect(requirement).toBe(join(f.product,'packages/asset-bake',provider==='isaac'?'requirements-isaac.txt':'requirements.txt'))

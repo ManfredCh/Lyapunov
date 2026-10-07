@@ -1,30 +1,54 @@
 import {describe,expect,test,afterEach} from 'bun:test'
 import type {Context} from '@deepseek-ai/cordis'
-import {startExternalInstallSession} from '../src/external-install-session.ts'
+import {startExternalInstallSession,startExternalMcpRegistrationSession} from '../src/external-install-session.ts'
+import {externalMcpConfig,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState} from '../src/external-tools-host.ts'
+import {runBlenderMcpSupplyCommand,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 
-function fixture(ok=true){
+function fixture(ok=true,wait?:Promise<void>){
  const calls:Array<{kind:string;value:unknown}>=[]
- const sessions={list:{getSnapshot:()=>({byId:{existing:{id:'existing',cwd:'/task',retainedBy:{mainView:1}}}})},
+ const sessions={
+  list:{getSnapshot:()=>({byId:{existing:{id:'existing',cwd:'/task',retainedBy:{mainView:1}}}})},
   create:async(opts:unknown)=>{calls.push({kind:'create',value:opts});return 'fresh-install'},
-  binding:(id:string)=>({session:{prompt:async(content:unknown,mode:unknown)=>{
+  // RC2 生命周期：binding 只在 retain 且 ready 之后存在。夹具按同一契约提供 using()，
+  // 这样测试能证明产品确实等到了 ready，而不是在 retain 之前同步读 binding。
+  using:async(id:string,options:{source:string},operation:(reference:unknown)=>Promise<string>|string)=>{
+   calls.push({kind:'retain',value:{id,source:options.source}})
+   const binding={session:{prompt:async(content:unknown,mode:unknown)=>{
     calls.push({kind:'prompt',value:{id,content,mode}})
     return ok?{ok:true}:{ok:false,error:{message:'模型未连接'}}
-  }}})}
+   }}}
+   const reference={sessionId:id,binding,ready:(wait??Promise.resolve()).then(()=>binding),release:()=>calls.push({kind:'release',value:id})}
+   try{return await operation(reference)}finally{reference.release()}
+  },
+ }
 
  const workspaces={list:{getSnapshot:()=>({items:[{workspaceId:'workspace',sessionIds:['existing']}]})}}
  const ctx={get:(name:string)=>name==='sessions'?sessions:name==='workspaces'?workspaces:undefined,uiWorkspace:{openSession:(id:string)=>{calls.push({kind:'open',value:id});calls.push({kind:'panel',value:null})}}} as unknown as Context
  return {ctx,calls,close:()=>calls.push({kind:'close',value:true})}
 }
 describe('外部工具从设置进入新会话',()=>{
- test('创建新会话后只向新绑定发送Blender自然语言请求，不复用已有任务',async()=>{
+ test('创建新会话、等到原生retain/ready后只向新绑定发送一次Blender英文请求，不复用已有任务',async()=>{
   const f=fixture();expect(await startExternalInstallSession(f.ctx,'blender',f.close)).toBe('fresh-install')
-  expect(f.calls.map(row=>row.kind)).toEqual(['create','open','panel','prompt','close'])
+  expect(f.calls.map(row=>row.kind)).toEqual(['create','retain','open','panel','prompt','close','release'])
   expect(f.calls[0]!.value).toEqual({workspaceId:'workspace'})
-  expect(f.calls[3]!.value).toMatchObject({id:'fresh-install',mode:'queue',content:[{type:'text',text:expect.stringContaining('请帮我下载并安装 Blender')}]})
+  expect(f.calls[1]!.value).toEqual({id:'fresh-install',source:'controllerOperation'})
+  expect(f.calls[4]!.value).toMatchObject({id:'fresh-install',mode:'queue',content:[{type:'text',text:expect.stringContaining('Please download and install Blender')}]})
  })
- test('Unity MCP使用配置与连接检查请求，不将已配置当作已安装',async()=>{
+ test('Unity MCP使用配置与连接检查请求，明确第三方桥接且不把已配置当作已安装',async()=>{
   const f=fixture();await startExternalInstallSession(f.ctx,'unity-mcp',f.close)
-  expect(JSON.stringify(f.calls[3]!.value)).toContain('不能据此声称已经安装或启动编辑器')
+  const prompt=JSON.stringify(f.calls.find(row=>row.kind==='prompt')!.value)
+  expect(prompt).toContain('cannot by itself claim that the editor is installed or running')
+  expect(prompt).toContain('third-party integration')
+ })
+ test('显式登记MCP把用户值带进英文请求，不硬编码服务名',async()=>{
+  const f=fixture();await startExternalMcpRegistrationSession(f.ctx,'  my-server --stdio  ',f.close)
+  const prompt=JSON.stringify(f.calls.find(row=>row.kind==='prompt')!.value)
+  expect(prompt).toContain('my-server --stdio')
+  expect(prompt).toContain('Do not invent server or tool names')
+ })
+ test('空MCP登记值在创建会话前拒绝',async()=>{
+  const f=fixture();await expect(startExternalMcpRegistrationSession(f.ctx,'   ',f.close)).rejects.toThrow('MCP 服务名称')
+  expect(f.calls).toEqual([])
  })
  test('提交失败保留设置错误处理机会，不报告完成',async()=>{
   const f=fixture(false);await expect(startExternalInstallSession(f.ctx,'blender',f.close)).rejects.toThrow('模型未连接')
@@ -33,6 +57,80 @@ describe('外部工具从设置进入新会话',()=>{
  test('未知工具不会创建会话或提交任何请求',async()=>{
   const f=fixture();await expect(startExternalInstallSession(f.ctx,'unknown-tool',f.close)).rejects.toThrow('未找到')
   expect(f.calls).toEqual([])
+ })
+ test('原生ready未落定前不打开或提交，落定后仅提交一次并释放临时引用',async()=>{
+  let ready!:()=>void;const gate=new Promise<void>(r=>ready=r),f=fixture(true,gate)
+  const operation=startExternalInstallSession(f.ctx,'blender',f.close)
+  await Promise.resolve();await Promise.resolve()
+  expect(f.calls.map(v=>v.kind)).toEqual(['create','retain'])
+  ready();await operation
+  expect(f.calls.filter(v=>v.kind==='prompt')).toHaveLength(1)
+  expect(f.calls.at(-1)?.kind).toBe('release')
+ })
+})
+
+describe('游客可直接配置MCP与取得权重，不依赖模型安装会话',()=>{
+ test('stdio按argv配置而不拼shell，Blender端口进入原生env',()=>{
+  expect(externalMcpConfig({serverName:'blender',transport:'stdio',command:'/tools/mcp-for-blender',args:['--literal','$(touch nope)'],blenderPort:9881},'/workspace')).toMatchObject({command:'/tools/mcp-for-blender',args:['--literal','$(touch nope)'],env:{BLENDER_HOST:'127.0.0.1',BLENDER_PORT:'9881'},failOnStartupError:false})
+  expect(()=>externalMcpConfig({serverName:'bad.name',transport:'stdio',command:'mcp'},'/workspace')).toThrow('MCP_NAME_INVALID')
+  expect(()=>externalMcpConfig({serverName:'blender',transport:'stdio',command:'mcp',blenderPort:0},'/workspace')).toThrow('BLENDER_PORT_INVALID')
+ })
+ test('HTTP端点秘密不进入设置表单，非法URL/transport失败关闭',()=>{
+  expect(externalMcpConfig({serverName:'unity',transport:'streamable-http',url:'http://localhost:8080/mcp'},'/workspace')).toMatchObject({url:'http://localhost:8080/mcp'})
+  for(const url of ['file:///tmp/mcp','https://user:secret@example.org/mcp','https://example.org/mcp?token=private'])expect(()=>externalMcpConfig({serverName:'other',transport:'sse',url},'/workspace')).toThrow('MCP_URL_INVALID')
+ })
+ test('既有配置更新只提交用户编辑字段，保留参数、凭据和超时，旧revision拒绝',async()=>{
+  let operations:unknown,revision=7
+  const entry={options:{id:'native-existing',name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'unity',transport:'streamable-http',url:'https://example.org/mcp?token=hidden',headers:{Authorization:'preserve-me'},toolCallTimeoutMs:999}}}
+  const ctx={get:(name:string)=>name==='profileContext'?{cwd:'/workspace'}:name==='configEditor'?{entries:()=>[entry]}:name==='settings'?{writable:true,describe:()=>[{ns:'native-existing',revision}],mutate:async(_ns:unknown,ops:unknown)=>{operations=ops}}:undefined} as unknown as Context
+  await saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:7})
+  expect(operations).toEqual([{op:'set',path:['serverName'],value:'unity'},{op:'set',path:['transport'],value:'streamable-http'}])
+  revision=8;await expect(saveExternalMcp(ctx,{serverName:'unity',transport:'streamable-http',expectedRevision:7})).rejects.toThrow('MCP_CONFIG_CONFLICT')
+ })
+ test('已有Blender自定义端口留空保存，不会覆写为9876，原生env仅在显式改端口时更新',async()=>{
+  let operations:any[]=[]
+  const entry={options:{id:'existing-blender',name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'blender',transport:'stdio',command:'/tools/mcp-for-blender',env:{BLENDER_PORT:'9988',PRIVATE_TOKEN:'keep'}}}}
+  const ctx={get:(name:string)=>name==='profileContext'?{cwd:'/workspace'}:name==='configEditor'?{entries:()=>[entry]}:name==='settings'?{writable:true,describe:()=>[{ns:'existing-blender',revision:1}],mutate:async(_ns:unknown,ops:any[])=>{operations=ops}}:undefined} as unknown as Context
+  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',expectedRevision:1})
+  expect(operations.some(v=>v.path[0]==='env')).toBe(false)
+  await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',blenderPort:9989,expectedRevision:1})
+  expect(operations).toContainEqual({op:'set',path:['env','BLENDER_PORT'],value:'9989'})
+  expect(operations.some(v=>v.path.includes('PRIVATE_TOKEN'))).toBe(false)
+ })
+ test('锁定桥接供给预取消不写入；实际供给子进程组取消后真实退出，不碰既有编辑器',async()=>{
+  const before=new AbortController();before.abort()
+  await expect(ensureBlenderMcp({signal:before.signal})).rejects.toThrow()
+  const controller=new AbortController()
+  const started=Date.now(),run=runBlenderMcpSupplyCommand(process.execPath,['-e',"const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});console.log('owned-child='+c.pid);setInterval(()=>{},1000)"],{signal:controller.signal})
+  setTimeout(()=>controller.abort(),250)
+  const outcome=await run
+  expect(outcome.code).toBe(130);expect(outcome.stderr).toContain('BLENDER_MCP_CANCELLED')
+  expect(Date.now()-started).toBeLessThan(5000)
+  const childPid=Number(/owned-child=(\d+)/.exec(outcome.stdout)?.[1]);expect(childPid).toBeGreaterThan(0)
+  if(process.platform==='linux'){
+   let childState:string|undefined;try{childState=await readFile(`/proc/${childPid}/status`,'utf8')}catch{}
+   expect(childState===undefined||/State:\s+Z\b/.test(childState)).toBe(true)
+  }
+ })
+ test('写入前按原生文件策略拒绝read-only、未知策略与工作区外目录',()=>{
+  const ctx=(mode:string)=>({get:(name:string)=>name==='sandboxPolicy'?{resolve:()=>({mode,workspaceRoot:'/task',networkAccess:false})}:undefined}) as unknown as Context
+  expect(()=>requireExternalWrite(ctx('read-only'),undefined,'/task/model')).toThrow('EXTERNAL_POLICY_READ_ONLY')
+  expect(()=>requireExternalWrite(ctx('unknown'),undefined,'/task/model')).toThrow('EXTERNAL_POLICY_READ_ONLY')
+  expect(()=>requireExternalWrite(ctx('workspace-write'),undefined,'/outside/model')).toThrow('EXTERNAL_POLICY_OUTSIDE_WRITABLE')
+  expect(()=>requireExternalWrite(ctx('workspace-write'),undefined,'/task/model')).not.toThrow()
+  expect(()=>requireExternalWrite({get:()=>undefined} as unknown as Context,undefined,'/task/model')).toThrow('EXTERNAL_POLICY_UNAVAILABLE')
+ })
+ test('镜像计划锁定revision/files/argv；即使父环境HF_ENDPOINT指官方，也不会回退',async()=>{
+  const calls:Record<string,unknown>[]=[],old=process.env.HF_ENDPOINT
+  let done!:Promise<unknown>
+  const ctx={get:(name:string)=>name==='sandboxPolicy'?{resolve:()=>({mode:'danger-full-access',workspaceRoot:'/task'})}:name==='jobs'?{start:(spec:any)=>{const hooks=spec.run({append:()=>undefined,updateProgress:()=>undefined});done=hooks.done;return 'external-install-1'}}:name==='subprocess'?{resolveExecutable:async()=>'/tools/hf',spawn:(spec:unknown)=>{calls.push(spec as Record<string,unknown>);return {done:Promise.resolve({exitCode:17,signal:null}),collected:{}}}}:undefined,profileContext:{cwd:'/task'}} as unknown as Context
+  try{
+   process.env.HF_ENDPOINT='https://huggingface.co'
+   expect(await startExternalAcquisition(ctx,{id:'da3',localDir:'/task/models/da3'})).toBe('external-install-1')
+   expect(calls[0]).toMatchObject({argv:['/tools/hf','download','depth-anything/DA3-BASE','--revision','f4a6c9b3c95e41c82048423d3493a81ec3fa810e','config.json','model.safetensors','--local-dir','/task/models/da3'],env:{HF_ENDPOINT:'https://hf-mirror.com'}})
+   expect(await done).toMatchObject({status:'failed',detail:expect.stringContaining('No official-endpoint fallback')})
+   expect(calls).toHaveLength(1)
+  }finally{if(old===undefined)delete process.env.HF_ENDPOINT;else process.env.HF_ENDPOINT=old}
  })
 })
 
@@ -43,6 +141,10 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import ConfigEditor from '@deepseek-ai/dsh-config-editor'
 import Settings from '@deepseek-ai/dsh-settings'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeMcp from '@deepseek-ai/dsh-mcp-client'
+import {createServer} from 'node:http'
+import type {AddressInfo} from 'node:net'
 import { initProfile, mountRootInclude, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -99,6 +201,34 @@ async function preferencesFixture(input: { legacy?: string; overrides?: object[]
  }
  return { ctx: await start(), start, home, profile, view }
 }
+
+test('原生profile新增MCP真实initialize/tools-list发布工具；重复namespace激活失败原子回退',async()=>{
+ const server=createServer(async(request,response)=>{
+  if(request.method!=='POST'){response.writeHead(405);response.end();return}
+  let body='';for await(const chunk of request)body+=String(chunk)
+  const rpc=JSON.parse(body)
+  if(rpc.id===undefined){response.writeHead(202);response.end();return}
+  const result=rpc.method==='initialize'?{protocolVersion:rpc.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'local-fixture',version:'1.0'}}:rpc.method==='tools/list'?{tools:[{name:'read_fixture',description:'Read the local MCP fixture, not a real editor.',inputSchema:{type:'object',properties:{}}}]}:{content:[{type:'text',text:'fixture'}]}
+  response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result}))
+ })
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r))
+ const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`,h=await preferencesFixture()
+ h.ctx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never)
+ await h.ctx.plugin(ToolRuntime)
+ try{
+  await saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',url,expectedRevision:null})
+  expect(h.ctx.tools.schemas().map(v=>v.name)).toContain('mcp__fixture__read_fixture')
+  const actual=await externalToolsState(h.ctx)
+  expect(actual.mcp.find(v=>v.serverName==='fixture')).toMatchObject({status:'connected',tools:['mcp__fixture__read_fixture'],detail:null})
+  const persisted=await readFile(h.profile.patchPath,'utf8')
+  expect(persisted).toContain('@deepseek-ai/dsh-mcp-client')
+  expect(persisted).toContain('lyapunov-external-mcp-fixture')
+  await h.ctx.plugin(NativeMcp,{transport:'streamable-http',serverName:'duplicate',url,toolCallTimeoutMs:1000,headers:{},failOnStartupError:false})
+  await expect(saveExternalMcp(h.ctx,{serverName:'duplicate',transport:'streamable-http',url,expectedRevision:null})).rejects.toThrow()
+  expect(await readFile(h.profile.patchPath,'utf8')).toBe(persisted)
+  expect(h.ctx.tools.schemas().map(v=>v.name)).toContain('mcp__fixture__read_fixture')
+ }finally{await h.ctx.fiber.dispose();await new Promise<void>(r=>server.close(()=>r()))}
+},20000)
 
 describe('RC2 原生偏好 Config/profile 事务', () => {
  test('产品两个真实built exports通过Loader生成可写原生表单并重开', async () => {

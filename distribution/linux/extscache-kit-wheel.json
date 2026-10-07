@@ -1,0 +1,10 @@
+{
+  "package": "isaacsim-extscache-kit",
+  "version": "6.0.1.0",
+  "filename": "isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl",
+  "url": "https://pypi.nvidia.cn/isaacsim-extscache-kit/isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl",
+  "bytes": 5879615742,
+  "sha256": "35b64cf35ce3d31875ef43025f243c8bd03e29cb28fe844b0cd06b76ba535714",
+  "index": "https://pypi.nvidia.cn/isaacsim-extscache-kit/",
+  "note": "Official NVIDIA index hash for the x86_64 wheel of isaacsim-extscache-kit 6.0.1.0; pypi.nvidia.com 301-redirects to the same object. The helper re-verifies every byte against this pinned length and SHA256 before pip sees it."
+}

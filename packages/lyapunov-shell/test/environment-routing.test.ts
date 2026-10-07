@@ -692,7 +692,7 @@ async function applyOnStub(skillNames?: readonly string[],mode:'formal'|'develop
         section: (section: { name: string; text: string | (() => string) }) => { prompts.push(section); return () => {} },
         context: (section: { name: string; text: string | (() => string) }) => { prompts.push(section); return () => {} },
       },
-      tools: { register: (definition: { name: string }) => { tools.set(definition.name, definition); return () => { tools.delete(definition.name) } }, get: (name: string) => tools.get(name) },
+      tools: { register: (definition: { name: string }) => { tools.set(definition.name, definition); return () => { tools.delete(definition.name) } }, get: (name: string) => tools.get(name), schemas:()=>[...tools.values()].map((value:any)=>({name:value.name,description:value.description??''})) },
       commands: { register: () => () => {}, execute: async () => undefined },
       connection: { fetch: { register: (route:{path:string}) => {routes.add(route.path);return()=>routes.delete(route.path)} } },
       get: (service: string) => (service === "sessionProjections" ? { stateOf: () => projection.todos } : service === "skills" ? skills : undefined),

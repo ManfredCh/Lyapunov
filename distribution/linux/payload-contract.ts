@@ -154,6 +154,10 @@ export const PRODUCT_RUNTIME_FILES = [
   'distribution/linux/lyapunov-desktop.desktop.in',
   'distribution/linux/install.sh',
   'distribution/linux/install-entry.mjs',
+  // 通用 Kit 大缓存（isaacsim-extscache-kit 6.0.1.0，约 5.88GB）的固定 pin 与分段续传 helper：
+  // 需随包分发；helper 只按 pin 的长度/SHA256 校验并把已验证本地 wheel 交给 pip。
+  'distribution/linux/fetch-extscache-kit.mjs',
+  'distribution/linux/extscache-kit-wheel.json',
 ] as const
 
 /** 只核真实staging载荷；存在源码不能替代缺失的运行worker或已构建SDK。 */

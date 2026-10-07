@@ -126,6 +126,8 @@ export interface EnvironmentRoutingInput {
   readonly selection?: { readonly sceneId?: string; readonly worldId?: string } | undefined
   /** 工具可见性（调用方的 `ctx.tools.get(name, agent)`）；缺省按不可见处理，不假装有入口。 */
   readonly hasTool?: ((name: string) => boolean) | undefined
+  /** 原生工具注册表当前可见的 MCP 名称与描述；不假定桥接命名空间或工具存在。 */
+  readonly visibleMcpTools?: readonly {name:string;description:string}[] | undefined
   /** 原生技能目录（`ctx.skills.snapshot()`）；缺省=不可读，不据此判定技能缺失。 */
   readonly skillCatalog?: SkillCatalogFact | undefined
 }
@@ -506,11 +508,14 @@ export function selectAssetGenerationRoute(text: string): AssetGenerationRoute |
   return { method: "peiri3d", why: "For a new semantic asset or realistic appearance, use Peiri 3D. Set texture:true and pbr:true explicitly when textures/PBR are required. Read the actual central quote and obtain one confirmation first. Stop if configuration is missing; offer free public models only when they satisfy the user's source requirements." }
 }
 
-function assetRouteHint(route: AssetGenerationRoute | undefined, hasTool?: (name: string) => boolean): string {
+function assetRouteHint(route: AssetGenerationRoute | undefined, hasTool?: (name: string) => boolean, mcpTools?:readonly {name:string;description:string}[]): string {
   if (!route) return ""
-  const tools = route.method === "peiri3d" ? ["generate_tripo"] : route.method === "mixed" ? ["blender_run","generate_tripo"] : ["blender_run"]
+  const blenderMcp=(mcpTools??[]).filter(tool=>/blender/i.test(tool.name+' '+tool.description)&&(!hasTool||hasTool(tool.name))).slice(0,6)
+  const usesBlender=route.method==='blender'||route.method==='mixed'
+  const blenderGuide=usesBlender?(blenderMcp.length?` Prefer an applicable tool from the currently discovered Blender MCP tools (${blenderMcp.map(v=>'`'+v.name+'`').join(', ')}); inspect its actual schema and editor/project state before invoking it. Use blender_run for a separate authorized batch script when the connected MCP cannot perform that operation.`:' No Blender MCP tool is currently visible. Read the native MCP configuration/connection state and report the concrete missing bridge, addon, endpoint, handshake, discovery, or scope. The authorized blender_run batch fallback remains usable when mounted; do not invent MCP tools.'):' '
+  const tools = route.method === "peiri3d" ? ["generate_tripo"] : route.method === "mixed" ? [...blenderMcp.length?[]:["blender_run"],"generate_tripo"] : blenderMcp.length?[]:["blender_run"]
   const gap = hasTool && tools.some(tool=>!hasTool(tool)) ? " The selected generation interface is not mounted. Report the block explicitly; do not call an unavailable capability or silently switch sources." : ""
-  return ` Generation route: ${route.why}${gap} Reuse the contract of already loaded skills without loading the same skill again. Do not repeat a request when server configuration and the quote have not changed.`
+  return ` Generation route: ${route.why}${blenderGuide}${gap} Reuse the contract of already loaded skills without loading the same skill again. Do not repeat a request when server configuration and the quote have not changed.`
 }
 
 /**
@@ -771,17 +776,17 @@ export function planDomainPointers(input: EnvironmentRoutingInput & { readonly p
     }
     const hits = input.pointers.filter(pointer => pointerRelevant(pointer) && pointerAvailable(pointer)).slice(0, 2)
     if (!hits.length) return undefined
-    const lines = hits.map(hit => (hit.tool ? `This may involve ${hit.label}: use tool \`${hit.skill}\` directly for interface control. Ignore this guidance if it does not apply.` : `This may involve ${hit.label}: read skill \`${hit.skill}\` for the operation contract. Ignore this guidance if it does not apply.`) + (hit.skill === "asset-generation" ? assetRouteHint(assetRoute,input.hasTool) : ""))
+    const lines = hits.map(hit => (hit.tool ? `This may involve ${hit.label}: use tool \`${hit.skill}\` directly for interface control. Ignore this guidance if it does not apply.` : `This may involve ${hit.label}: read skill \`${hit.skill}\` for the operation contract. Ignore this guidance if it does not apply.`) + (hit.skill === "asset-generation" ? assetRouteHint(assetRoute,input.hasTool,input.visibleMcpTools) : ""))
     return { text: lines.join("\n"), decision, injected: hits.map(hit => hit.skill) }
   }
-  const envText = renderEnvironmentPointer(decision)?.split("\n").map(line => line.includes("`asset-generation`") ? line + assetRouteHint(assetRoute,input.hasTool) : line).join("\n")
+  const envText = renderEnvironmentPointer(decision)?.split("\n").map(line => line.includes("`asset-generation`") ? line + assetRouteHint(assetRoute,input.hasTool,input.visibleMcpTools) : line).join("\n")
   const used = new Set(decision.hints.flatMap(hint => (hint.name ? [hint.name] : [])))
   // 停止档不加关键词补充：这一轮只该停，不该顺带推荐"可用某技能"（否则模型会先去加载技能）。
   // 补充也守"技能必须存在"：目录确认缺失的技能名不注入（不给人加载不出来的建议）。
   const supplements = text && decision.stage !== "stop"
     ? input.pointers.filter(pointer => pointerRelevant(pointer) && !used.has(pointer.skill) && pointerAvailable(pointer)).slice(0, Math.max(0, MAX_POINTERS - decision.hints.length))
     : []
-  const supplementLines = supplements.map(hit => `- Use ${hit.tool ? "" : "skill "}tool to read \`${hit.skill}\` for the operation contract: ${hit.label}` + (hit.skill === "asset-generation" ? assetRouteHint(assetRoute,input.hasTool) : ""))
+  const supplementLines = supplements.map(hit => `- Use ${hit.tool ? "" : "skill "}tool to read \`${hit.skill}\` for the operation contract: ${hit.label}` + (hit.skill === "asset-generation" ? assetRouteHint(assetRoute,input.hasTool,input.visibleMcpTools) : ""))
   const body = [envText, ...supplementLines, POINTER_FOOTER].join("\n")
   return { text: body, decision, injected: [...decision.hints.flatMap(hint => (hint.name ? [hint.name] : [])), ...supplements.map(hit => hit.skill)] }
 }

@@ -181,6 +181,56 @@ test('blender_run：模型多行代码误填python_script时在实际SDK边界�
   }
 })
 
+test('blender_run：相对python_script/source_blend不存在时在执行前明确拒绝，不创建任何作业记录', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'blender-missing-input-'))
+  const executable = await fakeExecutable(directory, `echo '${PREFIX}{"unexpected":true}'`)
+  const harness = await createHarness({ executable, workspace: directory, attachments: false })
+  const jobsOf = (): unknown[] => (harness.ctx as unknown as { jobs: { list(owner?: string): unknown[] } }).jobs.list(harness.agent.id)
+  try {
+    // 相对路径按真实会话任务工作区解析；这里 workspace=directory，缺失脚本必须在起进程前被拒。
+    const missingScript = await harness.call({ output_directory: 'out', python_script: 'missing-script.py', background: true })
+    assert.equal(missingScript.isError, true)
+    assert.match(resultText(missingScript), /BLENDER_INPUT_MISSING/)
+    assert.match(resultText(missingScript), /python_script/)
+    assert.deepEqual(jobsOf(), [], '缺失输入不得创建后台作业记录（否则会留下永远 running 的作业）')
+
+    const missingBlend = await harness.call({ output_directory: 'out', source_blend: 'missing.blend' })
+    assert.equal(missingBlend.isError, true)
+    assert.match(resultText(missingBlend), /BLENDER_INPUT_MISSING/)
+    assert.match(resultText(missingBlend), /source_blend/)
+    assert.deepEqual(jobsOf(), [])
+    const directoryInput=await harness.call({output_directory:'out',python_script:directory,background:true})
+    assert.equal(directoryInput.isError,true)
+    assert.match(resultText(directoryInput),/BLENDER_INPUT_MISSING/)
+    assert.deepEqual(jobsOf(),[],'目录不是可执行的Python输入文件')
+  } finally {
+    await harness.dispose()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('blender_run：原生Job在进程运行期间可读实际stdout/stderr，render=false不承诺PNG',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'blender-stream-'))
+ const executable=await fakeExecutable(directory,`printf 'modelling-started\\n'\nprintf 'script-diagnostic\\n' >&2\nsleep 1\nprintf '${PREFIX}{"scene":"ok"}\\n'`)
+ const harness=await createHarness({executable,workspace:directory,attachments:false})
+ try{
+  const call=await harness.call({output_directory:'out',background:true,render:false})
+  assert.equal(call.isError,false)
+  const receipt=JSON.parse(String(call.value?.result))
+  assert.equal(receipt.worldRenderRequested,false);assert.equal(receipt.previewExpected,false)
+  assert.match(receipt.note,/Python script may render on its own/)
+  assert.match(receipt.note,/Pausing a Goal does not pause/)
+  await new Promise(r=>setTimeout(r,400))
+  const jobs=harness.ctx.jobs,view=jobs.get(receipt.jobId,harness.agent.id)
+  assert.equal(view.status,'running')
+  const output=jobs.readAt(receipt.jobId,0,harness.agent.id)
+  assert.ok(output.chunks.some(c=>c.channel==='stdout'&&c.text.includes('modelling-started')))
+  assert.ok(output.chunks.some(c=>c.channel==='stderr'&&c.text.includes('script-diagnostic')))
+  await jobs.wait(receipt.jobId,3000,harness.agent.id)
+  assert.equal(jobs.get(receipt.jobId,harness.agent.id).status,'completed')
+ }finally{await harness.dispose();await rm(directory,{recursive:true,force:true})}
+})
+
 /** 最小合法 PNG（1×1）：附件服务会真的解码，随便写几个字节过不了。 */
 function tinyPng(): Buffer {
   const chunk = (type: string, data: Buffer): Buffer => {
@@ -390,9 +440,9 @@ test('scale_anchors：读数只说"输入自洽、实际尺寸仍待独立核对
     // 模型看到的那份描述本身也不能许诺"标定可信"：参数说明是模型判断读数含义的唯一依据。
     const schema = (harness.ctx.get('tools') as unknown as { schemas(): Array<{ name: string; description?: string; parameters?: { properties?: Record<string, { description?: string }> } }> }).schemas().find(entry => entry.name === 'blender_run')
     const description = schema?.parameters?.properties?.scale_anchors?.description ?? ''
-    assert.match(description, /同时/, '参数说明要写清 pixels 与 metres 必须同时给')
-    assert.match(description, /不代表实际尺寸已被验证|实际尺寸仍要/, '参数说明要写清这不是几何验证')
-    assert.doesNotMatch(description, /标定可信|即可确认尺寸|说明尺寸正确/, '不能把"参照一致"说成标定可信')
+    assert.match(description, /Every reference must provide positive pixels and metres/, '英文参数说明仍要求 pixels 与 metres 必须同时给且为正')
+    assert.match(description, /This does not verify actual dimensions.*Independently check dimensions/, '英文参数说明仍明确这不是几何验证')
+    assert.doesNotMatch(description, /calibration is reliable|confirms? (?:the )?dimensions|dimensions are correct/i, '不能把"参照一致"说成标定可信')
 
     // ① 两个参照彼此一致：读数只声明**输入自洽**，并明确把"实际尺寸"留给独立核对。
     const consistent = await scaleCheckOf([

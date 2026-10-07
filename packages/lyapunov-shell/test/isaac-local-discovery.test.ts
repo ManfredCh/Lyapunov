@@ -188,10 +188,12 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     writeFileSync(join(outside.site,"isaacsim/kit/EULA_ACCEPTED"),"yes\n")
     writeSdkPythonPreference("isaac",outside.python,env)
     for(const file of ["distribution/linux/install-provider","distribution/linux/doctor.mjs","distribution/linux/sandbox.mjs","distribution/linux/register-managed-sdk.mjs","packages/lyapunov-product-bundle/src/sdk-python.mjs","packages/sim-isaac/python/check.py"]){mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(PRODUCT_ROOT,file),join(product,file))}
+    // 本测试的假前缀已含同版通用 Kit 缓存：install-provider 走“已安装即复用”分支，不调用下载 helper；
+    // helper 的“已验证本地 wheel → pip”接线由 script/package-linux.test.ts + distribution/linux/install.test.ts 覆盖。
     mkdirSync(join(product,"script"),{recursive:true});writeFileSync(join(product,"script/package-linux.ts"),"// source fixture\n")
     mkdirSync(join(product,"packages/asset-bake"),{recursive:true});for(const file of ["requirements.txt","requirements-common.txt","requirements-isaac.txt"])copyFileSync(join(PRODUCT_ROOT,"packages/asset-bake",file),join(product,"packages/asset-bake",file))
     const prefix=join(product,".runtime/conda/envs/isaac"),python=join(prefix,"bin/python"),pipArgs=join(root,"pip-install.args"),readyMarker=join(root,"managed-isaac-ready")
-    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;esac;fi\ncase "$1" in *check.py) if [ -f ${shQuote(readyMarker)} ]; then printf '%s\\n' '{"provider":"isaac","status":"AVAILABLE","version":"6.0.1.0"}';exit 0;fi;;esac\nexec /usr/bin/python3 "$@"\n`)
+    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;*importlib.metadata*) printf '%s\\n' '6.0.1.0';exit 0;;esac;fi\ncase "$1" in *check.py) if [ -f ${shQuote(readyMarker)} ]; then printf '%s\\n' '{"provider":"isaac","status":"AVAILABLE","version":"6.0.1.0"}';exit 0;fi;;esac\nexec /usr/bin/python3 "$@"\n`)
     const micromamba=join(root,"micromamba");executable(micromamba,"#!/bin/sh\nexit 0\n")
     const ordinary=spawnSync("/usr/local/bin/node",[join(product,"distribution/linux/doctor.mjs"),"isaac"],{encoding:"utf8",timeout:5000,env:{...env,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(ordinary.status).toBe(0)
@@ -206,13 +208,13 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(report.providers.isaac.status).toBe("BLOCKED")
     expect(report.providers.isaac.code).toBe("PROVIDER_UNAVAILABLE")
     const actualArgs=readFileSync(pipArgs,"utf8").trim().split("\n")
-    // 固定 plain isaacsim 6.0.1.0，只点名当前 worker 需要的两个明确扩展缓存；
-    // 不请求整个 [extscache] 组，也不直接点名通用大 Kit 缓存 isaacsim-extscache-kit。
+    // 本次前缀已含同版通用大 Kit 缓存：恢复显式 isaacsim-extscache-kit==6.0.1.0 让其正常复用（pip 看到已满足，
+    // 不再下载）；不请求整个 [extscache] 组，也不请求 all 组。
     expect(actualArgs).toContain("isaacsim==6.0.1.0")
     for(const cache of ["isaacsim-extscache-kit-sdk","isaacsim-extscache-physics"])expect(actualArgs).toContain(`${cache}==6.0.1.0`)
     for(const component of ["app","core","asset","sensor","test"])expect(actualArgs).toContain(`isaacsim-${component}==6.0.1.0`)
+    expect(actualArgs).toContain("isaacsim-extscache-kit==6.0.1.0")
     expect(actualArgs.some(argument=>argument.includes("[extscache"))).toBe(false)
-    expect(actualArgs).not.toContain("isaacsim-extscache-kit==6.0.1.0")
     expect(actualArgs.some(argument=>argument.includes("[all"))).toBe(false)
     expect(actualArgs).not.toContain("--no-deps")
     expect(actualArgs).not.toContain("mujoco==3.13.0")
@@ -251,5 +253,13 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(corrupt.status).toBe(2)
     expect(corrupt.stdout).toContain('SDK_SELECTION_SAVE_FAILED')
     expect(readFileSync(corruptFile,'utf8')).toBe(corruptBytes)
+    // 有效 JSON 的 null/array 也不是有效配置：同样不能当成首次安装覆盖原字节。
+    for(const malformed of ['[]','null']){
+      writeFileSync(corruptFile,malformed)
+      const invalidShape=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+      expect(invalidShape.status).toBe(2)
+      expect(invalidShape.stdout).toContain('SDK_SELECTION_SAVE_FAILED')
+      expect(readFileSync(corruptFile,'utf8')).toBe(malformed)
+    }
   })
 })

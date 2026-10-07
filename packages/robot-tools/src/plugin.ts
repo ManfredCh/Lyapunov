@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url'
 import { simWorldsFor, type SimAction } from '../../sim-contract/src/index.ts'
 import { requireSessionId } from '../../lyapunov-contracts/src/session-scope.ts'
 import { requireWritableScene, sceneOperationsFor } from '../../scene-kit/src/plugin.ts'
+import { entityWorldMatrix } from '../../scene-kit/src/physics-binding.ts'
+import { Matrix3, Vector3 } from 'three'
 import { createRobotOperations, type SceneReader } from './operations.ts'
 import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import { executePolicy } from '../../policy-registry/src/execution.ts'
@@ -241,6 +243,15 @@ export function apply(ctx: Context, config: Config = {}) {
     const created = createRobotOperations(simWorldsFor(ctx, agent), sceneOps.scene as SceneReader, {...walkHooks(ctx, agent, sceneOps.scene as SceneReader),prepareWorld:async(snapshot,options,signal)=>{
       signal?.throwIfAborted()
       if(['physics-workspace-v1','physics-workspace-v2'].includes(snapshot.physics?.template??'')||['removed','disabled'].includes(snapshot.physics?.groundState??''))return snapshot
+      // 导入 Scene 已有唯一显式无限地面时，打开物理世界不需要额外持久标记模板。
+      // ground=false 是明确请求写入 disabled 选择，仍交给原 Scene CAS 写边界。
+      const ground=snapshot.entities.filter(entity=>(entity.components.supportSurface as {kind?:string}|undefined)?.kind==='ground'&&entity.components.collision?.shape==='plane'&&entity.components.collision?.infinite===true)
+      if(options?.ground!==false&&ground.length===1&&ground[0]!.components.collision?.enabled!==false&&ground[0]!.components.rigidBody?.type==='static'){
+        // 复用 Scene 的世界变换；免持久准备只能依据实际 +Z 支持面，不按实体名称或视觉大小猜。
+        const world=entityWorldMatrix(ground[0]!,new Map(snapshot.entities.map(entity=>[entity.entityId,entity])))
+        const normal=new Vector3(0,0,1).applyMatrix3(new Matrix3().getNormalMatrix(world)).normalize()
+        if(world.elements.every(Number.isFinite)&&Math.abs(normal.x)<=1e-6&&Math.abs(normal.y)<=1e-6&&Math.abs(normal.z-1)<=1e-6)return snapshot
+      }
       requireWritableScene(ctx,agent,'sim_open ground preparation')
       return sceneOps.prepareWorld({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,ground:options?.ground})
     }})

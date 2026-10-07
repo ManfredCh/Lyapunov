@@ -19,6 +19,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ProcessSimProvider, pathWithin, type SimWorkerLaunchSpec } from '../src/python-transport.ts'
+import { isWorkerModeWithinCurrent } from '../src/session-launch.ts'
 import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 
 const WORKER = new URL('./fixtures/fake-worker.py', import.meta.url).pathname
@@ -69,7 +70,16 @@ function spaceOf(sessionId: string): Space {
     launches: [],
   }
 }
-async function providerFor(space: Space, plan: Record<string, unknown>, mode: 'workspace-write' | 'read-only' = 'workspace-write'): Promise<{ provider: ProcessSimProvider; marker: string }> {
+/**
+ * 会话当前有效策略的控制：默认与启动模式一致；`current` 提供运行中现值，`unverifiable` 模拟会话已不在，
+ * `sequence` 按调用顺序返回值（模拟"派发后、发布前"被收紧）。
+ */
+interface PolicyControl {
+  current?: () => 'workspace-write' | 'read-only' | 'danger-full-access'
+  unverifiable?: boolean
+  sequence?: ('workspace-write' | 'read-only' | 'danger-full-access')[]
+}
+async function providerFor(space: Space, plan: Record<string, unknown>, mode: 'workspace-write' | 'read-only' = 'workspace-write', policy: PolicyControl = {}): Promise<{ provider: ProcessSimProvider; marker: string }> {
   const marker = join(base, `${space.sessionId}.marker`)
   const scenario = join(base, `${space.sessionId}.scenario.json`)
   await writeFile(marker, '')
@@ -86,10 +96,22 @@ async function providerFor(space: Space, plan: Record<string, unknown>, mode: 'w
         ...(mode === 'read-only' ? { internalWritableRoots: [join(space.writableRoot, '.lyapunov', 'sessions', space.sessionId, 'engine-cache', 'isaac')], internalWritableBoundary: 'os-bind' as const } : {}),
       }
       space.launches.push(facts)
+      let calls = 0
+      const check: SimWorkerLaunchSpec['check'] = async worker => {
+        if (policy.unverifiable) throw new Error('会话已不在本 Host，核不出有效策略')
+        const currentMode = policy.sequence !== undefined
+          ? policy.sequence[Math.min(calls++, policy.sequence.length - 1)]
+          : policy.current?.() ?? mode
+        // 与启动接线同一条 NativeMode 单调包含判据，并回报会话**当前**有效策略。
+        const current = { mode: currentMode, workspaceRoot: space.writableRoot }
+        return isWorkerModeWithinCurrent(worker.mode, currentMode)
+          ? { stale: false as const, current }
+          : { stale: true as const, detail: `本 worker 是按 ${worker.mode} 启动的，该会话当前有效策略已经是 ${currentMode}`, current }
+      }
       return {
         argv: [input.pythonPath, '-u', input.workerPath],
         env: { ...input.env, LYAPUNOV_SIM_SESSION: space.sessionId, LYAPUNOV_SIM_RUNTIME_ROOT: space.runtimeRoot, LYAPUNOV_SIM_SANDBOX_MODE: mode },
-        facts, check: async () => ({ stale: false as const }),
+        facts, check,
       }
     },
   })
@@ -236,15 +258,27 @@ describeIfPython('只读会话：用户落盘请求不能被引擎内部缓存�
     await provider.dispose()
   })
 
-  test('目标指到本会话产品根：同样按策略拒绝（只读下没有可写的用户产物位置）', async () => {
-    const space = spaceOf('relay-readonly-product')
-    const { provider, marker } = await providerFor(space, {}, 'read-only')
+  test('派发后、发布前被收紧成 read-only：宿主不代写进产品根，暂存清理、worker 不被杀', async () => {
+    const space = spaceOf('relay-tighten-before-publish')
+    // 第一次核对（派发前）仍是 workspace-write ⇒ 放行派发；第二次核对（发布前）已收紧成 read-only。
+    const { provider, marker } = await providerFor(space, {}, 'workspace-write', { sequence: ['workspace-write', 'read-only'] })
     await provider.open(scene('s1'), { worldId: 'w1' })
     const target = join(space.productRoot, 'shots')
     const failure = await refusalOf(provider.capture('w1', { outputDir: target }))
-    expect(failure.code).toBe('SIM_MEDIA_POLICY_READ_ONLY')
-    expect(await markerText(marker)).not.toContain('capture outputDir=')
+    expect(failure.code).toBe('SIM_MEDIA_POLICY_STALE')
+    expect(failure.message).toContain('read-only')
+    expect(failure.message).toContain('denied before publication')
+    expect(failure.message).toContain('internal staging files may already exist')
+    expect(failure.message).not.toContain('denied before dispatch')
+    // worker 收到了派发（写进了暂存），但宿主没有把暂存发布进产品根，也没有通知登记。
+    const written = await markerText(marker)
+    expect(written).toContain(`capture outputDir=${join(space.runtimeRoot, 'staging')}`)
+    expect(written).not.toContain('capture-published')
     expect(existsSync(target)).toBe(false)
+    // 暂存目录被清理；worker 与世界照常（拒绝只落在这条未经当前授权的写入上）。
+    expect(existsSync(join(space.runtimeRoot, 'staging', 'media-1'))).toBe(false)
+    await provider.observe('w1', {})
+    expect(await markerText(marker)).toContain('request observe')
     await provider.dispose()
   })
 

@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { join } from 'node:path'
 import { SessionSimFactory } from '../../sim-contract/src/session-provider.ts'
 import { createSimSessionLauncher } from '../../sim-contract/src/session-launch.ts'
 import { sessionNamespace } from '../../lyapunov-contracts/src/session-scope.ts'
@@ -31,6 +32,10 @@ export function apply(ctx: Context, config: MuJoCoPluginConfig = {}) {
     readOnlyRoots: config.readOnlyRoots,
     engineName: 'MuJoCo',
     productRoots: sessionKey => productRoots.map(root => sessionNamespace(root, sessionKey)),
+    // .mjcf 的解码别名/相对依赖镜像属于引擎内部计算；只给本会话 scratch/temp 可写位，
+    // read-only 仍禁止用户截图/导出，不把原件目录或整个会话运行根挂成可写。
+    internalWritableRoots: ({ privateRoot }) => [join(privateRoot, 'sim', 'scratch')],
+    internalTempDir: ({ privateRoot }) => join(privateRoot, 'sim', 'tmp'),
   })
   const sim = new SessionSimFactory({ create: sessionKey => new MuJoCoProvider({ ...config, launch: launchFor(sessionKey) }) })
   ctx.reflect.provide('sim', sim)

@@ -21,7 +21,8 @@
 
 | Publication metadata | Value |
 | --- | --- |
-| Technical version / releaseId | `0.1.0-alpha.6.2` |
+| Product version | `0.1.0-alpha.6.2` |
+| Release identifier | `0.1.0-alpha.6.2-r1` |
 | Documentation edition | 2026-10-07 |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | Produced by | [Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)](https://vorynel.com/?lang=en) |

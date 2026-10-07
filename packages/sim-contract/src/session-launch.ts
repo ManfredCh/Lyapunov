@@ -28,6 +28,38 @@ import type { SimWorkerLaunchFacts, SimWorkerLaunchHook, SimWorkerPolicyCheck } 
 export const SANDBOX_UNAVAILABLE = 'SANDBOX_UNAVAILABLE'
 
 /**
+ * 已定义 NativeMode（`SimWorkerLaunchFacts['mode']`）的**单调包含序**（数值越小权限越窄）：
+ * `read-only` ⊂ `workspace-write` ⊂ `danger-full-access`。
+ *
+ * 这里**只认这三个本层已定义的值**；任何别的取值（第三方后端自造的模式名、拼写变体）都取不到序号。
+ * 不猜它相对于已知模式是更宽还是更窄——认不出就按"不可证明"处理（见 {@link isWorkerModeWithinCurrent}）。
+ */
+const NATIVE_MODE_WIDTH = new Map<string, number>([
+  ['read-only', 0],
+  ['workspace-write', 1],
+  ['danger-full-access', 2],
+])
+
+/**
+ * worker 启动时绑定的沙箱模式是否被会话**当前**有效策略单调包含，也就是"这只 worker 带着的沙箱
+ * 不比现值更宽"。这是用户文件效果核对**允许派发/发布**的方向（物理世界不经这条核对）：
+ *   · 现值更宽或等宽（`read-only`→`workspace-write`/`danger-full-access`、`workspace-write`→
+ *     `danger-full-access`）⇒ `true`：原 worker 留在它**原来那个更严格的沙箱**里继续干活。本层只是
+ *     核对放行，**不提升、不重挂载、不换 argv**（放宽不会被用来悄悄扩大已有 worker 的权限）。
+ *   · 现值更窄（`workspace-write`→`read-only`、`danger-full-access`→`workspace-write`）⇒ `false`：
+ *     这只 worker 还带着比现值更宽的许可，必须按"旧许可过期"处理。
+ *   · 任一取值不在 {@link NATIVE_MODE_WIDTH} 里（未知模式）⇒ `false`：失败关闭，不猜第三方模式语义。
+ * @param workerMode - worker 启动时实际绑定的沙箱模式（`SimWorkerLaunchFacts.mode`）。
+ * @param currentMode - 该会话当前重新解析出的有效策略模式。
+ */
+export function isWorkerModeWithinCurrent(workerMode: unknown, currentMode: unknown): boolean {
+  if (typeof workerMode !== 'string' || typeof currentMode !== 'string') return false
+  const worker = NATIVE_MODE_WIDTH.get(workerMode)
+  const current = NATIVE_MODE_WIDTH.get(currentMode)
+  return worker !== undefined && current !== undefined && worker <= current
+}
+
+/**
  * 把共享 workspace 里的**会话私有运行目录**从"整个授权根可写"里收出来。
  *
  * 原生 `workspace-write` 的语义是"授权根（`session.header.cwd`）整体可写"，同一 Host 上两条 cwd 相同的
@@ -272,9 +304,11 @@ export async function resolveSessionPrivateRoot(ctx: SimLaunchContext, sessionKe
  * 下一次启动就是新模式，不需要重启 Host。
  *
  * 启动钩子同时给出**策略现值核对**（{@link SimWorkerPolicyCheck}）：worker 的沙箱在启动时绑定，
- * 而会话模式可以在运行中被收紧；写类操作前用同一条链重解析一次，把"这只 worker 还带着旧许可吗"
- * 变成可核对的问答。核对的结论只描述事实（旧模式/新模式），结束哪只 worker、怎么结束由传输层按
- * 既有 worker 生命周期决定。
+ * 而会话模式可以在运行中被改变。核对的用途已经**收窄到用户产物落盘边界**（截图/多集/数据集导出的派发
+ * 与发布），不再参与物理世界生命周期：模式互切本身不结束 worker、不销毁世界，`sim_sync`/暂停继续照常。
+ * 核对按已定义 NativeMode 的**单调包含**判定并回报会话**当前**有效策略：现值更宽时原 worker 继续在它
+ * 原来那个更严格沙箱里跑（本层不提升、不重挂载）；现值收紧、授权根变化、会话核不出来或模式不可比较时
+ * 按旧许可过期（或不可证明）拒绝——但拒绝只落在这一次 IO 写入上，世界继续。
  * @param ctx - Host 上下文（读 `agents`/`sessionController`/`sandboxPolicy`/`sandbox`）。
  * @param options - 引擎名、会话产品产物根与运行根落点。
  * @returns 按会话键取启动钩子的工厂。
@@ -284,17 +318,22 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
   return (sessionKey: string): SimWorkerLaunchHook => async (input) => {
     const { policy } = await resolveExecutionPolicy(ctx, sessionKey, engineName)
     const policyService = ctx.get('sandboxPolicy') as NativeSandboxPolicyService
-    /** 策略现值核对：与启动用同一条 resolve 链，读不到就抛给传输层（那边按"不可证明"拒绝本次操作）。 */
+    /** 策略现值核对：与启动用同一条 resolve 链；读不到就抛给传输层（那边按"不可证明"拒绝本次写入，不杀世界）。 */
     const check: SimWorkerPolicyCheck = async (facts) => {
       const live = await requireLiveSession(ctx, sessionKey, engineName)
       const current = policyService.resolve({ session: live })
-      if (current.mode !== facts.mode) {
-        return { stale: true, detail: `本 worker 是按 ${facts.mode} 启动的（会话 ${facts.sessionId}，运行根 ${facts.runtimeRoot}），该会话当前有效策略已经是 ${current.mode}` }
+      const snapshot = { mode: current.mode, workspaceRoot: current.workspaceRoot }
+      // 受限模式变更授权根必须重新建立运行空间。全访问已包括所有目录，
+      // 主要工作目录变化不收紧许可；原worker仍保持它启动时的沙箱和私有运行根。
+      if (current.mode !== 'danger-full-access' && current.workspaceRoot !== facts.workspaceRoot) {
+        return { stale: true, detail: `the session workspace root changed from ${facts.workspaceRoot} to ${current.workspaceRoot}; this worker was launched with the previous workspace authorization`, current: snapshot }
       }
-      if (current.workspaceRoot !== facts.workspaceRoot) {
-        return { stale: true, detail: `该会话的授权根已从 ${facts.workspaceRoot} 变成 ${current.workspaceRoot}，这只 worker 是按旧授权根启动的` }
+      // 模式只看**单调包含**：现值更宽放行（原 worker 留在原更严格沙箱，不提升/不重挂），
+      // 现值收紧或模式不可比较（未知值）都按旧许可过期拒绝。
+      if (!isWorkerModeWithinCurrent(facts.mode, current.mode)) {
+        return { stale: true, detail: `this worker was launched in ${facts.mode} mode (session ${facts.sessionId}, runtime root ${facts.runtimeRoot}); the current session policy is ${current.mode}`, current: snapshot }
       }
-      return { stale: false }
+      return { stale: false, current: snapshot }
     }
     const workspaceRoot = policy.workspaceRoot
     const runtimeParent = options.runtimeParent ?? '.lyapunov/sessions'

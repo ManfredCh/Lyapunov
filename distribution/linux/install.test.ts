@@ -27,7 +27,7 @@ function fixture(){
     if(path.endsWith('/linux-x64.tsv')){const row=manifests.get(release);return row?new Response(releaseManifestTsv(row)):new Response('missing',{status:404})}
     const bytes=files.get(path);if(!bytes)return new Response('missing',{status:404})
     const range=request.headers.get('range')
-    if(range){ranges.push(range);const start=Number(/^bytes=(\d+)-$/.exec(range)?.[1]);return new Response(bytes.subarray(start),{status:206,headers:{'Content-Range':`bytes ${start}-${bytes.length-1}/${bytes.length}`,'Content-Length':String(bytes.length-start)}})}
+    if(range){ranges.push(range);const match=/^bytes=(\d+)-(\d*)$/.exec(range);const start=Number(match?.[1]);const end=match?.[2]?Number(match[2]):bytes.length-1;return new Response(bytes.subarray(start,end+1),{status:206,headers:{'Content-Range':`bytes ${start}-${end}/${bytes.length}`,'Content-Length':String(end-start+1)}})}
     return new Response(bytes,{headers:{'Content-Length':String(bytes.length)}})
   }})
   function candidate(id:string,options:{mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;entryFails?:boolean;desktopLibraries?:'required'|'unknown'|'changed'|'remain'|'sandbox'|'bad-exit';sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
@@ -96,7 +96,7 @@ function fixture(){
     const text=`[Desktop Entry]\nType=Application\nName=Lyapunov联测\nStartupWMClass=lyapunov-desktop\nExec=${desktopExecutable(executable)}\nIcon=${join(old,'packages/desktop/icons/lyapunov.png')}\nTerminal=false\n`
     put(entry,text);return {old,oldData,entry,text,executable}
   }
-  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,stop:()=>server.stop(true)}
+  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,port:server.port,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
@@ -128,6 +128,35 @@ describe('公开 POSIX 用户安装入口',()=>{
   test('下载已有partial使用真实HTTP Range续传，再按完整bytes/hash验收',async()=>{
     const f=fixture();try{const row=f.candidate('a08-resume');const bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!;const partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial');mkdirSync(dirname(partial),{recursive:true});writeFileSync(partial,bytes.subarray(0,64))
       const result=await f.run();expect(result.status,result.err).toBe(0);expect(f.ranges).toContain('bytes=64-');expect(existsSync(partial)).toBe(false)
+      // 通用 Kit 大 wheel 的独立 helper：以真实 loopback Range 证明续传、完整缓存复用、
+      // 错误 Content-Range 与错误 SHA256 都不会产出交给 pip 的正式 .whl，且不静默删错件。
+      const wheel=Buffer.alloc(1024);for(let index=0;index<wheel.length;index++)wheel[index]=index%251
+      const wheelName='isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl'
+      f.files.set(`wheels/${wheelName}`,wheel)
+      const wheelsDir=join(f.root,'wheel-cache'),pinPath=join(f.root,'extscache-pin.json'),helper=join(source,'fetch-extscache-kit.mjs')
+      const writePin=(overrides:Record<string,unknown>={})=>writeFileSync(pinPath,JSON.stringify({filename:wheelName,url:`http://127.0.0.1:${f.port}/wheels/${wheelName}`,bytes:wheel.length,sha256:sha(wheel),...overrides}))
+      const runHelper=async()=>{const child=Bun.spawn([node,helper,'--pin',pinPath,'--wheels-dir',wheelsDir,'--segment-bytes','256'],{stdout:'pipe',stderr:'pipe'});const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out:out.trim(),err}}
+      const wheelPath=join(wheelsDir,wheelName),wheelPartial=wheelPath+'.partial'
+      // ① 从已有 100 字节 partial 续传：必须发 bytes=100-355 并从该处接续，最终原子改名去 partial。
+      mkdirSync(wheelsDir,{recursive:true});writeFileSync(wheelPartial,wheel.subarray(0,100));writePin();f.ranges.length=0
+      let helperRun=await runHelper()
+      expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath)
+      expect(readFileSync(wheelPath).equals(wheel)).toBe(true);expect(existsSync(wheelPartial)).toBe(false);expect(f.ranges).toContain('bytes=100-355')
+      // ② 完整缓存重验复用：不再发任何网络请求。
+      f.ranges.length=0;helperRun=await runHelper()
+      expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath);expect(f.ranges).toEqual([])
+      // ③ 错误 Content-Range（pin 总长度与官方实际不符）：明确非零、不产出正式 .whl。
+      rmSync(wheelPath);rmSync(wheelPartial,{force:true});writePin({bytes:wheel.length+1})
+      helperRun=await runHelper()
+      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('Content-Range');expect(existsSync(wheelPath)).toBe(false)
+      // ④ 错误 SHA256：完整下载后校验失败，不原子改名，保留完整 partial 并明确报错。
+      rmSync(wheelPath,{force:true});rmSync(wheelPartial,{force:true});writePin({sha256:'a'.repeat(64)})
+      helperRun=await runHelper()
+      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('SHA256_MISMATCH');expect(existsSync(wheelPath)).toBe(false);expect(existsSync(wheelPartial)).toBe(true)
+      // ⑤ 已存在的完整文件不是固定字节：保留原文件并明确报错，不覆盖、不降低校验。
+      rmSync(wheelPartial,{force:true});writeFileSync(wheelPath,Buffer.alloc(wheel.length,9));writePin()
+      helperRun=await runHelper()
+      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('WHEEL_CACHE_MISMATCH');expect(readFileSync(wheelPath).equals(Buffer.alloc(wheel.length,9))).toBe(true)
     }finally{f.stop()}
   })
   test('SDK已准备但desktop CONTEXT_ONLY只保留pending版本，不称ready或切current',async()=>{
@@ -258,7 +287,8 @@ describe('公开 POSIX 用户安装入口',()=>{
       expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-before');expect(readFileSync(join(f.home,'session'),'utf8')).toBe('unchanged user data')
       expect(existsSync(join(product,'.install/mujoco.sha256'))).toBe(true);expect(existsSync(join(product,'physics.args'))).toBe(false);expect(existsSync(join(product,'gui.args'))).toBe(false)
     }finally{f.stop()}}
-  })
+  // 六个分支顺序建立真实 tar/HTTP/PTY 夹具，实测总耗时超过默认 5s；只给本用例留出有界余量。
+  },30_000)
   test('未知SONAME与重读ldd不符时不请求系统权限，不进行猜测安装',async()=>{
     for(const mode of ['unknown','changed'] as const){const f=fixture();try{f.candidate('a08-unknown',{desktopLibraries:mode});f.fakeDependencies({[mode]:true});const result=await f.runPty('')
       expect(result.status,result.out+result.err).toBe(2);expect(result.out).toContain(mode==='unknown'?'DESKTOP_LIBRARY_UNMAPPED':'DESKTOP_DEPENDENCY_REPORT_CHANGED')

@@ -330,7 +330,7 @@ await writeFile(join(stage,'runtime/micromamba/LICENSE'),mambaLicense.text)
 const mambaLicenseRecord={version:mambaLicense.version,spdx:mambaLicense.spdx,url:mambaLicense.url,source:mambaLicense.source,location:mambaLicense.source==='network'?mambaLicense.location:relative(root,mambaLicense.location),payloadLocation:'runtime/micromamba/LICENSE',sha256:mambaLicense.sha256,bytes:mambaLicense.bytes,pinnedSha256:mambaLicense.pinnedSha256,hashMatchesPin:mambaLicense.hashMatchesPin,cached:mambaLicense.cached,...(mambaLicense.pinProblem?{pinProblem:mambaLicense.pinProblem}:{})}
 
 await mkdir(join(stage,'distribution/linux'),{recursive:true})
-for(const file of ['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
+for(const file of ['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
 // 随包分发的可选 Provider 定义：`distribution/providers/graspgenx/` 是**产品的可选 Provider 定义**
 // （用户据此自建 worker，`packages/grasp-graspgenx/README.md` 与 `distribution/linux/README.md` 都指向它），
 // 不是服务端内容，必须随产品分发。缺失即 fail-closed 停止打包，拷入后在 RELEASE.json 如实登记。

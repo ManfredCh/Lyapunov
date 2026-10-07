@@ -9,7 +9,9 @@
  * 钉住的四条：
  *   1. 启动事实来自**这次会话自己的**解析结果（会话键/模式/授权根/运行根/产品根），并真的进了 env；
  *   2. 会话私有运行目录的收窄只认表达得了它的原生 argv 形态；表达不了就如实记 `none`、按原生语义执行；
- *   3. 运行中模式/授权根变了，核对必须说"这只 worker 带的是旧许可"（这正是"更宽→更窄"那条方向）；
+ *   3. 运行中模式/授权根变了，核对（只服务用户产物落盘边界，不参与物理生命周期）按已定义模式的
+ *      **单调包含**判定并回报 **当前** 有效策略：现值更宽放行且原 worker 留在原更严格沙箱（不提升/不重挂）；
+ *      现值收紧或授权根变了必须说"这只 worker 带的是旧许可"；
  *   4. 没有会话身份、没有策略服务、没有沙箱后端时一律**失败关闭**，不拿部署默认值替一次执行解析策略。
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
@@ -18,6 +20,10 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SANDBOX_UNAVAILABLE, createSimSessionLauncher, resolveSessionPrivateRoot, type SimLaunchContext } from '../src/session-launch.ts'
+import { apply as applyMuJoCo } from '../../sim-mujoco/src/plugin.ts'
+import type { SessionSimFactory } from '../src/session-provider.ts'
+import type { SimWorkerLaunchHook } from '../src/python-transport.ts'
+import type { Context } from '@deepseek-ai/cordis'
 
 const SESSION = 'launch-session-a'
 const OTHER = 'launch-session-b'
@@ -31,11 +37,14 @@ interface Harness {
   ctx: SimLaunchContext
   /** 运行中改权限：改的就是核对要重读的同一份"当前有效策略"。 */
   setPolicy: (next: { mode?: Mode; workspaceRoot?: string }) => void
+  /** 运行中让本会话从本 Host 消失：核对同一份链必须核不出来（抛错）。 */
+  setLive: (next: boolean) => void
   confined: { argv: readonly string[]; policy: { mode: string; workspaceRoot: string; sessionId?: string } }[]
 }
 function harness(options: { mode?: Mode; root?: string; sandbox?: 'bwrap' | 'other' | 'none'; live?: boolean } = {}): Harness {
   const root = options.root ?? workspace
   let policy = { mode: (options.mode ?? 'workspace-write') as Mode, workspaceRoot: root, sessionId: SESSION }
+  let live = options.live !== false
   const session = { header: { id: SESSION, cwd: root } }
   const confined: Harness['confined'] = []
   const services: Record<string, unknown> = {
@@ -44,8 +53,8 @@ function harness(options: { mode?: Mode; root?: string; sandbox?: 'bwrap' | 'oth
         ? { mode: policy.mode, workspaceRoot: policy.workspaceRoot }
         : { ...policy },
     },
+    agents: { get: (id: unknown) => id === SESSION && live ? { session } : undefined },
   }
-  if (options.live !== false) services.agents = { get: (id: unknown) => id === SESSION ? { session } : undefined }
   if (options.sandbox !== 'none') {
     const kind = options.sandbox ?? 'bwrap'
     services.sandbox = {
@@ -59,7 +68,12 @@ function harness(options: { mode?: Mode; root?: string; sandbox?: 'bwrap' | 'oth
       },
     }
   }
-  return { ctx: { get: (name: string) => services[name] }, setPolicy: next => { policy = { ...policy, ...next } }, confined }
+  return {
+    ctx: { get: (name: string) => services[name] },
+    setPolicy: next => { policy = { ...policy, ...next } },
+    setLive: next => { live = next },
+    confined,
+  }
 }
 const input = { pythonPath: '/usr/bin/python3', workerPath: '/tmp/worker.py', env: { PATH: '/usr/bin' } }
 const launch = (h: Harness, key = SESSION, productRoots?: (sessionKey: string) => string[]) =>
@@ -156,12 +170,39 @@ describe('只读会话下的引擎内部可写目录：用户模式仍是只读�
     expect(spec.facts.runner).toBe('bwrap')
   })
 
-  test('装配方没声明内部目录时：只读照旧不加任何挂载、不建目录（MuJoCo 等保持原行为）', async () => {
+  test('装配方没声明内部目录时：只读照旧不加任何挂载、不建目录', async () => {
     const spec = await createSimSessionLauncher(harness({ mode: 'read-only' }).ctx, { engineName: '测试引擎' })(SESSION)(input)
     expect(spec.facts.internalWritableRoots).toBeUndefined()
     expect(spec.facts.internalWritableBoundary).toBeUndefined()
     expect(spec.argv).not.toContain('--bind')
     expect(existsSync(join(workspace, '.lyapunov'))).toBe(false)
+  })
+
+  test('MuJoCo 实际插件：read-only 冷加载只给本会话 scratch/temp 可写位，原件/产品/其它会话不挂回可写', async () => {
+    const h = harness({ mode: 'read-only' })
+    let sim: SessionSimFactory | undefined
+    const ctx = {
+      get: h.ctx.get,
+      reflect: { provide: (name: string, value: unknown) => { if (name === 'sim') sim = value as SessionSimFactory } },
+      effect: () => undefined,
+    } as unknown as Context
+    applyMuJoCo(ctx, { productRoots: ['/products/captures'] })
+    try {
+      // 读取实际插件创建的 Provider 启动钩子；核对最终 argv/env，不启动假沙箱冒充 OS 强制。
+      const provider = sim!.forSession(SESSION) as unknown as { config: { launch: SimWorkerLaunchHook } }
+      const spec = await provider.config.launch(input)
+      const own = join(workspace, '.lyapunov', 'sessions', SESSION)
+      const scratch = join(own, 'sim', 'scratch'), temp = join(own, 'sim', 'tmp')
+      const separator = spec.argv.lastIndexOf('--')
+      expect(spec.argv.slice(separator - 6, separator)).toEqual(['--bind', scratch, scratch, '--bind', temp, temp])
+      expect(spec.argv.slice(0, separator).filter(item => item === '--bind')).toHaveLength(2)
+      expect(spec.facts).toMatchObject({ mode: 'read-only', workspaceRoot: workspace, internalWritableRoots: [scratch, temp], internalWritableBoundary: 'os-bind', privateRootBoundary: 'none' })
+      expect(spec.env).toMatchObject({ TMPDIR: temp, TMP: temp, TEMP: temp, LYAPUNOV_SIM_SANDBOX_MODE: 'read-only' })
+      expect(existsSync(scratch)).toBe(true)
+      expect(existsSync(temp)).toBe(true)
+      expect(existsSync(join(workspace, '.lyapunov', 'sessions', OTHER))).toBe(false)
+      expect(spec.argv).not.toContain('/products/captures')
+    } finally { await sim?.dispose() }
   })
 
   test('workspace-write：整层会话私有目录已挂回可写，内部目录不再重复挂载，事实照实标 os-bind', async () => {
@@ -236,21 +277,71 @@ describe('只读会话下的引擎临时目录：Kit/Python 找不到可写临�
 })
 
 describe('运行中改权限：核对读的是"该会话当前有效策略"', () => {
-  test('现值不变：核对说一致；模式被收紧：核对说这只 worker 带的是旧许可，并点明两个模式', async () => {
+  test('模式核对只按已定义 NativeMode 的单调包含：现值更宽放行且原 worker 留在原更严格沙箱；收紧/未知一律旧许可，并点明两个模式', async () => {
+    // workspace-write 启动：现值一致、放宽到 danger-full-access、收紧到 read-only。
     const h = harness()
     const spec = await launch(h)(input)
     expect(spec.check).toBeDefined()
-    expect(await spec.check!(spec.facts)).toEqual({ stale: false })
+    expect(await spec.check!(spec.facts)).toEqual({ stale: false, current: { mode: 'workspace-write', workspaceRoot: workspace } })
+    const argvAtLaunch = [...spec.argv]
+    const factsAtLaunch = { ...spec.facts }
+    h.setPolicy({ mode: 'danger-full-access' })
+    expect(await spec.check!(spec.facts)).toEqual({ stale: false, current: { mode: 'danger-full-access', workspaceRoot: workspace } })
+    // 放宽只放行核对，不重挂、不提升：worker 的 argv/facts 仍是启动时那份 workspace-write 沙箱。
+    expect(spec.argv).toEqual(argvAtLaunch)
+    expect(spec.facts).toEqual(factsAtLaunch)
+    expect(spec.facts.mode).toBe('workspace-write')
     h.setPolicy({ mode: 'read-only' })
-    const verdict = await spec.check!(spec.facts)
-    expect(verdict.stale).toBe(true)
-    if (!verdict.stale) throw new Error('不可达')
-    expect(verdict.detail).toContain('workspace-write')
-    expect(verdict.detail).toContain('read-only')
-    expect(verdict.detail).toContain(SESSION)
+    const tightened = await spec.check!(spec.facts)
+    expect(tightened.stale).toBe(true)
+    if (!tightened.stale) throw new Error('不可达')
+    expect(tightened.detail).toContain('workspace-write')
+    expect(tightened.detail).toContain('read-only')
+    expect(tightened.detail).toContain(SESSION)
+    // 核对同时回报**当前**有效策略：IO 边界据此决定这次用户产物写入允不允许。
+    expect(tightened.current).toEqual({ mode: 'read-only', workspaceRoot: workspace })
+
+    // read-only 启动：放宽到 workspace-write / danger-full-access 都放行（worker 只会更严）。
+    const readOnly = harness({ mode: 'read-only' })
+    const readOnlySpec = await launch(readOnly)(input)
+    expect(await readOnlySpec.check!(readOnlySpec.facts)).toEqual({ stale: false, current: { mode: 'read-only', workspaceRoot: workspace } })
+    readOnly.setPolicy({ mode: 'workspace-write' })
+    expect(await readOnlySpec.check!(readOnlySpec.facts)).toEqual({ stale: false, current: { mode: 'workspace-write', workspaceRoot: workspace } })
+    readOnly.setPolicy({ mode: 'danger-full-access' })
+    expect(await readOnlySpec.check!(readOnlySpec.facts)).toEqual({ stale: false, current: { mode: 'danger-full-access', workspaceRoot: workspace } })
+
+    // danger-full-access 启动：收紧到 workspace-write / read-only 都拒绝（旧许可比现值更宽）。
+    const full = harness({ mode: 'danger-full-access', sandbox: 'none' })
+    const fullSpec = await launch(full)(input)
+    expect(await fullSpec.check!(fullSpec.facts)).toEqual({ stale: false, current: { mode: 'danger-full-access', workspaceRoot: workspace } })
+    full.setPolicy({ mode: 'workspace-write' })
+    const fullToWrite = await fullSpec.check!(fullSpec.facts)
+    expect(fullToWrite.stale).toBe(true)
+    if (!fullToWrite.stale) throw new Error('不可达')
+    expect(fullToWrite.detail).toContain('danger-full-access')
+    expect(fullToWrite.detail).toContain('workspace-write')
+    expect(fullToWrite.current).toEqual({ mode: 'workspace-write', workspaceRoot: workspace })
+    full.setPolicy({ mode: 'read-only' })
+    expect((await fullSpec.check!(fullSpec.facts)).stale).toBe(true)
+
+    // 未知模式：取不到单调包含序，失败关闭（不猜第三方模式语义）。
+    const unknown = harness()
+    const unknownSpec = await launch(unknown)(input)
+    unknown.setPolicy({ mode: 'third-party-mode' as unknown as Mode })
+    const unknownVerdict = await unknownSpec.check!(unknownSpec.facts)
+    expect(unknownVerdict.stale).toBe(true)
+    if (!unknownVerdict.stale) throw new Error('不可达')
+    expect(unknownVerdict.detail).toContain('third-party-mode')
+    // 未知模式在类型上不属于已定义 NativeMode：按运行时取值核对现值原样回报。
+    expect(unknownVerdict.current.mode as unknown as string).toBe('third-party-mode')
+    expect(unknownVerdict.current.workspaceRoot).toBe(workspace)
+    // worker 启动时就是未知模式：同一侧取不到包含序，同样按旧许可拒绝。
+    const unknownWorker = harness({ mode: 'third-party-mode' as unknown as Mode })
+    const unknownWorkerSpec = await launch(unknownWorker)(input)
+    expect((await unknownWorkerSpec.check!(unknownWorkerSpec.facts)).stale).toBe(true)
   })
 
-  test('授权根被换掉（同一模式）也算旧许可：运行根/授权根写进结论里', async () => {
+  test('受限模式变更授权根仍拒绝；全访问范围包括多个目录，不因主要工作目录变化误停', async () => {
     const h = harness()
     const spec = await launch(h)(input)
     h.setPolicy({ workspaceRoot: join(workspace, '另一个根') })
@@ -258,14 +349,29 @@ describe('运行中改权限：核对读的是"该会话当前有效策略"', ()
     expect(verdict.stale).toBe(true)
     if (!verdict.stale) throw new Error('不可达')
     expect(verdict.detail).toContain(join(workspace, '另一个根'))
+    expect(verdict.current.workspaceRoot).toBe(join(workspace, '另一个根'))
+    // 当前全访问已授权全部目录：旧worker继续保持原更窄沙箱，不重新挂载或提升。
+    h.setPolicy({ mode: 'danger-full-access' })
+    const widened = await spec.check!(spec.facts)
+    expect(widened.stale).toBe(false)
+    expect(spec.facts.mode).toBe('workspace-write')
+    expect(spec.facts.workspaceRoot).toBe(workspace)
+    const full = harness({mode:'danger-full-access',sandbox:'none'})
+    const fullSpec = await launch(full)(input)
+    const argv = [...fullSpec.argv]
+    full.setPolicy({workspaceRoot:join(workspace,'又一个目录')})
+    expect(await fullSpec.check!(fullSpec.facts)).toEqual({stale:false,current:{mode:'danger-full-access',workspaceRoot:join(workspace,'又一个目录')}})
+    expect(fullSpec.argv).toEqual(argv)
   })
 
   test('会话已经不在本 Host：核对核不出来就抛（由传输层按"不可证明"拒绝，不拿默认策略顶替）', async () => {
     const h = harness()
     const spec = await launch(h)(input)
-    expect(await spec.check!(spec.facts)).toEqual({ stale: false })
+    expect(await spec.check!(spec.facts)).toEqual({ stale: false, current: { mode: 'workspace-write', workspaceRoot: workspace } })
     // 会话从本 Host 消失（关掉/换了一台 Host）之后：同一条核对必须核不出来——抛出去，由传输层按
-    // "不可证明"拒绝本次操作，而不是回落成部署默认策略说"现值一致"。
+    // "不可证明"拒绝本次写入（不杀世界），而不是回落成部署默认策略说"现值一致"。
+    h.setLive(false)
+    await expect(spec.check!(spec.facts)).rejects.toThrow(/SESSION_NOT_BOUND/)
     const dead = harness({ live: false })
     const specOnDead = await createSimSessionLauncher(dead.ctx, { engineName: '测试引擎' })(SESSION)
     await expect(specOnDead(input)).rejects.toThrow(/SESSION_NOT_BOUND/)

@@ -21,7 +21,8 @@
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 技术版本 / releaseId | `0.1.0-alpha.6.2` |
+| 产品版本 | `0.1.0-alpha.6.2` |
+| 发行批次标识 | `0.1.0-alpha.6.2-r1` |
 | 文档版本日期 | 2026-10-07 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | [杭州奇异宇宙人工智能有限公司](https://vorynel.com/?lang=zh) |

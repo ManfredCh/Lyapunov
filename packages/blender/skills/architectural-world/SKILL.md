@@ -5,7 +5,7 @@ description: Build or edit editable buildings/scenes with Blender, export a Scen
 
 # Architecture-to-robot workflow
 
-Prefer connected Blender MCP (`mcp__blender__*`) for modelling, scene inspection and screenshots; otherwise use product `blender_run`. Reuse native DSH files/Jobs/images/Scene/robot tools for everything else.
+Prefer an applicable connected Blender MCP tool from the current native discovery and tool registry for modelling, scene inspection and screenshots. Inspect its actual schema and editor/project state; do not guess a tool name or namespace. If MCP is unavailable, report the concrete missing configuration, addon, handshake, discovery or scope, then use the authorized product `blender_run` batch fallback when applicable. Reuse native DSH files/Jobs/images/Scene/robot tools for everything else.
 
 **Stages**: modelling/export and acquisition/viewing do not need physics. **Enter physics only when collision, dynamics or robot execution inside the building is required.** Do not make `sim_open`, robot loading or engine import prerequisites for architecture, or open worlds merely to prove modelling is complete. Inspect appearance first; physics follows task requirements.
 

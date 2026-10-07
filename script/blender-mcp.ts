@@ -174,21 +174,33 @@ export function blenderMcpStatus(env: NodeJS.ProcessEnv = process.env): BlenderM
   }
 }
 
-async function run(command: string, args: string[], options: { cwd?: string } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+/** 只供本owner的安装/测试命令使用；取消终止该新进程组并等close，不影响已有编辑器。 */
+export async function runBlenderMcpSupplyCommand(command: string, args: string[], options: { cwd?: string;signal?:AbortSignal } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+  if(options.signal?.aborted)throw Error('BLENDER_MCP_CANCELLED: Supply cancelled before process start.')
   return await new Promise(resolveRun => {
-    const child = spawn(command, args, { cwd: options.cwd ?? PRODUCT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { cwd: options.cwd ?? PRODUCT_ROOT, stdio: ['ignore', 'pipe', 'pipe'],detached:process.platform!=='win32' })
     let stdout = '', stderr = ''
+    let timer:ReturnType<typeof setTimeout>|undefined
+    const terminate=(signal:NodeJS.Signals)=>{
+      if(!child.pid)return
+      try{if(process.platform==='win32')child.kill(signal);else process.kill(-child.pid,signal)}catch{}
+    }
+    const abort=()=>{terminate('SIGTERM');timer=setTimeout(()=>terminate('SIGKILL'),3000);timer.unref?.()}
+    options.signal?.addEventListener('abort',abort,{once:true})
+    if(options.signal?.aborted)abort()
+    const finish=(code:number)=>{options.signal?.removeEventListener('abort',abort);if(timer)clearTimeout(timer);resolveRun({code:options.signal?.aborted?130:code,stdout,stderr:options.signal?.aborted?stderr+'\nBLENDER_MCP_CANCELLED: The owned supply process exited after cancellation.':stderr})}
     child.stdout.on('data', chunk => { stdout += String(chunk) })
     child.stderr.on('data', chunk => { stderr += String(chunk) })
-    child.on('error', error => resolveRun({ code: 127, stdout, stderr: stderr + String(error) }))
-    child.on('exit', code => resolveRun({ code: code ?? 1, stdout, stderr }))
+    child.once('error', error => {stderr+=String(error);finish(127)})
+    child.once('close', code => finish(code??1))
   })
 }
 
-async function download(url: string, destination: string): Promise<void> {
-  const response = await fetch(url)
+async function download(url: string, destination: string,signal?:AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  const response = await fetch(url,{signal})
   if (!response.ok) throw new Error(`BLENDER_MCP_DOWNLOAD_FAILED: ${url} → HTTP ${response.status}`)
-  writeFileSync(destination, Buffer.from(await response.arrayBuffer()))
+  const bytes=Buffer.from(await response.arrayBuffer());signal?.throwIfAborted();writeFileSync(destination,bytes)
 }
 
 export interface EnsureOptions {
@@ -196,6 +208,8 @@ export interface EnsureOptions {
   log?: (message: string) => void
   /** 网络不可用时只验不装（离线校验既有产物）。 */
   offline?: boolean
+  /** 仅取消本次供给；不启动/关闭任何既有Blender、addon或项目服务。 */
+  signal?:AbortSignal
 }
 
 /**
@@ -205,6 +219,7 @@ export interface EnsureOptions {
  * 任一环节失败都抛出**带真实读数**的错误，不返回"看起来成功"的状态。
  */
 export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<BlenderMcpStatus> {
+  options.signal?.throwIfAborted()
   const log = options.log ?? (() => undefined)
   const lock = blenderMcpLock()
   const paths = blenderMcpPaths()
@@ -218,6 +233,7 @@ export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<Ble
   // 只有用户用 LYAPUNOV_BLENDER_MCP_COMMAND 指向自己的 MCP 安装时（没有我们的 wheel）才回退 GitHub。
   const overriddenCommand = !paths.command.startsWith(paths.venv)
   const addonPlacement = (sourcePath: string, provenance: string): void => {
+    options.signal?.throwIfAborted()
     const sha = sha256File(sourcePath)
     if (sha !== lock.addon.sha256) {
       throw new Error(`BLENDER_MCP_ADDON_HASH_MISMATCH: ${provenance} 的 addon sha256=${sha} ≠ 锁定 ${lock.addon.sha256}（拒绝落位）`)
@@ -232,11 +248,12 @@ export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<Ble
   }
 
   const ensureVenvAndPackage = async (): Promise<void> => {
+    options.signal?.throwIfAborted()
     const wheel = join(paths.cache, lock.wheel.filename)
     if (sha256File(wheel) !== lock.wheel.sha256) {
       if (options.offline) throw new Error(`BLENDER_MCP_OFFLINE_INCOMPLETE: ${lock.package} 未安装且指定了离线`)
       log(`下载 ${lock.wheel.filename} …`)
-      await download(lock.wheel.url, wheel)
+      await download(lock.wheel.url, wheel,options.signal)
       const wheelSha = sha256File(wheel)
       if (wheelSha !== lock.wheel.sha256) {
         rmSync(wheel, { force: true })
@@ -247,11 +264,11 @@ export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<Ble
     }
     if (!existsSync(paths.venv)) {
       log(`建 venv：${paths.venv}`)
-      const made = await run('python3', ['-m', 'venv', paths.venv])
+      const made = await runBlenderMcpSupplyCommand('python3', ['-m', 'venv', paths.venv],{signal:options.signal})
       if (made.code !== 0) throw new Error(`BLENDER_MCP_VENV_FAILED: ${made.stderr.slice(-800)}`)
     }
     log(`安装 ${lock.package}==${lock.version} …`)
-    const installed = await run(join(paths.venv, 'bin', 'pip'), ['install', '--disable-pip-version-check', '--no-input', wheel])
+    const installed = await runBlenderMcpSupplyCommand(join(paths.venv, 'bin', 'pip'), ['install', '--disable-pip-version-check', '--no-input', wheel],{signal:options.signal})
     if (installed.code !== 0) throw new Error(`BLENDER_MCP_PIP_FAILED: ${installed.stderr.slice(-1200)}`)
     log(`安装完成：${installed.stdout.trim().split('\n').slice(-1)[0] ?? ''}`)
   }
@@ -271,7 +288,7 @@ export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<Ble
         if (options.offline) throw new Error(`BLENDER_MCP_OFFLINE_INCOMPLETE: addon 校验不过且指定了离线：${before.detail}`)
         const staged = join(paths.cache, `addon-${lock.addon.commit.slice(0, 12)}.py`)
         log(`回退到上游仓原始 addon @ ${lock.addon.commit.slice(0, 12)} …`)
-        await download(lock.addon.url, staged)
+        await download(lock.addon.url, staged,options.signal)
         addonPlacement(staged, `上游仓 ${lock.addon.repository}@${lock.addon.commit.slice(0, 12)}`)
       }
     }
@@ -280,6 +297,7 @@ export async function ensureBlenderMcp(options: EnsureOptions = {}): Promise<Ble
   // ── venv + 钉死的 wheel（若上面还没装）─────────────────────────────────────
   if (!overriddenCommand && !blenderMcpStatus().readings.installedPackage) await ensureVenvAndPackage()
 
+  options.signal?.throwIfAborted()
   const after = blenderMcpStatus()
   if (!after.ready) throw new Error(`BLENDER_MCP_NOT_READY_AFTER_ENSURE: ${after.detail}`)
   return after

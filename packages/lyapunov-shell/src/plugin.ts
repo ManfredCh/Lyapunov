@@ -83,6 +83,7 @@ import { lodFaceFrom, lodFaceIssue, lodFaceIssueNote, lodFaceNote } from "./lod-
 import { assertRenderSize, normalizeCameraRequest, normalizeIntrinsics, projectionMatrixFromIntrinsics, scaleIntrinsics, type ViewerCameraIntrinsics, type ViewerCameraRequest } from "../../viewer/src/camera-view.ts"
 import type {VerifiedAdministrator} from '../../lyapunov-product-bundle/src/account/administrator.ts'
 import {applyPreferencesHost} from './preferences-host.ts'
+import {applyExternalToolsHost} from './external-tools-host.ts'
 import {applyProductFontsHost} from './product-fonts.ts'
 import {applyExecutionGraph,type GraphConfig} from './execution-graph-host.ts'
 // DEV-PRIV-01 发行隐私数据边界：产品侧唯一判据（纯函数）。三个消费者各留各的字段，
@@ -158,6 +159,7 @@ export async function apply(ctx:Context,config:Config={}){
   ...(process.env.DSH_HOME?{runtime:dirname(resolve(process.env.DSH_HOME))}:{}),
  }
  await applyPreferencesHost(ctx)
+ applyExternalToolsHost(ctx)
  applyProductFontsHost(ctx)
  // 会话事件的**浏览器出站**投影（上游补丁 dsh-session-outbound-projection 的钩子）：
  // 服务端模型真值与 session 持久化一字不改，只有 page/follow 发往浏览器的那一份按消费者裁剪。
@@ -249,7 +251,7 @@ export async function apply(ctx:Context,config:Config={}){
   // 这里只喂真实输入：本步用户消息、原生会话任务、当前选择、工具可见性、技能目录。
   // 技能目录照旧读：关键词表的"技能是否真存在"由目录核对（目录不可读时退回随包清单），
   // 建议不授予权限或固定模型角色，真实上下文仍归原生 Session。
-  const plan=planDomainPointers({pointers:domainPointers,messages,todos:sessionTodos(agent),selection:selectionIdentity(agent),hasTool:name=>Boolean(ctx.tools.get(name,agent as unknown as ScopeKey)),skillCatalog:await skillCatalog(agent,signal)})
+  const plan=planDomainPointers({pointers:domainPointers,messages,todos:sessionTodos(agent),selection:selectionIdentity(agent),hasTool:name=>Boolean(ctx.tools.get(name,agent as unknown as ScopeKey)),visibleMcpTools:ctx.tools.schemas(agent as unknown as ScopeKey).map(tool=>({name:tool.name,description:tool.description})).filter(tool=>tool.name.startsWith('mcp__')),skillCatalog:await skillCatalog(agent,signal)})
   const previous=domainPointerText(agent)
   const cleared="Current capability guidance: none. The previous domain pointers are no longer current; choose the next step from this user goal and the visible tools."
   // 工具结果/Job通知不代表用户换了意图；只有新用户输入才清除上一任务的建议。
