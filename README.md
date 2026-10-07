@@ -9,8 +9,6 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat" alt="License: Apache-2.0" /></a>
   <a href="https://github.com/ManfredCh/Lyapunov/releases"><img src="https://img.shields.io/github/v/release/ManfredCh/Lyapunov?include_prereleases&amp;style=flat&amp;label=release" alt="Release" /></a>
-  <a href="docs/releases/0.1.0-alpha.6.1.md"><img src="https://img.shields.io/badge/Status-Alpha-orange.svg?style=flat" alt="Status: Alpha" /></a>
-  <a href="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml"><img src="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci" /></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Language-English%20%7C%20%E4%B8%AD%E6%96%87-blue.svg?style=flat" alt="Language: English | 中文" /></a>
 </p>
 
