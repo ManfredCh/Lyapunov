@@ -76,11 +76,21 @@ for device,render in [('cpu','none'),('cpu','rtx'),('cuda','none'),('cuda','rtx'
  adapter=eval(compile(ast.Expression(prims_if.test),str(root/'scene_adapter.py'),'eval'),ns)
  rows.append([device,render,selected,adapter])
 profile=tomllib.loads((root/'physics-cpu.kit').read_text())
+# 执行实际worker生命周期护栏；不加载SDK，不把合成is_running状态签成引擎运行。
+guard=next(n for n in worker.body if isinstance(n,ast.If) and isinstance(n.test,ast.Name) and n.test.id=='cpu_native' and any(isinstance(x,ast.If) for x in n.body))
+lifecycle=[]
+for enabled,running in [(False,False),(True,False),(True,True)]:
+ def fail(code,message,stage):raise RuntimeError(code+'|'+stage+'|'+message)
+ app_state=types.SimpleNamespace(is_running=lambda:running)
+ app_api=types.SimpleNamespace(get_app=lambda:app_state)
+ ns={'cpu_native':enabled,'emit':lambda value:None,'omni':types.SimpleNamespace(kit=types.SimpleNamespace(app=app_api)),'fail_startup':fail}
+ try:exec(compile(ast.Module(body=[guard],type_ignores=[]),str(root/'worker.py'),'exec'),ns);lifecycle.append([enabled,running,'ALLOW'])
+ except RuntimeError as error:lifecycle.append([enabled,running,str(error)])
 print(json.dumps({'initial':initial,'tensor':tensor,'nested':nested,'restored':restored,'final':final,
  'linear':linear.tolist(),'angular':angular.tolist(),'calls':calls,'paths':rigid.paths,'masses':mass,
  'limits':[lower.tolist(),upper.tolist()],'driveTypes':robot.get_dof_drive_types(),'jointPositions':robot.get_dof_positions().tolist(),
  'friction':robot.get_dof_friction_properties()[2].tolist(),'links':robot.link_paths,'errors':errors,'selection':rows,
- 'profileDependencies':list(profile['dependencies']),'experimentalImported':any(x.startswith('isaacsim.core.experimental.prims') for x in sys.modules)}))
+ 'profileDependencies':list(profile['dependencies']),'manualRunLoop':profile['settings'].get('app',{}).get('runLoops',{}).get('main',{}).get('manualModeEnabled'),'lifecycle':lifecycle,'experimentalImported':any(x.startswith('isaacsim.core.experimental.prims') for x in sys.modules)}))
 `
 let result: Record<string, any>
 beforeAll(() => {
@@ -120,4 +130,9 @@ test('DOF 名字、索引、上下限与 PhysX 摩擦分量准确适配', () => 
 })
 test('无效原生 handle 与不支持的 Fabric 都拒绝，无 USD 静默回退', () => {
   expect(result.errors).toEqual([['invalid-handle', 'PHYSICS_NOT_READY'], ['no-native-view', 'PHYSICS_NOT_READY'], ['fabric', 'UNSUPPORTED_CAPABILITY']])
+})
+test('CPU 配置使用官方手动 run loop，Kit 未运行时不能发虚假 ready', () => {
+  expect(result.profileDependencies).toContain('omni.kit.loop-isaac')
+  expect(result.manualRunLoop).toBe(true)
+  expect(result.lifecycle).toEqual([[false, false, 'ALLOW'], [true, false, 'ISAAC_KIT_START_FAILED|kit-lifecycle|Kit application is not running after CPU initialization'], [true, true, 'ALLOW']])
 })

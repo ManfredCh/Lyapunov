@@ -482,6 +482,29 @@ def textured_without_uv(obj):
             f'TEXCOORD_0 不在，画面只能看到基色（补 UV 或去掉贴图后重导）')
 
 
+def procedural_material_losses(obj):
+    """只报实际输出链上的程序纹理/凹凸；不烘焙、不修改源材质、不把导出成功当外观一致。"""
+    losses=[]
+    for material in getattr(getattr(obj,'data',None),'materials',[]):
+        if material is None or not material.use_nodes: continue
+        tree=material.node_tree
+        pending=[node for node in tree.nodes if node.type=='OUTPUT_MATERIAL' and node.is_active_output]
+        seen=set(); unsupported=set()
+        while pending:
+            node=pending.pop(); identity=node.as_pointer()
+            if identity in seen: continue
+            seen.add(identity)
+            if node.type=='BUMP' or (node.type.startswith('TEX_') and node.type not in ('TEX_IMAGE','TEX_COORD')):
+                unsupported.add(node.type)
+            pending.extend(link.from_node for socket in node.inputs for link in socket.links)
+        if unsupported:
+            losses.append('BLENDER_PROCEDURAL_MATERIAL_UNBAKED: Material '+material.name
+                          +' has output-linked nodes '+', '.join(sorted(unsupported))
+                          +'. These node effects are not portable image textures in GLB; bake required PBR channels '
+                          +'to images with usable UVs, then inspect and reload the exact export. The editable nodes remain in source.blend.')
+    return losses
+
+
 def scaled_vector(values, scale):
     """按分量缩放：折进 MJCF geom 的 pos/size 用（MJCF body 没有 scale，缩放只能落在盒子上）。"""
     return [float(values[axis])*float(scale[axis]) for axis in range(3)]
@@ -696,6 +719,7 @@ def export_world(output):
             # 必须在这里如实记一条损失（负对照证明：去掉 UV 层后这条会出现，正例不出现）。
             textured_no_uv=textured_without_uv(derived or o)
             if textured_no_uv: losses=losses+[textured_no_uv]
+            losses=losses+procedural_material_losses(derived or o)
             try:
                 content=visual_content(o,fingerprint_cache,geometry,modifiers=bakes_modifiers(derived or o))
                 # 内容没变 → 复用旧版本文件（不导出、不改字节/mtime/版本）；变了 → 写新版本的新文件。
@@ -910,6 +934,10 @@ def export_world(output):
     # world.xml / 场景级 MJCF 也是固定名产物：内容没变就不刷新（只移相机/只改一个实例位移时它根本不变）。
     increment.fixed(root/'physics'/'world.xml',tostring(mj),resource_id('world-physics'))
     result={'source':str(root/'source.blend'),'scene':str(root/'scene.json'),'entities':len(entities),'visuals':sum(any(rp['mimeType']=='model/gltf-binary' for r in e['resources'] for rp in r['representations']) for e in entities),'physics':str(root/'physics'/'world.xml'),'resourceNamespace':namespace,'collisionApproximations':approximations,'collisionUnbakedModifiers':unbaked}
+    material_losses=sorted({loss for entity in entities for resource in entity['resources']
+                            for representation in resource['representations'] for loss in representation.get('losses',[])
+                            if isinstance(loss,str) and loss.startswith('BLENDER_PROCEDURAL_MATERIAL_UNBAKED:')})
+    if material_losses: result['materialLosses']=material_losses
     # Blender's native USD exporter is the Isaac visual/source representation.
     # Collision stays per-entity in scene.json and world.xml so the building
     # is never replaced by one closed convex hull.

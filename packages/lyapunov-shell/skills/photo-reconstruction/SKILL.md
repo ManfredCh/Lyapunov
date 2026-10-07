@@ -35,13 +35,19 @@ Derive camera assumptions from visible vanishing points, horizon, and known para
 - Use `depth_geometry` **when visible** to convert relative depth into metric geometry. Input is `depth_estimate` npy/metadata, K, and camera pose; output is metric depth **along the camera axis** and a coarse mesh. **Caller-supplied anchor depths define scale**; anchors may be measured or assumed, and the tool fits/tests them without inventing scale. `calibration.verdict` is the current verdict: only `verified` passes; `train-inconsistent`/`check-failed`/`unverified` cannot support a metric conclusion (see `accepted`). Assumed anchors support only conversion under an assumed scale, **never measured metric depth**. Images with `units:"relative"` have no own scale and produce no metric output.
 - When depth, drawing dimensions, and photo estimates conflict, check **object/time calibration** using known dimensions, same-view renders, and contemporary sources; do not assign absolute priority to a source type.
 
-## 5. Model and Compare from the Same Viewpoint
+## 5. Model, Observe and Revise
 
-See `architectural-world` for metric Z-up, component collision, and export; see `asset-generation` for individual assets. Iterate:
+Load `architectural-world` for the complete Blender contract. Prefer a connected tool actually present in native MCP discovery; `blender_run.python_script` also supports full `bpy` modelling. Select by the available editor, observation and export path, not by assuming that batch execution only supports simple shapes.
 
-1. Model the constraints read, then run `blender_run` with `render:true` when images are needed. Render attachments return to the session; use `mcp__blender__*` for interactive visual iteration.
-2. Compare render and photo **side by side** for silhouette, proportions, openings, and material appearance. List specific differences before editing instead of claiming a vague match.
-3. After importing into Scene, inspect from the same camera in 3D through Viewer/image annotation; ask the user to confirm appearance when needed.
+Keep the following loop in the same native AgentLoop and task. Use the task's existing files/Todo for concise evidence; no separate workflow engine or fixed component DAG is needed.
+
+1. Identify the visible requirements from the references: silhouette/proportions, distinctive geometry, openings and material appearance. Choose a view that can reveal each requirement. Treat unseen parts as assumptions; this does not excuse omitting visible features.
+2. Execute the model/change, then obtain actual previews. With batch jobs, `render:true` or `operation:preview` uses the tool's render path; a script with its own renders must expose/read those actual files. `render:false`, a Job ID or a successful export does not establish that an image exists or was seen. Wait on the same native Job; a quiet running job is not a reason to resubmit it.
+3. Read the reference and corresponding preview images in the same session. Check framing, view and illumination before diagnosing geometry. State each decision-relevant gap and its next concrete edit; a file path or image count alone is not visual comparison.
+4. When a visible requirement is missing, actually edit the geometry/material/camera and rerender the affected view. Compare the new image with the same reference and confirm what changed before propagating repeated components. Do not stop with a list of defects while reporting the model complete. Do not repeat unchanged checks once the affected requirement passes; if progress stops or a real dependency blocks it, report the specific unfinished item.
+5. Export and read back the exact final artifact using the portable-material and roundtrip contract in `architectural-world`. Then import it with `physicalize:false` for visual-only work, and observe the mounted revision through Viewer from the relevant viewpoint. Keep export facts, Blender reload, Viewer loading and visual acceptance distinct. Enter physics only for a requested collision/dynamics/robot task.
+
+Completion follows the observed requirements and actual portable artifact, not triangle count, tool success, turn completion or unsupported claims of embedded textures. State remaining visual differences and unknown parts precisely.
 
 ## 6. Update the Same Scene from Photo Evidence
 

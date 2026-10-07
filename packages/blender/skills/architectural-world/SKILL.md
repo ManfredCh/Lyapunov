@@ -39,6 +39,24 @@ For **shape-key meshes**, export does not bake modifiers, which would destroy mo
 
 Outputs include `source.blend`, `scene.json`, `visuals/*.glb`, `physics/world.xml`, `isaac/architecture.usda` and `isaac/import.json`. Check actual `blender_run` USD status and preview; paths alone do not prove engine execution.
 
+## Portable materials and artifact readback
+
+Blender procedural shaders are editable source effects; GLB does not carry arbitrary Noise/Bump/node graphs. If the task requires portable textures, bake the needed channels to image textures or connect exportable PBR image nodes with usable UVs. Preserve the editable `.blend`. Read the actual export's material losses; a successful export does not establish that procedural appearance survived.
+
+Use the helper at `../../python/artifact_inspect.py` relative to this skill directory, resolved against the skill's supplied base directory. It is packaged with this Blender package and uses Python's standard library for a read-only inspection:
+
+```text
+python <resolved-artifact_inspect.py> <actual-final.glb> --require-textures
+```
+
+Omit `--require-textures` when image textures are not required. The result reports the exact byte/hash, geometry/UV counts and embedded/external image references. It does not rate visual similarity or prove decoding/reloading. For actual reload, use an available Blender executable in a separate temporary factory-startup background process; do not clear the user's live editor or MCP project:
+
+```text
+<blender> --background --factory-startup --python-exit-code 1 --python <resolved-artifact_inspect.py> -- <actual-final.glb> --require-textures --roundtrip
+```
+
+Check the returned imported mesh/UV/loaded-image facts. Reopen the editable project only in its owned editor, and compare the delivered GLB in Viewer with the final preview. If textures, UVs or appearance are lost, correct the source/export and rerun only the affected check. These facts support artifact delivery; native Job/Graph success still describes execution, while the observed task requirements determine modelling completion.
+
 ## Stage 2: acquire and view without physics
 
 1. Open generated `scene.json` with `scene_open`. Repeated same-scene identical content is idempotent; only resource-location changes may overwrite, while structural changes report `SCENE_ALREADY_EXISTS`. **Repeated exports update the same Scene.** Replace mounted resources through the actual visible `scene_replace_resource` schema/receipt. Identity/pose/parentage remain. Collision/rigidBody/controller handling compares both originals' **actual geometry**: local-metre vertex positions and triangle multisets including node/ancestor transforms and source-coordinate conversion, matching what is displayed. Identical geometry retains derivations; changes, including internal pose/scale, require the target's registered derived defaults or `REPLACE_RESOURCE_PHYSICS_NOT_DERIVED`. Compression/skinning/animation preventing static verification produces `REPLACE_RESOURCE_GEOMETRY_UNVERIFIABLE`. Derive or rebuild as directed. If replacement is unavailable, report that entry gap; never change refs while keeping unknown derivations. `scene_import {path, sceneId}` **registers and adds an entity**, not replaces. **Do not create another sceneId just to receive artifacts** (`scene-construction`).

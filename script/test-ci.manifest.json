@@ -149,6 +149,22 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据（2026-09-26 W24 A1/A2 改名：scene-bridge → scene-projection。原因是 g17 的 legacy_owner 探针把裸词 scene-bridge 当旧平台残留命中 4 处，实为**同一模块的命名冲突、不是缺陷**；修法是产品侧改名而**不放宽门的探针**。Lead 补登记。）"
     },
     {
+      "path": "packages/blender/test/artifact-inspect.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "建模产物只读检查：纯stdlib Python读取确切GLB容器、贴图引用、UV和失败事实；无Blender/网络/凭据。静态容器检查不代签真实重载或视觉质量。"
+    },
+    {
+      "path": "packages/blender/test/material-readback.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "真实Blender导出/重载验收，需要BLENDER_EXECUTABLE；默认离线CI不运行。人工/VM受影响测试使用同一原生入口运行，不把skip记通过。"
+    },
+    {
       "path": "packages/blender/test/blender-run.test.ts",
       "declaredRunner": "node:test",
       "markers": [
@@ -1909,7 +1925,10 @@
     {
       "path": "packages/sim-isaac/test/model-origin.test.ts",
       "declaredRunner": "bun:test",
-      "markers": ["envgate", "isaac"],
+      "markers": [
+        "envgate",
+        "isaac"
+      ],
       "decision": "exclude",
       "reason": "专门验收：需显式选择含真实 pxr/Gf/numpy 的已安装解释器；只执行真实 USD 的资源原点/原生根平移、旋转、缩放、锚点与错根拒绝，不启动 Kit/PhysX，不出网、不改原件。正常 Host/managed SDK 的真实 PhysX 首帧、sync/reset、基座约束与视觉后代验收由候选回执单列，不能由此离线数值用例代签。"
     },

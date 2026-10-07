@@ -108,6 +108,11 @@ try:
 except Exception as exc:
     fail_startup('ISAAC_PHYSX_UNAVAILABLE',str(exc),'physx-initialize',causeType=type(exc).__name__)
 
+if cpu_native:
+    emit({'event':'phase','phase':'kit-lifecycle'})
+    if not omni.kit.app.get_app().is_running():
+        fail_startup('ISAAC_KIT_START_FAILED','Kit application is not running after CPU initialization','kit-lifecycle')
+
 def finite(value,label='value'):
     if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):raise SceneError('INVALID_ARGUMENT',label+'必须有限')
     return float(value)
