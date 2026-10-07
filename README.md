@@ -7,9 +7,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/badge-alpha.svg" alt="Alpha" />
-  <img src="docs/assets/badge-linux-x64.svg" alt="Linux x64" />
-  <a href="LICENSE"><img src="docs/assets/badge-lyapunov-license.svg" alt="License: Apache-2.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat" alt="License: Apache-2.0" /></a>
+  <a href="https://github.com/ManfredCh/Lyapunov/releases"><img src="https://img.shields.io/github/v/release/ManfredCh/Lyapunov?include_prereleases&amp;style=flat&amp;label=release" alt="Release" /></a>
+  <a href="docs/releases/0.1.0-alpha.6.1.md"><img src="https://img.shields.io/badge/Status-Alpha-orange.svg?style=flat" alt="Status: Alpha" /></a>
+  <a href="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml"><img src="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci" /></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Language-English%20%7C%20%E4%B8%AD%E6%96%87-blue.svg?style=flat" alt="Language: English | 中文" /></a>
 </p>
 
 <p align="center">
@@ -22,7 +24,7 @@
 | Publication metadata | Value |
 | --- | --- |
 | Technical version / releaseId | `0.1.0-alpha.6.1` |
-| Documentation edition | 2026-10-04 |
+| Documentation edition | 2026-10-07 |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | Produced by | [Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)](https://vorynel.com/?lang=en) |
 | Sponsored by | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
@@ -248,7 +250,7 @@ Lyapunov integrates an LLM/3D-first product workspace and its scene, tool, simul
 
 ## Help improve Lyapunov
 
-Share ideas in [Discussions](https://github.com/ManfredCh/Lyapunov/discussions), report reproducible problems in [Issues](https://github.com/ManfredCh/Lyapunov/issues), and contribute through [Pull requests](https://github.com/ManfredCh/Lyapunov/pulls). Include the version, minimal steps and privacy-clean diagnostics/screenshots; keep keys, sessions and private customer content out of reports. See [contribution workflow](CONTRIBUTING.md).
+Share ideas in [Discussions](https://github.com/ManfredCh/Lyapunov/discussions), report reproducible problems in [Issues](https://github.com/ManfredCh/Lyapunov/issues), and contribute through [Pull requests](https://github.com/ManfredCh/Lyapunov/pulls). For direct support, email [voryneltech@gmail.com](mailto:voryneltech@gmail.com). Include the version, minimal steps and privacy-clean diagnostics/screenshots; keep keys, sessions and private customer content out of reports. See [contribution workflow](CONTRIBUTING.md).
 
 ## Develop and contribute
 

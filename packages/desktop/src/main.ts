@@ -21,7 +21,7 @@ import {resolveDesktopDataRoot} from "./data-root.ts"
 import {classifyStartupFailure,planRestartRecovery,readWorkspaceRecords,resolveWorkspaceHostMode} from "./restart-recovery.ts"
 import {LOCAL_IMPORT_FILE_FILTERS} from "../../lyapunov-shell/src/local-file-import.ts"
 import {desktopExitDialog,desktopShortcut,desktopWindowTitle} from "./window-chrome.ts"
-import {accountLocale,DesktopLocaleMirror,desktopLocales} from "./account-locales.ts"
+import {accountLocale,DesktopLocaleMirror,desktopLocales,SUPPORT_MAILTO} from "./account-locales.ts"
 
 const mode=process.argv.includes("--developer")?"developer":"formal"
 if(mode==="developer"&&(app.isPackaged||process.env.NODE_ENV==="production"))throw new Error("发行构建不允许开发模式")
@@ -50,7 +50,8 @@ const accountURL=pathToFileURL(renderer).href
 const incidentFile=join(dataRoot,"desktop-incidents.jsonl")
 const safeIncidentUrl=(raw:string)=>{try{const parsed=new URL(raw);return `${parsed.origin}${parsed.pathname}`}catch{return "unparseable"}}
 const recordIncident=(kind:string,details:Record<string,unknown>={})=>{void appendFile(incidentFile,JSON.stringify({kind,...details,time:new Date().toISOString()})+"\n").catch(error=>console.error("桌面事件回执写入失败：",error instanceof Error?error.message:String(error)))}
-const openExternal=async(raw:string)=>{const url=new URL(raw);if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1"].includes(url.hostname)))throw new Error("不支持的外部地址");await shell.openExternal(url.href)}
+// 唯一支持邮箱例外：只放行精确的 mailto:voryneltech@gmail.com；其他收件人、query 或 body 一律拒绝，其余协议限制不变。
+const openExternal=async(raw:string)=>{if(raw===SUPPORT_MAILTO){await shell.openExternal(SUPPORT_MAILTO);return}const url=new URL(raw);if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1"].includes(url.hostname)))throw new Error("不支持的外部地址");await shell.openExternal(url.href)}
 // 正式账户仍登录先行；游客仅由可信显式按钮或 --guest 进入独立无模型身份。
 // 未登录/已退出/会话失效不自动回落到游客 Host。
 const allowed=(url:string)=>url===accountURL||(host!==undefined&&new URL(url).origin===host.origin)

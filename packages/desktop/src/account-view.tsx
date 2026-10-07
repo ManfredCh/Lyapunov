@@ -3,7 +3,7 @@ import {createRoot} from "react-dom/client"
 import type {AccountView} from "./account-controller.ts"
 import type {DesktopBridge} from "./bridge.ts"
 import {formatAccountPointValue,formatAccountPoints,type CreditPlan,type PaymentProvider} from "../../lyapunov-product-bundle/src/account/client.ts"
-import {accountLocales,type AccountLocale,type AccountTexts} from "./account-locales.ts"
+import {accountLocales,SUPPORT_MAILTO,type AccountLocale,type AccountTexts} from "./account-locales.ts"
 import {accountIdentity,availablePaymentMethods,commerceErrorMessage,commerceResultIsCurrent,stablePaymentProvider,type CommerceState} from "./account-view-helpers.ts"
 
 const readPreference=(canonicalKey:string,legacyKey:string,valid:(value:string)=>boolean,fallback:string)=>{
@@ -146,7 +146,7 @@ function AccountApp({api}:{api:DesktopBridge}){
       <h2>{t.orders}</h2>{commerceState.kind==="loading"||commerceState.kind==="idle"?<p>{t.loadingOrders}</p>:commerceMessage?<p role="status" className="message">{commerceMessage}</p>:commerce!.orders.length?<div className="table-wrap"><table><thead><tr><th>{t.order}</th><th>{t.amount}</th><th>{t.status}</th><th>{t.time}</th></tr></thead><tbody>{commerce!.orders.map(order=><tr key={order.id}><td>{order.name??order.planId}</td><td>¥{(order.amountFen/100).toFixed(2)}</td><td>{t[order.status]}</td><td>{new Date(order.createdAt).toLocaleString(locale)}</td></tr>)}</tbody></table></div>:<p>{t.emptyOrders}</p>}
     </>}
     {authenticated&&accountMessage&&<p role="status" className="message">{accountMessage}</p>}
-    <footer className="footer"><span className="muted">Lyapunov {version}</span><button className="quiet" onClick={()=>void run(async()=>{const update=await api.checkUpdates();if(!update.available){setError(update.reason??t.latest);return}if(window.confirm(`${t.versionFound} ${update.version}. ${t.install}`))await api.installUpdate()})}>{t.updates}</button></footer>
+    <footer className="footer"><span className="muted">Lyapunov {version}</span><a className="quiet" href={SUPPORT_MAILTO} target="_blank" rel="noreferrer">{t.contact}</a><button className="quiet" onClick={()=>void run(async()=>{const update=await api.checkUpdates();if(!update.available){setError(update.reason??t.latest);return}if(window.confirm(`${t.versionFound} ${update.version}. ${t.install}`))await api.installUpdate()})}>{t.updates}</button></footer>
   </main>
 }
 

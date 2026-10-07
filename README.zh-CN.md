@@ -7,9 +7,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/badge-alpha.svg" alt="Alpha" />
-  <img src="docs/assets/badge-linux-x64.svg" alt="Linux x64" />
-  <a href="LICENSE"><img src="docs/assets/badge-lyapunov-license.svg" alt="许可证：Apache-2.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat" alt="License: Apache-2.0" /></a>
+  <a href="https://github.com/ManfredCh/Lyapunov/releases"><img src="https://img.shields.io/github/v/release/ManfredCh/Lyapunov?include_prereleases&amp;style=flat&amp;label=release" alt="Release" /></a>
+  <a href="docs/releases/0.1.0-alpha.6.1.md"><img src="https://img.shields.io/badge/Status-Alpha-orange.svg?style=flat" alt="Status: Alpha" /></a>
+  <a href="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml"><img src="https://github.com/ManfredCh/Lyapunov/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci" /></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Language-English%20%7C%20%E4%B8%AD%E6%96%87-blue.svg?style=flat" alt="Language: English | 中文" /></a>
 </p>
 
 <p align="center">
@@ -22,7 +24,7 @@
 | 出版信息 | 内容 |
 | --- | --- |
 | 技术版本 / releaseId | `0.1.0-alpha.6.1` |
-| 文档版本日期 | 2026-10-04 |
+| 文档版本日期 | 2026-10-07 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | [杭州奇异宇宙人工智能有限公司](https://vorynel.com/?lang=zh) |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
@@ -248,7 +250,7 @@ Lyapunov负责LLM/3D优先的产品工作台与场景、工具、仿真、观察
 
 ## 一起完善Lyapunov
 
-欢迎在 [Discussions](https://github.com/ManfredCh/Lyapunov/discussions)讨论方向，在 [Issues](https://github.com/ManfredCh/Lyapunov/issues)报告可复现问题，通过 [Pull requests](https://github.com/ManfredCh/Lyapunov/pulls)贡献。附版本、最小操作和已去隐私的诊断/截图，不提交Key、会话或客户私有内容；具体流程见[贡献说明](CONTRIBUTING.md)。
+欢迎在 [Discussions](https://github.com/ManfredCh/Lyapunov/discussions)讨论方向，在 [Issues](https://github.com/ManfredCh/Lyapunov/issues)报告可复现问题，通过 [Pull requests](https://github.com/ManfredCh/Lyapunov/pulls)贡献。也可直接邮件联系 [voryneltech@gmail.com](mailto:voryneltech@gmail.com)；请附准确版本、最小复现步骤和已去隐私的诊断/截图，不提交Key、会话或客户私有内容；具体流程见[贡献说明](CONTRIBUTING.md)。
 
 ## 从源码开发与贡献
 
