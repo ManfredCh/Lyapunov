@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "44f32695616856ca8ef4d0481cbf94965ec867ef36022a2fafee5be83fa2791d": {
+    "a3a2d8860d02268bec8fc09174efc8679ee28c82f0de7f047071723036931269": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -74,9 +74,9 @@
       ],
       "stageHashes": [
         "d7dd6bf075e31e3b93b4c369536cbb2033fe9c0fbd1d20b8059b7112c9c9f1e6",
-        "6e08252a24be628654f0e01a2438032e75728e93e3a55b0b335cafd843c41fb8"
+        "17955d9da8e5fd246b1df7818081e5a4ff591e81e4d3b89c2f11999080bfe155"
       ],
-      "finalHash": "6e08252a24be628654f0e01a2438032e75728e93e3a55b0b335cafd843c41fb8",
+      "finalHash": "17955d9da8e5fd246b1df7818081e5a4ff591e81e4d3b89c2f11999080bfe155",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -96,7 +96,7 @@
         "packages/client/ui-chat/src/client/contract/slots.ts": "42683040d2464d7173a2fff52f551f2e42198863b35017316fbbe6af4c505880",
         "packages/client/ui-chat/src/client/locale.ts": "d91d0a05f27ea712d5ba1c6a3fa09d42eda6c0d56a3eb5a1d585a744a3b77410",
         "packages/client/ui-chat/tests/chat-view.client.spec.tsx": "709c92a509081484e9b8f049730ab6c97c2a7bfd625109d9aa8f1654ab201938",
-        "packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx": "57b365cc70439ea6c1beb9ebd02e0583a5f26c5990da15d313b4894b17eb6bc5",
+        "packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx": "23533ffcaf64446a2884505f728db67e74c6c5f59448b7e46e468ba0085a42af",
         "packages/client/ui-chat/tsconfig.client.json": "6000df251b92332756fd4f09a089bbbacbb733ae1a5be27e83b2b6dbf3df0561",
         "packages/client/ui-commands/src/client/service.ts": "4fe716cbdc4a28e6d16af46f36f862baaacb97516a58cdc7724a82fd4cda1b8e",
         "packages/client/ui-commands/tests/service.client.spec.ts": "d70f7b3218319c05ae8b235575b0694d971a9c542e4feacc040cf5ae22f14ddb",
@@ -118,14 +118,14 @@
         "packages/client/ui-model-selection/src/client/directory.ts": "001f716b2911af994e4d2e0473f24109e0b5560a2452804dd8fa24900e4db2bf",
         "packages/client/ui-model-selection/src/client/service.ts": "055c152fc1b48916800f09db470f16cd3100187abe4140d747d0dd7aead958e5",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "ac8c238e860d06ed048060a5abcb7fff7fb33c3466029761d9ce57398f9643c6",
-        "packages/client/ui-model-selection/tests/model-select.client.spec.tsx": "7ed5d7524760f8ba630f54b37ff20301233d929800687a92a0248aca59dce5b5",
+        "packages/client/ui-model-selection/tests/model-select.client.spec.tsx": "6b9f72d0b71d78fd7238d3db810703caf50632c51356e1361e5d00491804c79d",
         "packages/client/ui-trajectory/README.md": "f2b8110dfffd189f9de2c6089577e34f890020dfd45207a49619a6eef0e483a6",
         "packages/client/ui-trajectory/README.zh.md": "4eea03f5aead0e3711e5e5c78a37bb03f59359017253607045a4c41560524626",
         "packages/client/ui-trajectory/package.json": "6a7bb4fa1038ed98d108bba8a0095790ca1eb9052d07c891a440eb1c6cb54c41",
         "packages/client/ui-trajectory/src/client/TrajectoryTable.tsx": "ce81d21374277bf6774278614407b8be5c7143c0737941b890f018a0d814762c",
         "packages/client/ui-trajectory/src/client/TrajectoryView.tsx": "170279d9b961c2864570e846ef3c824b96f24d3df5e9b626a795a1ab7c96174b",
         "packages/client/ui-trajectory/src/client/index.ts": "3b95993cc00bd2bfbfd650187d93f4244ffbb8625f22278c28e4d766b939da2d",
-        "packages/client/ui-trajectory/tests/table.client.spec.tsx": "a56dacb70a47ca20e180f80e93e83dcfceb7f79b641faaa8d4aaf3ef663dec0d",
+        "packages/client/ui-trajectory/tests/table.client.spec.tsx": "9d1914692c0b9d983406c90548100b1449f6541b500a2651b3b3d5368d2278ed",
         "packages/client/ui-trajectory/tsconfig.json": "6b48b8170a30442d9951eb3a15f39c69304291dc89f7ccfdac858d1cdbeb9566",
         "packages/host/directory-picker-browse/README.md": "a30bb9d4d1663808710844e8d632ae7c903a7db2cbcf1c6de26d81299a4910e1",
         "packages/host/directory-picker-browse/README.zh.md": "9b05070591f591590245071a84615e7c83a3e64352bb2039696a2a8601111dd9",

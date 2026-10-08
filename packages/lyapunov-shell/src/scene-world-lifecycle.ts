@@ -30,6 +30,14 @@ export function sceneWorldPreflight(scene:SceneSnapshot,options:{allowEmpty?:boo
  const physical=scene.entities.some(e=>Boolean(e.components.collision||e.components.rigidBody||e.components.articulation||e.components.mujoco||e.components.isaac||e.components.newton))
  if(!physical&&!options.allowEmpty)return {code:'SCENE_PHYSICS_REQUIRED',detail:'当前场景只有视觉资源，尚无已声明碰撞或原生物理模型；物理世界未启动。',missing:['collision/native physics source']}
 }
+/** 自动物理意图只取已保存的模板/实体声明；视觉与默认重力不是启动请求。 */
+export function sceneRequestsPhysics(scene:SceneSnapshot):boolean{
+ return scene.physics?.template==='physics-workspace-v1'||scene.physics?.template==='physics-workspace-v2'||scene.entities.some(e=>Boolean(e.components.collision||e.components.rigidBody||e.components.articulation||e.components.mujoco||e.components.isaac||e.components.newton||e.components.physicsBinding))
+}
+/** 无Provider只阻断确有物理意图/既有world的场景；视觉显示保持可用。 */
+export function sceneWorldWithoutProvider(scene:SceneSnapshot,world:WorldHandle|undefined,detail:string):SceneWorldState{
+ return sceneRequestsPhysics(scene)||world?.sceneId===scene.sceneId?{phase:'blocked',sceneId:scene.sceneId,code:'PROVIDER_UNAVAILABLE',detail}:{phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision}
+}
 export function intentionalBlankScene(scene:SceneSnapshot):boolean{
  const noPhysics=!scene.entities.some(e=>e.components.collision||e.components.rigidBody||e.components.mujoco||e.components.isaac||e.components.articulation)
  const noVisual=scene.entities.every(e=>!e.resources.length&&!e.components.visual)
@@ -62,11 +70,12 @@ export class SceneWorldLifecycle {
    try{
     // 新版本/Scene的冷启动先等旧自有open完成真实收尾；既有world的sync取消仍沿原队列处理。
     if(previous?.operation==='open'){await previous.promise;if(!current())return}
-    // 有意空白/纯相机且没有旧world时，连资源修复也无需派发；旧world清空仍沿原reconcile→sync。
-    if(!explicit&&intentionalBlankScene(scene)){
+    // 未声明物理且没有旧world时，只显示场景；不通过reconcile/地面准备暗中改变意图。
+    // 已有world清空或转为纯视觉仍沿原reconcile→sync，不关闭用户owner。
+    if(!explicit&&!sceneRequestsPhysics(scene)){
      const existing=(await port.list()).filter(world=>world.sceneId===scene.sceneId&&world.status!=='closed')
      if(!current())return
-     if(!existing.length){this.publish({phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision,detail:'空白/相机场景可编辑；未请求创建物理世界。'});return}
+     if(!existing.length){this.publish({phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision,detail:'场景可显示和编辑；未请求创建物理世界。'});return}
     }
     let resourceIssue:{code:string;detail:string;missing:string[]}|undefined
     if(port.reconcile){
@@ -121,7 +130,7 @@ export class SceneWorldLifecycle {
      if(w.appliedSceneRevision!==scene.revision||frame.sceneRevision!==undefined&&frame.sceneRevision!==scene.revision){const stale={...w,status:'unsynced' as const};this.publish({...worldLifecycleState(stale,frame),code:'WORLD_SCENE_UNSYNCED',detail:'Scene已更新，当前物理世界仍为旧版本；同步当前场景后再执行动作，已提交编辑保留。'});return stale}
      this.publish(worldLifecycleState(w,frame));return w
     }
-    if(!explicit&&intentionalBlankScene(scene)){this.publish({phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision,detail:'空白/相机场景可编辑；未请求创建物理世界。'});return}
+    if(!explicit&&!sceneRequestsPhysics(scene)){this.publish({phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision,detail:'场景可显示和编辑；未请求创建物理世界。'});return}
     if(port.prepareWorld){
      const prepared=await port.prepareWorld(scene,controller.signal)
      if(!current())return

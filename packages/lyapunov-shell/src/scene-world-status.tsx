@@ -5,11 +5,13 @@ import {StatusDetails,statusMessageSummary} from './status-message.tsx'
 /**
  * 底部状态/详情按**界面语言**显示：Isaac 缺 SDK 的公开投影（`command-privacy.ts`）是给人类面的
  * 固定中文句，这里**复用同一个常量**（不是第二套错误/国际化服务）经已有 `tr` 回译，英文设置下
- * 显示英文。原始解释器路径不在这句话里（只留在诊断/模型日志）。其他状态的 detail 原样显示。
+ * 显示英文。纯视觉idle固定句也沿此tr入口映射；其余detail保留原诊断文本。
+ * 原始解释器路径不在公开固定句里（只留在诊断/模型日志）。
  */
 export function sceneWorldStatusDetail(state:Pick<SceneWorldState,'code'|'detail'>,tr:Translate):string|undefined{
  const detail=state.detail
  if(!detail)return detail
+ if(detail==='场景可显示和编辑；未请求创建物理世界。')return tr(detail,'The scene can be viewed and edited; no physics world was requested.')
  const body=detail.replace(/^[A-Z][A-Z0-9_]*[:：]\s*/,'').trim()
  if(state.code==='ISAAC_SDK_UNAVAILABLE'||body===ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE)
   return tr(ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE,'The selected Isaac SDK is unavailable. Install Isaac, or check and register an existing compatible local installation in Physics settings, then save and restart Lyapunov.')

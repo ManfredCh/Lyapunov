@@ -213,7 +213,7 @@ const imageQuote = {
 }
 
 describe("原生授权说明", () => {
-  test("正式提交展示Peiri与真实报价，供应商实际模型仅保留授权审计", async () => {
+  test("正式图像提交使用中性功能名与真实报价，供应商实际模型仅保留授权审计", async () => {
     const { authorize, asked, store } = authorizer()
     await authorize({
       product: "image",
@@ -225,8 +225,8 @@ describe("原生授权说明", () => {
       quote: imageQuote,
     })
     const question = asked[0]!.questions[0]!
-    expect(question.header).toBe("Peiri 图像")
-    expect(question.detail).toContain("生成服务：Peiri 图像")
+    expect(question.header).toBe("图像生成 / Image generation")
+    expect(question.detail).toContain("生成服务：图像生成 / Image generation")
     expect(question.detail).not.toContain("operator-supplied-model-id")
     expect(question.detail).not.toContain("model-from-the-client")
     expect(question.detail).toContain("中央服务报价：**300 点/次**")
@@ -293,12 +293,12 @@ describe("授权与取消边界", () => {
     expect(store.size).toBe(0)
   })
 
-  test("正式三维报价确认保留真实材质参数和内部审计，正文统一 Peiri", async () => {
+  test("正式三维报价确认保留真实材质参数和内部审计，正文按世界模型角色显示 Pontryagin", async () => {
     const { authorize,asked,store } = authorizer()
     await authorize({...approval(),request:{model:'Tripo/Tripo-P1.0',input:{mode:'text-to-3d',prompt:'真实三维香蕉'},parameters:{pbr:true,texture:true,texture_quality:'detailed'}}})
     const question=asked[0]!.questions[0]!
-    expect(question.header).toBe('Peiri 3D')
-    expect(question.question).toBe('提交这次 Peiri 3D 生成请求？')
+    expect(question.header).toBe('Pontryagin 3D')
+    expect(question.question).toBe('提交这次 Pontryagin 3D 生成请求？')
     expect(question.detail).toContain('材质：PBR')
     expect(question.detail).toContain('纹理：生成纹理')
     expect(question.detail).toContain('质量：detailed')
@@ -313,7 +313,7 @@ describe("授权与取消边界", () => {
     let message=''
     try{await client.quote()}catch(error){message=(error as Error).message}
     expect(message).toContain('CENTRAL_GENERATION_QUOTE_UNAVAILABLE')
-    expect(message).toContain('Peiri 3D')
+    expect(message).toContain('Pontryagin 3D')
     expect(message).toContain('正积分报价未就绪')
     expect(message).toContain('停止本次尝试')
     expect(message).not.toMatch(/tripo|百炼|aliyun/i)
@@ -324,7 +324,7 @@ describe("授权与取消边界", () => {
   test("供应商错误只投影到正式产品，原始原因保留供审计", () => {
     const original=Object.assign(new Error('本地取消：已停止等待 Tripo 生成'),{code:'GENERATION_CANCELLED_LOCAL'})
     const projected=generationPublicError(original,'tripo')
-    expect(projected.message).toContain('Peiri 3D')
+    expect(projected.message).toContain('Pontryagin 3D')
     expect(projected.message).not.toContain('Tripo')
     expect(projected.cause).toBe(original)
     const upstream=generationPublicError(new Error('Tripo request failed: 502 Bad Gateway'),'tripo')

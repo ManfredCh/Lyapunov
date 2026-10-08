@@ -8,7 +8,7 @@ import {ImportPurposeChoice} from './import-purpose-choice.tsx'
 import type {ResourcePhysicsProgress} from './physics-binding-settings.ts'
 import {importLocalPolicy,type LocalPolicyImportReceipt} from './local-policy-import.ts'
 import {physicalTestSpaceOf,physicalTestWorldInput,physicalTestMissingCapabilities} from "./physics-test-space.ts"
-import {SceneWorldLifecycle,worldLifecycleState,measuredJointTargets,type SceneWorldState} from './scene-world-lifecycle.ts'
+import {SceneWorldLifecycle,sceneWorldWithoutProvider,worldLifecycleState,measuredJointTargets,type SceneWorldState} from './scene-world-lifecycle.ts'
 import {sceneEditTarget,sceneNodeRole} from '../../lyapunov-contracts/src/scene-edit-target.ts'
 import {SceneWorldStatus,sceneWorldPhaseLabel} from './scene-world-status.tsx'
 import {WorldPhysicsPanel} from './world-physics-panel.tsx'
@@ -1149,7 +1149,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   return result
  }
  useEffect(()=>{
-  if(!open||!sessionId||!scene||!providerAvailable||readOnly){automaticWorld.leave();if(scene&&!providerAvailable)setWorldLifecycle({phase:'blocked',sceneId:scene.sceneId,code:'PROVIDER_UNAVAILABLE',detail:tr('当前Host未装配可用物理引擎；请检查已保存偏好与运行依赖。','The current Host has no physics provider; check the saved preference and runtime dependencies.')});return}
+  if(!open||!sessionId||!scene||!providerAvailable||readOnly){automaticWorld.leave();if(scene&&!providerAvailable)setWorldLifecycle(sceneWorldWithoutProvider(scene,worldRef.current,tr('当前Host未装配可用物理引擎；请检查已保存偏好与运行依赖。','The current Host has no physics provider; check the saved preference and runtime dependencies.')));return}
   void ensureSceneWorld().catch(value=>setError(String(value)))
  },[open,sessionId,scene?.sceneId,scene?.revision,providerAvailable,readOnly,worldHostEpoch])
  useEffect(()=>()=>automaticWorld.leave(),[open,sessionId,scene?.sceneId,providerAvailable,readOnly,worldHostEpoch])

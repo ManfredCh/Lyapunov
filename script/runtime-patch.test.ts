@@ -134,7 +134,7 @@ test("formal managed rows retain the gateway and environment-only credential", (
   const options: PiAiOptions | undefined = rows.find(row => row.id === "llm-pi-ai")?.config
   expect(() => PiAiSchema(options)).not.toThrow()
   const provider = options?.providers?.["lyapunov-plans"]
-  expect(provider).toMatchObject({ displayName: "Pontryagin", apiKeyEnv: "LYAPUNOV_ACCOUNT_TOKEN", baseURL: account.apiUrl + "/v1", managedBaseURL: account.apiUrl + "/v1" })
+  expect(provider).toMatchObject({ displayName: "Peiri", apiKeyEnv: "LYAPUNOV_ACCOUNT_TOKEN", baseURL: account.apiUrl + "/v1", managedBaseURL: account.apiUrl + "/v1" })
   expect(provider).not.toHaveProperty("apiKey")
   expect(JSON.stringify(rows)).not.toContain(account.token)
 })

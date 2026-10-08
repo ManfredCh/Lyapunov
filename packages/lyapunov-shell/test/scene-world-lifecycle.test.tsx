@@ -1,6 +1,11 @@
 import {expect,test} from 'bun:test'
 import {renderToStaticMarkup} from 'react-dom/server'
-import {SceneWorldLifecycle,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
+import {mkdtemp,writeFile,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {SceneOperations} from '../../scene-kit/src/operations.ts'
+import {solidGlb,box} from '../../scene-kit/test/glb-geometry-fixture.ts'
+import {SceneWorldLifecycle,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
 import {SceneWorldStatus} from '../src/scene-world-status.tsx'
 import {ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE} from '../../lyapunov-contracts/src/command-privacy.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
@@ -121,11 +126,11 @@ test('A08 旧自有初始化world未确认关闭时阻止后继open，不吞收�
  expect(await oldFailure).toContain('WORLD_START_CLEANUP_FAILED');expect(await fresh).toBeUndefined();expect(calls.filter(s=>s.startsWith('open'))).toEqual(['open:0'])
  expect(states.at(-1)?.code).toBe('WORLD_START_CLEANUP_FAILED')
 })
-test('源坐标缺项和纯视觉场景准确blocked，不猜Z/碰撞、不启动worker',async()=>{
+test('源坐标缺项仍物理blocked，纯视觉显示保持idle、不猜碰撞或启动worker',async()=>{
  const missing=scene();missing.entities[0]!.resources=[{resourceId:'r',version:1,original:{uri:'/fixture',mimeType:'x'},representations:[]} as any]
  expect(sceneWorldPreflight(missing)?.code).toBe('SCENE_RESOURCE_SOURCE_REQUIRED')
  const visual=scene();visual.entities[0]!.components={};expect(sceneWorldPreflight(visual)?.code).toBe('SCENE_PHYSICS_REQUIRED')
- const states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(s=>states.push(s));await lifecycle.ensure('a','h',visual,port(calls));expect(calls).toEqual(['list']);expect(states.at(-1)?.phase).toBe('blocked')
+ const states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(s=>states.push(s));await lifecycle.ensure('a','h',visual,port(calls));expect(calls).toEqual(['list']);expect(states.at(-1)?.phase).toBe('idle')
 })
 test('多个世界不猜，代次错误关闭自有world；手调缺实测不生成零目标',async()=>{
  const states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(s=>states.push(s)),p=port(calls)
@@ -200,4 +205,115 @@ test('A08 compact阻断原因不需展开详情即可见，原始长详情仍独
  expect(en).toContain('The selected Isaac SDK is unavailable')
  expect(en).not.toContain('当前选择的 Isaac SDK')
  expect(en).not.toContain('/home/')
+})
+
+
+test('纯视觉GLB显式跳过物理化后选择显示，不reconcile/prepare/open也不提升真实Scene版本',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'visual-scene-no-world-'))
+ try{
+  const operations=new SceneOperations(join(root,'data')),initial=await operations.create({sceneId:'visual',template:'blank'}),path=join(root,'visual.glb')
+  await writeFile(path,solidGlb({generator:'visual-only-fixture',nodes:[{name:'visible-box',mesh:box()}]}))
+  const imported=await operations.import({path,sceneId:initial.sceneId,physicalizationRequest:false}),displayed=imported.snapshot!
+  expect(imported.resource.physicalizationRequest).toBe(false);expect(displayed.entities.length).toBeGreaterThan(0)
+  const states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(state=>states.push(state)),p=port(calls)
+  p.reconcile=async(snapshot,signal)=>{calls.push('reconcile');return operations.reconcilePhysics({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,waitForPending:true},signal)}
+  p.prepareWorld=async(snapshot)=>{calls.push('prepare');return operations.prepareWorld({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision})}
+  p.open=async(snapshot)=>{calls.push('open');return {...world('visual-world',snapshot.sceneId),appliedSceneRevision:snapshot.revision}}
+  p.observe=async()=>{calls.push('observe');return frame({...world('visual-world',displayed.sceneId),appliedSceneRevision:(await operations.scene.snapshot(displayed.sceneId)).revision})}
+  expect(await lifecycle.ensure('owner','host',displayed,p)).toBeUndefined()
+  expect(calls).toEqual(['list']);expect(states.at(-1)).toMatchObject({phase:'idle',sceneId:displayed.sceneId,sceneRevision:displayed.revision})
+  expect(await operations.scene.snapshot(displayed.sceneId)).toEqual(displayed)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('无template的legacy视觉资源与相机仅显示；不向修复/世界准备端口发送请求',async()=>{
+ const states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(state=>states.push(state)),s=scene('legacy-visual'),p=port(calls)
+ s.entities[0]!.components={visual:{kind:'mesh'}}
+ s.entities[0]!.resources=[{resourceId:'visual',version:1,original:{uri:'file:///fixture/visual.glb',mimeType:'model/gltf-binary'},representations:[],source:{units:'m',upAxis:'Z',handedness:'right'}}]
+ p.reconcile=async()=>{calls.push('reconcile');throw Error('VISUAL_RECONCILE_UNEXPECTED')};p.prepareWorld=async()=>{calls.push('prepare');throw Error('VISUAL_PREPARE_UNEXPECTED')}
+ expect(await lifecycle.ensure('owner','host',s,p)).toBeUndefined();expect(calls).toEqual(['list']);expect(states.at(-1)?.phase).toBe('idle')
+})
+
+test('用户明确Start才将纯视觉blank准备为物理工作区并以实际CAS版本创建world',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'visual-scene-explicit-start-'))
+ try{
+  const operations=new SceneOperations(join(root,'data')),s=await operations.create({sceneId:'visual',template:'blank'}),path=join(root,'visual.glb')
+  await writeFile(path,solidGlb({generator:'explicit-start-fixture',nodes:[{name:'visible-box',mesh:box()}]}))
+  const displayed=(await operations.import({path,sceneId:s.sceneId,physicalizationRequest:false})).snapshot!,calls:string[]=[],states:SceneWorldState[]=[],p=port(calls)
+  let opened:WorldHandle|undefined
+  p.reconcile=async(snapshot,signal)=>{calls.push('reconcile');return operations.reconcilePhysics({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision,waitForPending:true},signal)}
+  p.prepareWorld=async(snapshot)=>{calls.push('prepare');return operations.prepareWorld({sceneId:snapshot.sceneId,expectedRevision:snapshot.revision})}
+  p.acceptScene=snapshot=>{calls.push('accept');expect(snapshot.physics?.template).toBe('physics-workspace-v2')}
+  p.open=async(snapshot)=>{calls.push('open');opened={...world('visual-world',snapshot.sceneId),appliedSceneRevision:snapshot.revision};return opened}
+  p.observe=async()=>{calls.push('observe');return frame(opened!)}
+  const result=await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',displayed,p,true)
+  expect(calls).toEqual(['reconcile','list','prepare','accept','open','observe']);expect(result?.appliedSceneRevision).toBe(displayed.revision+1)
+  const saved=await operations.scene.snapshot(s.sceneId);expect(saved.physics?.template).toBe('physics-workspace-v2');expect(saved.entities.some(entity=>entity.components.collision?.shape==='plane')).toBe(true)
+  expect(states.at(-1)?.phase).toBe('running')
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('既有运行world仍恢复与同步；视觉意图门不关闭/暂停/另建用户owner',async()=>{
+ const s={...scene(),revision:1},before={...world(),status:'running' as const},after={...before,worldGeneration:2,appliedSceneRevision:1},states:SceneWorldState[]=[],calls:string[]=[],p=port(calls)
+ s.entities[0]!.components={visual:{kind:'mesh'}}
+ p.list=async()=>{calls.push('list');return [before]};p.reconcile=async(snapshot)=>{calls.push('reconcile');return {snapshot,pending:false,issues:[]}}
+ p.sync=async(snapshot,bound)=>{calls.push('sync');expect(snapshot).toEqual(s);expect(bound).toEqual(before);return after};p.observe=async()=>{calls.push('observe');return frame(after)}
+ const result=await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',s,p)
+ expect(result).toEqual(after);expect(calls).toEqual(['list','reconcile','list','sync','observe']);expect(states.at(-1)?.phase).toBe('running')
+ expect(calls).not.toContain('open');expect(calls).not.toContain('close');expect(calls).not.toContain('pause')
+})
+
+
+test('原持久物理声明保自动路径；默认重力和纯视觉不暗示物理意图',async()=>{
+ const blank={...scene(),physics:{gravityWorldMps2:[0,0,-9.81] as [number,number,number],template:'blank' as const}}
+ blank.entities[0]!.components={visual:{kind:'mesh'}}
+ expect(sceneRequestsPhysics(blank)).toBe(false);expect(sceneRequestsPhysics({...blank,physics:{gravityWorldMps2:[0,0,-9.81]}})).toBe(false)
+ for(const template of ['physics-workspace-v1','physics-workspace-v2'] as const){
+  const s={...blank,physics:{...blank.physics,template}},calls:string[]=[],states:SceneWorldState[]=[],p=port(calls),prepared={...world(),appliedSceneRevision:1}
+  expect(sceneRequestsPhysics(s)).toBe(true)
+  p.reconcile=async(snapshot)=>{calls.push('reconcile');return {snapshot,pending:false,issues:[]}}
+  p.prepareWorld=async(snapshot)=>{calls.push('prepare');return {...snapshot,revision:1,entities:[{...scene().entities[0]!,components:{collision:{shape:'plane'},rigidBody:{type:'static'}}}]}}
+  p.open=async(snapshot)=>{expect(snapshot.revision).toBe(1);calls.push('open');return prepared};p.observe=async()=>{calls.push('observe');return frame(prepared)}
+  expect(await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',s,p)).toEqual(prepared)
+  expect(calls).toEqual(['reconcile','list','prepare','open','observe']);expect(states.at(-1)?.phase).toBe('running')
+ }
+ for(const key of ['collision','rigidBody','articulation','mujoco','isaac','newton'] as const){const s=scene();s.entities[0]!.components={[key]:{sourcePath:'/fixture/native'}};expect(sceneRequestsPhysics(s)).toBe(true)}
+ const requested={...blank},pending={...blank,revision:1};requested.entities=[{...blank.entities[0]!,components:{visual:{kind:'mesh'},physicsBinding:{resourceId:'r',version:1,status:'PENDING'}}}]
+ const calls:string[]=[],states:SceneWorldState[]=[],p=port(calls)
+ expect(sceneRequestsPhysics(requested)).toBe(true)
+ p.reconcile=async()=>{calls.push('reconcile');return {snapshot:pending,pending:true,issues:[]}}
+ expect(await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',requested,p)).toBeUndefined()
+ expect(calls).toEqual(['reconcile','list']);expect(states.at(-1)?.code).toBe('SCENE_PHYSICS_PENDING')
+})
+
+
+test('无物理Provider时纯视觉仍显示idle；物理声明与同Scene既有world准确blocked',()=>{
+ const visual=scene('visual');visual.entities[0]!.components={visual:{kind:'mesh'}}
+ expect(sceneWorldWithoutProvider(visual,undefined,'原错误')).toEqual({phase:'idle',sceneId:visual.sceneId,sceneRevision:visual.revision})
+ expect(sceneWorldWithoutProvider(visual,world('other','other'),'原错误').phase).toBe('idle')
+ expect(sceneWorldWithoutProvider(visual,world('own',visual.sceneId),'原错误')).toMatchObject({phase:'blocked',code:'PROVIDER_UNAVAILABLE',detail:'原错误'})
+ expect(sceneWorldWithoutProvider(scene(),undefined,'Original error')).toMatchObject({phase:'blocked',code:'PROVIDER_UNAVAILABLE',detail:'Original error'})
+})
+
+
+test('视觉Scene已有world在只读恢复期间被其owner关闭，不自动补地面或重开',async()=>{
+ const s=scene(),states:SceneWorldState[]=[],calls:string[]=[],p=port(calls);s.entities[0]!.components={visual:{kind:'mesh'}}
+ let lists=0;p.list=async()=>{calls.push('list');return ++lists===1?[world()]:[]}
+ p.reconcile=async(snapshot)=>{calls.push('reconcile');return {snapshot,pending:false,issues:[]}}
+ p.prepareWorld=async()=>{calls.push('prepare');throw Error('UNEXPECTED_VISUAL_PREPARE')}
+ expect(await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',s,p)).toBeUndefined()
+ expect(calls).toEqual(['list','reconcile','list']);expect(states.at(-1)?.phase).toBe('idle')
+})
+
+
+test('纯视觉idle状态经原formatter按界面语言显示，中英文compact与详情均一致',()=>{
+ const state:SceneWorldState={phase:'idle',sceneId:'visual',sceneRevision:1,detail:'场景可显示和编辑；未请求创建物理世界。'},noop=()=>{}
+ for(const compact of [false,true]){
+  const zh=renderToStaticMarkup(<SceneWorldStatus compact={compact} state={state} tr={cn=>cn} retry={noop} cancel={noop}/>),en=renderToStaticMarkup(<SceneWorldStatus compact={compact} state={state} tr={(_cn,en)=>en} retry={noop} cancel={noop}/>)
+  expect(zh).toContain('场景可显示和编辑；未请求创建物理世界。');expect(zh).not.toContain('The scene can be viewed and edited')
+  expect(en).toContain('The scene can be viewed and edited; no physics world was requested.');expect(en).not.toContain('场景可显示和编辑')
+  expect(en).toContain('Not initialized');expect(zh).toContain('尚未初始化')
+ }
+ const unknown=renderToStaticMarkup(<SceneWorldStatus state={{phase:'idle',detail:'ORIGINAL_UNMAPPED_DETAIL'}} tr={(_cn,en)=>en} retry={noop} cancel={noop}/>)
+ expect(unknown).toContain('ORIGINAL_UNMAPPED_DETAIL')
 })

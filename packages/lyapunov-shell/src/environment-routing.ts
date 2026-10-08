@@ -480,6 +480,37 @@ function findIntent(text: string, pattern: RegExp): { word: string; negated: boo
   return { word: match[0], negated: NEGATION_BEFORE.test(before) }
 }
 
+/** 停止条件不等于当前停止；只在原Stop入口核对句内条件，其他阶段的词义/优先级保持。 */
+function findStopIntent(text: string): { word: string; negated: boolean } | undefined {
+  let negated: { word: string; negated: boolean } | undefined
+  // 小数点两侧都是数字时不是句界，15.5分钟之类的预算须保持完整。
+  const sentenceBoundary = /[。！？!?;；\n]|(?<!\d)\.|\.(?!\d)/
+  for (const match of text.matchAll(new RegExp(STOP_INTENT.source, 'gi'))) {
+    const before = text.slice(0, match.index).split(sentenceBoundary).at(-1) ?? ''
+    const after = text.slice(match.index + match[0].length).split(sentenceBoundary, 1)[0] ?? ''
+    const isNegated = NEGATION_BEFORE.test(before.slice(-4))
+      || /\b(?:do\s+not|don['’]?t|must\s+not|should\s+not|never|no\s+need\s+to|without)\s*$/i.test(before)
+    if (isNegated) { negated ??= { word: match[0], negated: true }; continue }
+    const conditionalBefore = /(?:如果|假如|倘若|若(?!干)|一旦|只在|仅在|当[^，,]*?(?:时|后))|\b(?:if|unless|when|once)\b/i.test(before)
+    const conditionalAfter = /^\s*(?:(?:if|unless|when|once|after|only\s+if)\b|at\s+\d|upon\s+reaching|如果|若(?!干)|一旦|当|(?:应|需要)?在[^。！？!?;；\n]*?(?:后|时))/i.test(after)
+    const budgetBefore = /(?:连续|连着)\s*(?:\d+|[一二两三四五六七八九十百]+)\s*(?:轮|次|步)[^。！？!?;；\n]*?(?:应(?:当|该)?|需(?:要)?|须|就|再|则)(?:立即|马上)?\s*$/i.test(before)
+      || /(?:达到|超过|耗尽|用完|预算|上限)[^。！？!?;；\n]*?(?:后|时|应(?:当|该)?|再|则|就)(?:立即|马上)?\s*$/i.test(before)
+      || /\b(?:after|following)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i.test(before)
+    const budgetAlreadyMet = /已经|已(?:连续|达到|超过|耗尽|用完|超时|失败)|\balready\b/i.test(before)
+    // 检查当前进行状态并明确现在停止，不是未来预算；条件谓语须直接接立即Stop。
+    const currentWorkNow = (
+      /(?:如果|假如|倘若|若(?!干))\s*(?:这个|该|当前|本次)?\s*(?:场景|任务|作业)\s*(?:仍(?:然)?|还)?\s*(?:正在|在)\s*(?:生成|制作|构建|运行|执行)\s*[，,]\s*(?:(?:现在|此刻|立即|马上|立刻)\s*)*$/i.test(before)
+      || /\bif\s+(?:(?:this|the|current)\s+)?(?:scene|task|job)\s+is\s+(?:still\s+)?(?:being\s+(?:generated|built)|generating|running|executing)\s*,\s*(?:(?:now|immediately)\s*)*$/i.test(before)
+    ) && (
+      /(?:现在|此刻|立即|马上|立刻)\s*$|\b(?:now|immediately)\s*$/i.test(before)
+      || /^\s*(?:(?:it|this\s+(?:scene|task|job))\s+)?(?:now|immediately)\b/i.test(after)
+    )
+    if (conditionalBefore && !currentWorkNow || conditionalAfter || budgetBefore && !budgetAlreadyMet) continue
+    return { word: match[0], negated: false }
+  }
+  return negated
+}
+
 /** 请求级选路提示，不创建任务或保存另一份生成状态。物体名字不决定生成式来源。 */
 export function selectAssetGenerationRoute(text: string): AssetGenerationRoute | undefined {
   if (resourceOperationOnly(text) || robotActionRequest(text)) return undefined
@@ -492,10 +523,10 @@ export function selectAssetGenerationRoute(text: string): AssetGenerationRoute |
     const before = text.slice(Math.max(0,match.index! - 12),match.index)
     return !/[不别勿非无][^，,。；;]{0,3}$|(?:not|don'?t|do\s+not|without)\s*$/i.test(before)
   })
-  const explicitPeiri = positiveChoice(/(?:用|使用|选择|通过|走|换成|use|using|with)\s*(?:Peiri\s*(?:3D)?|生成式|文生\s*3D|图生\s*3D|AI\s*(?:生成|3D))|Peiri\s*3D\s*(?:生成|generate)/i)
-  const explicitBlender = positiveChoice(/(?:用|使用|选择|通过|走|换成|use|using|with)\s*blender|blender\s*(?:生成|建模|create|generate)/i)
-  if (explicitPeiri && explicitBlender) return { method: "mixed", why: "The user explicitly selected a mixed route: use Blender for regular geometry and Peiri 3D for generative parts. Acquire new artifacts for this task separately, then assemble them. Obtain the actual quote and one confirmation before the Peiri portion." }
-  if (nonBlender || explicitPeiri) return { method: "peiri3d", why: "The user explicitly selected a generative or non-Blender route: use Peiri 3D after reading the actual central quote and completing one native confirmation. Stop when configuration or a positive quote is missing; do not present old custom geometry as a new artifact." }
+  const explicitWorldModel = positiveChoice(/(?:用|使用|选择|通过|走|换成|use|using|with|through)\s*(?:Pontryagin\s*(?:3D)?|生成式|文生\s*3D|图生\s*3D|AI\s*(?:生成|3D))|Pontryagin\s*(?:3D)?\s*(?:生成|generate)/i)
+  const explicitBlender = positiveChoice(/(?:用|使用|选择|通过|走|换成|use|using|with|through)\s*blender|blender\s*(?:生成|建模|create|generate)/i)
+  if (explicitWorldModel && explicitBlender) return { method: "mixed", why: "The user explicitly selected a mixed route: use Blender for regular geometry and Pontryagin 3D for generative parts. Acquire new artifacts for this task separately, then assemble them. Obtain the actual quote and one confirmation before the Pontryagin portion." }
+  if (nonBlender || explicitWorldModel) return { method: "peiri3d", why: "The user explicitly selected a generative or non-Blender route: use Pontryagin 3D after reading the actual central quote and completing one native confirmation. Stop when configuration or a positive quote is missing; do not present old custom geometry as a new artifact." }
   if (explicitBlender) return { method: "blender", why: "The user explicitly selected Blender: create/edit and export for this task. Write and verify real Base Color, UV, textures/PBR as required; changing diffuse_color alone is insufficient." }
   // 尺寸只有与规则几何/参数化目标共同出现才构成 Blender 依据；有机资产也可以有目标尺度。
   const regular = /(地面|地板|台面|桌面|板材|箱|方块|立方体|长方体|盒子|圆柱|圆锥|管材|料架|工装|floor|ground|tabletop|countertop|cube|box|crate|cylinder|cone|pipe)/i.test(text)
@@ -503,9 +534,9 @@ export function selectAssetGenerationRoute(text: string): AssetGenerationRoute |
   const appearance = /(真实(?:外观|质感|纹理)|逼真|写实|有机|自然外形|语义外形|realistic|photoreal|organic|natural shape)/i.test(text)
   const dimensions = /\d+(?:\.\d+)?\s*(?:mm|cm|m\b|米|厘米|毫米)|(?:长|宽|高|厚|半径|直径).{0,4}\d/i.test(text)
   const mixed = /(?:再|并且|同时|另外|以及|和|and|also).{0,24}(?:生成|做个|做一个|create|generate)/i.test(text)
-  if ((regular || parameterized) && appearance && mixed) return { method: "mixed", why: "This combines regular geometry with semantic appearance: use Blender for precise parts and Peiri 3D for semantic or realistic assets. Acquire new artifacts separately, then assemble their scene relationships. Read the actual quote and obtain confirmation for paid work." }
+  if ((regular || parameterized) && appearance && mixed) return { method: "mixed", why: "This combines regular geometry with semantic appearance: use Blender for precise parts and Pontryagin 3D for semantic or realistic assets. Acquire new artifacts separately, then assemble their scene relationships. Read the actual quote and obtain confirmation for paid work." }
   if (parameterized || regular && (!appearance || dimensions)) return { method: "blender", why: "For regular or parametric geometry, use Blender to preserve dimensions and editability. If materials are needed, write real Base Color and UV/texture connections, then export, register, mount, and observe." }
-  return { method: "peiri3d", why: "For a new semantic asset or realistic appearance, use Peiri 3D. Set texture:true and pbr:true explicitly when textures/PBR are required. Read the actual central quote and obtain one confirmation first. Stop if configuration is missing; offer free public models only when they satisfy the user's source requirements." }
+  return { method: "peiri3d", why: "For a new semantic asset or realistic appearance, use Pontryagin 3D. Set texture:true and pbr:true explicitly when textures/PBR are required. Read the actual central quote and obtain one confirmation first. Stop if configuration is missing; offer free public models only when they satisfy the user's source requirements." }
 }
 
 function assetRouteHint(route: AssetGenerationRoute | undefined, hasTool?: (name: string) => boolean, mcpTools?:readonly {name:string;description:string}[]): string {
@@ -559,7 +590,7 @@ export function routeEnvironment(input: EnvironmentRoutingInput): EnvironmentRou
   const sessionEnvWork = annotation || todos.unfinishedEnv.length > 0
   // 资源路径可能包含 scene/build/modify 等词；它们不是用户意图，先从意图词扫描中移除。
   const intentText = text.replace(RESOURCE_PATH, "")
-  const stop = findIntent(intentText, STOP_INTENT)
+  const stop = findStopIntent(intentText)
   const plan = findIntent(intentText, PLAN_ONLY_INTENT)
   const cont = findIntent(intentText, CONTINUE_INTENT)
   const build = findIntent(intentText, BUILD_VERB)
@@ -756,7 +787,7 @@ export function planDomainPointers(input: EnvironmentRoutingInput & { readonly p
   const usesDirectControl = Boolean(manualControl && !manualControl.negated)
     || (/(关节|夹爪|tcp|\b(?:joint|gripper)\b)/i.test(text) && Boolean(directMotion && !directMotion.negated))
   if (decision.stage !== 'stop' && robotPolicyBehaviorRequest(text) && !usesDirectControl) {
-    const stop = findIntent(text, STOP_INTENT)
+    const stop = findStopIntent(text)
     if (stop && !stop.negated) return undefined
     const acquisition = findIntent(text, ROBOT_PREPARATION)
     const line = acquisition && !acquisition.negated

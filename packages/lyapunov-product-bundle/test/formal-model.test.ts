@@ -25,8 +25,8 @@ test("formal default resolves inside the native provider catalog", () => {
   expect(provider.baseURL).toBe("https://account.example.invalid/v1")
   expect(provider.managedBaseURL).toBe(provider.baseURL)
   expect(selection).toEqual({ provider: "lyapunov-plans", model: "peiri" })
-  expect(provider.displayName).toBe('Pontryagin')
-  expect(provider.models!.map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Pontryagin'}])
+  expect(provider.displayName).toBe('Peiri')
+  expect(provider.models!.map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Peiri'}])
 })
 
 test("formal default provider baseURL uses the unified production entry", () => {
@@ -48,9 +48,9 @@ test('正式模型保留原生idle默认与有界重试，不对持续有进度�
   await fiber
   const config:PiAi.Config=fiber.config
   const provider=config.providers.get()['lyapunov-plans']!
-  expect(ctx.llm.listProviders().find(provider=>provider.id==='lyapunov-plans')?.name).toBe('Pontryagin')
-  expect((await ctx.llm.listModels('lyapunov-plans')).map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Pontryagin'}])
-  expect((await ctx.llm.resolveModelInfo('lyapunov-plans','peiri')).name).toBe('Pontryagin')
+  expect(ctx.llm.listProviders().find(provider=>provider.id==='lyapunov-plans')?.name).toBe('Peiri')
+  expect((await ctx.llm.listModels('lyapunov-plans')).map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Peiri'}])
+  expect((await ctx.llm.resolveModelInfo('lyapunov-plans','peiri')).name).toBe('Peiri')
   const retry=resolveRetryPolicy(raw.providers!['lyapunov-plans']!.retryPolicy,'formal.provider.retryPolicy')
   expect(retry).toMatchObject({mode:'normal',maxRetries:5})
   expect(retry).not.toHaveProperty('requestPhaseTimeoutMs')

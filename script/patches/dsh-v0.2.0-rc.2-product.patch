@@ -469,7 +469,7 @@ index ba6d2e0b4765b28c3782b61fbe2b555516f73fad..79309d112325577a4ca173cb402e057a
      const snapshot = chatSnapshotFixture({ nodes: [user(1, 'included'), user(2, 'omitted')] })
      const h = makeHarness({}, {}, snapshot)
 diff --git a/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx b/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
-index 107ca55f9ea6e709ac72fcfae110bc921b074f65..a2f52b1b4bdc716765af9940af27ae629945fffc 100644
+index 107ca55f9ea6e709ac72fcfae110bc921b074f65..43e110ed9d400cc5f5af64c2490d4378d7facb5f 100644
 --- a/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
 +++ b/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
 @@ -1,12 +1,16 @@
@@ -512,14 +512,14 @@ index 107ca55f9ea6e709ac72fcfae110bc921b074f65..a2f52b1b4bdc716765af9940af27ae62
 +    catalog.store.set({ status: 'ready', error: null, value: { default: null, groups: [{ id: 'internal-provider', name: 'Public provider', models: [{ id, name }] }], routableProviders: ['internal-provider'], failures: [] } })
 +    return new ModelDirectory({} as never, SessionId('session-'+id), () => true, catalog, createSnapshotStore(undefined), () => true)
 +  }
-+  const first = make('peiri', 'Pontryagin'), second = make('other-private-model', 'Public second model')
++  const first = make('peiri', 'Peiri'), second = make('other-private-model', 'Public second model')
 +  const usage: TurnTokenUsage = { uncachedInputTokens: 123, outputTokens: 45, totalTokens: 168, routes: [{ provider: 'internal-provider', model: 'peiri' }] }
 +  const original = JSON.stringify(usage)
 +  const view = render(<TurnUsagePanel usage={usage} t={t} modelDirectory={first} />)
-+  fireEvent.click(view.getByRole('button'));expect(view.getByRole('dialog').textContent).toContain('Pontryagin');expect(view.getByRole('dialog').textContent).toContain('123 tok')
++  fireEvent.click(view.getByRole('button'));expect(view.getByRole('dialog').textContent).toContain('Peiri');expect(view.getByRole('dialog').textContent).toContain('123 tok')
 +  const otherUsage = { ...usage, routes: [{ provider: 'internal-provider', model: 'other-private-model' }] }
 +  view.rerender(<TurnUsagePanel usage={otherUsage} t={t} modelDirectory={second} />)
-+  expect(view.getByRole('dialog').textContent).toContain('Public second model');expect(view.getByRole('dialog').textContent).not.toContain('Pontryagin')
++  expect(view.getByRole('dialog').textContent).toContain('Public second model');expect(view.getByRole('dialog').textContent).not.toContain('Peiri')
 +  act(() => { second.store.update(snapshot => { snapshot.groups = [] }) })
 +  expect(view.getByRole('dialog').textContent).not.toContain('other-private-model');expect(view.getByRole('dialog').textContent).toContain('Model')
 +  view.rerender(<TurnUsagePanel usage={otherUsage} t={makeTranslate(zh)} modelDirectory={second} />)
@@ -1390,7 +1390,7 @@ index 0154f315be7a0a13b0f4ef18a96dbcfb87e2680c..10c861a1a852649860ba3ca41a628e97
      expect(b.calls.select).toBe(0)
    } finally { await b.ctx.fiber.dispose() }
 diff --git a/packages/client/ui-model-selection/tests/model-select.client.spec.tsx b/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
-index 470c852ec8d0e85e731ba7b05ff2e67a1897eb07..f3efc8e4c971823efd7a7922a958ff8edbb3f1dd 100644
+index 470c852ec8d0e85e731ba7b05ff2e67a1897eb07..6089a93fe371463ffe7a9c547f9bb2f28ae718d9 100644
 --- a/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
 +++ b/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
 @@ -143,7 +143,7 @@ describe('ModelSelect reasoning effort', () => {
@@ -1435,11 +1435,11 @@ index 470c852ec8d0e85e731ba7b05ff2e67a1897eb07..f3efc8e4c971823efd7a7922a958ff8e
 +
 +
 +it('registered public model captions stay distinct across two session sources; missing catalog is localized without raw ids', () => {
-+  const groups = [{ id: 'lyapunov-plans', name: 'Pontryagin', models: [{ id: 'peiri', name: 'Pontryagin' }] }]
++  const groups = [{ id: 'lyapunov-plans', name: 'Peiri', models: [{ id: 'peiri', name: 'Peiri' }] }]
 +  const first = createSnapshotStore(state({ current: { provider: 'lyapunov-plans', model: 'peiri' }, groups }))
 +  const second = createSnapshotStore(state({ current: { provider: 'private-provider', model: 'private-model' }, groups: [{ id: 'private-provider', name: 'Public gateway', models: [{ id: 'private-model', name: 'Public second model' }] }] }))
 +  const view = render(<div><ModelSelect locked={false} available directory={first} load={vi.fn()} select={vi.fn()} t={t} /><ModelSelect locked={false} available directory={second} load={vi.fn()} select={vi.fn()} t={t} /></div>)
-+  expect(view.getByRole('button', { name: '选择模型，当前 Pontryagin' })).toBeTruthy()
++  expect(view.getByRole('button', { name: '选择模型，当前 Peiri' })).toBeTruthy()
 +  expect(view.getByRole('button', { name: '选择模型，当前 Public second model' })).toBeTruthy()
 +  act(() => { first.update(snapshot => { snapshot.groups = [] }) })
 +  expect(view.getByRole('button', { name: '选择模型，当前 模型' })).toBeTruthy()
@@ -1655,7 +1655,7 @@ index 935a43ff2c47bd44f1831a7ef4b1a75f81cb7b10..75019be1722a1aa70af41b88c6e6b981
            getDefault: () => stringWrapping.getSnapshot(),
            setDefault: (value) => { stringWrapping.set(value) },
 diff --git a/packages/client/ui-trajectory/tests/table.client.spec.tsx b/packages/client/ui-trajectory/tests/table.client.spec.tsx
-index 7d054adc9b4ccf042feed9f01f383a54641d58a2..fb578dc0041a8772818a318baa00f07ebc8e6945 100644
+index 7d054adc9b4ccf042feed9f01f383a54641d58a2..24956fc037e8a834d25515df1bf5c1f2d3a83371 100644
 --- a/packages/client/ui-trajectory/tests/table.client.spec.tsx
 +++ b/packages/client/ui-trajectory/tests/table.client.spec.tsx
 @@ -2,13 +2,17 @@
@@ -1689,15 +1689,15 @@ index 7d054adc9b4ccf042feed9f01f383a54641d58a2..fb578dc0041a8772818a318baa00f07e
 +    catalog.store.set({ status: 'ready', error: null, value: { default: null, groups: [{ id: 'raw-provider', name: 'Public gateway', models: [{ id, name }] }], routableProviders: ['raw-provider'], failures: [] } })
 +    return new ModelDirectory({} as never, SessionId(id), () => true, catalog, createSnapshotStore(undefined), () => true)
 +  }
-+  const first = make('peiri', 'Pontryagin'), second = make('other-id', 'Second public name')
++  const first = make('peiri', 'Peiri'), second = make('other-id', 'Second public name')
 +  const turns: readonly TrajectoryTurnModel[] = [{ turn: 1, groups: [{ title: 'Step 1', cells: [{ index: 1, sourceSeq: 1, kind: 'message', text: 'response', timeSeconds: 1 }] }] }]
 +  const numbers = [{ turn: 1, step: 1, seq: 1, group: 'Step 1', number: 1, provider: 'raw-provider', model: 'peiri', requestConfig: { provider: 'raw-provider', model: 'peiri' } }]
 +  const original = JSON.stringify(numbers)
 +  const view = render(<LocalizedTrajectoryTable t={t} renderImages={renderImagesStub} turns={turns} requestNumbers={numbers} modelDirectory={first} {...FOLD_PROPS} />)
 +  fireEvent.click(screen.getByRole('button', { name: 'Request #1' }))
-+  expect(screen.getByText('Pontryagin')).toBeTruthy();expect(screen.getByText('Public gateway')).toBeTruthy()
++  expect(screen.getByText('Peiri')).toBeTruthy();expect(screen.getByText('Public gateway')).toBeTruthy()
 +  view.rerender(<LocalizedTrajectoryTable t={t} renderImages={renderImagesStub} turns={turns} requestNumbers={[{ ...numbers[0]!, model: 'other-id' }]} modelDirectory={second} {...FOLD_PROPS} />)
-+  expect(screen.getByText('Second public name')).toBeTruthy();expect(screen.queryByText('Pontryagin')).toBeNull()
++  expect(screen.getByText('Second public name')).toBeTruthy();expect(screen.queryByText('Peiri')).toBeNull()
 +  act(() => { second.store.update(state => { state.groups = [] }) })
 +  expect(view.container.textContent).not.toContain('raw-provider');expect(view.container.textContent).not.toContain('other-id')
 +  view.rerender(<LocalizedTrajectoryTable turns={turns} requestNumbers={numbers} modelDirectory={second} t={tZh} renderImages={renderImagesStub} {...FOLD_PROPS} />)

@@ -121,7 +121,7 @@ test('AG2: planning hint respects a complete native skill catalog', () => {
 
 const actualPointers = parsePointers(readFileSync(new URL('../src/plugin.ts',import.meta.url),'utf8'))
 
-test('A06：规则地面/台面走 Blender，语义外观按约束走 Peiri，不按物体名称写死', () => {
+test('A06：规则地面/台面走 Blender，语义外观按约束走 Pontryagin，不按物体名称写死', () => {
   const cases = [
     ['生成一个 3m × 2m、厚 0.1m 的地板','blender'],
     ['做一个长 1.2 米宽 0.6 米的可编辑台面','blender'],
@@ -138,16 +138,16 @@ test('A06：规则地面/台面走 Blender，语义外观按约束走 Peiri，�
     const plan = planDomainPointers({...input(request),pointers:actualPointers})!
     expect(plan.injected).toContain('asset-generation')
     expect(plan.text).toContain("Generation route:")
-    expect(plan.text).toContain(method === 'blender' ? "use Blender" : "use Peiri 3D")
+    expect(plan.text).toContain(method === 'blender' ? "use Blender" : "use Pontryagin 3D")
   }
 })
 
 test('A06：显式生成器优先，否定供应商选择不覆盖正向 Blender 选择', () => {
-  for (const request of ['用 Peiri 3D 生成一块 2m 地板','不要用Blender，生成一个箱子','Use Peiri 3D to generate a cube','Generate a cube without Blender'])
+  for (const request of ['用 Pontryagin 3D 生成一块 2m 地板','不要用Blender，生成一个箱子','Use Pontryagin 3D to generate a cube','Generate a cube without Blender'])
     expect(selectAssetGenerationRoute(request)?.method).toBe('peiri3d')
-  for (const request of ['用Blender生成一根香蕉','不用 Peiri，使用 Blender 生成一个写实箱子','Do not use Peiri 3D, use Blender to generate a model'])
+  for (const request of ['用Blender生成一根香蕉','不用 Pontryagin，使用 Blender 生成一个写实箱子','Do not use Pontryagin 3D, use Blender to generate a model'])
     expect(selectAssetGenerationRoute(request)?.method).toBe('blender')
-  expect(selectAssetGenerationRoute('用 Blender 生成精确地面，再用 Peiri 3D 生成一个写实摆件')?.method).toBe('mixed')
+  expect(selectAssetGenerationRoute('用 Blender 生成精确地面，再用 Pontryagin 3D 生成一个写实摆件')?.method).toBe('mixed')
 })
 
 test('A06：没有生成授权的动作/导入保持原路由；只方案与停止不能新增提交', () => {
@@ -180,4 +180,121 @@ test('Alpha6.2：优先实际发现的适用Blender MCP，不猜命名空间；�
  expect(absent.text).toContain('No Blender MCP tool is currently visible')
  expect(absent.text).toContain('blender_run batch fallback remains usable')
  expect(absent.text).not.toContain(tool.name)
+})
+
+// Source3095正常账户照片任务的逐字制作目标；预算条件不表示现在取消。
+const photoBudgetPrompt = "根据本条附上的唯一檐角照片，自主做一个可编辑的檐角局部：有弧度和厚度的屋檐、至少三条连续瓦垄、可辨的木纹构件。只做局部，不造整塔，不读或复用其它会话的脚本和成品。使用当前已连接的 Blender MCP 实际建模，不以 blender_run、独立 MCP 客户端或空文字代替。\n先实际读这张照片并说明关键形状，然后自主写 bpy。生成真实整体和近景预览并实际看图，指出具体几何差距，至少做一轮针对预览的几何修订，再看同视角验证。保留前后预览。程序材质必须烘焙成可携带图片与 UV，交付可编辑 .blend 和内嵌贴图 .glb；使用当前产品原 export_world／资源版本接口，最终正常导入本会话 Viewer（physicalize:false），不要启动物理世界。所有产物放当前工作区 photo-eave-a9616，文件不要覆盖前一版本。最后如实列未达到照片的地方。\n本轮验收最多15分钟、12个模型step、12000输出token；连续两轮没有新图像或几何事实应停止并报告，不重复提交未知或超时工具。先确保实际工具和图像往返，不用“运行中”代替交付。"
+
+test('照片制作预算中的未来停止条件不抢占目标，当前已发现Blender MCP路线仍可用', () => {
+  const request: EnvironmentRoutingInput = {
+    messages: [userMessage(text(photoBudgetPrompt), { type: 'image', attachment: { attachmentId: 'own-photo-fixture', name: '03_dougong_detail.jpg', mediaType: 'image/jpeg', width: 1500, height: 998, bytes: 290983 } })],
+    todos: [],
+    hasTool: name => ['mcp__blender__execute_blender_code', 'sim_world_list', 'job_list'].includes(name),
+    visibleMcpTools: [{ name: 'mcp__blender__execute_blender_code', description: '' }],
+  }
+  const decision = routeEnvironment(request), plan = planDomainPointers({ ...request, pointers: actualPointers })!
+  // 只纠正Stop；原modify优先于build仍把后续预览修订归local，不伪称完整新制作验收。
+  expect(decision.stage).toBe('local')
+  expect(decision.inputSource).toBe('photo')
+  expect(decision.facts.sceneId).toBeUndefined()
+  expect(decision.facts.worldId).toBeUndefined()
+  expect(decision.facts.sessionEnvironmentTodos).toEqual([])
+  expect(plan.text).not.toContain('Stop immediately')
+  expect(plan.text).not.toContain('[Stop]')
+  expect(plan.text).toContain('Blender architectural modeling')
+  expect(plan.text).not.toContain('An annotation-based local edit requires scene_edit')
+  expect(plan.text).not.toContain('Edit an existing scene locally with scene_edit')
+  // 显式制作的同预算句仍消费原实际MCP名称；不冒称local档已点名全部工具。
+  const explicitBuild = planDomainPointers({ ...request, messages: [userMessage(text('用Blender创建檐角构件场景；连续两轮没有新图像应停止并报告'))], pointers: actualPointers })!
+  expect(explicitBuild.decision.stage).toBe('new')
+  expect(explicitBuild.text).toContain('mcp__blender__execute_blender_code')
+})
+
+test('中英未来条件和未达到的制作预算不注入立即停止，否定停止保持制作目标', () => {
+  for (const request of [
+    '用Blender创建庭院场景；连续两轮没有新图像应停止并报告',
+    '创建庭院场景，如果两轮没有进展就停止',
+    '创建庭院场景；达到12个模型step后停止',
+    '创建庭院场景；停止应在连续两轮没有进展后执行',
+    'Create a courtyard scene using Blender; stop if two rounds produce no progress.',
+    'Create a courtyard scene using Blender; if two rounds fail, stop and report.',
+    'Create a courtyard scene using Blender; after two unsuccessful rounds, stop and report.',
+    'Create a courtyard scene using Blender; stop after twelve steps.',
+    'Create a courtyard scene using Blender; stop when the time budget is reached.',
+    '不要停止，用Blender创建庭院场景',
+    'Create a courtyard scene using Blender; do not stop.',
+    "Create a courtyard scene using Blender; don't cancel.",
+  ]) {
+    const decision = routeEnvironment(input(request, { hasTool: () => true }))
+    expect(decision.stage).toBe('new')
+    expect(renderEnvironmentPointer(decision) ?? '').not.toContain('Stop the action immediately')
+  }
+})
+
+test('当前立即停止、已满足预算后的明确停止，以及未来条件后的独立Stop仍优先', () => {
+  for (const request of [
+    '现在停止这个场景的生成',
+    '取消这个场景的生成',
+    '已经连续两轮没有新图像或几何事实，应立即停止场景制作',
+    '预算已经耗尽，现在立即停止场景制作',
+    '创建庭院场景，如果两轮没有进展就停止。现在立即停止场景生成',
+    '不要停止场景生成；现在取消场景生成',
+    'Stop creating this courtyard scene now.',
+    'Two rounds have already failed; stop the courtyard scene immediately.',
+    'Create a courtyard scene; if two rounds fail, stop. Cancel the scene now.',
+    'Do not stop the courtyard scene; cancel it now.',
+  ]) {
+    const decision = routeEnvironment(input(request, { hasTool: name => name === 'sim_stop' || name === 'job_kill' }))
+    expect(decision.stage).toBe('stop')
+    expect(decision.hints.map(hint => hint.name)).toEqual(['sim_stop', 'job_kill'])
+    expect(renderEnvironmentPointer(decision)).not.toContain('Generation route:')
+  }
+  expect(routeEnvironment(input('只给方案，不要执行：创建庭院场景；如果预算耗尽就停止')).stage).toBe('plan-only')
+})
+
+test('R2：当前场景仍在生成的中文条件配现在立即停止，属于当前Stop', () => {
+  const decision = routeEnvironment(input('如果这个场景仍在生成，现在立即停止', { hasTool: name => name === 'sim_stop' || name === 'job_kill' }))
+  expect(decision.stage).toBe('stop')
+  expect(decision.hints.map(hint => hint.name)).toEqual(['sim_stop', 'job_kill'])
+  expect(renderEnvironmentPointer(decision)).not.toContain('Generation route:')
+  for (const request of [
+    '创建庭院场景，如果两轮后这个场景仍在生成就停止',
+    '创建庭院场景，如果这个场景仍在生成，连续两轮没有进展后立即停止',
+    '如果这个场景仍在生成，现在不要停止',
+  ]) expect(routeEnvironment(input(request)).stage).toBe('new')
+})
+
+test('R2：当前场景仍在生成的英文条件配stop it now，属于当前Stop', () => {
+  const decision = routeEnvironment(input('If this scene is still being generated, stop it now.', { hasTool: name => name === 'sim_stop' || name === 'job_kill' }))
+  expect(decision.stage).toBe('stop')
+  expect(decision.hints.map(hint => hint.name)).toEqual(['sim_stop', 'job_kill'])
+  expect(renderEnvironmentPointer(decision)).not.toContain('Generation route:')
+  expect(routeEnvironment(input('Create a courtyard scene; if this scene is still being generated after two rounds, stop it now.')).stage).toBe('new')
+  expect(routeEnvironment(input('If this scene is still being generated, do not stop it now.')).stage).toBe('new')
+})
+
+test('R2：15.5分钟预算中的小数点不切断未来停止条件，制作目标仍属new', () => {
+  for (const request of [
+    '创建庭院场景；预算达到15.5分钟后停止',
+    'Create a courtyard scene; after 15.5 minutes, stop.',
+  ]) {
+    const decision = routeEnvironment(input(request))
+    expect(decision.stage).toBe('new')
+    expect(renderEnvironmentPointer(decision) ?? '').not.toContain('Stop the action immediately')
+  }
+  expect(routeEnvironment(input('创建庭院场景；预算达到15.5分钟后停止。现在立即停止场景生成')).stage).toBe('stop')
+})
+
+
+test('角色定义：Pontryagin明确选后台世界生成，Peiri加Blender仍是编程建模', () => {
+  for (const request of ['用Pontryagin生成一个规则箱子','Use Pontryagin to generate a cube','用Pontryagin 3D生成一块2m地板']) {
+    const route=selectAssetGenerationRoute(request)!
+    expect(route.method).toBe('peiri3d');expect(route.why).toContain('Pontryagin 3D');expect(route.why).not.toContain('Peiri 3D')
+  }
+  for (const request of ['用Peiri通过Blender生成一个3D模型','Use Peiri with Blender to generate a cube','用Peiri生成一个规则箱子'])
+    expect(selectAssetGenerationRoute(request)?.method).toBe('blender')
+  for (const request of ['使用生成式生成一块2m地板','用文生3D生成一个箱子','用图生3D生成一个箱子'])
+    expect(selectAssetGenerationRoute(request)?.method).toBe('peiri3d')
+  const mixed=selectAssetGenerationRoute('用Blender生成规则地面，再用Pontryagin生成一个写实摆件')!
+  expect(mixed.method).toBe('mixed');expect(mixed.why).toContain('Pontryagin 3D')
 })

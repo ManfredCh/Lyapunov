@@ -76,6 +76,8 @@ sh lyapunov-install.sh
 
 ## First run
 
+Peiri is the language model name used for conversation and tool orchestration. Pontryagin is the backend world model name. MCP integrations provide tools.
+
 1. Open Lyapunov. The welcome page lets you choose a language and theme.
 2. Choose **Sign in**, complete website authorization in your browser, and return to the same application window. The workspace opens after the account is verified. To use the website's model service, first register an account and top up Credits. Signed-in model calls use **Peiri** and the account's central Credits.
 3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to product servers, including the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri, product billing, or central Credits.

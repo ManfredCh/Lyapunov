@@ -9,7 +9,7 @@ export type {
 export type GenerationProduct = "marble" | "hunyuan" | "tripo" | "image"
 /** 正式产品名称与内部 product 分开；协议与审计继续使用原 product。 */
 export function generationPublicName(product: GenerationProduct): string {
-  return product === "image" ? "Peiri 图像" : "Peiri 3D"
+  return product === "image" ? "图像生成 / Image generation" : "Pontryagin 3D"
 }
 
 /** 正式工具的错误投影；原始 provider 错误保留在 cause/任务审计，不用于产品正文。 */
