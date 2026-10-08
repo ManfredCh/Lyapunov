@@ -3,6 +3,7 @@ import { blendExternalFiles } from "./blend-deps.ts"
 import {geometrySourceFacts,objMaterialFiles,type SourceTexturePolicy} from './geometry-source-deps.ts'
 import { splatBounds } from "./splat-bounds.ts"
 import {urdfVisualBounds} from './urdf-bounds.ts'
+import {mjcfOriginalBounds} from './mjcf-bounds.ts'
 import { createReadStream, existsSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { basename, dirname, extname, relative, resolve } from "node:path"
@@ -384,7 +385,7 @@ export async function parseAsset(path: string, override?: ResourceRef["source"],
     if (!root) throw new Error("UNSUPPORTED_ROBOT_XML_ROOT")
     const dependencies=await robotDependencies(path)
     if(dependencies.find(row=>resolve(row.path)===resolve(path))?.sha256!==createHash('sha256').update(text).digest('hex'))throw Error('RESOURCE_CHANGED_DURING_READ: '+path)
-    const bounds=document.robot?await urdfVisualBounds(document.robot,path,dependencies):undefined
+    const bounds=document.robot?await urdfVisualBounds(document.robot,path,dependencies):await mjcfOriginalBounds(path,dependencies)
     return { kind: "robot", mimeType: document.mujoco ? "application/x-mjcf+xml" : "application/x-urdf+xml", source: override ?? defaultSource, dependencies, metadata: { format: document.mujoco ? "mjcf" : "urdf", modelName: root.model ?? root.name ?? basename(path),...bounds??{} } }
   }
   if ([".hdr", ".exr"].includes(extension)) {

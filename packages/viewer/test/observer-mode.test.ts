@@ -67,6 +67,36 @@ function expectSameView(actual:ViewerViewState,expected:ViewerViewState){
   else expect(actual.intrinsics).toBeUndefined()
 }
 
+test('原导航DOM随同一locale显示Orbit/Roam和相机出口；换语言不通知观察状态或改机位',()=>{
+  const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
+  const dom=new JSDOM('<div id="viewer"></div>',{url:'http://viewer-copy.fixture.invalid'}),previous=new Map<string,PropertyDescriptor|undefined>()
+  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','CustomEvent','Node','localStorage']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true,writable:true})}
+  try{
+    const {viewer}=harness(),host=document.getElementById('viewer')!
+    let language:'zh'|'en'='zh'
+    viewer.options.container=host;viewer.options.translate=(zh:string,en:string)=>language==='en'?en:zh
+    viewer.navigationButtons=[];viewer.initializeNavigationBar();viewer.setNavigationMode('orbit',false)
+    const buttons=()=>[...host.querySelectorAll('button')],find=(label:string)=>buttons().find(button=>button.textContent===label)!
+    expect(find('环绕').getAttribute('aria-label')).toBe('查看器环绕');expect(find('漫游').title).toBe('漫游场景 · WASD/QE')
+    const before=viewer.getViewState();let updates=0;const unsubscribe=viewer.subscribeObserverState(()=>updates++)
+    language='en';viewer.renderFrame()
+    expect(host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Viewer navigation')
+    expect(find('Orbit').title).toBe('Orbit the scene');expect(find('Roam').getAttribute('aria-label')).toBe('Roam view')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Free orbit')
+    expect(updates).toBe(0);expectSameView(viewer.getViewState(),before)
+    find('Roam').click();expect(viewer.observerState().navigation).toBe('first-person');expect(find('Roam').getAttribute('aria-pressed')).toBe('true')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Free movement · WASD/QE')
+    viewer.setCameraRigs([spec()]);viewer.pilotCameraRig('camera-a')
+    expect(find('Exit camera').hidden).toBe(false);expect(find('Exit camera').title).toBe('Return to the main view')
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('Viewing camera (locked)')
+    find('Exit camera').click();expect(viewer.observerState().mode).toBe('free');expect(find('Exit camera').hidden).toBe(true)
+    const returned=viewer.getViewState(),after=updates;language='zh';viewer.renderFrame()
+    expect(find('环绕')).toBeTruthy();expect(find('漫游')).toBeTruthy();expect(find('退出相机').getAttribute('aria-label')).toBe('退出相机')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('自由漫游 · WASD/QE')
+    expect(updates).toBe(after);expectSameView(viewer.getViewState(),returned);unsubscribe()
+  }finally{dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete (globalThis as any)[key]}}
+})
+
 describe('A08统一观察模式与全部出口',()=>{
   test('无World已保存机位保持完整target/K/clips，切机位及Scene metadata保存不丢主视图返程',()=>{
     const {viewer}=harness()

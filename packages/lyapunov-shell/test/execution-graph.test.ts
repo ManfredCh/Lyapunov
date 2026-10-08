@@ -34,6 +34,75 @@ describe('原生执行图折叠',()=>{
   const graph=foldExecutionGraph(empty(),event(0,'turn/end',{turn:1,reason:{kind}}))
   expect(graph.nodes.find(row=>row.id==='turn:1')?.status).toBe(status)
  })
+ test('TIMEOUT 失败流按原 step 结束 request，step/end 与 turn/end 都不残留 running',()=>{
+  const diagnostic={code:'TIMEOUT',stage:'upstream_stream',fieldPath:null,retryable:false,effect:'unknown',requestId:'fixture-request'}
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'assistant/attempt',{turn:1,step:1,stream:[{time:1003,chunk:{type:'finish',reason:{kind:'error',failure:{code:'TIMEOUT',message:'PRIVATE_TIMEOUT',diagnostic}}}}]}),event(4,'step/end',{turn:1,step:1}),event(5,'turn/end',{turn:1,reason:{kind:'error',error:{code:'TIMEOUT',message:'PRIVATE_TIMEOUT',diagnostic}}})]
+  const before=JSON.stringify(events),graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.find(row=>row.id==='request:2')).toMatchObject({status:'failed',code:'TIMEOUT',diagnostic:{requestId:'fixture-request',effect:'unknown'}})
+  expect(graph.nodes.find(row=>row.id==='model:3')).toMatchObject({status:'failed',code:'TIMEOUT'})
+  expect(graph.nodes.find(row=>row.id==='step:1:1')).toMatchObject({status:'failed',code:'TIMEOUT'})
+  expect(graph.nodes.find(row=>row.id==='turn:1')).toMatchObject({status:'failed',code:'TIMEOUT'})
+  expect(graph.nodes.some(row=>row.status==='running')).toBe(false);expect(JSON.stringify(events)).toBe(before);expect(JSON.stringify(graph)).not.toContain('PRIVATE_TIMEOUT')
+ })
+ test('同 step 多次真实 request 的失败 attempt 独立保留，成功重试不覆盖前次 request',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'assistant/attempt',{turn:1,step:1,stream:[{time:1003,chunk:{type:'finish',reason:{kind:'error',failure:{code:'HTTP_503',message:'fixture'}}}}]}),event(4,'llm/retry',{turn:1,step:1,retry:1,maxRetries:5,failure:{code:'HTTP_503'}}),event(5,'llm/retry-started',{turn:1,step:1,retry:1}),event(6,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(7,'assistant/message',{turn:1,step:1,message:{content:[]},stream:[{time:1007,chunk:{type:'finish',reason:{kind:'stop'}}}]}),event(8,'step/end',{turn:1,step:1}),event(9,'turn/end',{turn:1,reason:{kind:'completed'}})]
+  const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.find(row=>row.id==='request:2')).toMatchObject({status:'failed',code:'HTTP_503'})
+  expect(graph.nodes.find(row=>row.id==='request:6')).toMatchObject({status:'success',code:null})
+  expect(graph.nodes.find(row=>row.id==='model:3')).toMatchObject({status:'failed',code:'HTTP_503'})
+  expect(graph.nodes.find(row=>row.id==='model:7')).toMatchObject({status:'success'})
+  expect(graph.nodes.find(row=>row.id==='retry:4')?.status).toBe('success')
+  expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('success')
+ })
+ test('旧日志只有一次诊断时保该 request 阶段最终状态，不杜撰第二次身份或抹失败 attempt',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'assistant/attempt',{turn:1,step:1,stream:[{time:1003,chunk:{type:'finish',reason:{kind:'error',failure:{code:'HTTP_503'}}}}]}),event(4,'llm/retry',{turn:1,step:1,retry:1}),event(5,'llm/retry-started',{turn:1,step:1,retry:1}),event(6,'assistant/message',{turn:1,step:1,message:{content:[]},stream:[{time:1006,chunk:{type:'finish',reason:{kind:'stop'}}}]}),event(7,'step/end',{turn:1,step:1})]
+  const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.filter(row=>row.kind==='request')).toHaveLength(1);expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('success')
+  expect(graph.nodes.find(row=>row.id==='model:3')?.status).toBe('failed');expect(graph.nodes.find(row=>row.id==='model:6')?.status).toBe('success');expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('success')
+ })
+ test('step/end 没有结果时保持未知；turn completed 不伪造缺失模型或工具的成功',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'tool/call',{turn:1,step:1,callId:'pending',name:'operation',arguments:'{}'}),event(4,'step/end',{turn:1,step:1}),event(5,'turn/end',{turn:1,reason:{kind:'completed'}})]
+  const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('unknown');expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('unknown')
+  expect(graph.nodes.find(row=>row.id==='tool:pending')?.status).toBe('running')
+ })
+ test('模型成功而工具失败或未知副作用仍按真实结果收口，不把步骤标为成功',()=>{
+  const model=event(2,'assistant/message',{turn:1,step:1,message:{content:[]},stream:[{time:1002,chunk:{type:'finish',reason:{kind:'tool-calls'}}}]})
+  for(const unknown of [false,true]){
+   const result=unknown?'[timed out after 30ms]\n[killed by signal: SIGTERM]':'PRIVATE_FAILURE'
+   const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),model,event(3,'tool/call',{turn:1,step:1,callId:'operation',name:'bash',arguments:'{}'}),event(4,'tool/result',{turn:1,step:1,message:createToolResultMessage({callId:ToolCallId('operation'),isError:!unknown,content:[{type:'text',text:result}]}),error:unknown?undefined:{code:'TOOL_FAILURE'}}),event(5,'step/end',{turn:1,step:1}),event(6,'turn/end',{turn:1,reason:{kind:'error',error:{code:'UNKNOWN'}}})]
+   const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+   expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe(unknown?'unknown':'failed');expect(graph.nodes.find(row=>row.id==='tool:operation')?.status).toBe(unknown?'unknown':'failed')
+   if(unknown)expect(graph.recovery.unknown).toMatchObject([{callId:'operation'}])
+  }
+ })
+ test('旧日志缺 step/end 且同 step 工具未交回或结果未知时，turn 失败不伪收口工具步骤',()=>{
+  for(const outcome of ['pending','unknown'] as const){
+   const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'tool/call',{turn:1,step:1,callId:'uncertain',name:'bash',arguments:'{}'})]
+   if(outcome==='unknown')events.push(event(4,'tool/result',{turn:1,step:1,message:createToolResultMessage({callId:ToolCallId('uncertain'),isError:false,content:[{type:'text',text:'[timed out after 30ms]\n[killed by signal: SIGTERM]'}]})}))
+   events.push(event(5,'turn/end',{turn:1,reason:{kind:'error',error:{code:'TIMEOUT'}}}))
+   const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+   expect(graph.nodes.find(row=>row.id==='turn:1')?.status).toBe('failed');expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('failed')
+   expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('unknown');expect(graph.nodes.find(row=>row.id==='tool:uncertain')?.status).toBe(outcome==='pending'?'running':'unknown')
+   if(outcome==='unknown')expect(graph.recovery.unknown).toMatchObject([{callId:'uncertain'}])
+  }
+ })
+ test('终态仅收口原 turn 的 request/step，不改变另一 turn、旧失败 attempt 或未知副作用',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'old'}),event(3,'turn/start',{turn:2}),event(4,'step/start',{turn:2,step:1}),event(5,'lyapunov/request-diagnostics',{turn:2,step:1,model:'current'}),event(6,'lyapunov/tool-observation',obs('uncertain',{turn:2,diagnostic:{code:'TOOL_OUTCOME_UNKNOWN',stage:null,fieldPath:null,retryable:false,effect:'unknown',requestId:null}})),event(7,'turn/end',{turn:1,reason:{kind:'error',error:{code:'TIMEOUT'}}})]
+  const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('failed');expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('failed')
+  expect(graph.nodes.find(row=>row.id==='request:5')?.status).toBe('running');expect(graph.nodes.find(row=>row.id==='step:2:1')?.status).toBe('running');expect(graph.recovery.unknown).toMatchObject([{callId:'uncertain'}])
+ })
+ test('中途已提交可见片段的 interrupted assistant/message 保取消，重试等待也由取消收口',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'assistant/message',{turn:1,step:1,interrupted:true,message:{content:[]},stream:[{time:1003,chunk:{type:'text-delta',text:'PRIVATE_PARTIAL'}}]}),event(4,'llm/retry',{turn:1,step:1,retry:1}),event(5,'step/end',{turn:1,step:1}),event(6,'turn/end',{turn:1,reason:{kind:'aborted',reason:{kind:'user'}}})]
+  const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())
+  expect(graph.nodes.find(row=>row.id==='model:3')?.status).toBe('cancelled');expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('cancelled');expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('cancelled');expect(graph.nodes.find(row=>row.id==='retry:4')?.status).not.toBe('waiting')
+ })
+ test('checkout 原 seq 前缀仍恢复运行态，未来终态不倒灌且完整 unknown 保留',()=>{
+  const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'lyapunov/request-diagnostics',{turn:1,step:1,model:'fixture'}),event(3,'lyapunov/tool-observation',obs('uncertain',{diagnostic:{code:'TOOL_OUTCOME_UNKNOWN',stage:null,fieldPath:null,retryable:false,effect:'unknown',requestId:null}})),event(4,'turn/end',{turn:1,reason:{kind:'error',error:{code:'TIMEOUT'}}}),event(5,'session/history-checkout',{throughSeq:2})]
+  const graph=rebuildExecutionGraph({id:SessionId('session-a')},events)
+  expect(graph.nodes.find(row=>row.id==='request:2')?.status).toBe('running');expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('running');expect(graph.nodes.find(row=>row.id==='turn:1')?.status).toBe('running');expect(graph.recovery.unknown).toMatchObject([{callId:'uncertain'}]);expect(graph.asOfSeq).toBe(5)
+ })
  test('A→B→A、换参数和随机action/request/worldId不重置失败窗口',()=>{
   let graph=empty()
   for(let i=0;i<3;i++)graph=foldExecutionGraph(graph,event(i,'lyapunov/tool-observation',obs('c'+i,{name:i===1?'alternate':'operation',argumentsHash:String(i),target:{worldId:'guessed-'+i}})))

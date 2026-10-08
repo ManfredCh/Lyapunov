@@ -219,6 +219,74 @@ index 35158490f2d73655c20665899048107f800eeace..12f5dd30466206ddeb30a9bf769a75fa
    it('serializes concurrent path adoption and preserves an existing title', async () => {
      const { controller, root } = await harness()
      const path = stageDir(root, 'alpha')
+diff --git a/packages/client/ui-chat/src/client/chat/MessageItem.tsx b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
+index 9005150af0d6449e744ec9ea2402673d9c1fd0c2..719dfe21e9c49725bd06be9fb0ff095a15362019 100644
+--- a/packages/client/ui-chat/src/client/chat/MessageItem.tsx
++++ b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
+@@ -55,6 +55,9 @@ function failureMessage(
+   if (code === 'ACCOUNT_SIGNED_OUT') return t('message.failure.accountSignedOut')
+   if (code === 'ACCOUNT_SIGN_IN_REQUIRED') return t('message.failure.accountSignInRequired')
+   if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') return t('message.failure.quota')
++  if (code === 'TIMEOUT' || code === 'TRANSPORT') return t('message.failure.transportIncomplete')
++  if (code === 'CENTRAL_DIAGNOSTIC_INVALID') return t('message.failure.centralDiagnosticInvalid')
++  if (code === 'model_reconciliation_required') return t('message.failure.centralReconciliationRequired')
+   return code === 'AUTH' ? t('message.failure.auth') : message
+ }
+ 
+diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
+index cc50abcf12b7807204bced3ba9d0e1cc6a5f518a..6ca50ef5c774e0bffdae8cba85215ea21900fe63 100644
+--- a/packages/client/ui-chat/src/client/locale.ts
++++ b/packages/client/ui-chat/src/client/locale.ts
+@@ -167,6 +167,9 @@ export const zh = {
+   'message.failure.accountSignedOut': '任务已因退出 DeepSeek 登录而停止。',
+   'message.failure.accountSignInRequired': '请先登录 DeepSeek，并确认请求地址支持账号认证。',
+   'message.failure.quota': '当前请求的额度已用尽',
++  'message.failure.transportIncomplete': '模型请求未完成。请保留本会话记录，核实原请求结果后再继续；如需帮助，请联系 voryneltech@gmail.com。',
++  'message.failure.centralDiagnosticInvalid': '无法确认模型请求的诊断结果。请保留本会话记录，先核实原请求；如需帮助，请联系 voryneltech@gmail.com。',
++  'message.failure.centralReconciliationRequired': '原模型请求结果仍待核实。请保留本会话记录，核实结果后再继续；如需帮助，请联系 voryneltech@gmail.com。',
+   'message.turnError': '本轮运行失败',
+   'message.maxTokens': '已达到输出 token 上限',
+   'message.maxTokens.hint': '回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。',
+@@ -362,6 +365,9 @@ export const en = {
+   'message.failure.accountSignedOut': 'Stopped because you signed out of DeepSeek.',
+   'message.failure.accountSignInRequired': 'Sign in to DeepSeek and ensure the request destination supports account authentication.',
+   'message.failure.quota': 'Request quota exhausted.',
++  'message.failure.transportIncomplete': 'The model request did not complete. Keep this conversation record and verify the original request outcome before continuing. For help, contact voryneltech@gmail.com.',
++  'message.failure.centralDiagnosticInvalid': 'The model request diagnostic could not be verified. Keep this conversation record and verify the original request. For help, contact voryneltech@gmail.com.',
++  'message.failure.centralReconciliationRequired': 'The original model request outcome still needs to be verified. Keep this conversation record and verify the outcome before continuing. For help, contact voryneltech@gmail.com.',
+   'message.turnError': 'This turn failed',
+   'message.maxTokens': 'Output token limit reached',
+   'message.maxTokens.hint': 'The reply was cut off; earlier output is preserved in the conversation. Send "continue" to let the model resume.',
+diff --git a/packages/client/ui-chat/tests/chat-view.client.spec.tsx b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
+index ba6d2e0b4765b28c3782b61fbe2b555516f73fad..79309d112325577a4ca173cb402e057a94099eab 100644
+--- a/packages/client/ui-chat/tests/chat-view.client.spec.tsx
++++ b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
+@@ -643,6 +643,25 @@ describe('Chat node rendering', () => {
+ })
+ 
+ describe('ChatView', () => {
++  it.each(['TIMEOUT', 'TRANSPORT', 'CENTRAL_DIAGNOSTIC_INVALID', 'model_reconciliation_required'])('switches %s help through Chinese, English and Chinese in the real failure DOM', code => {
++    const h = makeHarness({ nodes: [user(1, 'try'), { ...turnError(2, code), message: 'PRIVATE_BACKEND_MESSAGE' }] })
++    const view = render(<h.ChatView {...h.props} />)
++    const node = view.container.querySelector('[role="status"]')!
++    expect(node.textContent).toContain('请保留本会话记录')
++    expect(node.textContent).toContain('voryneltech@gmail.com')
++    expect(view.container.textContent).not.toContain('PRIVATE_BACKEND_MESSAGE')
++    h.props.t = makeTranslate(en, commonEn)
++    view.rerender(<h.ChatView {...h.props} />)
++    expect(view.container.textContent).toContain('Keep this conversation record')
++    expect(view.container.textContent).toContain('voryneltech@gmail.com')
++    expect(view.container.textContent).not.toContain('请保留本会话记录')
++    h.props.t = makeTranslate(zh, commonZh)
++    view.rerender(<h.ChatView {...h.props} />)
++    expect(view.container.textContent).toContain('请保留本会话记录')
++    expect(view.container.textContent).not.toContain('Keep this conversation record')
++    expect(view.container.querySelector('[role="status"]')).toBe(node)
++  })
++
+   it('renders only referenced Nodes without deleting unreferenced Node data', () => {
+     const snapshot = chatSnapshotFixture({ nodes: [user(1, 'included'), user(2, 'omitted')] })
+     const h = makeHarness({}, {}, snapshot)
 diff --git a/packages/client/ui-commands/src/client/service.ts b/packages/client/ui-commands/src/client/service.ts
 index 2e8fd7a0fbb3e04f420cd4e97def872259bad54a..22b6000f6591cd85b185dc78213baca2b3c8d9fc 100644
 --- a/packages/client/ui-commands/src/client/service.ts
@@ -1244,3 +1312,837 @@ index 4abc7bfc6898cd9dae856a366973cfb043731d98..1e4d43370c9cea73e15170a44b3a8da7
 +    await ctx.fiber.dispose()
 +  })
 +})
+diff --git a/packages/llm/llm-pi-ai/src/adapter.ts b/packages/llm/llm-pi-ai/src/adapter.ts
+index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa4802526ffbe5e6 100644
+--- a/packages/llm/llm-pi-ai/src/adapter.ts
++++ b/packages/llm/llm-pi-ai/src/adapter.ts
+@@ -26,6 +26,7 @@
+  * @module dsh-llm-pi-ai/adapter
+  */
+ 
++import { createHash } from 'node:crypto'
+ import type {
+   Api,
+   AuthContext,
+@@ -40,6 +41,7 @@ import type {
+ import {
+   attributionHeaders,
+   contentHasImage,
++  registerLlmContinuation,
+   LlmAdapter,
+   LlmError,
+   ReasoningEffortId,
+@@ -47,6 +49,7 @@ import {
+ import type {
+   GenerateOptions,
+   ImageAttachmentAccess,
++  LlmFailureDiagnostic,
+   LlmModelInfo,
+   LlmProviderInfo,
+   LlmResolvedModelInfo,
+@@ -62,6 +65,26 @@ import { toPiContext } from './context.ts'
+ import { createModels, getSupportedThinkingLevels } from './models.ts'
+ import { toStreamChunks } from './stream.ts'
+ import { diagnosticFetch } from './diagnostic-fetch.ts'
++import type { WireContinuation } from './diagnostic-fetch.ts'
++import { sameManagedEndpoint } from './managed-discovery.ts'
++
++interface PendingContinuation {
++  readonly snapshot: PiAiSnapshot
++  readonly provider: string
++  readonly model: string
++  readonly requestInputSha256: string
++  readonly wire: WireContinuation
++  readonly diagnostic: LlmFailureDiagnostic
++  readonly expiresAt: number
++  armed: boolean
++  cleanup: () => void
++}
++
++/** 续接用完后只保留原副作用事实，不能恢复出第三次认领能力。 */
++function withoutContinuation(diagnostic: LlmFailureDiagnostic): LlmFailureDiagnostic {
++  const { continuation: _usedContinuation, ...facts } = diagnostic
++  return facts
++}
+ 
+ /** One resolution's frozen view: the profiles and the collection built from them. */
+ interface PiAiSnapshot {
+@@ -221,6 +244,8 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined):
+  */
+ export class PiAiAdapter extends LlmAdapter {
+   private snapshot: PiAiSnapshot | undefined
++  // 原 callerSignal 是单个 AgentLoop 请求系列的内存边界；无需新 Session/Graph 状态。
++  private readonly continuations = new WeakMap<AbortSignal, Map<string, PendingContinuation>>()
+ 
+   constructor(private readonly config: PiAiAdapterOptions) {
+     super()
+@@ -349,6 +374,27 @@ export class PiAiAdapter extends LlmAdapter {
+       model,
+       options.reasoningEffort ?? profile.reasoning,
+     )
++    // 原串行 loop 的重试输入不会包含失败半参数；只取原公开生成输入的临时摘要。
++    // 同 signal 并发但不同内容的调用不得继承彼此的续接或被误拒。
++    const requestInputSha256 = createHash('sha256').update(JSON.stringify({
++      provider: options.provider, model: options.model, messages: options.messages, tools: options.tools,
++      temperature: options.temperature, maxTokens: options.maxTokens, reasoningEffort: options.reasoningEffort, sessionId: options.sessionId,
++    })).digest('hex')
++    const continuationEntries = options.signal === undefined ? undefined : this.continuations.get(options.signal)
++    const pending = [...continuationEntries?.values() ?? []].filter(value => value.provider === options.provider && value.model === options.model && value.requestInputSha256 === requestInputSha256)
++    let resume: PendingContinuation | undefined
++    const selectResume = pending.length === 0 ? undefined : (url: string, method: string, headers: Headers, _generatedBodySha256: string): WireContinuation => {
++      const armed = pending.filter(value => value.armed)
++      const value = armed.length === 1 ? armed[0] : undefined
++      if (!value || options.signal?.aborted || value.snapshot !== snapshot || Date.now() >= value.expiresAt
++        || value.wire.url !== url || value.wire.method !== method || value.wire.headers.get('authorization') !== headers.get('authorization')) {
++        throw new LlmError('Central continuation binding expired or changed; the original request remains unresolved.',
++          'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: withoutContinuation(pending[0]!.diagnostic) })
++      }
++      resume = value
++      value.cleanup()
++      return value.wire
++    }
+     const apiKey = await this.config.resolveApiKey(options.provider, profile)
+ 
+     const consumer = new AbortController()
+@@ -381,7 +427,10 @@ export class PiAiAdapter extends LlmAdapter {
+             maxBytes: profile.requestImageMaxBytes,
+           },
+         }, onReplayDegrade)
+-      const diagnostic = diagnosticFetch()
++      const diagnostic = diagnosticFetch({
++        continuation: model.api === 'openai-completions' && sameManagedEndpoint(profile.managedBaseURL, model.baseUrl),
++        ...selectResume === undefined ? {} : { resume: selectResume },
++      })
+       const events = snapshot.models.streamSimple(model, context, {
+         fetch: diagnostic.fetch,
+         ...profileOptions(profile, reasoning, apiKey),
+@@ -404,7 +453,61 @@ export class PiAiAdapter extends LlmAdapter {
+             exhausted = true
+             return
+           }
+-          yield result.value
++          const chunk = result.value
++          if (!resume && chunk.type === 'finish' && chunk.reason.kind === 'error' && options.signal) {
++            const wire = diagnostic.continuation()
++            const summary = chunk.reason.failure.diagnostic?.continuation
++            if (wire && summary && !options.signal.aborted) {
++              const signal = options.signal
++              const continuationKey = JSON.stringify([options.provider, options.model, summary.requestId, summary.bodySha256])
++              const value: PendingContinuation = {
++                snapshot, provider: options.provider, model: options.model, requestInputSha256, wire,
++                diagnostic: chunk.reason.failure.diagnostic!, expiresAt: Date.now() + 60_000,
++                armed: false, cleanup: () => {},
++              }
++              const cancel = () => {
++                cleanup()
++                // 用户停止只撤销中央现有 lease；沿原 Auth/完整 POST，不发新生成或预留。
++                const headers = new Headers(wire.headers)
++                headers.set('x-lyapunov-resume-control', 'cancel')
++                headers.set('x-lyapunov-resume-request', wire.requestId)
++                headers.set('x-lyapunov-resume-attempt', '1')
++                headers.set('x-lyapunov-resume-token', wire.token)
++                headers.set('x-lyapunov-body-sha256', wire.bodySha256)
++                void fetch(wire.url, { method: wire.method, body: wire.body, headers, signal: AbortSignal.timeout(5_000) })
++                  .then(response => response.body?.cancel()).catch(() => {})
++              }
++              const clearRegistration = registerLlmContinuation(signal, options.provider, summary, () => {
++                if (signal.aborted || this.continuations.get(signal)?.get(continuationKey) !== value || value.armed
++                  || snapshot.profiles !== this.config.profiles() || Date.now() >= value.expiresAt) return false
++                value.armed = true
++                return true
++              })
++              const cleanup = () => {
++                const entries = this.continuations.get(signal)
++                if (entries?.get(continuationKey) === value) entries.delete(continuationKey)
++                if (entries?.size === 0) this.continuations.delete(signal)
++                clearRegistration()
++                signal.removeEventListener('abort', cancel)
++                clearTimeout(timer)
++              }
++              const timer = setTimeout(cleanup, 60_000)
++              timer.unref?.()
++              value.cleanup = cleanup
++              const entries = this.continuations.get(signal) ?? new Map<string, PendingContinuation>()
++              entries.get(continuationKey)?.cleanup()
++              entries.set(continuationKey, value)
++              this.continuations.set(signal, entries)
++              signal.addEventListener('abort', cancel, { once: true })
++            }
++          }
++          // 缺少新的诊断时，已认领请求的后续失败仍保留原 reserved/unknown 门。
++          // 不允许 generic timeout 再建立第三个付费请求。
++          if (resume && chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')
++            && chunk.reason.failure.diagnostic === undefined) {
++            yield { ...chunk, reason: { ...chunk.reason, failure: { ...chunk.reason.failure,
++              diagnostic: withoutContinuation(resume.diagnostic) } } }
++          } else yield chunk
+         }
+       } finally {
+         if (!exhausted) {
+@@ -418,11 +521,12 @@ export class PiAiAdapter extends LlmAdapter {
+       }
+     } catch (error: unknown) {
+       if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
+-        throw new LlmError(`pi-ai stream idle timeout after ${streamIdleTimeoutMs}ms`, 'TIMEOUT', { cause: error })
++        throw new LlmError(`pi-ai stream idle timeout after ${streamIdleTimeoutMs}ms`, 'TIMEOUT', { cause: error, ...resume ? { diagnostic: withoutContinuation(resume.diagnostic) } : {} })
+       }
+       if (options.signal?.aborted) {
+         throw new LlmError('pi-ai request aborted by caller', 'ABORTED', { cause: error })
+       }
++      if (resume?.diagnostic || pending.length > 0) throw new LlmError('Central continuation failed; reconcile the original request before resubmitting.', 'CENTRAL_CONTINUATION_FAILED', { cause: error, diagnostic: withoutContinuation((resume ?? pending[0])!.diagnostic) })
+       throw error
+     } finally {
+       consumer.abort('pi-ai stream consumer stopped')
+diff --git a/packages/llm/llm-pi-ai/src/diagnostic-fetch.ts b/packages/llm/llm-pi-ai/src/diagnostic-fetch.ts
+index 13c38fe258d6c607ac58e985c7b243d19e1463f3..625982b3b5f928ff4fbfcc0846f29b914ead1a56 100644
+--- a/packages/llm/llm-pi-ai/src/diagnostic-fetch.ts
++++ b/packages/llm/llm-pi-ai/src/diagnostic-fetch.ts
+@@ -1,12 +1,33 @@
+ /** 每次原生adapter调用独占的公开wire观察；原HTTP/SSE字节与取消链原样交给pi-ai。 */
++import { createHash } from 'node:crypto'
+ import { parseLlmFailureDiagnostic } from '@deepseek-ai/dsh-llm'
+ import type { LlmFailureDiagnostic } from '@deepseek-ai/dsh-llm'
+ 
+ export interface WireFailureDiagnostic { diagnostic?: LlmFailureDiagnostic; invalid: boolean; requestId?: string }
+ 
+-/** @returns 仅此stream使用的fetch和白名单读取，不替换global fetch或保存原body。 */
+-export function diagnosticFetch() {
++/** 仅原 adapter 实例保存的 transport 数据；严禁写入公开诊断或持久化事件。 */
++export interface WireContinuation {
++  readonly url: string
++  readonly method: string
++  readonly body: string
++  readonly bodySha256: string
++  readonly headers: Headers
++  readonly requestId: string
++  readonly token: string
++}
++
++interface DiagnosticFetchOptions {
++  /** 仅可信 product composition 的原 chat-completions POST 申请协议协商。 */
++  readonly continuation?: boolean
++  /** 原 Retry 已认领的本次内存续接，不允许第三次请求。 */
++  readonly resume?: (url: string, method: string, headers: Headers, bodySha256: string) => WireContinuation
++}
++
++/** @returns 仅此stream使用的fetch和白名单读取；续接所需原POST仅留内存，不替换global fetch或写盘。 */
++export function diagnosticFetch(options: DiagnosticFetchOptions = {}) {
+   const value: WireFailureDiagnostic = { invalid: false }
++  let continuation: WireContinuation | undefined
++  let fetched = false
+   const observe = (text: string) => {
+     try {
+       const parsed: unknown = JSON.parse(text)
+@@ -20,9 +41,41 @@ export function diagnosticFetch() {
+     } catch (_nonJsonSseData) { /* 普通模型流不是错误诊断，不从文本猜副作用。 */ }
+   }
+   const fetcher: typeof fetch = async (input, init) => {
+-    const response = await fetch(input, init)
++    const url = input instanceof Request ? input.url : String(input)
++    const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
++    const body = init?.body
++    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
++    const resume = options.resume === undefined ? undefined : typeof body === 'string'
++      ? options.resume(url, method, headers, createHash('sha256').update(body).digest('hex')) : undefined
++    if (options.resume && !resume) throw new Error('CENTRAL_CONTINUATION_BINDING_INVALID')
++    let requestInit = init
++    if (resume) {
++      if (fetched || method !== resume.method || url !== resume.url || headers.get('authorization') !== resume.headers.get('authorization')) {
++        throw new Error('CENTRAL_CONTINUATION_BINDING_INVALID')
++      }
++      fetched = true
++      const resumeHeaders = new Headers(resume.headers)
++      resumeHeaders.set('x-lyapunov-continuation', '1')
++      resumeHeaders.set('x-lyapunov-resume-request', resume.requestId)
++      resumeHeaders.set('x-lyapunov-resume-attempt', '1')
++      resumeHeaders.set('x-lyapunov-resume-token', resume.token)
++      resumeHeaders.set('x-lyapunov-body-sha256', resume.bodySha256)
++      requestInit = { ...init, method: resume.method, body: resume.body, headers: resumeHeaders }
++    } else if (options.continuation && method === 'POST' && typeof body === 'string' && /\/chat\/completions$/.test(new URL(url).pathname)) {
++      // 完整 pi-ai 序列化 POST 原字节只保存在此 stream 的闭包，续接时绝不重新拼历史。
++      headers.set('x-lyapunov-continuation', '1')
++      requestInit = { ...init, headers }
++    }
++    const response = await fetch(input, requestInit)
+     const id = response.headers.get('x-lyapunov-request-id')
+     if (id && /^[A-Za-z0-9._:-]{1,128}$/.test(id) && !/^sk-/i.test(id)) value.requestId = id
++    const token = response.headers.get('x-lyapunov-resume-token')
++    if (!resume && options.continuation && response.ok && !response.redirected && response.headers.get('x-lyapunov-continuation') === '1'
++      && requestInit?.method === 'POST' && typeof body === 'string' && value.requestId && token && /^[a-f0-9]{64}$/.test(token)
++      && /\/chat\/completions$/.test(new URL(url).pathname)) {
++      continuation = { url, method, body, bodySha256: createHash('sha256').update(body).digest('hex'),
++        headers: new Headers(requestInit.headers), requestId: value.requestId, token }
++    }
+     if (!response.body) return response
+     const sse = response.headers.get('content-type')?.includes('text/event-stream') === true
+     if (!sse && response.ok) return response
+@@ -42,7 +95,7 @@ export function diagnosticFetch() {
+       }
+       if (new TextEncoder().encode(buffer).byteLength > 65536) { buffer = ''; skipping = true }
+     }
+-    const body = new ReadableStream<Uint8Array>({
++    const observedBody = new ReadableStream<Uint8Array>({
+       async pull(controller) {
+         try {
+           const next = await reader.read()
+@@ -52,9 +105,15 @@ export function diagnosticFetch() {
+       },
+       async cancel(reason) { try { await reader.cancel(reason) } finally { try { reader.releaseLock() } catch (_pendingRead) { /* 不伪造已释放。 */ } } },
+     })
+-    const wrapped = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers })
++    const wrapped = new Response(observedBody, { status: response.status, statusText: response.statusText, headers: response.headers })
+     Object.defineProperties(wrapped, { url: { value: response.url }, redirected: { value: response.redirected }, type: { value: response.type } })
+     return wrapped
+   }
+-  return { fetch: fetcher, current: () => ({ ...value }) }
++  return { fetch: fetcher, current: () => ({ ...value }),
++    continuation: () => {
++      const summary = value.diagnostic?.continuation
++      return !value.invalid && summary && continuation && summary.requestId === continuation.requestId
++        && summary.bodySha256 === continuation.bodySha256 ? continuation : undefined
++    },
++  }
+ }
+diff --git a/packages/llm/llm-retry/src/index.ts b/packages/llm/llm-retry/src/index.ts
+index 87140d0167b0235b926bae96c04f882a6b5d7470..6e99f2b8fb3cf1d0c392c16c3f191fb04ce725c0 100644
+--- a/packages/llm/llm-retry/src/index.ts
++++ b/packages/llm/llm-retry/src/index.ts
+@@ -10,6 +10,7 @@ import type { Context, Events } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import { z as zod } from 'zod'
+ import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
++import { claimLlmContinuation } from '@deepseek-ai/dsh-llm'
+ import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+ import { RetryId } from './brand.ts'
+@@ -188,6 +189,7 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
+     agent.session.append('llm/retry', eventData)
+     if (!await cancellableDelay(delayMs, fusedSignal)) return
+     agent.session.append('llm/retry-started', { retryId, turn, step, retry })
++    if (fusedSignal.aborted) return
+     return { kind: 'retry' }
+   }
+ 
+@@ -195,6 +197,18 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
+     { agent, turn, step, provider, failure, retryPolicy: policy, signal }: Parameters<Events['agent/request-error']>[0],
+     next: () => Promise<RequestErrorAction>,
+   ): Promise<RequestErrorAction> {
++    // 只认领本次原 transport 的单次续接能力，沿 AgentLoop 原 attempt 边界重建 parser。
++    // 公开摘要本身、普通 unknown/reserved 或恢复后的持久化事件都不足以授权。
++    if (!lifetime.signal.aborted && claimLlmContinuation(failure, provider, signal)) {
++      // 此协议只认领同一中央请求的一次备用，不占 provider 通用重试预算。
++      // 仍沿原 durable-before-wait 与 started 事件边界，0 延迟也保留取消机会。
++      const continuationPolicy: ResolvedRetryPolicy = {
++        mode: 'normal', maxRetries: 1, retryableCodes: [],
++        initialDelayMs: 0, maxDelayMs: 0, jitterRatio: 0,
++      }
++      return backoff(agent, turn, step, failure, provider, continuationPolicy,
++        JSON.stringify(['central-continuation', 1]), 1, RetryId(randomUUID()), 0, signal)
++    }
+     // 中央owner未确认结果，或明确禁止重发；normal/always都不能新建同一收费请求。
+     if (failure.diagnostic?.retryable === false || failure.diagnostic?.effect === 'unknown'
+       || failure.diagnostic?.effect === 'reserved' || failure.diagnostic?.effect === 'charged') return
+diff --git a/packages/llm/llm-retry/tests/transport-recovery.spec.ts b/packages/llm/llm-retry/tests/transport-recovery.spec.ts
+index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c75141808711 100644
+--- a/packages/llm/llm-retry/tests/transport-recovery.spec.ts
++++ b/packages/llm/llm-retry/tests/transport-recovery.spec.ts
+@@ -1,5 +1,11 @@
+-import { createUserMessage, expandAssistantStream } from '@deepseek-ai/dsh-llm'
++import { createUserMessage, BlockAssembler, expandAssistantStream, claimLlmContinuation, registerLlmContinuation, parseLlmFailureDiagnostic } from '@deepseek-ai/dsh-llm'
+ import { createServer } from 'node:http'
++import type { IncomingMessage, Server } from 'node:http'
++import { createHash } from 'node:crypto'
++import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
++import { resolveProfiles } from '../../llm-pi-ai/src/config.ts'
++import { memoryAuth } from '../../llm-pi-ai/tests/auth-double.ts'
++import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+ import type { AddressInfo } from 'node:net'
+ import { afterEach, describe, expect, it, vi } from 'vitest'
+ import { Context } from '@deepseek-ai/cordis'
+@@ -284,3 +290,365 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
+     }
+   })
+ })
++
++// 真正的 PiAi → LlmRuntime → AgentLoop → 原 Retry，使用 loopback HTTP/SSE，零付费。
++type CentralBehavior = 'valid' | 'missing-token' | 'wrong-body' | 'missing-optin' | 'invalid-summary' | 'missing-body-hash' | 'wrong-request' | 'generic-first' | 'resume-fails'
++const centralServers: Server[] = []
++afterEach(async () => {
++  await Promise.all(centralServers.splice(0).map(server => new Promise<void>(resolve => {
++    server.closeAllConnections()
++    server.close(() => resolve())
++  })))
++})
++
++async function centralFixture(behavior: CentralBehavior = 'valid') {
++  const requestId = 'fixture-central-lease'
++  const privateToken = 'd'.repeat(64)
++  const records: { body: string; headers: IncomingMessage['headers'] }[] = []
++  const controlReceived = Promise.withResolvers<void>()
++  let initialHash = '', reserved = 0, claimed = 0, revoked = 0
++  const server = createServer((request, response) => {
++    const bytes: Buffer[] = []
++    request.on('data', bytes.push.bind(bytes))
++    request.on('end', () => {
++      const body = Buffer.concat(bytes).toString('utf8')
++      records.push({ body, headers: request.headers })
++      if (behavior === 'generic-first' && records.length === 1) { response.writeHead(503, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: { message: 'fixture initial HTTP 503' } })); return }
++      const hash = createHash('sha256').update(body).digest('hex')
++      const continuationHeaders = {
++        'x-lyapunov-request-id': requestId,
++        ...behavior === 'missing-optin' ? {} : { 'x-lyapunov-continuation': '1' },
++        ...behavior === 'missing-token' ? {} : { 'x-lyapunov-resume-token': privateToken },
++      }
++      const emit = (data: unknown) => response.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`)
++      const failure = (continuation: boolean) => ({ error: {
++        code: 'upstream_timeout', message: 'Upstream stream timed out',
++        diagnostic: { version: 1, domain: 'model', code: 'TIMEOUT', stage: 'upstream_stream', fieldPath: null,
++          retryable: false, effect: 'reserved', requestId,
++          ...continuation ? { continuation: { version: 1, requestId, attempt: 1,
++            bodySha256: behavior === 'wrong-body' ? 'a'.repeat(64) : initialHash,
++            ...behavior === 'invalid-summary' ? { unexpected: 'refused' } : {},
++            ...behavior === 'missing-body-hash' ? { bodySha256: undefined } : {},
++            ...behavior === 'wrong-request' ? { requestId: 'another-request' } : {},
++          } } : {},
++        },
++      } })
++      if (request.headers['x-lyapunov-resume-control'] === 'cancel') {
++        if (body === records[0]?.body && hash === initialHash
++          && request.headers['x-lyapunov-resume-request'] === requestId
++          && request.headers['x-lyapunov-resume-attempt'] === '1'
++          && request.headers['x-lyapunov-resume-token'] === privateToken
++          && request.headers['x-lyapunov-body-sha256'] === hash) revoked += 1
++        response.writeHead(204); response.end(); controlReceived.resolve(); return
++      }
++      if (request.headers['x-lyapunov-resume-request'] !== undefined) {
++        const valid = claimed === 0 && reserved === 1 && body === records[0]?.body && hash === initialHash
++          && request.headers['x-lyapunov-resume-request'] === requestId
++          && request.headers['x-lyapunov-resume-attempt'] === '1'
++          && request.headers['x-lyapunov-resume-token'] === privateToken
++          && request.headers['x-lyapunov-body-sha256'] === hash
++          && request.headers.authorization === records[0]?.headers.authorization
++        if (!valid) { response.writeHead(409); response.end(); return }
++        claimed += 1
++        response.writeHead(200, { 'content-type': 'text/event-stream', ...continuationHeaders })
++        if (behavior === 'resume-fails') { emit(failure(false)); response.end(); return }
++        const completeArgs = JSON.stringify({ target: 'fresh-parser', xyz: [1, 2, 3] })
++        emit({ choices: [{ delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-fresh', type: 'function', function: { name: 'get_scene_info', arguments: '' } }] }, index: 0, finish_reason: null }] })
++        emit({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: completeArgs } }] }, index: 0, finish_reason: null }] })
++        emit({ choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 5, completion_tokens: 7 } })
++        emit('[DONE]'); response.end(); return
++      }
++      reserved += 1
++      initialHash = hash
++      response.writeHead(200, { 'content-type': 'text/event-stream', ...continuationHeaders })
++      emit({ choices: [{ delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-partial', type: 'function', function: { name: 'get_scene_info', arguments: '' } }] }, index: 0, finish_reason: null }] })
++      // 半参数恰好249字节；不带 finish、usage 或闭合JSON。
++      emit({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"target":"' + 'x'.repeat(238) } }] }, index: 0, finish_reason: null }] })
++      emit(failure(true)); response.end()
++    })
++  })
++  centralServers.push(server)
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
++  const baseURL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
++  return { baseURL, requestId, privateToken, records, controlReceived: controlReceived.promise,
++    counters: () => ({ reserved, claimed, revoked }) }
++}
++
++async function centralHarness(baseURL: string, managed = true, beforeRetry?: (ctx: Context) => void, normal = false) {
++  const ctx = new Context()
++  await mountAgentLoopTestDependencies(ctx, { tools: { mode: 'native' } })
++  const profiles = resolveProfiles({ central: { api: 'openai-completions', baseURL,
++    ...managed ? { managedBaseURL: baseURL } : {}, models: [{ id: 'public-model' }],
++    retryPolicy: { ...normal ? { mode: 'normal' as const, maxRetries: 1 } : { mode: 'always' as const }, backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } },
++  } })
++  const adapter = new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('fixture-auth'), auth: memoryAuth() })
++  ctx.llm.registerAdapter(['central'], adapter)
++  beforeRetry?.(ctx)
++  const retryFiber = await ctx.plugin(Retry)
++  await ctx.plugin(AgentLoop, { agents: [] })
++  const calls: unknown[] = []
++  ctx.tools.register(defineContentToolFixture({ name: 'get_scene_info', description: 'read fixture scene', parameters: {},
++    async execute(args, exec) { calls.push(args); exec.concludeTurn(); return [{ type: 'text', text: 'scene fixture' }] },
++  }))
++  return { ctx, calls, retryFiber }
++}
++
++describe('managed central same-request continuation through original AgentLoop', () => {
++  it('discards half tool arguments and resumes exact POST once with fresh parser and one tool side effect', async () => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-fresh-parser'), { provider: 'central', model: 'public-model' })
++    const order: string[] = [], attemptIds: string[] = []
++    context.on('agent/assistant-stream', ({ agent: subject, frame }) => {
++      if (subject === agent && frame.type === 'start') { order.push('attempt-start'); attemptIds.push(frame.attemptId) }
++    })
++    context.on('session/event', (session, event) => {
++      if (session === agent.session && ['assistant/attempt', 'llm/retry', 'llm/retry-started', 'assistant/message'].includes(event.type)) order.push(event.type)
++    })
++    await sendAndWait(context, agent)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 1, revoked: 0 })
++    expect(server.records).toHaveLength(2)
++    expect(server.records[0]?.body).toBe(server.records[1]?.body)
++    expect(server.records[0]?.headers['x-lyapunov-continuation']).toBe('1')
++    expect(mounted.calls).toEqual([{ target: 'fresh-parser', xyz: [1, 2, 3] }])
++    const events = agent.session.snapshotEvents()
++    expect(events.filter(event => event.type === 'assistant/attempt')).toHaveLength(1)
++    expect(events.filter(event => event.type === 'assistant/message')).toHaveLength(1)
++    expect(events.filter(event => event.type === 'tool/call')).toHaveLength(1)
++    expect(events.filter(event => event.type === 'tool/result')).toHaveLength(1)
++    const scheduled = events.filter(event => event.type === 'llm/retry')
++    const started = events.filter(event => event.type === 'llm/retry-started')
++    expect(scheduled).toHaveLength(1); expect(started).toHaveLength(1)
++    expect(scheduled[0]?.data).toMatchObject({ mode: 'normal', retry: 1, maxRetries: 1, delayMs: 0,
++      policyKey: '["central-continuation",1]', failure: { diagnostic: { effect: 'reserved', retryable: false } } })
++    expect(started[0]?.data.retryId).toBe(scheduled[0]?.data.retryId)
++    expect(events.find(event => event.type === 'assistant/attempt')!.seq).toBeLessThan(scheduled[0]!.seq)
++    expect(scheduled[0]!.seq).toBeLessThan(started[0]!.seq)
++    expect(started[0]!.seq).toBeLessThan(events.find(event => event.type === 'assistant/message')!.seq)
++    expect(order).toEqual(['attempt-start', 'assistant/attempt', 'llm/retry', 'llm/retry-started', 'attempt-start', 'assistant/message'])
++    expect(attemptIds).toHaveLength(2); expect(attemptIds[0]).not.toBe(attemptIds[1])
++    const partial = events.find(event => event.type === 'assistant/attempt')!
++    if (partial.type === 'assistant/attempt') {
++      const finish = expandAssistantStream(partial.data.stream).find(item => item.chunk.type === 'finish')?.chunk
++      expect(finish).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { diagnostic: { effect: 'reserved', retryable: false } } } })
++    }
++    expect(JSON.stringify(events)).not.toContain(server.privateToken)
++    expect(JSON.stringify(events)).not.toContain('fixture-auth')
++    expect(events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
++  })
++
++  it.each(['missing-token', 'wrong-body', 'missing-optin', 'invalid-summary', 'missing-body-hash', 'wrong-request'] as const)('never creates a new request when %s invalidates the private continuation', async behavior => {
++    const server = await centralFixture(behavior)
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId(`central-${behavior}`), { provider: 'central', model: 'public-model' })
++    await sendAndWait(context, agent)
++    expect(server.records).toHaveLength(1)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 0 })
++    expect(mounted.calls).toHaveLength(0)
++    expect(agent.session.snapshotEvents().some(event => event.type === 'assistant/message')).toBe(false)
++  })
++
++  it('does not negotiate or resume an arbitrary unmanaged provider', async () => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL, false)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-unmanaged'), { provider: 'central', model: 'public-model' })
++    await sendAndWait(context, agent)
++    expect(server.records).toHaveLength(1)
++    expect(server.records[0]?.headers['x-lyapunov-continuation']).toBeUndefined()
++    expect(mounted.calls).toHaveLength(0)
++  })
++
++  it('does not turn a failed claimed continuation into a third chargeable POST', async () => {
++    const server = await centralFixture('resume-fails')
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-once'), { provider: 'central', model: 'public-model' })
++    await sendAndWait(context, agent)
++    expect(server.records).toHaveLength(2)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 1, revoked: 0 })
++    expect(mounted.calls).toHaveLength(0)
++  })
++
++  it('cancels the existing lease with original bytes and auth when user Stops during recovery', async () => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL, true, ctx => {
++      ctx.on('agent/request-error', async (payload, next) => {
++        payload.agent.cancel({ kind: 'user' })
++        return next()
++      })
++    })
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-stop'), { provider: 'central', model: 'public-model' })
++    await sendAndWait(context, agent)
++    await server.controlReceived
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 1 })
++    expect(server.records).toHaveLength(2)
++    expect(server.records[1]?.headers['x-lyapunov-resume-control']).toBe('cancel')
++    expect(mounted.calls).toHaveLength(0)
++    expect(JSON.stringify(agent.session.snapshotEvents())).not.toContain(server.privateToken)
++  })
++
++  it('requires live transport capability, not a copied public persisted diagnostic', () => {
++    const diagnostic = parseLlmFailureDiagnostic({ version: 1, domain: 'model', code: 'TIMEOUT', stage: 'upstream_stream', fieldPath: null,
++      retryable: false, effect: 'reserved', requestId: 'historical', continuation: { version: 1, requestId: 'historical', attempt: 1, bodySha256: 'b'.repeat(64) } })
++    expect(diagnostic).toBeDefined()
++    if (!diagnostic) throw new Error('fixture diagnostic rejected')
++    expect(claimLlmContinuation({ code: 'TIMEOUT', message: 'old', diagnostic }, 'central', new AbortController().signal)).toBe(false)
++  })
++  it('separates simultaneous continuations on one native callerSignal by exact request/body/provider identity', () => {
++    const signal = new AbortController().signal
++    const summaryA = { version: 1 as const, requestId: 'parallel-a', attempt: 1 as const, bodySha256: 'a'.repeat(64) }
++    const summaryB = { version: 1 as const, requestId: 'parallel-b', attempt: 1 as const, bodySha256: 'b'.repeat(64) }
++    const claims: string[] = []
++    const releaseA = registerLlmContinuation(signal, 'central', summaryA, () => { claims.push('a'); return true })
++    const releaseB = registerLlmContinuation(signal, 'central', summaryB, () => { claims.push('b'); return true })
++    const failure = (summary: typeof summaryA) => ({ code: 'TIMEOUT', message: 'fixture', diagnostic: {
++      version: 1 as const, domain: 'model' as const, code: 'TIMEOUT', stage: 'upstream_stream', fieldPath: null,
++      retryable: false, effect: 'reserved' as const, requestId: summary.requestId, continuation: summary,
++    } })
++    expect(claimLlmContinuation(failure(summaryA), 'other', signal)).toBe(false)
++    expect(claimLlmContinuation(failure({ ...summaryA, bodySha256: 'b'.repeat(64) }), 'central', signal)).toBe(false)
++    expect(claimLlmContinuation(JSON.parse(JSON.stringify(failure(summaryB))), 'central', signal)).toBe(true)
++    expect(claimLlmContinuation(failure(summaryB), 'central', signal)).toBe(false)
++    expect(claimLlmContinuation(JSON.parse(JSON.stringify(failure(summaryA))), 'central', signal)).toBe(true)
++    expect(claims).toEqual(['b', 'a'])
++    releaseA(); releaseB()
++  })
++
++  it('drops cancelled and expired in-memory capabilities instead of reviving from a public diagnostic', () => {
++    const controller = new AbortController()
++    const summary = { version: 1 as const, requestId: 'expired', attempt: 1 as const, bodySha256: 'c'.repeat(64) }
++    const failure = { code: 'TIMEOUT', message: 'fixture', diagnostic: { version: 1 as const, domain: 'model' as const,
++      code: 'TIMEOUT', stage: 'upstream_headers', fieldPath: null, retryable: false, effect: 'reserved' as const,
++      requestId: summary.requestId, continuation: summary } }
++    const claim = vi.fn(() => true)
++    const clear = registerLlmContinuation(controller.signal, 'central', summary, claim)
++    controller.abort('user')
++    expect(claimLlmContinuation(failure, 'central', controller.signal)).toBe(false)
++    expect(claim).not.toHaveBeenCalled()
++    clear()
++    const openSignal = new AbortController().signal
++    const clearExpired = registerLlmContinuation(openSignal, 'central', summary, claim)
++    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_001)
++    expect(claimLlmContinuation(failure, 'central', openSignal)).toBe(false)
++    now.mockRestore()
++    expect(claim).not.toHaveBeenCalled()
++    clearExpired()
++  })
++
++
++  it('keeps distinct same-signal calls independent and resumes only the explicitly claimed original input', async () => {
++    const first = await centralFixture()
++    const controller = new AbortController()
++    const profiles = resolveProfiles({ central: { api: 'openai-completions', baseURL: first.baseURL, managedBaseURL: first.baseURL,
++      models: [{ id: 'public-model' }],
++    } })
++    const adapter = new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('fixture-auth'), auth: memoryAuth() })
++    const messages = new Map<string, ReturnType<typeof createUserMessage>>()
++    const collect = async (text: string) => {
++      if (!messages.has(text)) messages.set(text, createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
++      const assembler = new BlockAssembler()
++      for await (const chunk of adapter.stream({ provider: 'central', model: 'public-model', signal: controller.signal,
++        messages: [messages.get(text)!],
++      })) assembler.push(chunk)
++      return assembler.finish
++    }
++    // B shares the exact native cancellation signal, provider and model, but has different public input.
++    const a = await collect('request A')
++    const b = await collect('request B')
++    expect(first.records).toHaveLength(2)
++    expect(first.records[1]?.body).not.toBe(first.records[0]?.body)
++    expect(first.records[1]?.headers['x-lyapunov-resume-request']).toBeUndefined()
++    // Public summary is copied as the real accumulator copies it; matching A still owns its original bytes.
++    expect(a.kind).toBe('error'); expect(b.kind).toBe('error')
++    if (a.kind !== 'error' || b.kind !== 'error') throw new Error('fixture must fail both initial attempts')
++    expect(claimLlmContinuation(a.failure, 'central', controller.signal)).toBe(true)
++    // The fixture uses one ID and remembers latest body intentionally, so its CAS rejects A; transport still sends cached A.
++    await collect('request A')
++    expect(first.records).toHaveLength(3)
++    expect(first.records[2]?.body).toBe(first.records[0]?.body)
++    expect(first.records[2]?.headers['x-lyapunov-resume-request']).toBe(first.requestId)
++    expect(claimLlmContinuation(a.failure, 'central', controller.signal)).toBe(false)
++    controller.abort('fixture cleanup')
++    await Promise.race([first.controlReceived, Promise.resolve()])
++  })
++
++  it('keeps transport continuation separate from an exhausted ordinary retry budget', async () => {
++    const server = await centralFixture('generic-first')
++    const mounted = await centralHarness(server.baseURL, true, undefined, true)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-generic-budget'), { provider: 'central', model: 'public-model' })
++    const snapshots: unknown[] = []
++    context.on('session/event', (session, event) => {
++      if (session === agent.session && event.type === 'llm/retry-started') snapshots.push(context!.sessionProjections.stateOf(session, 'llmRetry'))
++    })
++    await sendAndWait(context, agent)
++    expect(server.records).toHaveLength(3)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 1, revoked: 0 })
++    const retries = agent.session.snapshotEvents().filter(event => event.type === 'llm/retry')
++    expect(retries).toHaveLength(2)
++    expect(retries[0]!.data).toMatchObject({ retry: 1, maxRetries: 1, failure: { code: 'SERVER' } })
++    expect(retries[1]!.data).toMatchObject({ retry: 1, maxRetries: 1, delayMs: 0, policyKey: '["central-continuation",1]' })
++    expect(retries[0]!.data.policyKey).not.toBe(retries[1]!.data.policyKey)
++    const final = snapshots.at(-1) as Record<string, { retry: number }>
++    expect(Object.keys(final)).toHaveLength(2)
++    expect(Object.values(final).map(entry => entry.retry)).toEqual([1, 1])
++    expect(mounted.calls).toEqual([{ target: 'fresh-parser', xyz: [1, 2, 3] }])
++  })
++
++  it.each(['llm/retry', 'llm/retry-started'] as const)('does not send a claimed continuation after user Stop from %s', async stage => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId(`central-stop-${stage}`), { provider: 'central', model: 'public-model' })
++    context.on('session/event', (session, event) => { if (session === agent.session && event.type === stage) agent.cancel({ kind: 'user' }) })
++    await sendAndWait(context, agent)
++    await server.controlReceived
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 1 })
++    expect(server.records).toHaveLength(2)
++    expect(mounted.calls).toHaveLength(0)
++    const events = agent.session.snapshotEvents()
++    expect(events.filter(event => event.type === 'llm/retry')).toHaveLength(1)
++    expect(events.filter(event => event.type === 'llm/retry-started')).toHaveLength(stage === 'llm/retry' ? 0 : 1)
++    expect(JSON.stringify(events)).not.toContain(server.privateToken)
++  })
++
++  it('does not send a claimed continuation after the original Retry plugin is disposed during its zero-delay wait', async () => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId('central-dispose'), { provider: 'central', model: 'public-model' })
++    let disposing: Promise<unknown> | undefined
++    context.on('session/event', (session, event) => { if (session === agent.session && event.type === 'llm/retry') disposing = mounted.retryFiber.dispose() })
++    await sendAndWait(context, agent)
++    await disposing
++    expect(server.records).toHaveLength(1)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 0 })
++    expect(mounted.calls).toHaveLength(0)
++    expect(agent.session.snapshotEvents().filter(event => event.type === 'llm/retry-started')).toHaveLength(0)
++    // 用户原请求仍保持保守未知；此处停止本测试拥有的 signal 并清理其剩余租约。
++    agent.cancel({ kind: 'disposed' })
++  })
++
++  it.each(['llm/retry', 'llm/retry-started'] as const)('does not dispatch after the durable %s append fails', async stage => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    const agent = await context.agentLoop.create(SessionId(`central-append-${stage}`), { provider: 'central', model: 'public-model' })
++    const append = agent.session.append.bind(agent.session)
++    const spy = vi.spyOn(agent.session, 'append').mockImplementation((...args) => {
++      if (args[0] === stage) throw new Error('fixture durable retry append rejected')
++      return Reflect.apply(append, agent.session, args)
++    })
++    try { await sendAndWait(context, agent) } finally { spy.mockRestore() }
++    expect(server.records).toHaveLength(1)
++    expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 0 })
++    expect(mounted.calls).toHaveLength(0)
++    expect(agent.session.snapshotEvents().filter(event => event.type === 'llm/retry-started')).toHaveLength(0)
++    expect(JSON.stringify(agent.session.snapshotEvents())).not.toContain(server.privateToken)
++  })
++
++})
+diff --git a/packages/llm/llm/src/public-diagnostic.ts b/packages/llm/llm/src/public-diagnostic.ts
+index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2313d4eef 100644
+--- a/packages/llm/llm/src/public-diagnostic.ts
++++ b/packages/llm/llm/src/public-diagnostic.ts
+@@ -1,5 +1,5 @@
+ /** 从中央协议错误中保留公开事实；不携带供应商message、URL、认证或账本。 */
+-import type { LlmFailureDiagnostic } from './types.ts'
++import type { LlmContinuationSummary, LlmFailure, LlmFailureDiagnostic } from './types.ts'
+ 
+ /** @param value - wire或持久化诊断值。 @returns 白名单诊断或无效。 */
+ export function parseLlmFailureDiagnostic(value: unknown): LlmFailureDiagnostic | undefined {
+@@ -14,8 +14,13 @@ export function parseLlmFailureDiagnostic(value: unknown): LlmFailureDiagnostic
+   const requestId = d.requestId === null ? null : typeof d.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(d.requestId)
+     && !/^sk-/i.test(d.requestId) ? d.requestId : undefined
+   if (fieldPath === undefined || requestId === undefined) return undefined
++  const continuation = d.continuation === undefined ? undefined : parseLlmContinuation(d.continuation)
++  if (d.continuation !== undefined && (!continuation || d.domain !== 'model'
++    || requestId !== continuation.requestId || !['upstream_stream', 'upstream_headers', 'upstream_response'].includes(d.stage) || !['TIMEOUT', 'TRANSPORT'].includes(d.code)
++    || d.retryable !== false || d.effect !== 'reserved')) return undefined
+   return Object.freeze({ version: 1, domain: d.domain as LlmFailureDiagnostic['domain'], code: d.code, stage: d.stage,
+-    fieldPath, retryable: d.retryable, effect: d.effect as LlmFailureDiagnostic['effect'], requestId })
++    fieldPath, retryable: d.retryable, effect: d.effect as LlmFailureDiagnostic['effect'], requestId,
++    ...continuation === undefined ? {} : { continuation } })
+ }
+ 
+ /** pi-ai保留parsed API错误为JSON文字；只解有限对象，不从普通文案猜账务。 */
+@@ -33,3 +38,66 @@ export function diagnosticFromProviderError(message: string): { diagnostic?: Llm
+     return { ...diagnostic ? { diagnostic } : {}, invalid: diagnostic === undefined }
+   } catch (_invalidProviderJson) { return { invalid: message.includes('"diagnostic"') } }
+ }
++
++/** 严格验证单次同请求摘要；额外字段也不进入公开事件。 */
++export function parseLlmContinuation(value: unknown): LlmContinuationSummary | undefined {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
++  const c = value as Record<string, unknown>
++  if (Object.keys(c).length !== 4 || !['version', 'requestId', 'attempt', 'bodySha256'].every(key => Object.hasOwn(c, key))
++    || c.version !== 1 || c.attempt !== 1 || typeof c.requestId !== 'string'
++    || !/^[A-Za-z0-9._:-]{1,128}$/.test(c.requestId) || /^sk-/i.test(c.requestId)
++    || typeof c.bodySha256 !== 'string' || !/^[a-f0-9]{64}$/.test(c.bodySha256)) return undefined
++  return Object.freeze({ version: 1, requestId: c.requestId, attempt: 1, bodySha256: c.bodySha256 })
++}
++
++interface LiveContinuation {
++  readonly provider: string
++  readonly summary: LlmContinuationSummary
++  readonly claim: () => boolean
++  readonly expiresAt: number
++  cleanup: () => void
++}
++// 原 live finish 经 AssistantStreamAccumulator JSON 快照复制，不能用 failure 身份认领。
++// 原 callerSignal 在 adapter、AgentLoop 和 Retry 中不复制；仅这个内存边界拥有能力。
++const liveContinuations = new WeakMap<AbortSignal, Map<string, LiveContinuation>>()
++const continuationKey = (provider: string, summary: LlmContinuationSummary): string => JSON.stringify([provider, summary.requestId, summary.attempt, summary.bodySha256])
++
++/** 原 transport 注册一次内存能力；不会把回调或凭证混入公开 failure。 */
++export function registerLlmContinuation(
++  signal: AbortSignal,
++  provider: string,
++  summary: LlmContinuationSummary,
++  claim: () => boolean,
++): () => void {
++  const key = continuationKey(provider, summary)
++  const entries = liveContinuations.get(signal) ?? new Map<string, LiveContinuation>()
++  entries.get(key)?.cleanup()
++  const value: LiveContinuation = { provider, summary, claim, expiresAt: Date.now() + 60_000, cleanup: () => {} }
++  entries.set(key, value)
++  liveContinuations.set(signal, entries)
++  const clear = () => {
++    if (entries.get(key) === value) entries.delete(key)
++    if (entries.size === 0 && liveContinuations.get(signal) === entries) liveContinuations.delete(signal)
++    signal.removeEventListener('abort', clear)
++    clearTimeout(timer)
++  }
++  value.cleanup = clear
++  const timer = setTimeout(clear, 60_000)
++  timer.unref?.()
++  if (signal.aborted) clear()
++  else signal.addEventListener('abort', clear, { once: true })
++  return clear
++}
++
++/** 原 Retry 只允许匹配本次 live transport 的公开摘要认领一次。 */
++export function claimLlmContinuation(failure: LlmFailure, provider: string, signal: AbortSignal): boolean {
++  const diagnostic = parseLlmFailureDiagnostic(failure.diagnostic)
++  const summary = diagnostic?.continuation
++  if (!summary) return false
++  const entries = liveContinuations.get(signal)
++  const value = entries?.get(continuationKey(provider, summary))
++  if (value === undefined) return false
++  if (signal.aborted || Date.now() >= value.expiresAt) { value.cleanup(); return false }
++  value.cleanup()
++  return value.claim()
++}
+diff --git a/packages/llm/llm/src/types.ts b/packages/llm/llm/src/types.ts
+index f2804ab5d9882ae7bffcf4856ba4d460f7cf5e4b..a1aa2d36769ea6ec30029b9e1b2ac34ed2e150d9 100644
+--- a/packages/llm/llm/src/types.ts
++++ b/packages/llm/llm/src/types.ts
+@@ -37,6 +37,14 @@ export type {
+   UserMessage,
+ } from './message.ts'
+ 
++/** 中央单次续接的公开身份摘要；不包含可认领凭证。 */
++export interface LlmContinuationSummary {
++  readonly version: 1
++  readonly requestId: string
++  readonly attempt: 1
++  readonly bodySha256: string
++}
++
+ /** 中央公开失败事实；未知结果不得被通用TIMEOUT重试覆盖。 */
+ export interface LlmFailureDiagnostic {
+   readonly version: 1
+@@ -47,6 +55,8 @@ export interface LlmFailureDiagnostic {
+   readonly retryable: boolean
+   readonly effect: 'none' | 'released' | 'reserved' | 'charged' | 'unknown'
+   readonly requestId: string | null
++  /** 仅完整协议身份；原 transport 另持有内存认领能力时才允许续接。 */
++  readonly continuation?: LlmContinuationSummary
+ }
+ 
+ /** Serializable provider or transport failure facts; policy decides whether they are retryable. */

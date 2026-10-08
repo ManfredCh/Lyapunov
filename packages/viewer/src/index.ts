@@ -529,19 +529,7 @@ export class SceneViewer {
     this.camera.position.set(5, -6, 4)
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.firstPerson=new FirstPersonNavigation(this.camera,this.renderer.domElement,this.controls.target,()=>this.setNavigationMode("orbit"),()=>this.worldUp())
-    this.navigationBar=document.createElement("div")
-    this.navigationBar.className="lya-viewer-navigation"
-    this.navigationBar.setAttribute("role","group");this.navigationBar.setAttribute("aria-label","查看器导航")
-    Object.assign(this.navigationBar.style,{position:"absolute",top:"12px",right:"12px",zIndex:"6",display:"flex",gap:"4px",padding:"4px",borderRadius:"8px",background:"var(--dsw-alias-bg-l1,#222)",color:"var(--dsw-alias-label-primary,#eee)"})
-    for(const [mode,label] of [["orbit","环绕"],["first-person","漫游"]] as const){
-      const button=document.createElement("button");button.type="button";button.textContent=label;button.setAttribute("aria-label",`查看器${label}`)
-      Object.assign(button.style,{padding:"4px 10px",border:"1px solid currentColor",borderRadius:"5px",background:"transparent",color:"inherit",cursor:"pointer"})
-      button.onclick=()=>this.setNavigationMode(mode)
-      this.navigationButtons.push({mode,button});this.navigationBar.appendChild(button)
-    }
-    this.observerLabel=document.createElement("span");this.observerLabel.setAttribute("role","status");this.navigationBar.appendChild(this.observerLabel)
-    this.observerExitButton=document.createElement("button");this.observerExitButton.type="button";this.observerExitButton.textContent="退出相机";this.observerExitButton.setAttribute("aria-label","退出相机");this.observerExitButton.onclick=()=>this.exitCameraMode();this.navigationBar.appendChild(this.observerExitButton)
-    options.container.appendChild(this.navigationBar)
+    this.initializeNavigationBar()
     let navigation:"orbit"|"first-person"="first-person"
     try{if(localStorage.getItem("lyapunov.viewer.navigation")==="orbit")navigation="orbit"}catch{}
     this.setNavigationMode(navigation,false)
@@ -656,6 +644,7 @@ export class SceneViewer {
    * 对得上当前相机"正是这一帧里的行为（`bun test packages/viewer/test/capture-gate-view.test.ts`）。
    */
   private renderFrame(): void {
+    this.refreshNavigationCopy()
     const frameStarted = performance.now()
     const intervals = this.frameIntervalSamplesMs ?? (this.frameIntervalSamplesMs = [])
     if (this.lastRenderFrameStarted !== undefined) appendFrameSample(intervals, frameStarted - this.lastRenderFrameStarted)
@@ -1960,11 +1949,40 @@ export class SceneViewer {
     return this.observerSnapshot
   }
   subscribeObserverState(listener:()=>void):()=>void { (this.observerListeners??=new Set()).add(listener);return()=>this.observerListeners?.delete(listener) }
+  private initializeNavigationBar():void {
+    this.navigationBar=document.createElement("div")
+    this.navigationBar.className="lya-viewer-navigation"
+    this.navigationBar.setAttribute("role","group")
+    Object.assign(this.navigationBar.style,{position:"absolute",top:"12px",right:"12px",zIndex:"6",display:"flex",gap:"4px",padding:"4px",borderRadius:"8px",background:"var(--dsw-alias-bg-l1,#222)",color:"var(--dsw-alias-label-primary,#eee)"})
+    for(const mode of ["orbit","first-person"] as const){
+      const button=document.createElement("button");button.type="button"
+      Object.assign(button.style,{padding:"4px 10px",border:"1px solid currentColor",borderRadius:"5px",background:"transparent",color:"inherit",cursor:"pointer"})
+      button.onclick=()=>this.setNavigationMode(mode)
+      this.navigationButtons.push({mode,button});this.navigationBar.appendChild(button)
+    }
+    this.observerLabel=document.createElement("span");this.observerLabel.setAttribute("role","status");this.navigationBar.appendChild(this.observerLabel)
+    this.observerExitButton=document.createElement("button");this.observerExitButton.type="button";this.observerExitButton.onclick=()=>this.exitCameraMode();this.navigationBar.appendChild(this.observerExitButton)
+    this.options.container.appendChild(this.navigationBar)
+  }
+  private refreshNavigationCopy(current=this.observerSnapshot):void {
+    const tr=this.options?.translate??((zh:string,_en:string)=>zh)
+    const copy=(element:HTMLElement,text:string,aria=text,title=text)=>{
+      if(element.textContent!==text)element.textContent=text
+      if(element.getAttribute('aria-label')!==aria)element.setAttribute('aria-label',aria)
+      if(element.title!==title)element.title=title
+    }
+    if(this.navigationBar){const name=tr('查看器导航','Viewer navigation');if(this.navigationBar.getAttribute('aria-label')!==name)this.navigationBar.setAttribute('aria-label',name)}
+    for(const {mode,button} of this.navigationButtons??[]){
+      if(mode==='orbit')copy(button,tr('环绕','Orbit'),tr('查看器环绕','Orbit view'),tr('环绕查看场景','Orbit the scene'))
+      else copy(button,tr('漫游','Roam'),tr('查看器漫游','Roam view'),tr('漫游场景 · WASD/QE','Roam the scene · WASD/QE'))
+    }
+    if(this.observerExitButton)copy(this.observerExitButton,tr('退出相机','Exit camera'),tr('退出相机','Exit camera'),tr('返回主视图','Return to the main view'))
+    if(current&&this.observerLabel){const caption=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 右键拖动调朝向','Origin locked · right-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit');if(this.observerLabel.textContent!==caption)this.observerLabel.textContent=caption}
+    if(current&&this.observerExitButton&&this.observerExitButton.hidden!==(current.mode==="free"))this.observerExitButton.hidden=current.mode==="free"
+  }
   private publishObserverState():void {
     const previous=this.observerSnapshot,current=this.observerState()
-    const tr=this.options?.translate??((zh:string,_en:string)=>zh)
-    if(this.observerLabel)this.observerLabel.textContent=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 右键拖动调朝向','Origin locked · right-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit')
-    if(this.observerExitButton)this.observerExitButton.hidden=current.mode==="free"
+    this.refreshNavigationCopy(current)
     if(previous!==current)for(const listener of this.observerListeners??[])listener()
   }
   private syncObserverControls():void {

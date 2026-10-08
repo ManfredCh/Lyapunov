@@ -1386,7 +1386,7 @@
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+      "reason": "离线原件解析/挂载行为；原MJCF默认落点用既有CI-py固定mujoco==3.13.0只读compile/forward，测试无world/step/网络/模型/GPU，不依赖开发机SDK路径；URDF和缺runtime负例保持。"
     },
     {
       "path": "packages/scene-kit/test/g19-building-robot-task.test.ts",
@@ -1547,7 +1547,7 @@
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+      "reason": "离线原件解析/挂载行为；原MJCF默认落点用既有CI-py固定mujoco==3.13.0只读compile/forward，测试无world/step/网络/模型/GPU，不依赖开发机SDK路径；URDF和缺runtime负例保持。"
     },
     {
       "path": "packages/scene-kit/test/readonly-policy-gate.test.ts",

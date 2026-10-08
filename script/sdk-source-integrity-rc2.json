@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "4651480376add3d889f6e03294d58877a057fd472cbe525658abb34b1b8eda84": {
+    "d4367a1dbd007510bb6515c7935eb7520d67d2e4a76aaed13b7e2be91a37ec4d": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -12,6 +12,9 @@
         "packages/api/workspace-controller/README.zh.md",
         "packages/api/workspace-controller/src/index.ts",
         "packages/api/workspace-controller/tests/workspace-controller.host.spec.ts",
+        "packages/client/ui-chat/src/client/chat/MessageItem.tsx",
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-chat/tests/chat-view.client.spec.tsx",
         "packages/client/ui-commands/src/client/service.ts",
         "packages/client/ui-commands/tests/service.client.spec.ts",
         "packages/client/ui-conversation/src/client/contract/composer-blocks.ts",
@@ -37,13 +40,19 @@
         "packages/host/directory-picker/src/index.ts",
         "packages/interaction/commands/src/index.ts",
         "packages/interaction/commands/src/types.ts",
-        "packages/interaction/commands/tests/commands.spec.ts"
+        "packages/interaction/commands/tests/commands.spec.ts",
+        "packages/llm/llm-pi-ai/src/adapter.ts",
+        "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts",
+        "packages/llm/llm-retry/src/index.ts",
+        "packages/llm/llm-retry/tests/transport-recovery.spec.ts",
+        "packages/llm/llm/src/public-diagnostic.ts",
+        "packages/llm/llm/src/types.ts"
       ],
       "stageHashes": [
-        "0bd109dd769d60fd8a9c4d38c84a06f59484de35f4e4ccb2dc2d7c1fddec8eeb",
-        "10608ecb43a967dd28d0f279d6bad9f70a505c7655a031cbc4f36cad84d56328"
+        "4b0502a016046c405694f3cc7b9f0cc158707e90716a86b9d6c677af473a7c2c",
+        "fce243331bbbecd0a9f423de934c8116779a028950f0176361aa8df27b966b22"
       ],
-      "finalHash": "10608ecb43a967dd28d0f279d6bad9f70a505c7655a031cbc4f36cad84d56328",
+      "finalHash": "fce243331bbbecd0a9f423de934c8116779a028950f0176361aa8df27b966b22",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -53,6 +62,9 @@
         "packages/api/workspace-controller/README.zh.md": "c3b62ab85450c98acca242365fddfce0229f480927602a52da385fa8045a7ecc",
         "packages/api/workspace-controller/src/index.ts": "53452fc7a3b7505e2dc560334efc637fb97d4cba22ef8dbb7573bad24bfa956f",
         "packages/api/workspace-controller/tests/workspace-controller.host.spec.ts": "9a2daf114e6107f951a149967b5bfee321500aa7eeb09cd1075cadfd0f8f5001",
+        "packages/client/ui-chat/src/client/chat/MessageItem.tsx": "f44942ba3ba40df7283c846230f42a41af462255f33924ea4412ed8991acfcb8",
+        "packages/client/ui-chat/src/client/locale.ts": "82649a7e2947c5f4ad2107ef72f2cb366f053b4692fe308fc12f8803a9081cb6",
+        "packages/client/ui-chat/tests/chat-view.client.spec.tsx": "709c92a509081484e9b8f049730ab6c97c2a7bfd625109d9aa8f1654ab201938",
         "packages/client/ui-commands/src/client/service.ts": "4fe716cbdc4a28e6d16af46f36f862baaacb97516a58cdc7724a82fd4cda1b8e",
         "packages/client/ui-commands/tests/service.client.spec.ts": "d70f7b3218319c05ae8b235575b0694d971a9c542e4feacc040cf5ae22f14ddb",
         "packages/client/ui-conversation/src/client/contract/composer-blocks.ts": "a1ae9e1aa3c3b96121d2f5251b608379cf294203aaef30262f6e3ba6b15415c9",
@@ -78,7 +90,13 @@
         "packages/host/directory-picker/src/index.ts": "c7dc84355421b4ac8748be809ebad00ef33a8a44ce2b7f9ea7b44a79fa073a9e",
         "packages/interaction/commands/src/index.ts": "2e616046179c45e904d569ed65eee2d5f457a400a3356705b194e7c047e33c87",
         "packages/interaction/commands/src/types.ts": "418e9c5524ffd62c689852ef1b43eac26aed4ec81014fb85665c826e69b50ec0",
-        "packages/interaction/commands/tests/commands.spec.ts": "017aa95c81b4ca9a4d85195c61c83524cf7728a38a324c1d60c94853cdec8511"
+        "packages/interaction/commands/tests/commands.spec.ts": "017aa95c81b4ca9a4d85195c61c83524cf7728a38a324c1d60c94853cdec8511",
+        "packages/llm/llm-pi-ai/src/adapter.ts": "d9ad2696dab65dcc95fec22c3889136e7f10c20a8082fd42d601132121e94d81",
+        "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts": "947e4ceddbfbccb6b2d6fec714a0dcd4c335a6200ed81a2ef047969eeec5909c",
+        "packages/llm/llm-retry/src/index.ts": "c171019d533945d9ebb61695b02a248814334ca4cfe96bcc756d5885468ca783",
+        "packages/llm/llm-retry/tests/transport-recovery.spec.ts": "07e8b52ce7b99a23b777cdc4985b33ecadd01e1d24e97719ede608c644f9161d",
+        "packages/llm/llm/src/public-diagnostic.ts": "6427be3f5521d722c632b3f41480fca5da4504f2615d6448009fae45f1c4a45e",
+        "packages/llm/llm/src/types.ts": "6d7bea5bd2b88d7ad09ef6d72741824a805d4cae1b10dd3401f4367741afdf9e"
       }
     }
   }

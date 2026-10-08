@@ -152,9 +152,17 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
   const stream=Array.isArray(data.stream)?data.stream:[],finish=stream.map(row=>object(object(row).chunk)).findLast(row=>row.type==='finish'),reason=object(finish?.reason),failure=object(reason.failure)
   const partial=stream.filter(row=>object(row).type==='tool-call-chunks').map(row=>object(row))
   const argumentsChars=partial.reduce((sum,row)=>sum+(Array.isArray(row.args)?row.args.reduce((n,x)=>n+String(x).length,0):0),0)
-  add(`model:${seq}`,stepId,'model',type==='assistant/message'?'model':'attempt',reason.kind==='error'?'failed':reason.kind==='aborted'?'cancelled':finish?'success':'unknown',publicId(failure.code),{partialCalls:partial.length,argumentsChars},imageFacts((object(data.message).content??[]) as ContentBlock[]).length,publicDiagnostic(failure.diagnostic))
+  add(`model:${seq}`,stepId,'model',type==='assistant/message'?'model':'attempt',data.interrupted===true||reason.kind==='aborted'?'cancelled':reason.kind==='error'?'failed':finish?'success':'unknown',publicId(failure.code),{partialCalls:partial.length,argumentsChars},imageFacts((object(data.message).content??[]) as ContentBlock[]).length,publicDiagnostic(failure.diagnostic))
+  // 原 llm/stream 每个 attempt 通常有自己的诊断；只匹配当前 step 最近一条，失败旧 attempt 不覆盖。
+  // 旧日志若仅记一次诊断，它代表该 step 的整个请求阶段；后续 attempt 仍各自保留终态。
+  const request=next.nodes.findLast(row=>row.parent===stepId&&row.kind==='request')
+  if(request)next.nodes=next.nodes.map(row=>row.id===request.id?{...row,status:node!.status,code:node!.code,diagnostic:node!.diagnostic}:row)
  }
  else if(type==='llm/retry'){add(`retry:${seq}`,stepId,'retry','retry','waiting',publicId(object(data.failure).code),{retry:Number(data.retry),...typeof data.maxRetries==='number'?{maxRetries:data.maxRetries}:{}})}
+ else if(type==='llm/retry-started'){
+  const retry=next.nodes.findLast(row=>row.parent===stepId&&row.kind==='retry'&&row.status==='waiting'&&row.facts.retry===data.retry)
+  if(retry)next.nodes=next.nodes.map(row=>row.id===retry.id?{...row,status:'success'}:row)
+ }
  else if(type==='lyapunov/tool-observation'){
   const observation=event.data as ToolObservation
   next.nodes=next.nodes.map(row=>row.id===`tool:${observation.callId}`?{...row,facts:{...row.facts,...observation.facts},diagnostic:observation.diagnostic??row.diagnostic}:row)
@@ -172,9 +180,25 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
   add(`service:${data.intentKey}`,id,'service','peiri',data.outcome==='success'?'success':'failed',publicId(data.code),{},0,publicDiagnostic(data.diagnostic))
  }
  else if(type==='lyapunov/recovery-handoff'){next.recovery={...next.recovery,handoffSeq:seq};add(`handoff:${seq}`,stepId,'handoff','recovery','waiting',publicId(data.code))}
+ else if(type==='step/end'){
+  const prior=next.nodes.find(row=>row.id===stepId),result=stepOutcome(next.nodes,stepId)
+  add(stepId,prior?.parent??`turn:${data.turn}`,'step','step',result.status,result.code,prior?.facts??{},prior?.images??0,result.diagnostic)
+  // 边界只说明结束；没有模型终态的请求保持未知，不能由 step/end 猜测成功。
+  next.nodes=next.nodes.map(row=>row.parent===stepId&&(row.kind==='request'||row.kind==='retry')&&['running','waiting'].includes(row.status)?{...row,status:'unknown'}:row)
+ }
  else if(type==='turn/end'){
   const reason=object(data.reason)
   add(`turn:${data.turn}`,null,'turn','turn',reason.kind==='error'?'failed':reason.kind==='aborted'||reason.kind==='interrupted'?'cancelled':reason.kind==='completed'?'success':['blocked','forked','max-tokens'].includes(String(reason.kind))?'waiting':'unknown',publicId(object(reason.error).code))
+  const ending=node!,ownedSteps=new Set(next.nodes.filter(row=>row.kind==='step'&&row.parent===ending.id).map(row=>row.id)),diagnostic=publicDiagnostic(object(reason.error).diagnostic)
+  next.nodes=next.nodes.map(row=>{
+   const owned=row.kind==='step'&&row.parent===ending.id||row.kind==='request'&&ownedSteps.has(row.parent??'')
+   const unknownEffect=row.diagnostic?.effect==='unknown'||row.kind==='step'&&next.nodes.some(child=>child.parent===row.id&&child.kind==='tool'&&(child.status==='unknown'||child.status==='running'||child.diagnostic?.effect==='unknown'))
+   if(owned&&row.status==='running')return {...row,status:unknownEffect||ending.status==='success'?'unknown':ending.status,code:row.code??ending.code,diagnostic:row.diagnostic??diagnostic}
+   // step/end 无结果的未知项可由同 turn 的失败/取消原因收口；旧 attempt 或未知副作用不改。
+   if(owned&&row.status==='unknown'&&['failed','cancelled'].includes(ending.status)&&!unknownEffect)return {...row,status:ending.status,code:row.code??ending.code,diagnostic:row.diagnostic??diagnostic}
+   if(row.kind==='retry'&&ownedSteps.has(row.parent??'')&&row.status==='waiting')return {...row,status:ending.status==='success'?'unknown':ending.status}
+   return row
+  })
  }
  if(node)next.nodes=replaceNode(next.nodes,node,maxNodes)
  if(next.nodes.length===maxNodes&&state.nodes.length===maxNodes&&node&&!state.nodes.some(row=>row.id===node!.id))next.omittedNodes+=1
@@ -182,6 +206,16 @@ export function foldExecutionGraph(state:ExecutionGraph,event:SessionEvent,maxNo
 }
 
 function replaceNode(nodes:GraphNode[],node:GraphNode,maxNodes:number){const old=nodes.findIndex(row=>row.id===node.id);if(old<0)return [...nodes,node].slice(-maxNodes);return nodes.map((row,i)=>i===old?node:row)}
+
+/** step/end 没有成功标志；只用同 step 的真实工具结果和最终模型 attempt 收口。 */
+function stepOutcome(nodes:readonly GraphNode[],stepId:string):Pick<GraphNode,'status'|'code'|'diagnostic'>{
+ const children=nodes.filter(row=>row.parent===stepId),model=children.findLast(row=>row.kind==='model'),tools=children.filter(row=>row.kind==='tool')
+ const uncertain=tools.find(row=>row.status==='unknown'||row.status==='running'||row.diagnostic?.effect==='unknown')
+ if(uncertain)return {status:'unknown',code:uncertain.code,diagnostic:uncertain.diagnostic}
+ const failed=tools.find(row=>row.status==='failed'),cancelled=tools.find(row=>row.status==='cancelled')
+ const outcome=failed??(model?.status==='failed'?model:undefined)??cancelled??(model?.status==='cancelled'?model:undefined)??(children.some(row=>row.kind==='request'&&row.status==='running')?undefined:model)
+ return outcome?{status:outcome.status==='running'||outcome.status==='waiting'?'unknown':outcome.status,code:outcome.code,diagnostic:outcome.diagnostic}:{status:'unknown',code:null,diagnostic:null}
+}
 
 /** 仅识别现有公开错误前缀，正文仍保留在原生结果中，不复制至图。 */
 export function publicCodeFromText(value:unknown):string|null{

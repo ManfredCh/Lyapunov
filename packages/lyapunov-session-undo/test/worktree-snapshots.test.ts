@@ -17,10 +17,11 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { runtimePluginInsert } from '../../../script/runtime-patch.ts'
 import { openWorktreeSnapshots, type WorktreeSnapshots } from '../src/worktree.ts'
 
 const scratch: string[] = []
@@ -164,5 +165,183 @@ describe('冷恢复：事务未定论时的 recover 结论', () => {
     expect(read(root, 'swap', 'inner.txt').toString()).toBe('inner')
     // 纯预检：没有留下待恢复 journal。
     expect(await store.recover(async () => true)).toEqual([])
+  }, 30_000)
+})
+
+
+describe('明确产品运行根排除与真实 Git 暂态文件竞争', () => {
+  const protectedPaths = ['private/config', 'private/data', 'private/cache', 'private/state', 'private/tmp', 'dsh', 'worktree-history']
+  async function runtimeFixture() {
+    const original = await fixture()
+    const runtime = path(original.root, 'managed-runtime')
+    for (const relative of protectedPaths) mkdirSync(path(runtime, relative), { recursive: true })
+    const excludedRoots = protectedPaths.map(relative => path(runtime, relative))
+    const opened = await openWorktreeSnapshots({ cwd: original.root, storageRoot: original.storageRoot, excludedRoots })
+    if (!opened.supported) throw new Error('夹具不是 Git 工作树')
+    return { ...original, store: opened.store, runtime, excludedRoots }
+  }
+
+  /** 包装器只安排文件删除时序；所有 Git 命令及其返回均来自实际系统 Git。 */
+  function hashTimeRemoval(base: string, victim: string) {
+    const realGit = Bun.which('git')
+    if (!realGit) throw new Error('真实 Git 不可用')
+    const bin = path(base, 'git-wrapper'), output = path(base, 'git-wrapper.jsonl')
+    mkdirSync(bin)
+    const wrapper = path(bin, 'git')
+    const code = `#!${process.execPath}
+` + `
+import { spawnSync } from 'node:child_process'
+import { appendFileSync, existsSync, unlinkSync } from 'node:fs'
+const args = process.argv.slice(2)
+const input = args.includes('--stdin-paths') ? Buffer.from(await Bun.stdin.arrayBuffer()) : undefined
+if (input !== undefined) {
+  const present = existsSync(${JSON.stringify(victim)})
+  if (present) unlinkSync(${JSON.stringify(victim)})
+  appendFileSync(${JSON.stringify(output)}, JSON.stringify({ removed: present, args, input: input.toString() }) + '\\n')
+}
+const result = spawnSync(${JSON.stringify(realGit)}, args, { input, stdio: input === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'] })
+if (result.error) throw result.error
+process.exit(result.status ?? 1)
+`
+    writeFileSync(wrapper, code)
+    chmodSync(wrapper, 0o755)
+    return { bin, output }
+  }
+
+  test('临时索引在 hash 子进程前真实删除；排除运行根后用户快照、Git 元数据及普通同名目录仍正常', async () => {
+    const { root, store, storageRoot, runtime } = await runtimeFixture()
+    const original = path(runtime, 'private/tmp/dsh-workspace-changes-abc/index-def/index')
+    mkdirSync(dirname(original), { recursive: true }); writeFileSync(original, 'temporary-index')
+    for (const relative of protectedPaths) writeFileSync(path(runtime, relative, 'owned.txt'), 'runtime-before')
+    writeFileSync(path(root, 'tracked.txt'), 'tracked-before')
+    mkdirSync(path(root, 'another/private/tmp'), { recursive: true })
+    writeFileSync(path(root, 'another/private/tmp/user.txt'), 'same-name-before')
+    mkdirSync(path(runtime, 'private/project'), { recursive: true })
+    writeFileSync(path(runtime, 'private/project/user.txt'), 'legacy-private-before')
+    writeFileSync(path(runtime, 'private/.bashrc'), 'ordinary-private-before')
+    git(root, ['add', 'tracked.txt'])
+    git(root, ['-c', 'user.email=test@example.invalid', '-c', 'user.name=Test', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'initial'])
+    const indexBefore = read(root, '.git/index'), headBefore = git(root, ['rev-parse', 'HEAD']), refsBefore = git(root, ['show-ref'])
+    const wrapper = hashTimeRemoval(dirname(storageRoot), original)
+    const previousPath = process.env.PATH
+    process.env.PATH = wrapper.bin + ':' + previousPath
+    try {
+      const before = await store.capture()
+      expect(existsSync(original)).toBe(false)
+      const evidence = readFileSync(wrapper.output, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      expect(evidence[0].removed).toBe(true)
+      expect(evidence[0].input).not.toContain('dsh-workspace-changes-abc')
+      for (const relative of protectedPaths) writeFileSync(path(runtime, relative, 'owned.txt'), 'runtime-after')
+      writeFileSync(path(root, 'tracked.txt'), 'tracked-after')
+      writeFileSync(path(root, 'bin.dat'), Buffer.from([0, 1, 254, 255]))
+      writeFileSync(path(root, 'run.sh'), '#!/bin/sh\nexit 0\n'); chmodSync(path(root, 'run.sh'), 0o755)
+      symlinkSync('tracked.txt', path(root, 'user-link'))
+      writeFileSync(path(root, 'another/private/tmp/user.txt'), 'same-name-after')
+      writeFileSync(path(runtime, 'private/project/user.txt'), 'legacy-private-after')
+      writeFileSync(path(runtime, 'private/.bashrc'), 'ordinary-private-after')
+      const after = await store.capture(), changed = (await store.diff(before, after)).sort()
+      expect(changed).toEqual([
+        'another/private/tmp/user.txt', 'bin.dat', 'managed-runtime/private/.bashrc',
+        'managed-runtime/private/project/user.txt', 'run.sh', 'tracked.txt', 'user-link',
+      ])
+      const undo = await store.beginRestore({ operationId: 'runtime-roots-undo', sessionId: 'test', target: before, paths: [...changed, ...protectedPaths.map(relative => 'managed-runtime/' + relative + '/owned.txt')] })
+      await undo.commit()
+      expect(read(root, 'tracked.txt').toString()).toBe('tracked-before')
+      expect(read(root, 'another/private/tmp/user.txt').toString()).toBe('same-name-before')
+      expect(read(runtime, 'private/project/user.txt').toString()).toBe('legacy-private-before')
+      expect(read(runtime, 'private/.bashrc').toString()).toBe('ordinary-private-before')
+      for (const relative of protectedPaths) expect(read(runtime, relative, 'owned.txt').toString()).toBe('runtime-after')
+      const redo = await store.beginRestore({ operationId: 'runtime-roots-redo', sessionId: 'test', target: after, paths: changed })
+      await redo.commit()
+      expect(read(root, 'bin.dat').equals(Buffer.from([0, 1, 254, 255]))).toBe(true)
+      expect(lstatSync(path(root, 'run.sh')).mode & 0o111).toBe(0o111)
+      expect(readlinkSync(path(root, 'user-link'))).toBe('tracked.txt')
+      expect(read(root, '.git/index').equals(indexBefore)).toBe(true)
+      expect(git(root, ['rev-parse', 'HEAD'])).toBe(headBefore)
+      expect(git(root, ['show-ref'])).toBe(refsBefore)
+      const liveAlias = path(dirname(storageRoot), 'runtime-alias')
+      symlinkSync(runtime, liveAlias)
+      const aliasOpened = await openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: protectedPaths.map(relative => path(liveAlias, relative)) })
+      if (!aliasOpened.supported) throw new Error('夹具不是 Git 工作树')
+      expect((await aliasOpened.store.captureReported()).report.files).toBe(7)
+    } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath }
+  }, 30_000)
+
+  test('未排除普通用户文件的真实 hash 读取失败仍拒绝，清理操作锁后下一次能够恢复', async () => {
+    const { root, store, storageRoot } = await runtimeFixture()
+    const userFile = path(root, 'user.txt')
+    writeFileSync(userFile, 'real-user-before')
+    const wrapper = hashTimeRemoval(dirname(storageRoot), userFile), previousPath = process.env.PATH
+    process.env.PATH = wrapper.bin + ':' + previousPath
+    try {
+      await expect(store.capture()).rejects.toThrow("could not open 'user.txt'")
+      expect(existsSync(path(storageRoot, 'operation.lock'))).toBe(false)
+      expect(existsSync(path(storageRoot, 'capture.json'))).toBe(false)
+    } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath }
+    writeFileSync(userFile, 'real-user-restored')
+    expect((await store.captureReported()).report.files).toBe(1)
+  }, 30_000)
+
+  test('旧 journal 的运行目录、临时文件和目录模式均不覆盖；正常用户文件仍按原事务结论恢复', async () => {
+    const { root, storageRoot, runtime, excludedRoots } = await runtimeFixture()
+    const old = await openWorktreeSnapshots({ cwd: root, storageRoot })
+    if (!old.supported) throw new Error('夹具不是 Git 工作树')
+    const managed = 'managed-runtime/private/cache/state.txt'
+    writeFileSync(path(root, managed), 'runtime-v1'); writeFileSync(path(root, 'user.txt'), 'user-v1')
+    const before = await old.store.capture()
+    writeFileSync(path(root, managed), 'runtime-v2'); writeFileSync(path(root, 'user.txt'), 'user-v2')
+    await old.store.beginRestore({ operationId: 'old-runtime-journal', sessionId: 'test', target: before, paths: [managed, 'user.txt'] })
+    const journalPath = path(storageRoot, 'journals/old-runtime-journal.json')
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8'))
+    const protectedTemporary = path(root, journal.temporaryFiles[managed])
+    writeFileSync(protectedTemporary, 'keep-owned-temporary')
+    writeFileSync(path(root, managed), 'live-runtime-v3')
+    chmodSync(path(runtime, 'private/cache'), 0o700)
+    journal.directories.push({ path: 'managed-runtime/private/cache', mode: 0o777 })
+    writeFileSync(journalPath, JSON.stringify(journal) + '\n')
+    const next = await openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots })
+    if (!next.supported) throw new Error('夹具不是 Git 工作树')
+    expect(await next.store.recover(async () => false)).toEqual([{ operationId: 'old-runtime-journal', sessionId: 'test', outcome: 'rolled-back' }])
+    expect(read(root, managed).toString()).toBe('live-runtime-v3')
+    expect(readFileSync(protectedTemporary, 'utf8')).toBe('keep-owned-temporary')
+    expect(lstatSync(path(runtime, 'private/cache')).mode & 0o777).toBe(0o700)
+    expect(read(root, 'user.txt').toString()).toBe('user-v2')
+    expect(await next.store.recover(async () => false)).toEqual([])
+  }, 30_000)
+
+  test('原 runtime 装配只登记七个明确目录，旧布局与分域布局共用原账号运行根', () => {
+    const previousUndo = process.env.LYAPUNOV_SESSION_UNDO
+    delete process.env.LYAPUNOV_SESSION_UNDO
+    try {
+      const runtime = '/tmp/undo-runtime-wiring/account'
+      const sceneRoot = path(runtime, 'scene')
+      const domains = { worldsRoot: path(runtime, 'worlds'), assetsRoot: path(runtime, 'assets'), robotsRoot: path(runtime, 'robots'), cacheRoot: path(runtime, 'cache'), catalogRoot: path(runtime, 'catalog') }
+      for (const input of [{ sceneRoot }, { sceneRoot: '/tmp/legacy-scene/scene', domains }]) {
+        const plugin = runtimePluginInsert({ mode: 'guest', surface: 'web', engine: 'none', ...input }).find(plugin => plugin.id === 'lyapunov-lyapunov-session-undo')
+        expect(plugin?.config).toEqual({ dataRoot: path(runtime, 'worktree-history'), excludedRoots: protectedPaths.map(relative => path(runtime, relative)) })
+      }
+    } finally { if (previousUndo === undefined) delete process.env.LYAPUNOV_SESSION_UNDO; else process.env.LYAPUNOV_SESSION_UNDO = previousUndo }
+  })
+
+  test('外置运行根不扩大文件域、排除缺失末端有效；非 Git 无快照；错误装配不能排整个工作树', async () => {
+    const { root, storageRoot } = await fixture()
+    const external = path(dirname(storageRoot), 'external-runtime')
+    mkdirSync(external); writeFileSync(path(external, 'state.txt'), 'external-before')
+    const pending = path(root, 'future-runtime/private/tmp')
+    const opened = await openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: [external, pending] })
+    if (!opened.supported) throw new Error('夹具不是 Git 工作树')
+    mkdirSync(pending, { recursive: true }); writeFileSync(path(pending, 'index'), 'temporary')
+    writeFileSync(path(root, 'user.txt'), 'user-before')
+    const before = await opened.store.capture()
+    writeFileSync(path(external, 'state.txt'), 'external-after'); writeFileSync(path(root, 'user.txt'), 'user-after')
+    const after = await opened.store.capture()
+    expect(await opened.store.diff(before, after)).toEqual(['user.txt'])
+    expect((await opened.store.captureReported()).report.files).toBe(1)
+    const notGit = await openWorktreeSnapshots({ cwd: external, storageRoot: path(external, 'store'), excludedRoots: [pending] })
+    expect(notGit).toEqual({ supported: false, reason: 'NOT_GIT_WORKTREE' })
+    expect(existsSync(path(external, 'store'))).toBe(false)
+    await expect(openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: [root] })).rejects.toThrow('不能包含工作树或当前工作目录')
+    await expect(openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: [dirname(root)] })).rejects.toThrow('不能包含工作树或当前工作目录')
+    await expect(openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: ['relative/private/tmp'] })).rejects.toThrow('必须是绝对路径')
   }, 30_000)
 })

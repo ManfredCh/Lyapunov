@@ -435,7 +435,7 @@
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity-rc2.json",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "1fd0358a8e51fef0c062a7b609dc8f89baa94edce64094ba54001b3671a18fd4"
+    "sha256": "e22f656c2d2e7ffafb66fa21c6c93141ddc38dc8e69d4f9237c21c520d86fede"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -473,7 +473,7 @@
   "sdkProductPatch": {
     "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "8a147495270352f5d5f4a3ac8aac7374270206f85f4557da11ea7094da2e9646",
+    "sha256": "25e576881c2b56531e7a70476d72e52bc5501f55b387a3cbcd9e827d8eb4ae59",
     "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
     "includedInFork": false
   },

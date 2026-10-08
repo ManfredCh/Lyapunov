@@ -144,7 +144,16 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   // viewer 只提供浏览器代码（宿主半边是空实现），但 DSH 的客户端模块表只扫描"宿主 Loader 里的条目"，
   // 所以必须作为插件挂进 profile，shell 与 workspace 才能按 @lyapunov/viewer/client 共享同一份 three+spark。
   add("viewer")
-  if (process.env.LYAPUNOV_SESSION_UNDO !== '0') add('lyapunov-session-undo', { dataRoot: join(input.sceneRoot, '..', 'worktree-history') })
+  if (process.env.LYAPUNOV_SESSION_UNDO !== '0') {
+    const undoRuntimeRoot=runtimeRoot??dirname(input.sceneRoot)
+    add('lyapunov-session-undo', {
+      dataRoot: join(undoRuntimeRoot, 'worktree-history'),
+      excludedRoots: [
+        ...['config','data','cache','state','tmp'].map(name=>join(undoRuntimeRoot,'private',name)),
+        join(undoRuntimeRoot,'dsh'),join(undoRuntimeRoot,'worktree-history'),
+      ],
+    })
+  }
   if(input.engine&&input.engine!=="none"){
     if(input.engine==="mujoco"){
       const renderBackend=process.env.LYAPUNOV_MUJOCO_RENDER_BACKEND

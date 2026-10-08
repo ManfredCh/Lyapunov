@@ -790,10 +790,13 @@ export class SceneOperations {
     let entities: Entity[]
     let transform=input.transform??resource.mountTransform
     if(input.alignBottomToSurface!==false&&input.transform?.position&&transform){
-      // 旧登记版本可能没有新可重建的URDF视觉bounds。只读同原件重测供本次挂载，不改库或原件版本。
-      if(!resource.physicalization?.collisionBounds&&resource.parsed.kind==='robot'&&resource.parsed.metadata.format==='urdf'&&!resource.parsed.metadata.aabb){
+      // 旧登记版本只在已核原件闭包上重测本次 native bounds，不改库、原件或资源版本。
+      if(!resource.physicalization?.collisionBounds&&resource.parsed.kind==='robot'&&['urdf','mjcf'].includes(String(resource.parsed.metadata.format))&&!resource.parsed.metadata.aabb){
         const measured=await parseAsset(localPath(resource.ref.original.uri),resource.ref.source)
-        if(measured.kind!=='robot'||measured.metadata.format!=='urdf')throw Error('URDF_BOUNDS_SOURCE_FORMAT_MISMATCH')
+        if(measured.kind!=='robot'||measured.metadata.format!==resource.parsed.metadata.format)throw Error(resource.parsed.metadata.format==='urdf'?'URDF_BOUNDS_SOURCE_FORMAT_MISMATCH':'MJCF_BOUNDS_SOURCE_FORMAT_MISMATCH')
+        // verify 与重读间也不得换原件或依赖；不将任意新几何元数据借给旧资源版本。
+        const expected=new Map(resource.parsed.dependencies.map(d=>[resolve(d.path),d.sha256]))
+        if(measured.dependencies.length!==expected.size||measured.dependencies.some(d=>!d.sha256||expected.get(resolve(d.path))!==d.sha256))throw Error('NATIVE_BOUNDS_SOURCE_CHANGED')
         resource={...resource,parsed:{...resource.parsed,metadata:{...resource.parsed.metadata,...measured.metadata}}}
       }
       // 落地对齐优先用碰撞产物包围盒（物理基准，含凸包/盒组真实外形）；物理化未完成或无产物时退回视觉 aabb。

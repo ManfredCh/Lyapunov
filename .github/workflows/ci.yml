@@ -72,19 +72,21 @@ jobs:
       - name: Build desktop
         run: bun run script/build-desktop.ts
 
-      # CI 唯一的 python venv（CCMM-09）：**在技能校验之前**就绪，装齐下面两处真用到的依赖。
+      # CI 唯一的 python venv（CCMM-09）：**在技能校验之前**就绪，装齐下面实际使用的依赖。
       #  · PyYAML：`Validate skill files` 解析 SKILL.md frontmatter 要 `import yaml`；
       #  · numpy / Pillow：纳入清单的 python 用例真实依赖（`test_worker_protocol.py` import numpy；
       #    `packages/benchmark-gymnasium/python/worker.py` 里 `from PIL import Image`）。
+      #  · mujoco==3.13.0：原MJCF参考几何解析/默认落点正例；与发行Mu runtime锁一致，只compile/forward、不step/world。
       # 之后一律用这个 venv 的解释器，**不依赖 ubuntu-latest 是否碰巧预装 PyYAML**（那是偶然事实，不是前提）。
-      - name: Provision CI python venv (PyYAML + numpy + Pillow)
+      - name: Provision CI python venv (PyYAML + numpy + Pillow + pinned MuJoCo parser)
         run: |
           set -eu
           python3 -m venv .runtime/ci-py
           export TESTCI_PYTHON="$PWD/.runtime/ci-py/bin/python"
           echo "TESTCI_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
-          "$TESTCI_PYTHON" -m pip install -q pyyaml numpy pillow
-          "$TESTCI_PYTHON" -c "import yaml, numpy, PIL; print('ci-py ok', yaml.__version__, numpy.__version__, PIL.__version__)"
+          "$TESTCI_PYTHON" -m pip install -q pyyaml numpy pillow mujoco==3.13.0
+          echo "LYAPUNOV_MUJOCO_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
+          "$TESTCI_PYTHON" -c "import yaml, numpy, PIL, mujoco; assert mujoco.__version__ == '3.13.0'; print('ci-py ok', yaml.__version__, numpy.__version__, PIL.__version__, mujoco.__version__)"
 
       - name: Validate skill files
         run: |

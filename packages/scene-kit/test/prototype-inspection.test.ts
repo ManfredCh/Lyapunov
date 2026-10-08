@@ -58,9 +58,9 @@ function triangleGLB(withNormal: boolean): Buffer {
 }
 
 describe('ENV-21 原型不通过就不复制', () => {
-  it('原生MJCF/URDF真实kind为robot：缺bounds默认及显式true拒写，false保用户模型原点与原件姿态',async()=>{
+  it('真实MJCF默认底面对齐；无可视URDF仍拒写，显式false保源原点与关节',async()=>{
     const pose={position:[2,3,4] as [number,number,number],quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as [number,number,number]}
-    // MJCF 尚未派生 bounds；合法但没有 visual 的 URDF 也不能猜测底面。
+    // MJCF由官方只读编译参考姿态；无visual URDF不能猜底面。
     const sources=[['xml','mjcf','<mujoco model="arbitrary-native"><worldbody><body name="root" pos="0 0 1"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>'],['urdf','urdf','<robot name="other-native"><link name="root"/></robot>']] as const
     for(const [extension,format,source] of sources){
       const path=join(workspace,`arbitrary.${extension}`);await writeFile(path,source)
@@ -68,13 +68,56 @@ describe('ENV-21 原型不通过就不复制', () => {
       const imported=await operations.import({path,resourceId:'arbitrary-resource',physicalize:false}),row=(await operations.resources.list({}))[0]!
       expect(row.parsed.kind).toBe('robot');expect(row.parsed.metadata.format).toBe(format)
       const input={sceneId:scene.sceneId,resourceId:row.ref.resourceId,version:row.ref.version,transform:pose}
-      await expect(operations.mount(input)).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE')
-      await expect(operations.mount({...input,alignBottomToSurface:true})).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE')
-      expect((await operations.inspect(scene.sceneId)).revision).toBe(0);expect((await operations.inspect(scene.sceneId)).entities).toEqual([])
+      if(format==='mjcf'){
+        const placed=await operations.mount(input),entity=placed.snapshot.entities.find(e=>e.entityId===placed.entityId)!
+        expect(entity.transform.position[2]).toBeCloseTo(3.3,6) // 原body z=1、box半高.3，底面.7 → 目标4。
+        expect(row.parsed.metadata.boundsFacts).toMatchObject({status:'available',source:'mjcf-original-geometries',pose:'source-reference-qpos0',dynamicPoseEvaluated:false,simulationSteps:0})
+        const metric=assetBounds(row.parsed,{units:'mm',upAxis:'Z',handedness:'right',metersPerUnit:.001})!;expect(metric.min[2]).toBeCloseTo(.0007,9) // 原sourceTransform只转换一次，不把SDK数值当已缩放的Scene坐标。
+        const again=await operations.mount({...input,alignBottomToSurface:true});expect(again.snapshot.entities.find(e=>e.entityId===again.entityId)!.transform.position[2]).toBeCloseTo(3.3,6)
+      }else{
+        await expect(operations.mount(input)).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE')
+        await expect(operations.mount({...input,alignBottomToSurface:true})).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE')
+        expect((await operations.inspect(scene.sceneId)).revision).toBe(0);expect((await operations.inspect(scene.sceneId)).entities).toEqual([])
+      }
       const placed=await operations.mount({...input,alignBottomToSurface:false}),entity=placed.snapshot.entities.find(row=>row.entityId===placed.entityId)!
-      expect(placed.snapshot.revision).toBe(1);expect(entity.transform).toEqual(pose);expect(entity.components.articulation?.format).toBe(format);expect(entity.components.visual?.robot).toBeDefined()
+      expect(placed.snapshot.revision).toBe(format==='mjcf'?3:1);expect(entity.transform).toEqual(pose);expect(entity.components.articulation?.format).toBe(format);expect(entity.components.visual?.robot).toBeDefined()
       expect(entity.resources[0]?.resourceId).toBe(imported.resource.ref.resourceId);expect(await readFile(path,'utf8')).toBe(source)
     }
+  })
+
+  it('MJCF有限worldbody-only原几何有效；本体bounds不包含world支撑面/相机/site',async()=>{
+    const only=join(workspace,'world-only.xml');await writeFile(only,'<mujoco><worldbody><geom type="box" pos="1 2 3" size=".1 .2 .3"/><geom type="plane" size="0 0 .1"/></worldbody></mujoco>')
+    const a=await parseAsset(only);expect(a.metadata.aabb).toEqual({min:[.9,1.8,2.7],max:[1.1,2.2,3.3]});expect(a.metadata.boundsFacts).toMatchObject({geometryScope:'finite-worldbody-only-geometries',excludedPlaneCount:1})
+    const body=join(workspace,'body-only.xml');await writeFile(body,'<mujoco><worldbody><geom type="plane" size="1000 1000 .1"/><geom type="box" pos="90 90 90" size="1 1 1"/><body name="robot" pos="0 0 1"><geom type="box" size=".1 .2 .3"/><site pos="300 0 0"/><camera pos="400 0 0"/></body></worldbody></mujoco>')
+    const b=await parseAsset(body);expect(b.metadata.aabb).toEqual({min:[-.1,-.2,.7],max:[.1,.2,1.3]});expect(b.metadata.boundsFacts).toMatchObject({geometryScope:'source-body-geometries',excludedWorldGeomCount:2,geomCount:1,simulationSteps:0})
+  })
+  it('MJCF解析运行时缺失与编译失败具体拒写，不能猜bounds或偷改源',async()=>{
+    const path=join(workspace,'missing-runtime.xml'),source='<mujoco><worldbody><body><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>';await writeFile(path,source)
+    const original=process.env.LYAPUNOV_MUJOCO_PYTHON
+    try{
+      process.env.LYAPUNOV_MUJOCO_PYTHON='/not-installed/native-mjcf-parser'
+      const parsed=await parseAsset(path);expect(parsed.metadata.aabb).toBeUndefined();expect((parsed.metadata.boundsFacts as any).issue).toMatch(/^MJCF_BOUNDS_QUERY_FAILED:/)
+      const ops=new SceneOperations(join(workspace,'missing-runtime-data')),scene=await ops.create({});await expect(ops.import({path,sceneId:scene.sceneId,physicalize:false,transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]}})).rejects.toThrow('PROTOTYPE_BOUNDS_UNAVAILABLE');expect((await ops.inspect(scene.sceneId)).entities).toHaveLength(0)
+    }finally{if(original===undefined)delete process.env.LYAPUNOV_MUJOCO_PYTHON;else process.env.LYAPUNOV_MUJOCO_PYTHON=original}
+    for(const[i,invalid]of ['<mujoco><worldbody><body><geom type="box" size="-1 .2 .3"/></body></worldbody></mujoco>','<mujoco><worldbody><body pos="nan 0 0"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>'].entries()){const broken=join(workspace,'compile-invalid-'+i+'.xml');await writeFile(broken,invalid);const bad=await parseAsset(broken);expect(bad.metadata.aabb).toBeUndefined();expect((bad.metadata.boundsFacts as any).issue).toMatch(/^MJCF_BOUNDS_QUERY_FAILED:/)}expect(await readFile(path,'utf8')).toBe(source)
+  })
+  it('旧MJCF资源仅同版本同闭包本次重测；原件变更仍拒绝且不写Scene',async()=>{
+    const path=join(workspace,'legacy-mjcf.xml'),source='<mujoco><worldbody><body name="part" pos="0 0 1"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>';await writeFile(path,source)
+    const operations=new SceneOperations(join(workspace,'legacy-mjcf-data')),scene=await operations.create({}),imported=await operations.import({path,resourceId:'legacy-mjcf',physicalize:false})
+    const indexPath=operations.resources.indexPath,index=JSON.parse(await readFile(indexPath,'utf8')),row=index.records.find((r:any)=>r.ref.resourceId==='legacy-mjcf');delete row.parsed.metadata.aabb;delete row.parsed.metadata.boundsFacts;await writeFile(indexPath,JSON.stringify(index))
+    const beforeIndex=await readFile(indexPath),placed=await operations.mount({sceneId:scene.sceneId,resourceId:'legacy-mjcf',version:imported.resource.ref.version,transform:{position:[0,0,5],quaternion:[0,0,0,1],scale:[1,1,1]}})
+    expect(placed.snapshot.entities.find(e=>e.entityId===placed.entityId)!.transform.position[2]).toBeCloseTo(4.3,6);expect(await readFile(indexPath)).toEqual(beforeIndex);expect((await operations.resources.get('legacy-mjcf')).ref.version).toBe(imported.resource.ref.version)
+    const originalPath=new URL(imported.resource.ref.original.uri).pathname;await writeFile(originalPath,source.replace('.1 .2 .3','.1 .2 .9'))
+    const revision=(await operations.inspect(scene.sceneId)).revision;await expect(operations.mount({sceneId:scene.sceneId,resourceId:'legacy-mjcf',version:imported.resource.ref.version,transform:{position:[0,0,5],quaternion:[0,0,0,1],scale:[1,1,1]}})).rejects.toThrow('RESOURCE_UNAVAILABLE');expect((await operations.inspect(scene.sceneId)).revision).toBe(revision)
+  })
+  it('旧MJCF在verify后变更原件也不能把新bounds借给旧版本',async()=>{
+    const path=join(workspace,'racing-mjcf.xml'),source='<mujoco><worldbody><body name="part"><geom type="box" size=".1 .2 .3"/></body></worldbody></mujoco>';await writeFile(path,source)
+    const operations=new SceneOperations(join(workspace,'race-data')),scene=await operations.create({}),imported=await operations.import({path,resourceId:'racing',physicalize:false})
+    const indexPath=operations.resources.indexPath,index=JSON.parse(await readFile(indexPath,'utf8')),row=index.records.find((r:any)=>r.ref.resourceId==='racing');delete row.parsed.metadata.aabb;delete row.parsed.metadata.boundsFacts;await writeFile(indexPath,JSON.stringify(index));const beforeIndex=await readFile(indexPath)
+    const originalVerify=operations.resources.verify.bind(operations.resources)
+    operations.resources.verify=async(id,version)=>{const verified=await originalVerify(id,version);expect(verified.valid).toBe(true);await writeFile(new URL(imported.resource.ref.original.uri).pathname,source.replace('.1 .2 .3','.1 .2 .6'));return verified}
+    await expect(operations.mount({sceneId:scene.sceneId,resourceId:'racing',version:imported.resource.ref.version,transform:{position:[0,0,1],quaternion:[0,0,0,1],scale:[1,1,1]}})).rejects.toThrow('NATIVE_BOUNDS_SOURCE_CHANGED')
+    expect((await operations.inspect(scene.sceneId)).revision).toBe(0);expect((await operations.inspect(scene.sceneId)).entities).toHaveLength(0);expect(await readFile(indexPath)).toEqual(beforeIndex)
   })
   it('没有包围盒（造型/底面/尺度不可判定）：默认落地对齐拒绝复制，场景不动；显式 false 与不给 position 仍可导入', async () => {
     const prototype = join(workspace, 'prototype-nobounds.sog')

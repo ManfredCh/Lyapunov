@@ -560,6 +560,7 @@ export function ModelPreviewBody({t,useTabInfo,readBytes}:Props){
  const {tab}=useTabInfo()
  const address=tab.navigation.address
  const tr=(zh:string,en:string)=>t('open')==='Files & terminal'?en:zh
+ const translateRef=useRef(tr);translateRef.current=tr
  const stage=useRef<HTMLDivElement|null>(null)
  const viewer=useRef<SceneViewer|null>(null)
  const preview=useRef<{object:THREE.Object3D;upAxis:'Y'|'Z'}|null>(null)
@@ -592,7 +593,7 @@ export function ModelPreviewBody({t,useTabInfo,readBytes}:Props){
    }
    const loaded=await loadPreview(context)
    if(disposed||abort.signal.aborted)return
-   const instance=createViewer({container:node,resolveResource:uri=>loaded.via==='scene'?loaded.resolveResource(uri):'',onError:reason=>fail(reason)})
+   const instance=createViewer({container:node,translate:(zh,en)=>translateRef.current(zh,en),resolveResource:uri=>loaded.via==='scene'?loaded.resolveResource(uri):'',onError:reason=>fail(reason)})
    viewer.current=instance
    if(loaded.via==='scene'){
     await instance.setScene(loaded.snapshot)

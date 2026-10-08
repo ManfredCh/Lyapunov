@@ -55,7 +55,7 @@ export class SessionUndoController {
   private readonly operations = new Map<string, Promise<unknown>>()
   private readonly blocked = new Set<string>()
   private readonly blockedWorktrees = new Set<string>()
-  constructor(private readonly ctx: Context, private readonly config: { dataRoot: string; snapshots?: boolean }) {}
+  constructor(private readonly ctx: Context, private readonly config: { dataRoot: string; snapshots?: boolean; excludedRoots?: readonly string[] }) {}
 
   private async persisted(operationId: string, sessionId: string): Promise<boolean> {
     try {
@@ -73,7 +73,7 @@ export class SessionUndoController {
       pending = (async () => {
         if (this.config.snapshots === false) return { cwd, mode: 'disabled' as const }
         const key = createHash('sha256').update(cwd).digest('hex')
-        const opened = await openWorktreeSnapshots({ cwd, storageRoot: join(this.config.dataRoot, key) })
+        const opened = await openWorktreeSnapshots({ cwd, storageRoot: join(this.config.dataRoot, key), excludedRoots: this.config.excludedRoots })
         if (!opened.supported) return { cwd, mode: 'not-git' as const }
         await opened.store.recover((operationId, sessionId) => this.persisted(operationId, sessionId))
         return { cwd, mode: 'git' as const, store: opened.store }

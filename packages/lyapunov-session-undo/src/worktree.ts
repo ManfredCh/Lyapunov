@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rmdir, symlink, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { SESSION_PRIVATE_PARENT } from '../../lyapunov-contracts/src/writable-boundary.ts'
+import { canonicalTargetPath, SESSION_PRIVATE_PARENT } from '../../lyapunov-contracts/src/writable-boundary.ts'
 
 export interface SnapshotRef { version: 1; worktree: string; tree: string }
 export interface CaptureReport {
@@ -90,7 +90,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 }
 
 /** 仅打开真实 Git 工作树；storageRoot 是这个工作树专用的 DSH 私有目录。 */
-export async function openWorktreeSnapshots(options: { cwd: string; storageRoot: string }): Promise<
+export async function openWorktreeSnapshots(options: { cwd: string; storageRoot: string; excludedRoots?: readonly string[] }): Promise<
   { supported: false; reason: 'NOT_GIT_WORKTREE' } | { supported: true; store: WorktreeSnapshots }
 > {
   const cwd = await realpath(options.cwd)
@@ -99,12 +99,19 @@ export async function openWorktreeSnapshots(options: { cwd: string; storageRoot:
   const worktree = await realpath((await git(cwd, ['rev-parse', '--show-toplevel'])).toString().replace(/\n$/, ''))
   const sourceGit = await realpath((await git(cwd, ['rev-parse', '--absolute-git-dir'])).toString().replace(/\n$/, ''))
   const sourceCommon = await realpath((await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).toString().replace(/\n$/, ''))
+  // 装配方仅登记明确的非用户运行目录；不存在的末端使用产品共用的规范路径规则。
+  const excludedRoots = [...new Set((options.excludedRoots ?? []).map(root => {
+    if (!isAbsolute(root)) throw new Error('排除运行目录必须是绝对路径')
+    const canonical = canonicalTargetPath(root)
+    if (isWithin(canonical, worktree) || isWithin(canonical, cwd)) throw new Error('排除运行目录不能包含工作树或当前工作目录')
+    return canonical
+  }))]
   const requested = resolve(options.storageRoot)
   if (requested === worktree || isWithin(sourceGit, requested) || isWithin(sourceCommon, requested)) throw new Error('快照目录不能是工作树本身或用户 Git 目录')
   await mkdir(requested, { recursive: true, mode: 0o700 })
   const storageRoot = await realpath(requested)
   if (storageRoot === worktree || isWithin(sourceGit, storageRoot) || isWithin(sourceCommon, storageRoot)) throw new Error('快照目录不能指向工作树本身或用户 Git 目录')
-  const store = new WorktreeSnapshots(worktree, storageRoot)
+  const store = new WorktreeSnapshots(worktree, storageRoot, excludedRoots)
   await store.initialize()
   return { supported: true, store }
 }
@@ -115,9 +122,13 @@ export class WorktreeSnapshots {
   private readonly journals: string
   readonly worktree: string
   readonly storageRoot: string
-  constructor(worktree: string, storageRoot: string) {
+  constructor(worktree: string, storageRoot: string, private readonly excludedRoots: readonly string[] = []) {
     this.worktree = worktree; this.storageRoot = storageRoot
     this.objects = join(storageRoot, 'git'); this.journals = join(storageRoot, 'journals')
+  }
+  /** 产品运行目录与会话私有目录不属于用户文件撤销域。 */
+  private excludes(path: string): boolean {
+    return isSessionRuntime(path) || this.excludedRoots.some(root => isWithin(root, join(this.worktree, path)))
   }
   async initialize(): Promise<void> {
     await this.exclusive(async () => {
@@ -199,7 +210,7 @@ export class WorktreeSnapshots {
       // 尾随斜杠是git对“不递归的未跟踪目录”（如嵌套仓库）的整体标记，不是可快照叶路径；其内容git也不会逐个列出。
       // 忽略规则已由--exclude-standard施加在未跟踪文件上，且忽略规则从不作用于已跟踪文件；
       // 曾用check-ignore --no-index复核会误删已跟踪的*.log等文件，并让每步空转约0.5秒。
-      const candidates = [...new Set(splitNul(await git(this.worktree, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])))].filter(path => !path.endsWith('/') && !path.split('/').includes('.git') && !isWithin(this.storageRoot, join(this.worktree, path)) && !isSessionRuntime(path))
+      const candidates = [...new Set(splitNul(await git(this.worktree, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])))].filter(path => !path.endsWith('/') && !path.split('/').includes('.git') && !isWithin(this.storageRoot, join(this.worktree, path)) && !this.excludes(path))
       const directories = new Map<string, boolean>(), entries = new Map<string, CaptureEntry>(), unhashed = new Map<string, { mode: Entry['mode']; size: string; mtimeNs: string; ctimeNs: string; ino: string; link: boolean }>()
       let reused = 0, bytesRead = 0
       for (const path of candidates) {
@@ -284,8 +295,8 @@ export class WorktreeSnapshots {
   diff(before: SnapshotRef, after: SnapshotRef): Promise<string[]> {
     return this.exclusive(async () => {
       this.checkRef(before); this.checkRef(after)
-      // 会话私有运行目录在两侧都不进树（见 isSessionRuntime），这里再挡一次旧快照：它不构成撤销路径。
-      return splitNul(await this.privateGit(['diff-tree', '-r', '--no-renames', '--name-only', '-z', before.tree, after.tree])).map(path => this.checkedPath(path)).filter(path => !isSessionRuntime(path))
+      // 同一排除判据保护旧快照：运行目录不构成用户撤销路径。
+      return splitNul(await this.privateGit(['diff-tree', '-r', '--no-renames', '--name-only', '-z', before.tree, after.tree])).map(path => this.checkedPath(path)).filter(path => !this.excludes(path))
     })
   }
   private async entries(ref: SnapshotRef): Promise<Map<string, Entry>> {
@@ -310,7 +321,7 @@ export class WorktreeSnapshots {
       if (!request.sessionId) throw new Error('sessionId不能为空')
       const path = this.journalPath(request.operationId)
       if ((await this.pending()).length) throw new Error('WORKTREE_RESTORE_PENDING: 先完成或恢复已有文件事务')
-      const paths = [...new Set(request.paths.map(path => this.checkedPath(path)))].filter(path => !isSessionRuntime(path)).sort()
+      const paths = [...new Set(request.paths.map(path => this.checkedPath(path)))].filter(path => !this.excludes(path)).sort()
       const target = await this.entries(request.target)
       const plan = await this.plan(paths, target, [])
       const before = await this.treeFor(paths), directories: Directory[] = [], modes: Record<string, number> = {}, temporaryFiles: Record<string, string> = {}
@@ -390,13 +401,13 @@ export class WorktreeSnapshots {
     for (const [file, path] of Object.entries(journal.temporaryFiles)) {
       this.checkedPath(path)
       if (dirname(path) !== dirname(file) || !path.split('/').at(-1)?.startsWith('.lyapunov-restore-')) throw new Error('无效的恢复临时文件记录')
-      if (await this.info(path)) await unlink(join(this.worktree, path))
+      if (!this.excludes(file) && !this.excludes(path) && await this.info(path)) await unlink(join(this.worktree, path))
     }
   }
   private async apply(paths: readonly string[], entries: Map<string, Entry>, restoredDirectories: Directory[], modes: Record<string, number>, temporaryFiles: Record<string, string>): Promise<void> {
-    // 会话私有运行目录一律不落字节（含修复前 journal/redo 点里的遗留路径，见 isSessionRuntime）。
-    paths = paths.filter(path => !isSessionRuntime(path))
-    restoredDirectories = restoredDirectories.filter(row => !isSessionRuntime(row.path))
+    // 产品/会话私有运行目录不落字节，含修复前 journal/redo 点的遗留路径。
+    paths = paths.filter(path => !this.excludes(path))
+    restoredDirectories = restoredDirectories.filter(row => !this.excludes(row.path))
     const plan = await this.plan(paths, entries, restoredDirectories), contents = new Map<string, Buffer>()
     for (const [path, entry] of plan.desired) contents.set(path, await this.privateGit(['cat-file', 'blob', entry.oid]))
     const deepest = (a: string, b: string) => b.split('/').length - a.split('/').length

@@ -27,6 +27,7 @@ export function RecordingMissingFiles({ row, tr }: { row: Pick<Summary, 'missing
 export function RecordingPanel({ api, sceneId, world, tr, perform, onReplayChange, close, visible = true }: { api: ReturnType<typeof workbenchAPI>; sceneId?: string; world?: WorldHandle; tr: Translate; perform: (fn: () => Promise<unknown>) => void; onReplayChange: (value: boolean) => void; close: () => void; visible?: boolean }) {
  const [rows, setRows] = useState<Summary[]>([]), [replay, setReplay] = useState<RecordingReplay>(), [segment, setSegment] = useState(0), [index, setIndex] = useState(0), [playing, setPlaying] = useState(false), [limit, setLimit] = useState(60), [note, setNote] = useState(''), [loaded, setLoaded] = useState(false), [listVisible, setListVisible] = useState(true)
  const container = useRef<HTMLDivElement>(null), viewer = useRef<SceneViewer>(), instanceVersion = useRef(0)
+ const translateRef=useRef(tr);translateRef.current=tr
  const currentSegment = replay?.segments[segment], frames = currentSegment?.frames ?? [], frame = frames[index]
  const sourceSummary = currentSegment && frame
   ? `scene ${currentSegment.scene.sceneId} · world ${currentSegment.world.worldId} · g${frame.generation} · scene rev ${currentSegment.world.appliedSceneRevision} · frame rev ${frame.sceneRevision}`
@@ -37,7 +38,7 @@ export function RecordingPanel({ api, sceneId, world, tr, perform, onReplayChang
  useEffect(() => {
   if (!replay || !container.current) return
   // 录制媒体也按会话寻址：录制品在 <recordingRoot>/sessions/<本窗口会话> 下，不手拼前缀。
-  const instance = createViewer({ container: container.current, resolveResource: uri => api.mediaURL('recording-resource', { recordingId: replay.manifest.recordingId, uri }), onError: error => setNote(String(error)) })
+  const instance = createViewer({ container: container.current, translate:(zh,en)=>translateRef.current(zh,en), resolveResource: uri => api.mediaURL('recording-resource', { recordingId: replay.manifest.recordingId, uri }), onError: error => setNote(String(error)) })
   viewer.current = instance; setLoaded(false)
   return () => { ++instanceVersion.current; instance.dispose(); viewer.current = undefined }
  }, [replay?.manifest.recordingId, segment])

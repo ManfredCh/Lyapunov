@@ -6,7 +6,7 @@
 
 本地终端和远端终端支持 `:undo`、`:redo` 和 `:undo_status`；斜杠形式进入相同原生 Commands。撤销后的文字及附件恢复为待确认草稿，只有用户再次发送才进入模型。未发送草稿仍是当前客户端状态。非 Git 目录只提供会话历史撤销，结果通过 `files.mode=not-git` 明示没有 Git 文件恢复；Git 旧输入缺少快照时拒绝承诺完整撤销。
 
-`openWorktreeSnapshots({ cwd, storageRoot })` 仅支持真实 Git 工作树；非 Git 目录返回 `{ supported: false, reason: 'NOT_GIT_WORKTREE' }`，不会创建快照目录或假报成功。`storageRoot` 必须是该工作树专用的 DSH 私有目录，不能位于用户 Git 元数据目录。私有 Git 对象库及每次独立索引位于其中，组件不修改用户 `.git/index`、HEAD 或提交。私有目录位于工作树内时自动排除。
+`openWorktreeSnapshots({ cwd, storageRoot, excludedRoots? })` 仅支持真实 Git 工作树；非 Git 目录返回 `{ supported: false, reason: 'NOT_GIT_WORKTREE' }`，不会创建快照目录或假报成功。`storageRoot` 必须是该工作树专用的 DSH 私有目录，不能位于用户 Git 元数据目录。私有 Git 对象库及每次独立索引位于其中，组件不修改用户 `.git/index`、HEAD 或提交。私有目录位于工作树内时自动排除。`excludedRoots` 只由可信产品装配登记明确的绝对运行目录，打开 store 时按同一规范路径规则解析；不得包含 Git 根或当前工作目录。正式装配排除 `private/config`、`private/data`、`private/cache`、`private/state`、`private/tmp`、`dsh` 与 `worktree-history`。捕获、差集、恢复及旧 journal 应用共用排除判据，其他同名目录、`private` 根的普通项目文件与用户 worlds/assets/robots/captures/recordings 保持覆盖。这样 Git 根内临时索引正常删除不会成为用户快照的读取失败。
 
 会话从 Git 子目录启动时，也按该 Git 工作树完整的变化路径恢复，包括工具实际修改的同仓库其他目录文件；不静默丢弃这些路径。
 

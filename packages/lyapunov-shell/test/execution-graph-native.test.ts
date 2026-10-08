@@ -238,17 +238,20 @@ describe('原生Graph/恢复hook',()=>{
    expect(read.isError).toBe(false);expect(JSON.stringify(read.content)).toContain('loader-host')
   }finally{await ctx.fiber.dispose();await rm(scratch,{recursive:true,force:true})}
  })
- test('真实原生projection ver1/ver2/ver3坏旧缓存按ver4从完整事件重建，checkout不改原事件且回到准确前缀',async()=>{
+ test('真实原生projection ver1–4旧缓存按ver5从完整事件重建，checkout不改原事件且回到准确前缀',async()=>{
   const h=await setup([toolCallResponse('cache','progress',{}),textResponse('完成')])
   h.ctx.tools.register(defineTool({name:'progress',description:'原生缓存回执',parameters:{},output,async execute(){return {result:JSON.stringify({sceneRevision:1})}}}))
   try{
    await h.send();const events=h.agent.session.snapshotEvents(),before=JSON.stringify(events),rows=h.ctx.sessionProjections.checkpoint(h.agent.session)
-   expect(rows.lyapunovGraph?.ver).toBe(4)
-   for(const ver of [1,2,3]){
-    const old={...rows,lyapunovGraph:{ver,seq:events.at(-1)!.seq,val:{oldSchema:true,stagnant:-999}}}
+   expect(rows.lyapunovGraph?.ver).toBe(5)
+   for(const ver of [1,2,3,4]){
+    // ver4 的 schema 合法但遗漏 request/step 终态，必须丢弃缓存后按原日志重建。
+    const stale=ver===4?{...h.read(h.agent).graph,nodes:h.read(h.agent).graph.nodes.map(row=>['request','step'].includes(row.kind)?{...row,status:'running' as const}:row)}:{oldSchema:true,stagnant:-999}
+    const old={...rows,lyapunovGraph:{ver,seq:events.at(-1)!.seq,val:stale}}
     expect(h.ctx.sessionProjections.restoreFloor(old)).toBe(SessionLogOffset(0))
     const rebuilt=h.ctx.sessionProjections.restore(old,events,SessionLogOffset(0),h.agent.session.header,h.agent.session.inheritedEventCount)
-    expect(rebuilt.checkpoint.lyapunovGraph?.ver).toBe(4);expect(rebuilt.checkpoint.lyapunovGraph?.val).toEqual(h.read(h.agent).graph);expect(JSON.stringify(h.agent.session.snapshotEvents())).toBe(before)
+    expect(rebuilt.checkpoint.lyapunovGraph?.ver).toBe(5);expect(rebuilt.checkpoint.lyapunovGraph?.val).toEqual(h.read(h.agent).graph);expect(JSON.stringify(h.agent.session.snapshotEvents())).toBe(before)
+    if(ver===4)expect((rebuilt.checkpoint.lyapunovGraph!.val as ReturnType<typeof emptyExecutionGraph>).nodes.filter(row=>['request','step'].includes(row.kind)).every(row=>row.status==='success')).toBe(true)
    }
    const anchor=events.find(row=>row.type==='step/end')!.seq
    const changed=h.agent.session.checkout(anchor)

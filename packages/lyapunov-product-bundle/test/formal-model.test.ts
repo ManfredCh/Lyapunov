@@ -23,7 +23,10 @@ test("formal default resolves inside the native provider catalog", () => {
   expect(provider.api).toBe("openai-completions")
   expect(provider.apiKeyEnv).toBe("LYAPUNOV_ACCOUNT_TOKEN")
   expect(provider.baseURL).toBe("https://account.example.invalid/v1")
+  expect(provider.managedBaseURL).toBe(provider.baseURL)
   expect(selection).toEqual({ provider: "lyapunov-plans", model: "peiri" })
+  expect(provider.displayName).toBe('Pontryagin')
+  expect(provider.models!.map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Pontryagin'}])
 })
 
 test("formal default provider baseURL uses the unified production entry", () => {
@@ -32,6 +35,7 @@ test("formal default provider baseURL uses the unified production entry", () => 
   const providerRow = rows.find((row) => row.id === "llm-pi-ai")!
   const provider = providerRow.config!.providers!["lyapunov-plans"]!
   expect(provider.baseURL).toBe("https://vorynel.com/lyaup-unified/v1")
+  expect(provider.managedBaseURL).toBe(provider.baseURL)
 })
 
 test('正式模型保留原生idle默认与有界重试，不对持续有进度的流强加整阶段截止',async()=>{
@@ -44,9 +48,13 @@ test('正式模型保留原生idle默认与有界重试，不对持续有进度�
   await fiber
   const config:PiAi.Config=fiber.config
   const provider=config.providers.get()['lyapunov-plans']!
+  expect(ctx.llm.listProviders().find(provider=>provider.id==='lyapunov-plans')?.name).toBe('Pontryagin')
+  expect((await ctx.llm.listModels('lyapunov-plans')).map(model=>({id:model.id,name:model.name}))).toEqual([{id:'peiri',name:'Pontryagin'}])
+  expect((await ctx.llm.resolveModelInfo('lyapunov-plans','peiri')).name).toBe('Pontryagin')
   const retry=resolveRetryPolicy(raw.providers!['lyapunov-plans']!.retryPolicy,'formal.provider.retryPolicy')
   expect(retry).toMatchObject({mode:'normal',maxRetries:5})
   expect(retry).not.toHaveProperty('requestPhaseTimeoutMs')
+  expect(provider.managedBaseURL).toBe('https://account.example.invalid/v1')
   expect(provider.streamIdleTimeoutMs).toBe(300_000)
   expect(provider).not.toHaveProperty('timeoutMs')
   }finally{await ctx.fiber.dispose()}

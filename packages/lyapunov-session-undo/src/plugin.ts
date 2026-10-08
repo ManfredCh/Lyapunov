@@ -10,8 +10,8 @@ import type {} from './types.ts'
 
 export const name = 'lyapunov-session-undo'
 export const inject = ['commands', 'agents', 'sessions', 'sessionController', 'sessionPersistence', 'attachments']
-export interface Config { dataRoot: string; snapshots?: boolean }
-export const Config: Schema<Config> = Schema.object({ dataRoot: Schema.string().required(), snapshots: Schema.boolean().default(true) })
+export interface Config { dataRoot: string; snapshots?: boolean; excludedRoots?: string[] }
+export const Config: Schema<Config> = Schema.object({ dataRoot: Schema.string().required(), snapshots: Schema.boolean().default(true), excludedRoots: Schema.array(Schema.string()).default([]) })
 
 export function apply(ctx: Context, config: Config): void {
   const controller = new SessionUndoController(ctx, config)

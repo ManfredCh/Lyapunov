@@ -50,7 +50,7 @@ const geomList = (doc: any): any[] => {
   return geoms
 }
 /** 在临时目录里写几个文件，跑完删掉。 */
-async function withFiles(files: Record<string, string>, run: (dir: string) => Promise<void>): Promise<void> {
+async function withFiles(files: Record<string, string|Uint8Array>, run: (dir: string) => Promise<void>): Promise<void> {
   const base = await mkdtemp(join(tmpdir(), "lyapunov-mjcf-"))
   try {
     for (const [name, content] of Object.entries(files)) await writeFile(join(base, name), content)
@@ -293,4 +293,26 @@ describe("无效文档不静默", () => {
       "b.xml": `<mujoco model="b"><include file="a.xml"/><worldbody><body name="bb"/></worldbody></mujoco>`,
     }, async base => await expect(robotVisual(join(base, "a.xml"))).rejects.toThrow(/ROBOT_INCLUDE_CYCLE/))
   })
+})
+
+
+describe('原MJCF官方参考姿态bounds，不以Viewer或派生碰撞猜范围',()=>{
+  test('include/default/mesh非均匀scale/多层rotation/geom偏移和joint ref由原编译器一致消费',async()=>{
+    const vertices=[[0,0,0],[2,0,0],[0,3,0],[0,0,4]],faces=[[0,2,1],[0,1,3],[0,3,2],[1,2,3]]
+    const stl=Buffer.alloc(84+faces.length*50);stl.writeUInt32LE(faces.length,80);for(const[i,face]of faces.entries())for(const[j,id]of face.entries())for(const[k,value]of vertices[id]!.entries())stl.writeFloatLE(value,84+i*50+12+j*12+k*4)
+    await withFiles({
+      'original.stl':stl,
+      'part.xml':'<mujocoinclude><default><default class="part"><mesh scale="2 3 4"/><geom type="mesh"/></default></default><asset><mesh name="original" class="part" file="original.stl"/></asset><worldbody><body name="parent" pos="1 2 3" euler="0 0 90"><body name="child" pos="4 0 0" euler="90 0 0" childclass="part"><joint name="j" type="hinge" axis="1 0 0" ref="30"/><geom mesh="original" pos="0 5 0"/></body></body></worldbody></mujocoinclude>',
+      'main.xml':'<mujoco><compiler angle="degree"/><include file="part.xml"/><worldbody><geom type="plane" size="0 0 .1"/></worldbody></mujoco>',
+    },async dir=>{
+      const parsed=await parseAsset(join(dir,'main.xml')),box=parsed.metadata.aabb as {min:number[];max:number[]}
+      expect(box,JSON.stringify(parsed.metadata.boundsFacts)).toBeDefined()
+      // 源四顶点经scale与声明矩阵：child世界原点[1,6,3]，geom原点[1,6,8]，合成旋转(x,y,z)→(z,x,y)。
+      for(const[i,value]of [1,6,8].entries())expect(box.min[i]).toBeCloseTo(value,5)
+      for(const[i,value]of [17,10,17].entries())expect(box.max[i]).toBeCloseTo(value,5)
+      expect(parsed.metadata.boundsFacts).toMatchObject({status:'available',source:'mjcf-original-geometries',pose:'source-reference-qpos0',simulationSteps:0,dynamicPoseEvaluated:false,meshCount:1,geomCount:1,dependencyHashesVerified:true})
+      expect(parsed.dependencies.map(d=>d.path)).toContain(join(dir,'part.xml'))
+      expect(readFileSync(join(dir,'original.stl'))).toEqual(stl)
+    })
+  },15000)
 })

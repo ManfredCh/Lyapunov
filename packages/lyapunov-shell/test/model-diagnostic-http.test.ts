@@ -40,6 +40,10 @@ describe('模型公开diagnostic实际消费',()=>{
   await h.send();expect(h.requests()).toBe(1)
   const events=h.agent.session.snapshotEvents();expect(events.filter(x=>x.type==='llm/retry')).toHaveLength(0);expect(events.filter(x=>x.type==='turn/end')).toHaveLength(1)
   const view=h.read(h.agent);expect(view.model?.diagnostic).toMatchObject({stage:'upstream_stream',effect:'unknown',retryable:false,requestId:'fixture-model-request'});expect(JSON.stringify(events)).not.toContain('PRIVATE_VENDOR_DETAIL');expect(view.model?.phase).toBe('terminal')
+  expect(events.some(x=>x.type==='step/end'&&x.data.turn===1&&x.data.step===1)).toBe(true)
+  expect(view.graph.nodes.find(row=>row.kind==='request')).toMatchObject({status:'failed',code:'TIMEOUT',diagnostic:{requestId:'fixture-model-request',effect:'unknown'}})
+  expect(view.graph.nodes.find(row=>row.id==='step:1:1')).toMatchObject({status:'failed',code:'TIMEOUT'})
+  expect(view.graph.nodes.filter(row=>['request','step','model','turn'].includes(row.kind)).every(row=>row.status!=='running')).toBe(true)
  })
  test('相同typed未知门也优先于always策略，不把code TIMEOUT当重新收费许可',async()=>{
   const h=await harness(response=>streamError(response,diagnostic()),'always');await h.send();expect(h.requests()).toBe(1);expect(h.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')).toHaveLength(0)
@@ -51,6 +55,9 @@ describe('模型公开diagnostic实际消费',()=>{
   const h=await harness((response,n)=>{if(n===1){response.writeHead(500,{'content-type':'application/json'});response.end(JSON.stringify({error:{message:'fixture 500'}}));return}response.writeHead(200,{'content-type':'text/event-stream'});sse(response,{choices:[{index:0,delta:{content:'hello'},finish_reason:null}]});sse(response,{choices:[{index:0,delta:{},finish_reason:'stop'}]});response.write('data: [DONE]\n\n');response.end()},'always')
   await h.send();expect(h.requests()).toBe(2);expect(h.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')).toHaveLength(1)
   const graph=h.read(h.agent).graph;expect(graph.nodes.filter(row=>row.kind==='retry')).toHaveLength(1);expect(Object.values(graph.nodes.find(row=>row.kind==='retry')!.facts).every(value=>typeof value!=='number'||Number.isFinite(value))).toBe(true)
+  const requests=graph.nodes.filter(row=>row.kind==='request'),models=graph.nodes.filter(row=>row.kind==='model')
+  expect(requests.map(row=>row.status)).toEqual(['failed','success']);expect(models.map(row=>row.status)).toEqual(['failed','success'])
+  expect(requests[0]?.code).toBe(models[0]?.code);expect(graph.nodes.find(row=>row.id==='step:1:1')?.status).toBe('success')
  })
  test('不安全requestId/fieldPath诊断fail-closed且不回显正文或重发',async()=>{
   const h=await harness(response=>streamError(response,diagnostic({requestId:'https://private?token=PRIVATE',fieldPath:'Authorization Bearer PRIVATE'})));await h.send();expect(h.requests()).toBe(1);expect(h.read(h.agent).model?.finishCode).toBe('CENTRAL_DIAGNOSTIC_INVALID');expect(JSON.stringify(h.agent.session.snapshotEvents())).not.toContain('PRIVATE')
@@ -88,5 +95,7 @@ describe('模型公开diagnostic实际消费',()=>{
   const successEvents=h.agent.session.snapshotEvents().length;h.agent.cancel({kind:'user'});await new Promise(resolve=>setTimeout(resolve,10));expect(h.agent.session.snapshotEvents()).toHaveLength(successEvents)
   cancel.ctx.on('agent/assistant-stream',({agent,frame})=>{if(agent===cancel.agent&&frame.type==='chunk'&&frame.chunk.type==='text-delta')agent.cancel({kind:'user'})})
   await cancel.send();expect(cancel.requests()).toBe(1);expect(cancel.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')).toHaveLength(0);expect(cancel.agent.session.snapshotEvents().filter(x=>x.type==='turn/end')).toHaveLength(1)
+  const cancelled=cancel.read(cancel.agent).graph
+  expect(cancelled.nodes.find(row=>row.kind==='request')?.status).toBe('cancelled');expect(cancelled.nodes.find(row=>row.id==='step:1:1')?.status).toBe('cancelled');expect(cancelled.nodes.find(row=>row.id==='turn:1')?.status).toBe('cancelled')
  })
 })
