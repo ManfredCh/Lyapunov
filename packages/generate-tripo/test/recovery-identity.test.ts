@@ -125,7 +125,7 @@ describe("tripo requestId 输入身份", () => {
         throw new Error('不允许生成提交或其他请求')
       }) as typeof fetch
       const message=await rejection(runGeneration({requestId:OLD_REQUEST_ID,...OLD_INPUT,pbr:true,texture:true} as never,{dataDirectory:directory,mode:'formal',accountApiUrl:API,accountToken:'session-token',fetcher,authorizeSubmission:async()=>{confirmations++}}))
-      expect(message).toContain('Peiri 3D')
+      expect(message).toContain('Pontryagin 3D')
       expect(message).toContain('正积分报价未就绪')
       expect(confirmations).toBe(0)
       expect(calls.filter(call=>call.includes('/generation-quotes/'))).toHaveLength(1)

@@ -72,3 +72,5 @@ SmolVLA×LIBERO 走**并列的 VLA 执行分支**（`src/execution.ts` 的 `exec
 - **观测**：官方 bench `Frame` 的 `sensors`——`eefPositionM`(3)、`eefQuaternionXyzw`(4)、`gripperQpos`(2)（另加图像路径），与 Go1 的 47 维／Go2 的 98 维向量不同。
 - **周期与时长**：`periodS = 1/frequencyHz`（LIBERO 为 20 Hz，即 `timestepS=1/20`）；`durationS` 仍受 0.02–300 边界，但**默认跑满 `libero_goal` 官方 horizon**（1000 步 @20 Hz = 50 s），不是关节路线的 4 s。
 - **推理**：产品模块 `python/libero_vla_infer_server.py`，CPU 出块预算由 `LYAPUNOV_VLA_INFER_TIMEOUT_MS` 控制（只作用于本分支）。产品通路 `policy_execute` 曾在限定 seed／任务跑出官方终态（台账 R463–R469；限定 seed／任务，不等于全任务成功率）。
+
+已应用策略的场景保存真实派生模型路径。冷重开后再次 `policy_prepare`，沿同一缓存适配器记录的 `modelPath`、`modelSourcePath` 和模型内容戳回到该实体同资源版本的已登记原件；不会把任意同名路径当本体，或借用另一机器人。资源字节核对针对 Scene 实际引用位置，继续保留固定策略来源、资源版本、世界代次和原件完整性要求。

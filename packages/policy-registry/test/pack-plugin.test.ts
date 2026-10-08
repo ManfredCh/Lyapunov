@@ -14,10 +14,12 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { apply, matchPolicy, name, inject, searchPacks, searchPolicies, POLICY_INPUT_INVALID_JSON, POLICY_INPUT_MUST_BE_OBJECT, toolInput } from '../src/plugin.ts'
+import { SceneOperations } from '../../scene-kit/src/operations.ts'
+import { hashFile, policyDirectory } from '../src/source.ts'
 import type { PackFetcher, PackRequestInit } from '../src/pack-source.ts'
 import { JobId, type JobHandle, type JobOutcome, type JobSpec } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -367,6 +369,32 @@ describe('本地策略来源与工具参数边界',()=>{
   const h=boot(mockPackServer()),id={provider:'github',modelId:'x/y',revision:'fixed'}
   const conflict=await capture(()=>h.call('policy_load_state',{identity:id,modelId:'other/model'}));expect(String(conflict)).toContain('POLICY_IDENTITY_CONFLICT')
   const mixed=await capture(()=>h.callRaw('policy_prepare',{input:id,sceneId:'s'}));expect(String(mixed)).toContain('mixed flat and nested input')
+ })
+ test('真实机器人导入保存冷重开后，原prepare入口把当前同策略派生路径绑定回已登记本体，不接纳改写或其它本体',async()=>{
+  const box=emptyDir(),identity={provider:'github' as const,modelId:'Improbable-AI/walk-these-ways',revision:'0e7236bdc81ce855cbe3d70345a7899452bdeb1c'},cache=join(box,'cache'),sceneRoot=join(box,'scene')
+  try{
+   const original=join(box,'robot','go1.xml');mkdirSync(dirname(original),{recursive:true})
+   writeFileSync(original,'<mujoco model="test-go1"><worldbody><body name="trunk"><freejoint/><geom type="box" size="0.1 0.05 0.03"/></body></worldbody></mujoco>')
+   const ops=new SceneOperations(sceneRoot),scene=await ops.create({template:'blank'}),imported=await ops.import({path:original,sceneId:scene.sceneId,entityId:'go1',alignBottomToSurface:false,storage:'reference'})
+   const registered=(await ops.inspect(scene.sceneId)).entities.find(e=>e.entityId==='go1')!,modelPath=join(policyDirectory(cache,identity.provider,identity.modelId,identity.revision),'derived','wtw-go1-torchscript-v1','go1-position-pd.xml')
+   mkdirSync(dirname(modelPath),{recursive:true});writeFileSync(modelPath,readFileSync(original,'utf8').replace('test-go1','test-go1-adapter'))
+   const adapter={adapter:'wtw-go1-torchscript-v1',modelPath,modelSourcePath:original,modelSha256:(await hashFile(modelPath)).sha256,sourceProvider:identity.provider,sourceModelId:identity.modelId,sourceRevision:identity.revision,jointNames:[],config:{},observations:{},frequencyHz:50}
+   const adapterFile=join(dirname(dirname(modelPath)),'adapter.json');writeFileSync(adapterFile,JSON.stringify(adapter))
+   await ops.scene.commit({sceneId:scene.sceneId,expectedRevision:imported.snapshot!.revision,patch:[{op:'update',entityId:'go1',changes:{components:{...registered.components,mujoco:{sourcePath:modelPath},controller:{policyAdapter:adapter.adapter}}}}]})
+   const saved=join(box,'saved','scene.json');await ops.save(scene.sceneId,saved)
+   const cold=new SceneOperations(sceneRoot),reopened=await cold.open(saved),entity=reopened.entities.find(e=>e.entityId==='go1')!
+   expect(entity.resources).toEqual(registered.resources);expect(entity.components.mujoco).toMatchObject({sourcePath:modelPath})
+   expect(await cold.resources.verifyReference(entity.resources[0]!)).toEqual({valid:true,missing:[],changed:[]})
+   const h=fakeCtx();h.ctx.get=((name:string)=>name==='scene'?{forSession:()=>cold}:undefined) as any;apply(h.ctx as any,{dataDirectory:cache})
+   const tool=h.tools.get('policy_prepare'),exec={agent:{session:{id:'cold-go1',header:{id:'cold-go1',cwd:box}}},signal:new AbortController().signal}
+   const call=(extra:Record<string,unknown>={})=>tool.execute({input:{identity,sceneId:scene.sceneId,entityId:'go1',...extra}},exec)
+   // 无权重的离线夹具到达原下一阶段；不把来源通过冒充真实 PREPARED 或运动。
+   expect(String(await capture(()=>call()))).toContain('POLICY_FILES_NOT_VERIFIED')
+   expect(String(await capture(()=>call({robotModelPath:original})))).toContain('POLICY_FILES_NOT_VERIFIED')
+   const other=join(box,'another.xml');writeFileSync(other,readFileSync(original));expect(String(await capture(()=>call({robotModelPath:other})))).toContain('POLICY_ROBOT_SOURCE_MISMATCH')
+   writeFileSync(modelPath,readFileSync(modelPath,'utf8')+'<!-- changed -->');expect(String(await capture(()=>call()))).toContain('POLICY_ROBOT_SOURCE_NOT_AUTHORIZED')
+   expect(h.jobs).toHaveLength(0);expect(entity.resources[0]!.resourceId).toBe(imported.resource.ref.resourceId)
+  }finally{rmSync(box,{recursive:true,force:true})}
  })
  test('只读会话policy_execute先拒绝，不创建Jobs或查询/改变世界',async()=>{
   const h=fakeCtx();h.ctx.get=((name:string)=>name==='sandboxPolicy'?{resolve:()=>({mode:'read-only',workspaceRoot:'/fixture'})}:undefined) as any

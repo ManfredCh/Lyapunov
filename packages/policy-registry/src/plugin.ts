@@ -8,10 +8,10 @@ import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import {fileURLToPath} from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { asObject, downloadPolicy, githubCredential, githubHeaders, githubSearchStatusError, huggingfaceEndpoint, policyDirectory, policyId, policyRevision, policySource, readPolicyCache, sourceSnapshot, type PolicySource } from './source.ts'
+import { asObject, hashFile, downloadPolicy, githubCredential, githubHeaders, githubSearchStatusError, huggingfaceEndpoint, policyDirectory, policyId, policyRevision, policySource, readPolicyCache, sourceSnapshot, type PolicySource } from './source.ts'
 import { identityStrength, mirrorDiscoveryRequest, type DeclaredIdentity, type MirrorCoordinates, type SourceFileIdentity } from './mirror-search.ts'
 import { downloadPack, packBearer, packCatalog, packDiscovery, packEndpoint, packError, packModelId, packPiece, readPackListing, type PackFetcher, type PackPiece } from './pack-source.ts'
-import { preparePolicy, verifyPolicy } from './adapter.ts'
+import { preparePolicy, verifyPolicy, readAdapter, isPreparedAdapter } from './adapter.ts'
 import type {PolicyRuntimeConfig} from './runtime.ts'
 import { resolveModelFace, type PackModelRoute } from './pack-contract.ts'
 import { createModelRoutes } from './model-routes.ts'
@@ -254,14 +254,27 @@ export function apply(ctx:Context,config:Config={}){
    if(!record)continue
    const native=[record.ref.original,...record.ref.representations].filter((rep:any)=>rep.mimeType==='application/x-mjcf+xml')
    if(!native.length)continue
-   const verified=await operations.resources.verify(ref.resourceId,ref.version)
+   const verified=await operations.resources.verifyReference(ref)
    if(!verified.valid)throw new Error('POLICY_ROBOT_RESOURCE_INVALID: 选中实体原件/依赖缺失或字节改变，请先重新登记正确版本')
    for(const rep of native){const p=rep.uri.startsWith('file:')?fileURLToPath(rep.uri):rep.uri;if(!isAbsolute(p))throw new Error('POLICY_ROBOT_SOURCE_PATH_UNRESOLVED');authorized.add(await realpath(p))}
   }
   if(!authorized.size)throw new Error('POLICY_ROBOT_SOURCE_MISSING: 选中实体缺少本会话已登记MJCF原件')
   const declared=entity.components?.mujoco?.sourcePath
   let source:string|undefined
-  if(typeof declared==='string'&&declared){const p=declared.startsWith('file:')?fileURLToPath(declared):declared;if(!isAbsolute(p))throw new Error('POLICY_ROBOT_SOURCE_PATH_UNRESOLVED');try{source=await realpath(p)}catch{throw new Error('POLICY_ROBOT_SOURCE_MISSING: 选中实体mujoco原件缺失')}if(!authorized.has(source))throw new Error('POLICY_ROBOT_SOURCE_NOT_AUTHORIZED: sourcePath不属于选中实体的已登记原件')}
+  if(typeof declared==='string'&&declared){
+   const p=declared.startsWith('file:')?fileURLToPath(declared):declared
+   if(!isAbsolute(p))throw new Error('POLICY_ROBOT_SOURCE_PATH_UNRESOLVED')
+   try{source=await realpath(p)}catch{throw new Error('POLICY_ROBOT_SOURCE_MISSING: 选中实体mujoco原件缺失')}
+   if(!authorized.has(source)){
+    // 已应用策略的场景保存派生模型；重新准备沿同一缓存适配器回到其已登记本体原件。
+    const cached=await readAdapter(policyDirectory(root(),prepared.provider,prepared.modelId,prepared.revision))
+    if(isPreparedAdapter(cached)&&entity.components?.controller?.policyAdapter===cached.adapter&&cached.sourceProvider===prepared.provider&&cached.sourceModelId===prepared.modelId&&cached.sourceRevision===prepared.revision&&await realpath(cached.modelPath)===source&&(await hashFile(source)).sha256===cached.modelSha256){
+     const original=await realpath(cached.modelSourcePath)
+     if(authorized.has(original))source=original
+    }
+    if(!authorized.has(source))throw new Error('POLICY_ROBOT_SOURCE_NOT_AUTHORIZED: sourcePath不属于选中实体的已登记原件')
+   }
+  }
   if(explicit){const selected=await realpath(explicit);if(!authorized.has(selected)||source&&selected!==source)throw new Error('POLICY_ROBOT_SOURCE_MISMATCH: 显式模型路径不能替换当前选中本体');source=selected}
   source??=authorized.size===1?[...authorized][0]:undefined
   if(!source)throw new Error('POLICY_ROBOT_SOURCE_AMBIGUOUS: 多个已登记MJCF原件，需显式选择其中一个')
