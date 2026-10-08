@@ -209,3 +209,16 @@ describe('原生执行图折叠',()=>{
   expect(graph.nodes.find(row=>row.id==='service:search-second')).toMatchObject({status:'failed',diagnostic:{requestId:'original-second',effect:'unknown',retryable:false,upstreamHttpStatus:502}})
  })
 })
+
+
+test('客户Graph只映射模型request显示名，原图状态/事实与tool标签保持',async()=>{
+ const React=await import('react'),{renderToStaticMarkup}=await import('react-dom/server'),{ExecutionGraphView}=await import('../src/execution-graph-client.tsx')
+ let graph=foldExecutionGraph(empty(),event(0,'lyapunov/request-diagnostics',{turn:1,step:1,provider:'lyapunov-plans',model:'peiri',messageCount:0,imageCount:0,toolCount:0,toolsBytes:2,toolsHash:'test',contexts:[],basis:'harness-before-adapter'}))
+ graph=foldExecutionGraph(graph,event(1,'tool/call',{turn:1,step:1,callId:'t1',name:'scene_inspect',arguments:'{}'}))
+ graph=foldExecutionGraph(graph,event(2,'lyapunov/service-diagnostic',{turn:1,step:1,callId:'t1',intentKey:'model-service',outcome:'failed',code:'PROVIDER_UNAVAILABLE',diagnostic:{stage:'request',effect:'none',requestId:'fixture'}}))
+ graph={...graph,nodes:[...graph.nodes,{id:'service:other',parent:null,kind:'service',label:'physics-provider',seq:3,at:1003,status:'failed',code:'PHYSICS_TEST',images:0,facts:{},diagnostic:null}]}
+ const before=JSON.stringify(graph)
+ const html=renderToStaticMarkup(React.createElement(ExecutionGraphView,{value:{graph,hostInstanceId:'test',jobs:[],model:null,liveJobCount:0,stop:{agentStatus:'idle',jobs:[],physicalStop:'unchanged',unknownEffects:0}},t:key=>key}))
+ expect(html).toContain('<strong>Pontryagin</strong>');expect(html).toContain('<strong>scene_inspect</strong>');expect(html).not.toContain('<strong>peiri</strong>');expect(html).toContain('<strong>physics-provider</strong>');expect(html.match(/<strong>Pontryagin<\/strong>/g)).toHaveLength(2)
+ expect(JSON.stringify(graph)).toBe(before);expect(graph.nodes[0]!.label).toBe('peiri');expect(graph.nodes[0]!.status).toBe('running');expect(graph.nodes.find(node=>node.kind==='service'&&node.label==='peiri')).toMatchObject({id:'service:model-service',status:'failed',code:'PROVIDER_UNAVAILABLE'});expect(graph.nodes.find(node=>node.id==='service:other')?.label).toBe('physics-provider')
+})

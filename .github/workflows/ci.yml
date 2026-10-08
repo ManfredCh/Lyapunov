@@ -119,15 +119,34 @@ jobs:
       # （projinfo / cct / geod / cs2cs / proj）；缺依赖时它们如实报 `MAP_PROJ_UNAVAILABLE` 而红。
       # 在行为测试**之前**显式装 proj-bin（Ubuntu 正常包；libproj22 硬依赖 proj-data，proj.db 随之就位），
       # 并用 command -v + 版本读数确认五个二进制真的可调用（不靠 runner 碰巧预装，也不是"存在就跳过"）。
-      - name: Provision PROJ CLI (proj-bin)
+      # 托管 runner 无 GPU：用 MuJoCo 官方 OSMesa 软件离屏后端真实采集 RGB/深度，
+      # 不依赖 EGL 设备/显示器，不跳过相机用例，也不改产品端 Linux 默认后端。
+      - name: Provision CI native libraries (PROJ + OSMesa)
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends proj-bin
+          sudo apt-get install -y --no-install-recommends proj-bin libosmesa6
           for bin in proj projinfo cct cs2cs geod; do command -v "$bin"; done
           proj 2>&1 | head -n 1
           projinfo EPSG:4326 >/dev/null
           echo "proj cli ok"
+          echo "MUJOCO_GL=osmesa" >> "$GITHUB_ENV"
+          echo "PYOPENGL_PLATFORM=osmesa" >> "$GITHUB_ENV"
+          MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa "$TESTCI_PYTHON" - <<'PY'
+          import json, numpy as np, mujoco as mj
+          from OpenGL import GL
+          model = mj.MjModel.from_xml_string('<mujoco><worldbody><geom type="box" pos="0 3 0" size="4 .1 4"/><camera name="ci" pos="0 -1.5 0" xyaxes="1 0 0 0 0 1"/></worldbody></mujoco>')
+          data = mj.MjData(model)
+          mj.mj_forward(model, data)
+          with mj.Renderer(model, height=24, width=32) as renderer:
+              renderer.update_scene(data, camera='ci')
+              rgb = renderer.render().copy()
+              renderer.enable_depth_rendering()
+              depth = renderer.render().copy()
+              assert rgb.shape == (24, 32, 3) and rgb.dtype == np.uint8 and np.any(rgb)
+              assert depth.shape == (24, 32) and np.isfinite(depth).all() and (depth > 0).all()
+              print(json.dumps({'mujoco': mj.__version__, 'backend': 'osmesa', 'renderer': GL.glGetString(GL.GL_RENDERER).decode(), 'glVersion': GL.glGetString(GL.GL_VERSION).decode(), 'rgbShape': list(rgb.shape), 'depthShape': list(depth.shape)}))
+          PY
 
       # Viewer 两条离线回归（`packages/viewer/test/robot-glb-mesh.test.ts`、
       # `packages/viewer/test/robot-glb-ktx2-texture.test.ts`）读

@@ -219,6 +219,68 @@ index 35158490f2d73655c20665899048107f800eeace..12f5dd30466206ddeb30a9bf769a75fa
    it('serializes concurrent path adoption and preserves an existing title', async () => {
      const { controller, root } = await harness()
      const path = stageDir(root, 'alpha')
+diff --git a/packages/client/ui-chat/README.md b/packages/client/ui-chat/README.md
+index f09b12c46138b05ba55c6905f540b03d6120d825..f3ee1cae451ddc5e31e66f4b8464c7574df89d60 100644
+--- a/packages/client/ui-chat/README.md
++++ b/packages/client/ui-chat/README.md
+@@ -8,6 +8,8 @@ English | [中文](README.zh.md)
+ 
+ Desktop product events use the optional [product analytics service](../product-analytics/README.md); ordinary Web interactions are excluded.
+ 
++Customer presentation reads public names from the existing session model directory. An absent directory or unmatched identity shows the localized generic Model label, without concatenating internal provider/model identifiers. Optional compositions use the same safe fallback and create no second model directory. Requests, logs, selections, usage numbers, and billing attribution remain unchanged.
++
+ ## Summary
+ 
+ Use this package to render a browser chat from recorded Session conversations, including historical images, localized actions, and restored scroll position. Work-details modes control reasoning previews and process visibility without hiding final answers; Verbose keeps completed-turn process rows visible. Local transcript and steering submissions appear immediately, remain in their original surface, and disappear atomically when authoritative Session records arrive, while queued submissions stay outside Chat. The package does not assemble or modify model requests.
+diff --git a/packages/client/ui-chat/README.zh.md b/packages/client/ui-chat/README.zh.md
+index 599c4cb0cf895ee439061dff75868554a3e7ac59..75376981948af33687dd4db0f404b8867b8559dd 100644
+--- a/packages/client/ui-chat/README.zh.md
++++ b/packages/client/ui-chat/README.zh.md
+@@ -14,6 +14,8 @@ kind: "package-reference"
+ 
+ 文件提及提供方同时接收当前查看的会话 ID 与收尾轮次的属主信息，因此继承历史中的链接可以指向 fork 自身。
+ 
++客户显示读取原会话模型目录中的公开名称；目录缺失或身份未匹配时显示“模型”，不会拼接内部提供方／模型身份。可选目录未装配时同样采用安全显示，不创建新模型目录。请求、日志、模型选择、用量数字与计费归属不变。
++
+ ## 目录
+ 
+ - [引用预览](#reference-previews)
+diff --git a/packages/client/ui-chat/package.json b/packages/client/ui-chat/package.json
+index befd3040985c4139b9fa4d85b5717676cd3e20bd..71e6de95bbe11ed977310ca1cdbf5fd59e133944 100644
+--- a/packages/client/ui-chat/package.json
++++ b/packages/client/ui-chat/package.json
+@@ -49,7 +49,8 @@
+   },
+   "license": "MIT",
+   "peerDependencies": {
+-    "@deepseek-ai/cordis": "workspace:~"
++    "@deepseek-ai/cordis": "workspace:~",
++    "@deepseek-ai/dsh-client-ui-model-selection": "workspace:*"
+   },
+   "devDependencies": {
+     "@deepseek-ai/cordis": "workspace:~",
+@@ -94,7 +95,8 @@
+     "react-dom": "^18.2.0",
+     "@deepseek-ai/dsh-settings": "workspace:*",
+     "@deepseek-ai/dsh-client-product-analytics": "workspace:*",
+-    "@deepseek-ai/dsh-client-shortcuts": "workspace:*"
++    "@deepseek-ai/dsh-client-shortcuts": "workspace:*",
++    "@deepseek-ai/dsh-client-ui-model-selection": "workspace:*"
+   },
+   "dependencies": {
+     "@deepseek-ai/schemastery": "workspace:~"
+@@ -103,5 +105,10 @@
+     "lib/index.js",
+     "lib/client.js",
+     "lib/types/**/*.d.ts"
+-  ]
++  ],
++  "peerDependenciesMeta": {
++    "@deepseek-ai/dsh-client-ui-model-selection": {
++      "optional": true
++    }
++  }
+ }
 diff --git a/packages/client/ui-chat/src/client/chat/MessageItem.tsx b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
 index 9005150af0d6449e744ec9ea2402673d9c1fd0c2..719dfe21e9c49725bd06be9fb0ff095a15362019 100644
 --- a/packages/client/ui-chat/src/client/chat/MessageItem.tsx
@@ -233,8 +295,111 @@ index 9005150af0d6449e744ec9ea2402673d9c1fd0c2..719dfe21e9c49725bd06be9fb0ff095a
    return code === 'AUTH' ? t('message.failure.auth') : message
  }
  
+diff --git a/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx b/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
+index a3d58a8cfe48d00b1cd922e315ef6d831ad572b2..370e228588726271148c94cd4bee323d5db78505 100644
+--- a/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
++++ b/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
+@@ -26,7 +26,7 @@ function lastContent(snapshot: ChatSnapshot, turn: number, skipWarning: boolean)
+ 
+ /** Turn-local actions and feature tail over the Location index, independent of Assistant placement. */
+ export const TurnTailNodeView = memo(function TurnTailNodeView({
+-  node, openFile, forkAt, renderSlot, t, useChat, usePerformanceUsage,
++  node, openFile, forkAt, renderSlot, t, useChat, usePerformanceUsage, modelDirectory,
+ }: TurnTailNodeViewProps) {
+   const detailed = usePerformanceUsage(mode => mode) === 'detailed'
+   const data = node.data
+@@ -71,7 +71,7 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
+         className={css.actions}
+         extraActions={assistantActions}
+         usageAction={detailed && data.tokenUsage !== undefined
+-          ? <TurnUsagePanel usage={data.tokenUsage} t={t} />
++          ? <TurnUsagePanel usage={data.tokenUsage} t={t} modelDirectory={modelDirectory} />
+           : null}
+         t={t}
+       />
+diff --git a/packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx b/packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx
+index 460d1092a2f64f0869ff81a649b6401bfd5a6572..c5945ec75b558ded125a9f20e12e8a9fb3c01811 100644
+--- a/packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx
++++ b/packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx
+@@ -1,5 +1,7 @@
+ /** Completed-Turn token usage action and its accounting details dialog. */
+ 
++import { useSyncExternalStore } from 'react'
++import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import { createPortal } from 'react-dom'
+ import { IconDatabaseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { TurnTokenUsage } from '../contract/chat-nodes.ts'
+@@ -9,7 +11,12 @@ import { MEASURE_STYLE, useStatDialog } from './stat-dialog.ts'
+ import css from './TurnUsagePanel.module.css'
+ import dialogCss from './stat-dialog.module.css'
+ 
++const EMPTY_MODEL_GROUPS = [] as const
++const emptySubscribe = () => () => {}
++
+ export interface TurnUsagePanelProps {
++  /** Existing session directory; absent compositions show generic model labels. */
++  modelDirectory?: ModelDirectory | undefined
+   usage: TurnTokenUsage
+   /** The owning view's locale seat, passed down as a plain prop. */
+   t: ChatViewSlotProps['t']
+@@ -28,14 +35,16 @@ function formatExactCount(value: number, t: ChatViewSlotProps['t']): string {
+  * @param props - Turn usage buckets and locale seat.
+  * @returns The trigger and, while open, its portaled dialog anchored above the trigger.
+  */
+-export function TurnUsagePanel({ usage, t }: TurnUsagePanelProps) {
++export function TurnUsagePanel({ usage, t, modelDirectory }: TurnUsagePanelProps) {
++  useSyncExternalStore(modelDirectory?.store.subscribe ?? emptySubscribe,
++    () => modelDirectory?.store.getSnapshot().groups ?? EMPTY_MODEL_GROUPS)
+   const { open, setOpen, rootRef, panelRef, pos } = useStatDialog()
+ 
+   const cacheHit = usage.cacheReadTokens === undefined
+     ? null
+     : formatCacheHitPercent(usage.cacheReadTokens, usage.totalTokens - usage.outputTokens, 1)
+   const total = formatCompactCount(usage.totalTokens, t)
+-  const routes = usage.routes?.map(route => `${route.provider}/${route.model}`).join(', ') ?? ''
++  const routes = usage.routes?.map(route => modelDirectory?.displayNames(route, t('message.modelNameFallback')).model ?? t('message.modelNameFallback')).join(', ') ?? ''
+ 
+   return (
+     <span ref={rootRef} className={css.root}>
+diff --git a/packages/client/ui-chat/src/client/chat/register-node-renderers.ts b/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
+index eec1a124c4c4ff6efaed0fbdc6cd4ce4b42a3d8c..1c74afefb29e95b06e5625f2c3a6cdb772d80330 100644
+--- a/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
++++ b/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
+@@ -1,3 +1,4 @@
++import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+ import type { PerformanceUsageMode } from '../../chat-settings.ts'
+@@ -65,7 +66,7 @@ export function registerChatNodeRenderers(
+     name: 'conversation.chat.node',
+     key: 'turn-tail',
+     locale: NS,
+-    inject: () => ({ hooks: { performanceUsage } }),
++    inject: (sessionId) => ({ hooks: { performanceUsage }, modelDirectory: ctx.get('modelDirectories')?.directoryFor(sessionId) }),
+     children: {
+       'conversation.chat.turnTail': { kind: 'list', scope: 'session' },
+       'conversation.chat.assistant-actions': { kind: 'list', scope: 'session' },
+diff --git a/packages/client/ui-chat/src/client/contract/slots.ts b/packages/client/ui-chat/src/client/contract/slots.ts
+index 38badeb7b3c4f517c37acf6266ba331b874a8df6..9df45bb5b227a522c5c3d1749c0cb2f4209da1b5 100644
+--- a/packages/client/ui-chat/src/client/contract/slots.ts
++++ b/packages/client/ui-chat/src/client/contract/slots.ts
+@@ -1,4 +1,5 @@
+ /** Chat-owned Slot declarations and composed component props. */
++import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+ import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
+ import type {
+@@ -222,6 +223,8 @@ export interface ChatScrollPosition {
+ 
+ /** Shared settings source for the performance row, composer, and turn tail. */
+ export interface PerformanceUsageInjected {
++  /** Optional existing session model directory used only for public labels. */
++  modelDirectory?: ModelDirectory | undefined
+   hooks: {
+     /** Accepted performance and usage detail preference. */
+     performanceUsage: ObservableSnapshot<PerformanceUsageMode>
 diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
-index cc50abcf12b7807204bced3ba9d0e1cc6a5f518a..6ca50ef5c774e0bffdae8cba85215ea21900fe63 100644
+index cc50abcf12b7807204bced3ba9d0e1cc6a5f518a..f0a22896d604072dec6420391f58affa2a0ededf 100644
 --- a/packages/client/ui-chat/src/client/locale.ts
 +++ b/packages/client/ui-chat/src/client/locale.ts
 @@ -167,6 +167,9 @@ export const zh = {
@@ -247,7 +412,15 @@ index cc50abcf12b7807204bced3ba9d0e1cc6a5f518a..6ca50ef5c774e0bffdae8cba85215ea2
    'message.turnError': '本轮运行失败',
    'message.maxTokens': '已达到输出 token 上限',
    'message.maxTokens.hint': '回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。',
-@@ -362,6 +365,9 @@ export const en = {
+@@ -174,6 +177,7 @@ export const zh = {
+   'message.turnUsage.title': '本轮用量',
+   'message.turnUsage.consumed': '用量 {total}',
+   'message.turnUsage.model': '提供方 / 模型',
++  'message.modelNameFallback': '模型',
+   'message.turnUsage.cacheHit': '缓存命中',
+   'message.turnUsage.input': '未缓存输入',
+   'message.turnUsage.cacheRead': '缓存读取',
+@@ -362,6 +366,9 @@ export const en = {
    'message.failure.accountSignedOut': 'Stopped because you signed out of DeepSeek.',
    'message.failure.accountSignInRequired': 'Sign in to DeepSeek and ensure the request destination supports account authentication.',
    'message.failure.quota': 'Request quota exhausted.',
@@ -257,6 +430,14 @@ index cc50abcf12b7807204bced3ba9d0e1cc6a5f518a..6ca50ef5c774e0bffdae8cba85215ea2
    'message.turnError': 'This turn failed',
    'message.maxTokens': 'Output token limit reached',
    'message.maxTokens.hint': 'The reply was cut off; earlier output is preserved in the conversation. Send "continue" to let the model resume.',
+@@ -369,6 +376,7 @@ export const en = {
+   'message.turnUsage.title': 'Turn usage',
+   'message.turnUsage.consumed': 'Usage {total}',
+   'message.turnUsage.model': 'Provider / model',
++  'message.modelNameFallback': 'Model',
+   'message.turnUsage.cacheHit': 'Cache hit',
+   'message.turnUsage.input': 'Uncached input',
+   'message.turnUsage.cacheRead': 'Cached input',
 diff --git a/packages/client/ui-chat/tests/chat-view.client.spec.tsx b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
 index ba6d2e0b4765b28c3782b61fbe2b555516f73fad..79309d112325577a4ca173cb402e057a94099eab 100644
 --- a/packages/client/ui-chat/tests/chat-view.client.spec.tsx
@@ -287,6 +468,78 @@ index ba6d2e0b4765b28c3782b61fbe2b555516f73fad..79309d112325577a4ca173cb402e057a
    it('renders only referenced Nodes without deleting unreferenced Node data', () => {
      const snapshot = chatSnapshotFixture({ nodes: [user(1, 'included'), user(2, 'omitted')] })
      const h = makeHarness({}, {}, snapshot)
+diff --git a/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx b/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
+index 107ca55f9ea6e709ac72fcfae110bc921b074f65..a2f52b1b4bdc716765af9940af27ae629945fffc 100644
+--- a/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
++++ b/packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx
+@@ -1,12 +1,16 @@
+ // @vitest-environment jsdom
+ 
+ import { afterEach, describe, expect, it } from 'vitest'
+-import { cleanup, fireEvent, render } from '@testing-library/react'
++import { act, cleanup, fireEvent, render } from '@testing-library/react'
+ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+ import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
+ import { TurnUsagePanel } from '../src/client/chat/TurnUsagePanel.tsx'
+ import type { TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
+-import { en } from '../src/client/locale.ts'
++import { en, zh } from '../src/client/locale.ts'
++import { ModelDirectory } from '../../ui-model-selection/src/client/directory.ts'
++import { ModelCatalogDirectory } from '../../ui-model-selection/src/client/catalog.ts'
++import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
++import { SessionId } from '@deepseek-ai/dsh-session/types'
+ 
+ const t = makeTranslate(en, commonEn)
+ 
+@@ -41,7 +45,7 @@ describe('TurnUsagePanel', () => {
+     expect(dialog.firstChild?.textContent).toBe('Turn usage15,800 tok')
+     const details = dialog.querySelector('[data-turn-usage-details]') as HTMLElement
+     expect(details).toBeTruthy()
+-    expect(details.textContent).toContain('Provider / modeldeepseek/deepseek-chat')
++    expect(details.textContent).toContain('Provider / modelModel')
+     expect(details.textContent).toContain('Cache hit49.4%')
+     expect(details.textContent).toContain('Uncached input5,060 tok')
+     expect(details.textContent).toContain('Cached input4,940 tok')
+@@ -96,3 +100,25 @@ describe('TurnUsagePanel', () => {
+     expect(view.queryByRole('dialog')).toBeNull()
+   })
+ })
++
++
++it('two real directory instances show their own public usage names; missing catalog/locales preserve route and exact numbers', () => {
++  const make = (id: string, name: string) => {
++    const catalog = new ModelCatalogDirectory({ remote: { session: {} } } as never)
++    catalog.store.set({ status: 'ready', error: null, value: { default: null, groups: [{ id: 'internal-provider', name: 'Public provider', models: [{ id, name }] }], routableProviders: ['internal-provider'], failures: [] } })
++    return new ModelDirectory({} as never, SessionId('session-'+id), () => true, catalog, createSnapshotStore(undefined), () => true)
++  }
++  const first = make('peiri', 'Pontryagin'), second = make('other-private-model', 'Public second model')
++  const usage: TurnTokenUsage = { uncachedInputTokens: 123, outputTokens: 45, totalTokens: 168, routes: [{ provider: 'internal-provider', model: 'peiri' }] }
++  const original = JSON.stringify(usage)
++  const view = render(<TurnUsagePanel usage={usage} t={t} modelDirectory={first} />)
++  fireEvent.click(view.getByRole('button'));expect(view.getByRole('dialog').textContent).toContain('Pontryagin');expect(view.getByRole('dialog').textContent).toContain('123 tok')
++  const otherUsage = { ...usage, routes: [{ provider: 'internal-provider', model: 'other-private-model' }] }
++  view.rerender(<TurnUsagePanel usage={otherUsage} t={t} modelDirectory={second} />)
++  expect(view.getByRole('dialog').textContent).toContain('Public second model');expect(view.getByRole('dialog').textContent).not.toContain('Pontryagin')
++  act(() => { second.store.update(snapshot => { snapshot.groups = [] }) })
++  expect(view.getByRole('dialog').textContent).not.toContain('other-private-model');expect(view.getByRole('dialog').textContent).toContain('Model')
++  view.rerender(<TurnUsagePanel usage={otherUsage} t={makeTranslate(zh)} modelDirectory={second} />)
++  expect(view.getByRole('dialog').textContent).toContain('模型');expect(JSON.stringify(usage)).toBe(original)
++  first.dispose();second.dispose()
++})
+diff --git a/packages/client/ui-chat/tsconfig.client.json b/packages/client/ui-chat/tsconfig.client.json
+index e2619955e5d2e42c34b7d5d84099a918aec9a7a1..6bc5f69946744ea55d9a76b6ab1523a2037b6048 100644
+--- a/packages/client/ui-chat/tsconfig.client.json
++++ b/packages/client/ui-chat/tsconfig.client.json
+@@ -119,6 +119,9 @@
+     },
+     {
+       "path": "../shortcuts/tsconfig.client.json"
++    },
++    {
++      "path": "../ui-model-selection"
+     }
+   ],
+   "exclude": [
 diff --git a/packages/client/ui-commands/src/client/service.ts b/packages/client/ui-commands/src/client/service.ts
 index 2e8fd7a0fbb3e04f420cd4e97def872259bad54a..22b6000f6591cd85b185dc78213baca2b3c8d9fc 100644
 --- a/packages/client/ui-commands/src/client/service.ts
@@ -981,6 +1234,114 @@ index 354e4e60b231b2dd194dc7bae4adbb9550b09f1d..fe59b38fd19a0bab623d778607f7da17
    it('declares the services it drives', () => {
      expect(inject).toEqual(['slots', 'uiWorkspace', 'locale'])
    })
+diff --git a/packages/client/ui-model-selection/README.md b/packages/client/ui-model-selection/README.md
+index 09b016ef3aaed38fbb56b149cf58c7ee85af18ad..e0e5996e3c3a24343b4003f329bbbb6db3017828 100644
+--- a/packages/client/ui-model-selection/README.md
++++ b/packages/client/ui-model-selection/README.md
+@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
+ 
+ Desktop product events use the optional [product analytics service](../product-analytics/README.md); ordinary Web interactions are excluded.
+ 
++Customer presentation reads public names from the existing session model directory. An absent directory or unmatched identity shows the localized generic Model label, without concatenating internal provider/model identifiers. Optional compositions use the same safe fallback and create no second model directory. Requests, logs, selections, usage numbers, and billing attribution remain unchanged.
++
+ ## Summary
+ 
+ The Web GUI lets users switch the model and reasoning effort for an existing session through either the `/model` popup or the composer's model control. Both surfaces present the same provider-grouped choices, and the selected model determines the available effort names and default. A complete selection applies to the next request; a running step keeps the model and effort it started with. If the selected model is unavailable, the composer stays disabled until the user selects an available model or that exact model becomes available again.
+@@ -31,7 +33,7 @@ DeepSeek account and API-key routes appear as separate provider groups, each exp
+ 
+ The unselected model label uses the same regular weight as an available model name and retains the saved reasoning effort caption for existing and new sessions; effort editing requires an available model. Clicking the unselected trigger opens the model list directly; Escape closes it.
+ 
+-Mount this plugin alongside `ui-conversation` and the commands package; the composer then shows the model seat next to the pending indicator, and `/model` opens the same directory as a popup. While the seat's menu is open, `↑`/`↓` move focus through root and effort rows, or move the model-list highlight without leaving search. Enter and Tab settle the highlighted model or focused row; Escape and `Shift+Tab` leave a drilled pane first and otherwise close back to the trigger. Drilling focuses model search when shown, otherwise the current model or effort row, and going back lands on the cell that opened the pane left. The composer shows the catalog name while the selected model is available, and its saved `provider/model` ID when the model or provider is removed, including account sign-out. The stored provider, model, and reasoning effort remain unchanged.
++Mount this plugin alongside `ui-conversation` and the commands package; the composer then shows the model seat next to the pending indicator, and `/model` opens the same directory as a popup. While the seat's menu is open, `↑`/`↓` move focus through root and effort rows, or move the model-list highlight without leaving search. Enter and Tab settle the highlighted model or focused row; Escape and `Shift+Tab` leave a drilled pane first and otherwise close back to the trigger. Drilling focuses model search when shown, otherwise the current model or effort row, and going back lands on the cell that opened the pane left. The composer shows the catalog name while the selected model is available, and a localized generic Model label when the model or provider is removed, including account sign-out; saved route identities are not shown by this control. The stored provider, model, and reasoning effort remain unchanged.
+ 
+ Mouse selection uses native browser clicks, including their cancellation behavior; a press alone never selects. Opening the root menu focuses its trigger, and clicking the trigger again closes the menu and returns focus there. Root rows and the search-clear button show the same fill for keyboard focus and hover, without a native outline. Selecting a model or effort returns focus to the trigger without a focus ring; leaving the trigger or reopening the menu restores its normal focus indication. While a selection from either entry is pending, focus stays on the trigger, the trigger shows a spinner in place of its chevron, and each row whose value the selection carries shows one in place of its check; a rejected selection leaves the menu open. Tab returns to model search with the current model highlighted when search is shown, otherwise to the current row.
+ 
+diff --git a/packages/client/ui-model-selection/README.zh.md b/packages/client/ui-model-selection/README.zh.md
+index 12df7a98edb7263449663bb16b524a701c6c2b5c..9b2454a1f33e27c14134d7949b8a7d013aadfc2b 100644
+--- a/packages/client/ui-model-selection/README.zh.md
++++ b/packages/client/ui-model-selection/README.zh.md
+@@ -13,6 +13,8 @@ kind: "package-reference"
+ 
+ Web GUI 允许用户通过 `/model` 弹窗或 composer 模型控件切换既有会话使用的模型与推理（reasoning）强度。两个界面呈现同一组按提供方分组的选择；所选模型决定可用的推理强度名称与默认值。完整选择从下一次请求开始生效；运行中的步骤保留其启动时的模型与推理强度。所选模型不可用时，composer 保持停用，直到用户选择可用模型或同一模型恢复可用。
+ 
++客户显示读取原会话模型目录中的公开名称；目录缺失或身份未匹配时显示“模型”，不会拼接内部提供方／模型身份。可选目录未装配时同样采用安全显示，不创建新模型目录。请求、日志、模型选择、用量数字与计费归属不变。
++
+ ## 目录
+ 
+ - [使用本包](#use-this-package)
+@@ -31,7 +33,7 @@ DeepSeek 账号和 API Key 路由显示为独立提供方分组，各自展示
+ 
+ 未选模型文案与可用模型名使用相同的常规字重，并在既有会话与新会话中保留已保存的推理强度显示；调整推理强度需要先选择可用模型。点击未选模型控件直接打开模型列表，Escape 关闭列表。
+ 
+-与 `ui-conversation` 及命令包一起挂载本插件；composer 随即在待处理指示器旁显示模型位，`/model` 则以弹窗打开同一份目录。模型位菜单打开期间，`↑`／`↓` 在根菜单和推理等级行间移动焦点，或在模型列表中移动高亮并让焦点保留在搜索框。Enter 和 Tab 选定高亮模型或聚焦行；Escape 与 `Shift+Tab` 先退出已下钻的面板，否则关闭并回到触发器。下钻时若显示模型搜索框则聚焦搜索框，否则聚焦当前模型或推理强度行，返回则落在打开该面板的格子上。所选模型可用时，composer 显示目录中的模型名称；模型或提供方被删除时（包括账号退登），改为显示已保存的 `provider/model` ID。保存的提供方、模型和推理强度均保持不变。
++与 `ui-conversation` 及命令包一起挂载本插件；composer 随即在待处理指示器旁显示模型位，`/model` 则以弹窗打开同一份目录。模型位菜单打开期间，`↑`／`↓` 在根菜单和推理等级行间移动焦点，或在模型列表中移动高亮并让焦点保留在搜索框。Enter 和 Tab 选定高亮模型或聚焦行；Escape 与 `Shift+Tab` 先退出已下钻的面板，否则关闭并回到触发器。下钻时若显示模型搜索框则聚焦搜索框，否则聚焦当前模型或推理强度行，返回则落在打开该面板的格子上。所选模型可用时，composer 显示目录中的模型名称；模型或提供方被删除时（包括账号退登），改为显示本地化的通用模型名称，内部已保存的身份不显示在该入口。保存的提供方、模型和推理强度均保持不变。
+ 
+ 鼠标选择沿用浏览器原生点击及其取消行为；仅按下按钮不会选定。打开根菜单时聚焦触发按钮，再次点击触发按钮会关闭菜单并把焦点还给它。根菜单行和搜索清除按钮的键盘焦点与悬停使用相同底色，不显示原生焦点轮廓。选定模型或推理等级后，焦点返回触发按钮但不显示焦点环；焦点离开按钮或重新打开菜单后恢复正常焦点提示。等待任一入口发起的选择结果时，焦点停在触发按钮，触发按钮以加载图标代替下拉箭头，该选择包含的值所在行以加载图标代替勾选标记；选择被拒绝后菜单保持打开。显示模型搜索框时，Tab 返回搜索框并高亮当前模型，否则返回当前选中行。
+ 
+diff --git a/packages/client/ui-model-selection/src/client/ModelSelect.tsx b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
+index fbeda5d31ecac119c49cb5cfc4b01af2a386950b..74fccd7ba177aa1c518e95b139cbefc215a9d10d 100644
+--- a/packages/client/ui-model-selection/src/client/ModelSelect.tsx
++++ b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
+@@ -1,3 +1,4 @@
++import { modelDisplayNames } from './directory.ts'
+ /**
+  * ModelSelect: the composer's named model seat (`conversation.input.model`).
+  * Two-level selection per figma 496:26454's MenuDropdown: the root menu is
+@@ -414,8 +415,7 @@ export function ModelSelect(
+   const waiting = state.current === null && state.status === 'loading'
+   const modelLabel = waiting
+     ? t('trigger.loading')
+-    : currentChoice?.model.name
+-      ?? (state.current === null ? t('trigger.fallback') : `${state.current.provider}/${state.current.model}`)
++    : state.current === null ? t('trigger.fallback') : modelDisplayNames(state.groups, state.current, t('menu.model')).model
+   const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
+   const triggerAria = waiting
+     ? t('trigger.loading')
+diff --git a/packages/client/ui-model-selection/src/client/directory.ts b/packages/client/ui-model-selection/src/client/directory.ts
+index 2acf389b73e19833cbd25ad31ae60f9208bf63a6..e630c5040c30162438141a78f6d733e3713a992e 100644
+--- a/packages/client/ui-model-selection/src/client/directory.ts
++++ b/packages/client/ui-model-selection/src/client/directory.ts
+@@ -36,6 +36,23 @@ export interface ModelDirectoryState {
+   error: string | null
+ }
+ 
++/** Public catalog names for one route; missing identities use caller-localized copy. */
++export interface ModelDisplayNames { provider: string; model: string }
++
++/**
++ * Resolve presentation without exposing stored provider or model identifiers.
++ * @param groups - current groups from the existing model directory.
++ * @param identity - historical or current route identity.
++ * @param fallback - the consumer's localized generic Model label.
++ * @returns registered presentation names, or generic labels when no model matches.
++ */
++export function modelDisplayNames(groups: readonly ModelProviderGroup[], identity: { provider?: string | undefined; model?: string | undefined }, fallback: string): ModelDisplayNames {
++  const group = groups.find(group => group.id === identity.provider)
++  const model = group?.models.find(model => model.id === identity.model)
++  return model === undefined ? { provider: fallback, model: fallback }
++    : { provider: group?.name || fallback, model: model.name || fallback }
++}
++
+ /** One session's shared directory controller; disposed with the session scope. */
+ export class ModelDirectory {
+   /** The shared snapshot both entries render from (uSES-safe store). */
+@@ -43,6 +60,16 @@ export class ModelDirectory {
+     current: null, routable: null, groups: [], failures: [], status: 'idle', pending: null, error: null,
+   })
+ 
++  /**
++   * Read public labels from this directory's current catalog without changing selection.
++   * @param identity - route whose labels are being shown.
++   * @param fallback - consumer-localized generic Model label.
++   * @returns registered names, or generic names for an unavailable route.
++   */
++  displayNames(identity: { provider?: string | undefined; model?: string | undefined }, fallback: string): ModelDisplayNames {
++    return modelDisplayNames(this.store.getSnapshot().groups, identity, fallback)
++  }
++
+   /** Latest selection operation wins; an older response never overwrites a newer one. */
+   private generation = 0
+   private disposed = false
 diff --git a/packages/client/ui-model-selection/src/client/service.ts b/packages/client/ui-model-selection/src/client/service.ts
 index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..f96123b5b41a178447a0a2d57c0457e8779515dc 100644
 --- a/packages/client/ui-model-selection/src/client/service.ts
@@ -1028,6 +1389,335 @@ index 0154f315be7a0a13b0f4ef18a96dbcfb87e2680c..10c861a1a852649860ba3ca41a628e97
      })
      expect(b.calls.select).toBe(0)
    } finally { await b.ctx.fiber.dispose() }
+diff --git a/packages/client/ui-model-selection/tests/model-select.client.spec.tsx b/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
+index 470c852ec8d0e85e731ba7b05ff2e67a1897eb07..f3efc8e4c971823efd7a7922a958ff8edbb3f1dd 100644
+--- a/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
++++ b/packages/client/ui-model-selection/tests/model-select.client.spec.tsx
+@@ -143,7 +143,7 @@ describe('ModelSelect reasoning effort', () => {
+       .toEqual(['Default', 'Standard'])
+   })
+ 
+-  it('shows the durable model id when the catalog has no matching display name', () => {
++  it('shows a safe model caption while preserving a durable id absent from the catalog', () => {
+     const directory = createSnapshotStore(state({
+       current: { provider: 'deepseek-official', model: 'removed-model' },
+     }))
+@@ -157,8 +157,8 @@ describe('ModelSelect reasoning effort', () => {
+       t={t}
+     />)
+ 
+-    const trigger = screen.getByRole('button', { name: '选择模型，当前 deepseek-official/removed-model' })
+-    expect(trigger.textContent).toContain('deepseek-official/removed-model')
++    const trigger = screen.getByRole('button', { name: '选择模型，当前 模型' })
++    expect(trigger.textContent).toContain('模型')
+     fireEvent.click(trigger)
+     expect(screen.queryByRole('menuitem', { name: /推理等级/ })).toBeNull()
+     fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+@@ -176,7 +176,7 @@ describe('ModelSelect reasoning effort', () => {
+       snapshot.routable = false
+     }) })
+     expect(screen.getByRole('button', { name: /选择模型，当前/ }).textContent)
+-      .toMatchInlineSnapshot('"deepseek-official/deepseek-v4-flashHigh"')
++      .toMatchInlineSnapshot('"模型High"')
+     expect(directory.getSnapshot().current).toEqual(state().current)
+   })
+ 
+@@ -912,8 +912,25 @@ it('restores the account model name after login without changing the saved route
+   expect(screen.getByRole('button', { name: /选择模型，当前/ }).textContent).toBe('DeepSeek FlashHigh')
+   act(() => { directory.update((snapshot) => { snapshot.groups = []; snapshot.routable = false }) })
+   expect(screen.getByRole('button', { name: /选择模型，当前/ }).textContent)
+-    .toMatchInlineSnapshot('"deepseek-account/deepseek-flashHigh"')
++    .toMatchInlineSnapshot('"模型High"')
+   act(() => { directory.update((snapshot) => { snapshot.groups = groups; snapshot.routable = true }) })
+   expect(screen.getByRole('button', { name: /选择模型，当前/ }).textContent).toBe('DeepSeek FlashHigh')
+   expect(directory.getSnapshot().current).toEqual(selected)
+ })
++
++
++it('registered public model captions stay distinct across two session sources; missing catalog is localized without raw ids', () => {
++  const groups = [{ id: 'lyapunov-plans', name: 'Pontryagin', models: [{ id: 'peiri', name: 'Pontryagin' }] }]
++  const first = createSnapshotStore(state({ current: { provider: 'lyapunov-plans', model: 'peiri' }, groups }))
++  const second = createSnapshotStore(state({ current: { provider: 'private-provider', model: 'private-model' }, groups: [{ id: 'private-provider', name: 'Public gateway', models: [{ id: 'private-model', name: 'Public second model' }] }] }))
++  const view = render(<div><ModelSelect locked={false} available directory={first} load={vi.fn()} select={vi.fn()} t={t} /><ModelSelect locked={false} available directory={second} load={vi.fn()} select={vi.fn()} t={t} /></div>)
++  expect(view.getByRole('button', { name: '选择模型，当前 Pontryagin' })).toBeTruthy()
++  expect(view.getByRole('button', { name: '选择模型，当前 Public second model' })).toBeTruthy()
++  act(() => { first.update(snapshot => { snapshot.groups = [] }) })
++  expect(view.getByRole('button', { name: '选择模型，当前 模型' })).toBeTruthy()
++  expect(view.container.textContent).not.toContain('peiri');expect(view.container.textContent).not.toContain('private-provider')
++  const english = (key: string) => (en as Record<string,string>)[key] ?? key
++  view.rerender(<ModelSelect locked={false} available directory={first} load={vi.fn()} select={vi.fn()} t={english} />)
++  expect(view.getByRole('button').textContent).toBe('Model')
++  expect(first.getSnapshot().current).toEqual({ provider: 'lyapunov-plans', model: 'peiri' })
++})
+diff --git a/packages/client/ui-trajectory/README.md b/packages/client/ui-trajectory/README.md
+index ca4a84a44fd7fc42f6c7ea2ff95fa533731fde0f..c68a3a3ed603dd2ef06de0c505c22d269ad667a3 100644
+--- a/packages/client/ui-trajectory/README.md
++++ b/packages/client/ui-trajectory/README.md
+@@ -7,6 +7,8 @@ kind: "package-reference"
+ 
+ English | [中文](README.zh.md)
+ 
++Customer presentation reads public names from the existing session model directory. An absent directory or unmatched identity shows the localized generic Model label, without concatenating internal provider/model identifiers. Optional compositions use the same safe fallback and create no second model directory. Requests, logs, selections, usage numbers, and billing attribution remain unchanged.
++
+ ## Summary
+ 
+ The Trajectory tab lets you inspect agent activity as a turn-aware ledger and interactive timing overview. It groups User, Assistant, Tool, nested Subtool, and compaction records, marks turn and step boundaries, and opens a record inspector for token usage, duration, input, output, timing, images, and attachment summaries. Long histories open at the current tail, load older pages on demand, and render only visible rows. During streaming, the view follows the tail until you scroll upward, and in-flight records show a start marker without inventing elapsed time.
+diff --git a/packages/client/ui-trajectory/README.zh.md b/packages/client/ui-trajectory/README.zh.md
+index 1b22723b23ffd53af63f9fba1c8498d6cd60e2f3..b207cfbc19300e22c583eef61f279228e7b0a6a7 100644
+--- a/packages/client/ui-trajectory/README.zh.md
++++ b/packages/client/ui-trajectory/README.zh.md
+@@ -11,6 +11,8 @@ kind: "package-reference"
+ 
+ Trajectory 标签页让你以按轮次组织的事件记录表和交互式时间概览检查 agent（智能体）活动。它对用户、助手、工具、嵌套子工具和压缩（compaction）记录分组，标示轮次与步骤边界，并为所选记录打开检查器，显示 token 用量、耗时、输入、输出、计时、图片和附件摘要。较长历史打开时定位于当前尾部，按需加载更早页面，并且只渲染可见行。流式输出期间，视图会跟随尾部，直到你向上滚动；进行中的记录只显示开始标记，不会虚构耗时。
+ 
++客户显示读取原会话模型目录中的公开名称；目录缺失或身份未匹配时显示“模型”，不会拼接内部提供方／模型身份。可选目录未装配时同样采用安全显示，不创建新模型目录。请求、日志、模型选择、用量数字与计费归属不变。
++
+ ## 目录
+ 
+ - [使用本包](#use-this-package)
+diff --git a/packages/client/ui-trajectory/package.json b/packages/client/ui-trajectory/package.json
+index abbf4bb5d04c324f46b947b578b067d5b1a0c72e..c22f070ef3d18f78fd08b3501562e7bd4543c10d 100644
+--- a/packages/client/ui-trajectory/package.json
++++ b/packages/client/ui-trajectory/package.json
+@@ -43,7 +43,8 @@
+   },
+   "license": "MIT",
+   "peerDependencies": {
+-    "@deepseek-ai/cordis": "workspace:~"
++    "@deepseek-ai/cordis": "workspace:~",
++    "@deepseek-ai/dsh-client-ui-model-selection": "workspace:*"
+   },
+   "devDependencies": {
+     "@deepseek-ai/dsh-agent": "workspace:*",
+@@ -68,11 +69,17 @@
+     "@deepseek-ai/dsh-llm": "workspace:*",
+     "@deepseek-ai/dsh-attachment": "workspace:*",
+     "@tanstack/react-virtual": "^3.14.9",
+-    "diff": "^9.0.0"
++    "diff": "^9.0.0",
++    "@deepseek-ai/dsh-client-ui-model-selection": "workspace:*"
+   },
+   "files": [
+     "lib/index.js",
+     "lib/client.js",
+     "lib/types/**/*.d.ts"
+-  ]
++  ],
++  "peerDependenciesMeta": {
++    "@deepseek-ai/dsh-client-ui-model-selection": {
++      "optional": true
++    }
++  }
+ }
+diff --git a/packages/client/ui-trajectory/src/client/TrajectoryTable.tsx b/packages/client/ui-trajectory/src/client/TrajectoryTable.tsx
+index 9eeeb5c2abb0e62994ae0031be32f21a4d806c06..5819e806a1e43610ee9572fbbe39d0d88b659e71 100644
+--- a/packages/client/ui-trajectory/src/client/TrajectoryTable.tsx
++++ b/packages/client/ui-trajectory/src/client/TrajectoryTable.tsx
+@@ -1,6 +1,7 @@
+ /** Turn-aware trajectory event ledger with a local record inspector. */
+ 
+-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
++import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import type { CSSProperties, ReactNode } from 'react'
+ import { useVirtualizer } from '@tanstack/react-virtual'
+ import {
+@@ -386,7 +387,12 @@ function AssistantTimingPanel({
+ }
+ 
+ /** Props for the trajectory ledger. */
++const EMPTY_MODEL_GROUPS = [] as const
++const emptySubscribe = () => () => {}
++
+ export interface TrajectoryTableProps {
++  /** Optional existing model directory; internal request facts remain untouched. */
++  modelDirectory?: ModelDirectory | undefined
+   /** Wrapping control shared by all JSON inspectors. */
+   stringWrapping?: JsonTreeProps['stringWrapping']
+   /** Trajectory locale seat. */
+@@ -2091,7 +2097,10 @@ export function TrajectoryTable({
+   onToggleAssistant,
+   inspectCallId = null,
+   onInspectApplied,
++  modelDirectory,
+ }: TrajectoryTableProps) {
++  useSyncExternalStore(modelDirectory?.store.subscribe ?? emptySubscribe,
++    () => modelDirectory?.store.getSnapshot().groups ?? EMPTY_MODEL_GROUPS)
+   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
+   const [selectedRequest, setSelectedRequest] = useState<SelectedRequest | null>(null)
+   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+@@ -2306,6 +2315,12 @@ export function TrajectoryTable({
+   const selectedRequestCumulativeUsage =
+     selectedRequestInfo?.cumulativeUsage ?? selectedRequestUsage
+   const selectedRequestOptions = selectedRequestInfo?.requestConfig
++  const requestNames = modelDirectory?.displayNames({ provider: selectedRequestOptions?.provider, model: selectedRequestOptions?.model }, t('details.model'))
++  const requestOptionsDisplay = selectedRequestOptions === undefined ? undefined : {
++    ...selectedRequestOptions,
++    ...(selectedRequestOptions.provider === undefined ? {} : { provider: requestNames?.provider ?? t('details.model') }),
++    ...(selectedRequestOptions.model === undefined ? {} : { model: requestNames?.model ?? t('details.model') }),
++  }
+   const activeTurn = selectedRequestInfo === undefined ? selected?.turn : selectedRequestInfo.turn
+   const activeSection = selectedRequestInfo === undefined
+     ? selected?.section
+@@ -3123,8 +3138,7 @@ export function TrajectoryTable({
+                     <div>
+                       <dt>{t('details.provider')}</dt>
+                       <dd>
+-                        {selectedRequestInfo.provider
+-                          ?? selectedRequestInfo.requestConfig?.provider}
++                        {modelDirectory?.displayNames({ provider: selectedRequestInfo.provider ?? selectedRequestInfo.requestConfig?.provider, model: selectedRequestInfo.model ?? selectedRequestInfo.requestConfig?.model }, t('details.model')).provider ?? t('details.model')}
+                       </dd>
+                     </div>
+                   )}
+@@ -3133,8 +3147,7 @@ export function TrajectoryTable({
+                     <div>
+                       <dt>{t('details.model')}</dt>
+                       <dd>
+-                        {selectedRequestInfo.model
+-                          ?? selectedRequestInfo.requestConfig?.model}
++                        {modelDirectory?.displayNames({ provider: selectedRequestInfo.provider ?? selectedRequestInfo.requestConfig?.provider, model: selectedRequestInfo.model ?? selectedRequestInfo.requestConfig?.model }, t('details.model')).model ?? t('details.model')}
+                       </dd>
+                     </div>
+                   )}
+@@ -3201,7 +3214,7 @@ export function TrajectoryTable({
+                 <div className={css.overviewSections}>
+                   {selectedRequestOptions !== undefined && (
+                     <OverviewSection label={t('tab.options')} onOpen={() => { activateTab('options') }}>
+-                      <RequestOptions options={selectedRequestOptions} preview stringWrapping={stringWrapping} t={t} />
++                      <RequestOptions options={requestOptionsDisplay} preview stringWrapping={stringWrapping} t={t} />
+                     </OverviewSection>
+                   )}
+                   <OverviewSection label={t('tab.usage')} onOpen={() => { activateTab('usage') }}>
+@@ -3220,7 +3233,7 @@ export function TrajectoryTable({
+               </>
+             )}
+             {selectedRequestInfo !== undefined && activeTab === 'options' && (
+-              <RequestOptions options={selectedRequestOptions} stringWrapping={stringWrapping} t={t} />
++              <RequestOptions options={requestOptionsDisplay} stringWrapping={stringWrapping} t={t} />
+             )}
+             {selectedRequestInfo !== undefined && activeTab === 'usage' && (
+               <RequestUsagePanel
+diff --git a/packages/client/ui-trajectory/src/client/TrajectoryView.tsx b/packages/client/ui-trajectory/src/client/TrajectoryView.tsx
+index 6c2cd98ec8de072f940a2d2fae627dbcd1ca409b..9ebe1fb1b9e5f23d5d94724da12067272dc6ccba 100644
+--- a/packages/client/ui-trajectory/src/client/TrajectoryView.tsx
++++ b/packages/client/ui-trajectory/src/client/TrajectoryView.tsx
+@@ -1,5 +1,6 @@
+ /** Trajectory view: compact summary over a turn-aware event ledger. */
+ 
++import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import type {
+   AssistantBlock, AssistantMessageNode, ConvViewProps, MessageImageLoader, RenderMessageImages,
+@@ -75,6 +76,8 @@ function partialStructureSignature(partial: TrajectorySnapshot['partial']): stri
+ 
+ /** Session-bound controls not already supplied by the conversation view slot. */
+ export interface TrajectoryViewInjected {
++  /** Optional existing session model directory for public request labels. */
++  modelDirectory?: ModelDirectory | undefined
+   /** Shared wrapping preference read by expansion handlers. */
+   jsonStringWrapping?: Omit<NonNullable<JsonTreeProps['stringWrapping']>, 'label'>
+   hooks: {
+@@ -131,7 +134,7 @@ function addUsage(
+ 
+ export function TrajectoryView({
+   useSession, useTrajectory, useDuration, loadOlder, loadImage, setActualDuration,
+-  viewRequest, completeViewRequest, renderSlot, t, jsonStringWrapping,
++  viewRequest, completeViewRequest, renderSlot, t, jsonStringWrapping, modelDirectory,
+ }: ConvViewProps
+   & PropsRenderSlots<'conversation.trajectory.images'>
+   & InjectFace<TrajectoryViewInjected>
+@@ -543,6 +546,7 @@ export function TrajectoryView({
+       />
+       <div className={css.ledger}>
+         <TrajectoryTable
++          modelDirectory={modelDirectory}
+           t={t}
+           stringWrapping={jsonStringWrapping === undefined ? undefined : {
+             ...jsonStringWrapping,
+diff --git a/packages/client/ui-trajectory/src/client/index.ts b/packages/client/ui-trajectory/src/client/index.ts
+index 935a43ff2c47bd44f1831a7ef4b1a75f81cb7b10..75019be1722a1aa70af41b88c6e6b98162580604 100644
+--- a/packages/client/ui-trajectory/src/client/index.ts
++++ b/packages/client/ui-trajectory/src/client/index.ts
+@@ -2,6 +2,7 @@
+  * Browser trajectory plugin contributing one entry to the conversation view
+  * slot without defining a service.
+  */
++import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
+@@ -93,6 +94,7 @@ export function apply(ctx: Context): void {
+       const trajectory = ctx.uiConversation.binding(sessionId).target('trajectory')
+       return {
+         hooks: { duration },
++        modelDirectory: ctx.get('modelDirectories')?.directoryFor(sessionId),
+         jsonStringWrapping: {
+           getDefault: () => stringWrapping.getSnapshot(),
+           setDefault: (value) => { stringWrapping.set(value) },
+diff --git a/packages/client/ui-trajectory/tests/table.client.spec.tsx b/packages/client/ui-trajectory/tests/table.client.spec.tsx
+index 7d054adc9b4ccf042feed9f01f383a54641d58a2..fb578dc0041a8772818a318baa00f07ebc8e6945 100644
+--- a/packages/client/ui-trajectory/tests/table.client.spec.tsx
++++ b/packages/client/ui-trajectory/tests/table.client.spec.tsx
+@@ -2,13 +2,17 @@
+ /** Trajectory ledger selection, details, status, and fold behavior. */
+ 
+ import { afterEach, describe, expect, it, vi } from 'vitest'
+-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
++import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+ import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+ import type { ComponentProps } from 'react'
+ import type { RenderMessageImages } from '@deepseek-ai/dsh-client-ui-conversation/client'
+ import { TrajectoryTable as LocalizedTrajectoryTable } from '../src/client/TrajectoryTable.tsx'
+ import { deriveTrajectoryLayout, type TrajectoryTurnModel } from '../src/client/layout.ts'
+ import { trajectoryRecordId } from '../src/client/trajectory-record.ts'
++import { ModelDirectory } from '../../ui-model-selection/src/client/directory.ts'
++import { ModelCatalogDirectory } from '../../ui-model-selection/src/client/catalog.ts'
++import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
++import { SessionId } from '@deepseek-ai/dsh-session/types'
+ import { t, tZh } from './locale.client.ts'
+ 
+ const renderImagesStub: RenderMessageImages = ({ images }) => (
+@@ -1227,3 +1231,26 @@ describe('TrajectoryTable', () => {
+     expect(onInspectApplied).not.toHaveBeenCalled()
+   })
+ })
++
++
++it('request inspector uses each session directory public names and localized unknown fallback without changing facts', () => {
++  const make = (id: string, name: string) => {
++    const catalog = new ModelCatalogDirectory({ remote: { session: {} } } as never)
++    catalog.store.set({ status: 'ready', error: null, value: { default: null, groups: [{ id: 'raw-provider', name: 'Public gateway', models: [{ id, name }] }], routableProviders: ['raw-provider'], failures: [] } })
++    return new ModelDirectory({} as never, SessionId(id), () => true, catalog, createSnapshotStore(undefined), () => true)
++  }
++  const first = make('peiri', 'Pontryagin'), second = make('other-id', 'Second public name')
++  const turns: readonly TrajectoryTurnModel[] = [{ turn: 1, groups: [{ title: 'Step 1', cells: [{ index: 1, sourceSeq: 1, kind: 'message', text: 'response', timeSeconds: 1 }] }] }]
++  const numbers = [{ turn: 1, step: 1, seq: 1, group: 'Step 1', number: 1, provider: 'raw-provider', model: 'peiri', requestConfig: { provider: 'raw-provider', model: 'peiri' } }]
++  const original = JSON.stringify(numbers)
++  const view = render(<LocalizedTrajectoryTable t={t} renderImages={renderImagesStub} turns={turns} requestNumbers={numbers} modelDirectory={first} {...FOLD_PROPS} />)
++  fireEvent.click(screen.getByRole('button', { name: 'Request #1' }))
++  expect(screen.getByText('Pontryagin')).toBeTruthy();expect(screen.getByText('Public gateway')).toBeTruthy()
++  view.rerender(<LocalizedTrajectoryTable t={t} renderImages={renderImagesStub} turns={turns} requestNumbers={[{ ...numbers[0]!, model: 'other-id' }]} modelDirectory={second} {...FOLD_PROPS} />)
++  expect(screen.getByText('Second public name')).toBeTruthy();expect(screen.queryByText('Pontryagin')).toBeNull()
++  act(() => { second.store.update(state => { state.groups = [] }) })
++  expect(view.container.textContent).not.toContain('raw-provider');expect(view.container.textContent).not.toContain('other-id')
++  view.rerender(<LocalizedTrajectoryTable turns={turns} requestNumbers={numbers} modelDirectory={second} t={tZh} renderImages={renderImagesStub} {...FOLD_PROPS} />)
++  expect(view.container.textContent).toContain('模型');expect(JSON.stringify(numbers)).toBe(original)
++  first.dispose();second.dispose()
++})
+diff --git a/packages/client/ui-trajectory/tsconfig.json b/packages/client/ui-trajectory/tsconfig.json
+index c4938ad2551839d0625602503526104c8f5dc5b2..b59aa307e599e259235bb785bef3f4bd2d9e6818 100644
+--- a/packages/client/ui-trajectory/tsconfig.json
++++ b/packages/client/ui-trajectory/tsconfig.json
+@@ -49,6 +49,9 @@
+     },
+     {
+       "path": "../../attachment/attachment"
++    },
++    {
++      "path": "../ui-model-selection"
+     }
+   ]
+ }
 diff --git a/packages/host/directory-picker-browse/README.md b/packages/host/directory-picker-browse/README.md
 index 9618b6b2f7101aa5dd145fd2c8f7a659a44b0308..9507e2c39990f66648b263f1992ac107c2844ddf 100644
 --- a/packages/host/directory-picker-browse/README.md
@@ -1313,7 +2003,7 @@ index 4abc7bfc6898cd9dae856a366973cfb043731d98..1e4d43370c9cea73e15170a44b3a8da7
 +  })
 +})
 diff --git a/packages/llm/llm-pi-ai/src/adapter.ts b/packages/llm/llm-pi-ai/src/adapter.ts
-index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa4802526ffbe5e6 100644
+index b8721402012a88bf71d1a37c0d38ea98306d35c2..24b879a698b90dc2b91781767931aa5df591c23f 100644
 --- a/packages/llm/llm-pi-ai/src/adapter.ts
 +++ b/packages/llm/llm-pi-ai/src/adapter.ts
 @@ -26,6 +26,7 @@
@@ -1376,24 +2066,67 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
  
    constructor(private readonly config: PiAiAdapterOptions) {
      super()
-@@ -349,6 +374,27 @@ export class PiAiAdapter extends LlmAdapter {
-       model,
-       options.reasoningEffort ?? profile.reasoning,
-     )
-+    // 原串行 loop 的重试输入不会包含失败半参数；只取原公开生成输入的临时摘要。
-+    // 同 signal 并发但不同内容的调用不得继承彼此的续接或被误拒。
+@@ -318,8 +343,13 @@ export class PiAiAdapter extends LlmAdapter {
+     }
+   }
+ 
+-  override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
++  override prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+     const snapshot = this.current()
++    const armed = [...(signal === undefined ? undefined : this.continuations.get(signal))?.values() ?? []].filter(value => value.armed)
++    if (armed.length > 0 && (armed.length !== 1 || armed[0]!.provider !== provider || armed[0]!.model !== model || armed[0]!.snapshot !== snapshot || Date.now() >= armed[0]!.expiresAt)) {
++      throw new LlmError('Central continuation binding changed; reconcile the original request before resubmitting.',
++        'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: withoutContinuation(armed[0]!.diagnostic) })
++    }
+     return Promise.resolve({
+       model: this.modelInfo(snapshot, provider, model),
+       stream: options => this.streamWithSnapshot(options, snapshot),
+@@ -334,22 +364,51 @@ export class PiAiAdapter extends LlmAdapter {
+     options: GenerateOptions,
+     snapshot: PiAiSnapshot,
+   ): AsyncIterable<StreamChunk> {
++    const continuationEntries = options.signal === undefined ? undefined : this.continuations.get(options.signal)
++    const armed = [...continuationEntries?.values() ?? []].filter(value => value.armed)
++    // 已认领能力属于原请求，不能先按新输入过滤掉它，再把续接悄悄变成新收费请求。
++    // 没有 armed 能力时，同一取消信号下的不同独立输入仍按原路径执行。
 +    const requestInputSha256 = createHash('sha256').update(JSON.stringify({
 +      provider: options.provider, model: options.model, messages: options.messages, tools: options.tools,
-+      temperature: options.temperature, maxTokens: options.maxTokens, reasoningEffort: options.reasoningEffort, sessionId: options.sessionId,
++      temperature: options.temperature, maxTokens: options.maxTokens, reasoningEffort: options.reasoningEffort,
++      sessionId: options.sessionId, stop: options.stop,
 +    })).digest('hex')
-+    const continuationEntries = options.signal === undefined ? undefined : this.continuations.get(options.signal)
++    if (armed.length > 0 && (armed.length !== 1 || armed[0]!.provider !== options.provider
++      || armed[0]!.model !== options.model || armed[0]!.requestInputSha256 !== requestInputSha256 || armed[0]!.snapshot !== snapshot || Date.now() >= armed[0]!.expiresAt)) {
++      throw new LlmError('Central continuation input or binding changed; reconcile the original request before resubmitting.',
++        'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: withoutContinuation(armed[0]!.diagnostic) })
++    }
+     if (options.stop !== undefined) {
+       throw new LlmError('llm-pi-ai does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
+     }
+-    // One capture per stream call, taken before any await: the profile, the
+-    // model descriptor, and the collection all come from the same immutable
+-    // snapshot, and the credential freezes with them. A configuration change
+-    // mid-request builds a separate snapshot, so this request finishes under
+-    // the one it started with and the next call picks up the new one.
++    // 原配置快照、模型与凭据依然在任何网络访问之前绑定。
+     const profile = this.profileOf(snapshot, options.provider)
+     const model = this.modelOf(snapshot, options.provider, options.model)
+     this.config.assertModel?.(options.provider, model.baseUrl)
+-    const reasoning = resolveReasoningLevel(
+-      model,
+-      options.reasoningEffort ?? profile.reasoning,
+-    )
+-    const apiKey = await this.config.resolveApiKey(options.provider, profile)
++    const reasoning = resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning)
 +    const pending = [...continuationEntries?.values() ?? []].filter(value => value.provider === options.provider && value.model === options.model && value.requestInputSha256 === requestInputSha256)
 +    let resume: PendingContinuation | undefined
-+    const selectResume = pending.length === 0 ? undefined : (url: string, method: string, headers: Headers, _generatedBodySha256: string): WireContinuation => {
++    let resumeBindingRejected = false
++    const selectResume = pending.length === 0 ? undefined : (url: string, method: string, headers: Headers, generatedBodySha256: string): WireContinuation => {
 +      const armed = pending.filter(value => value.armed)
 +      const value = armed.length === 1 ? armed[0] : undefined
 +      if (!value || options.signal?.aborted || value.snapshot !== snapshot || Date.now() >= value.expiresAt
-+        || value.wire.url !== url || value.wire.method !== method || value.wire.headers.get('authorization') !== headers.get('authorization')) {
++        || value.wire.url !== url || value.wire.method !== method || value.wire.bodySha256 !== generatedBodySha256
++        || value.wire.headers.get('authorization') !== headers.get('authorization')) {
++        resumeBindingRejected = true
 +        throw new LlmError('Central continuation binding expired or changed; the original request remains unresolved.',
 +          'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: withoutContinuation(pending[0]!.diagnostic) })
 +      }
@@ -1401,10 +2134,16 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
 +      value.cleanup()
 +      return value.wire
 +    }
-     const apiKey = await this.config.resolveApiKey(options.provider, profile)
++    let apiKey: string | undefined
++    try { apiKey = await this.config.resolveApiKey(options.provider, profile) } catch (error) {
++      if (armed.length > 0) throw new LlmError('Central continuation credentials could not be verified; reconcile the original request before resubmitting.',
++        'CENTRAL_CONTINUATION_BINDING_INVALID', { cause: error, diagnostic: withoutContinuation(armed[0]!.diagnostic) })
++      throw error
++    }
  
      const consumer = new AbortController()
-@@ -381,7 +427,10 @@ export class PiAiAdapter extends LlmAdapter {
+     const upstream = options.signal === undefined
+@@ -381,7 +440,10 @@ export class PiAiAdapter extends LlmAdapter {
              maxBytes: profile.requestImageMaxBytes,
            },
          }, onReplayDegrade)
@@ -1416,7 +2155,7 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
        const events = snapshot.models.streamSimple(model, context, {
          fetch: diagnostic.fetch,
          ...profileOptions(profile, reasoning, apiKey),
-@@ -404,7 +453,61 @@ export class PiAiAdapter extends LlmAdapter {
+@@ -404,7 +466,63 @@ export class PiAiAdapter extends LlmAdapter {
              exhausted = true
              return
            }
@@ -1450,7 +2189,7 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
 +                  || snapshot.profiles !== this.config.profiles() || Date.now() >= value.expiresAt) return false
 +                value.armed = true
 +                return true
-+              })
++              }, { adapter: this, model: options.model, diagnostic: chunk.reason.failure.diagnostic! })
 +              const cleanup = () => {
 +                const entries = this.continuations.get(signal)
 +                if (entries?.get(continuationKey) === value) entries.delete(continuationKey)
@@ -1459,7 +2198,8 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
 +                signal.removeEventListener('abort', cancel)
 +                clearTimeout(timer)
 +              }
-+              const timer = setTimeout(cleanup, 60_000)
++              // 已认领后保留同series绑定，即使许可到期也只能拒绝，不得fallback为fresh请求。
++              const timer = setTimeout(() => { if (!value.armed) cleanup() }, 60_000)
 +              timer.unref?.()
 +              value.cleanup = cleanup
 +              const entries = this.continuations.get(signal) ?? new Map<string, PendingContinuation>()
@@ -1471,15 +2211,16 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..ebd73ae54cb686d96d4f095ffa480252
 +          }
 +          // 缺少新的诊断时，已认领请求的后续失败仍保留原 reserved/unknown 门。
 +          // 不允许 generic timeout 再建立第三个付费请求。
-+          if (resume && chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')
++          if ((resume || pending.length > 0) && chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')
 +            && chunk.reason.failure.diagnostic === undefined) {
 +            yield { ...chunk, reason: { ...chunk.reason, failure: { ...chunk.reason.failure,
-+              diagnostic: withoutContinuation(resume.diagnostic) } } }
++              code: resumeBindingRejected ? 'CENTRAL_CONTINUATION_BINDING_INVALID' : chunk.reason.failure.code,
++              diagnostic: withoutContinuation((resume ?? pending[0])!.diagnostic) } } }
 +          } else yield chunk
          }
        } finally {
          if (!exhausted) {
-@@ -418,11 +521,12 @@ export class PiAiAdapter extends LlmAdapter {
+@@ -418,11 +536,12 @@ export class PiAiAdapter extends LlmAdapter {
        }
      } catch (error: unknown) {
        if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
@@ -1643,7 +2384,7 @@ index 87140d0167b0235b926bae96c04f882a6b5d7470..6e99f2b8fb3cf1d0c392c16c3f191fb0
      if (failure.diagnostic?.retryable === false || failure.diagnostic?.effect === 'unknown'
        || failure.diagnostic?.effect === 'reserved' || failure.diagnostic?.effect === 'charged') return
 diff --git a/packages/llm/llm-retry/tests/transport-recovery.spec.ts b/packages/llm/llm-retry/tests/transport-recovery.spec.ts
-index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c75141808711 100644
+index 062f6ad30000e291090b9c611d6fcd1f0657f530..496d77ea1ac65d0b88bd9901111de04d26b6eb40 100644
 --- a/packages/llm/llm-retry/tests/transport-recovery.spec.ts
 +++ b/packages/llm/llm-retry/tests/transport-recovery.spec.ts
 @@ -1,5 +1,11 @@
@@ -1659,7 +2400,7 @@ index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c751
  import type { AddressInfo } from 'node:net'
  import { afterEach, describe, expect, it, vi } from 'vitest'
  import { Context } from '@deepseek-ai/cordis'
-@@ -284,3 +290,365 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
+@@ -284,3 +290,451 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
      }
    })
  })
@@ -1751,11 +2492,11 @@ index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c751
 +  const ctx = new Context()
 +  await mountAgentLoopTestDependencies(ctx, { tools: { mode: 'native' } })
 +  const profiles = resolveProfiles({ central: { api: 'openai-completions', baseURL,
-+    ...managed ? { managedBaseURL: baseURL } : {}, models: [{ id: 'public-model' }],
++    ...managed ? { managedBaseURL: baseURL } : {}, models: [{ id: 'public-model' }, { id: 'changed-model' }],
 +    retryPolicy: { ...normal ? { mode: 'normal' as const, maxRetries: 1 } : { mode: 'always' as const }, backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } },
 +  } })
 +  const adapter = new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('fixture-auth'), auth: memoryAuth() })
-+  ctx.llm.registerAdapter(['central'], adapter)
++  const disposeAdapter = ctx.llm.registerAdapter(['central'], adapter)
 +  beforeRetry?.(ctx)
 +  const retryFiber = await ctx.plugin(Retry)
 +  await ctx.plugin(AgentLoop, { agents: [] })
@@ -1763,7 +2504,7 @@ index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c751
 +  ctx.tools.register(defineContentToolFixture({ name: 'get_scene_info', description: 'read fixture scene', parameters: {},
 +    async execute(args, exec) { calls.push(args); exec.concludeTurn(); return [{ type: 'text', text: 'scene fixture' }] },
 +  }))
-+  return { ctx, calls, retryFiber }
++  return { ctx, calls, retryFiber, disposeAdapter }
 +}
 +
 +describe('managed central same-request continuation through original AgentLoop', () => {
@@ -2024,9 +2765,128 @@ index 062f6ad30000e291090b9c611d6fcd1f0657f530..e091b358bed6faee70484572a620c751
 +    expect(JSON.stringify(agent.session.snapshotEvents())).not.toContain(server.privateToken)
 +  })
 +
++  it.each(['maxTokens', 'model', 'provider', 'adapter'] as const)('rejects an armed original series when native request preparation changes %s, without a fresh POST', async variation => {
++    const server = await centralFixture()
++    const mounted = await centralHarness(server.baseURL)
++    context = mounted.ctx
++    let disposeReplacement: (() => void) | undefined
++    if (variation === 'provider') {
++      const alternateProfiles = resolveProfiles({ alternate: { api: 'openai-completions', baseURL: server.baseURL,
++        managedBaseURL: server.baseURL, models: [{ id: 'public-model' }],
++      } })
++      context.llm.registerAdapter(['alternate'], new PiAiAdapter({ profiles: () => alternateProfiles,
++        resolveApiKey: () => Promise.resolve('fixture-auth'), auth: memoryAuth() }))
++    }
++    const first = await context.agentLoop.create(SessionId(`central-armed-changed-${variation}`), {
++      provider: 'central', model: 'public-model', maxTokens: 128,
++    })
++    let prepares = 0
++    context.on('agent/request', async (payload, next) => {
++      const config = await next()
++      if (payload.agent !== first || ++prepares < 2) return config
++      if (variation === 'maxTokens') return { ...config, maxTokens: 256 }
++      if (variation === 'model') return { ...config, model: 'changed-model' }
++      if (variation === 'provider') return { ...config, provider: 'alternate' }
++      // 原 native registration 原子替换；provider/model未变也不能改adapter身份。
++      mounted.disposeAdapter()
++      const replacementProfiles = resolveProfiles({ central: { api: 'openai-completions', baseURL: server.baseURL,
++        managedBaseURL: server.baseURL, models: [{ id: 'public-model' }],
++      } })
++      disposeReplacement = context!.llm.registerAdapter(['central'], new PiAiAdapter({ profiles: () => replacementProfiles,
++        resolveApiKey: () => Promise.resolve('fixture-auth'), auth: memoryAuth() }))
++      return config
++    })
++    try {
++      await sendAndWait(context, first)
++      expect(prepares).toBe(2)
++      expect(server.records).toHaveLength(1)
++      expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 0 })
++      expect(mounted.calls).toHaveLength(0)
++      const events = first.session.snapshotEvents()
++      expect(events.filter(event => event.type === 'llm/retry')).toHaveLength(1)
++      expect(events.filter(event => event.type === 'llm/retry-started')).toHaveLength(1)
++      const terminal = events.at(-1)
++      expect(terminal).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'error', error: {
++        code: 'CENTRAL_CONTINUATION_BINDING_INVALID', diagnostic: { effect: 'reserved', retryable: false },
++      } } } })
++      expect(JSON.stringify(events)).not.toContain(server.privateToken)
++      expect(JSON.stringify(events)).not.toContain('fixture-auth')
++    } finally { disposeReplacement?.() }
++  })
++
++  it('keeps an expired armed original series fail-closed after its timers fire, without a fresh paid POST', async () => {
++    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
++    const scheduled = Promise.withResolvers<void>(), secondPrepare = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
++    let task: Promise<void> | undefined
++    try {
++      const server = await centralFixture()
++      const mounted = await centralHarness(server.baseURL)
++      context = mounted.ctx
++      const agent = await context.agentLoop.create(SessionId('central-expired-armed'), { provider: 'central', model: 'public-model', maxTokens: 128 })
++      let prepares = 0, abortedAtDispatch: boolean | undefined
++      context.on('agent/request', async (payload, next) => {
++        const config = await next()
++        if (payload.agent === agent && ++prepares === 2) {
++          secondPrepare.resolve(); await release.promise; abortedAtDispatch = payload.signal.aborted
++        }
++        return config
++      })
++      context.on('session/event', (session, event) => { if (session === agent.session && event.type === 'llm/retry') scheduled.resolve() })
++      task = sendAndWait(context, agent)
++      await scheduled.promise; await vi.advanceTimersByTimeAsync(0); await secondPrepare.promise
++      await vi.advanceTimersByTimeAsync(60_001)
++      const expiredWallClock = Date.now()
++      vi.useRealTimers(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(expiredWallClock)
++      release.resolve(); await task
++      expect(abortedAtDispatch).toBe(false)
++      expect(server.records).toHaveLength(1)
++      expect(server.counters()).toEqual({ reserved: 1, claimed: 0, revoked: 0 })
++      expect(mounted.calls).toHaveLength(0)
++      const events = agent.session.snapshotEvents()
++      expect(events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'error', error: {
++        code: 'CENTRAL_CONTINUATION_BINDING_INVALID', diagnostic: { effect: 'reserved', retryable: false },
++      } } } })
++      expect(JSON.stringify(events)).not.toContain(server.privateToken)
++      expect(JSON.stringify(events)).not.toContain('fixture-auth')
++    } finally { vi.useRealTimers(); release.resolve(); await task?.catch(() => {}) }
++  })
++
 +})
+diff --git a/packages/llm/llm/src/index.ts b/packages/llm/llm/src/index.ts
+index 50c1ec8a7b8a7a2ee03bcb9f80f299438a58bc64..06b3d12fd0d9b956a5b0899570016c601f13ca56 100644
+--- a/packages/llm/llm/src/index.ts
++++ b/packages/llm/llm/src/index.ts
+@@ -34,6 +34,7 @@ import type { ProviderRequestId } from './brand.ts'
+ import { callConfigEquals } from './call-config.ts'
+ import type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
+ import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
++import { llmContinuationBindingFailure } from './public-diagnostic.ts'
+ import { normalizeLlmFailure } from './adapter-failure.ts'
+ import { normalizeApiKey } from './api-key.ts'
+ import {
+@@ -938,6 +939,9 @@ export class LlmRuntime extends TypertRemoteService {
+    * @returns a prepared config and its registration-bound stream entry point.
+    */
+   async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall> {
++    const continuationFailure = llmContinuationBindingFailure(signal, config.provider, config.model, this.adapters.get(config.provider)?.adapter)
++    if (continuationFailure) throw new LlmError('Central continuation binding expired or changed; reconcile the original request before resubmitting.',
++      'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: continuationFailure })
+     const registration = this.registration(config.provider)
+     const adapterCall = await registration.adapter.prepareCall(config.provider, config.model, signal)
+     const modelInfo = this.normalizeModelInfo(registration, config.model, adapterCall.model)
+@@ -1040,6 +1044,10 @@ export class LlmRuntime extends TypertRemoteService {
+   ): AsyncGenerator<StreamChunk> {
+     let iterator: AsyncIterator<StreamChunk>
+     try {
++      const continuationFailure = llmContinuationBindingFailure(options.signal, options.provider, options.model,
++        prepared?.registration.adapter ?? this.adapters.get(options.provider)?.adapter)
++      if (continuationFailure) throw new LlmError('Central continuation binding expired or changed before dispatch; reconcile the original request before resubmitting.',
++        'CENTRAL_CONTINUATION_BINDING_INVALID', { diagnostic: continuationFailure })
+       const registration = prepared?.registration ?? this.registration(options.provider)
+       const adapter = registration.adapter
+       let modelInfo: LlmResolvedModelInfo
 diff --git a/packages/llm/llm/src/public-diagnostic.ts b/packages/llm/llm/src/public-diagnostic.ts
-index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2313d4eef 100644
+index 8065f142b27ac7fffb240a1da00448c1458f4ae6..f62cda62fbedc81fe2a9d7c789c72e076067b3ee 100644
 --- a/packages/llm/llm/src/public-diagnostic.ts
 +++ b/packages/llm/llm/src/public-diagnostic.ts
 @@ -1,5 +1,5 @@
@@ -2051,7 +2911,7 @@ index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2
  }
  
  /** pi-ai保留parsed API错误为JSON文字；只解有限对象，不从普通文案猜账务。 */
-@@ -33,3 +38,66 @@ export function diagnosticFromProviderError(message: string): { diagnostic?: Llm
+@@ -33,3 +38,98 @@ export function diagnosticFromProviderError(message: string): { diagnostic?: Llm
      return { ...diagnostic ? { diagnostic } : {}, invalid: diagnostic === undefined }
    } catch (_invalidProviderJson) { return { invalid: message.includes('"diagnostic"') } }
  }
@@ -2067,11 +2927,20 @@ index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2
 +  return Object.freeze({ version: 1, requestId: c.requestId, attempt: 1, bodySha256: c.bodySha256 })
 +}
 +
++/** 原调用系列的进程内路由身份，不携带凭证或请求正文。 */
++export interface LlmContinuationBinding {
++  readonly adapter: object
++  readonly model: string
++  readonly diagnostic: LlmFailureDiagnostic
++}
++
 +interface LiveContinuation {
 +  readonly provider: string
 +  readonly summary: LlmContinuationSummary
 +  readonly claim: () => boolean
 +  readonly expiresAt: number
++  readonly binding?: LlmContinuationBinding
++  armed: boolean
 +  cleanup: () => void
 +}
 +// 原 live finish 经 AssistantStreamAccumulator JSON 快照复制，不能用 failure 身份认领。
@@ -2085,11 +2954,12 @@ index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2
 +  provider: string,
 +  summary: LlmContinuationSummary,
 +  claim: () => boolean,
++  binding?: LlmContinuationBinding,
 +): () => void {
 +  const key = continuationKey(provider, summary)
 +  const entries = liveContinuations.get(signal) ?? new Map<string, LiveContinuation>()
 +  entries.get(key)?.cleanup()
-+  const value: LiveContinuation = { provider, summary, claim, expiresAt: Date.now() + 60_000, cleanup: () => {} }
++  const value: LiveContinuation = { provider, summary, claim, expiresAt: Date.now() + 60_000, ...binding === undefined ? {} : { binding }, armed: false, cleanup: () => {} }
 +  entries.set(key, value)
 +  liveContinuations.set(signal, entries)
 +  const clear = () => {
@@ -2099,7 +2969,8 @@ index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2
 +    clearTimeout(timer)
 +  }
 +  value.cleanup = clear
-+  const timer = setTimeout(clear, 60_000)
++  // 过期仅取消尚未认领的许可；已armed原series必须保留绑定护栏，不能恢复成fresh收费。
++  const timer = setTimeout(() => { if (!value.armed) clear() }, 60_000)
 +  timer.unref?.()
 +  if (signal.aborted) clear()
 +  else signal.addEventListener('abort', clear, { once: true })
@@ -2113,10 +2984,31 @@ index 8065f142b27ac7fffb240a1da00448c1458f4ae6..31b7bf4bc58b0bcc64e3d9c585893cd2
 +  if (!summary) return false
 +  const entries = liveContinuations.get(signal)
 +  const value = entries?.get(continuationKey(provider, summary))
-+  if (value === undefined) return false
++  if (value === undefined || value.armed) return false
 +  if (signal.aborted || Date.now() >= value.expiresAt) { value.cleanup(); return false }
-+  value.cleanup()
-+  return value.claim()
++  if (!value.claim()) { value.cleanup(); return false }
++  // JSON 诊断只能认领一次，但同一原调用系列在消费前仍须保留路由护栏。
++  value.armed = true
++  return true
++}
++
++/** 原 Runtime 在重新选 adapter 前核对已认领系列；无 armed 能力的调用不受影响。 */
++export function llmContinuationBindingFailure(
++  signal: AbortSignal | undefined,
++  provider: string,
++  model: string,
++  adapter: object | undefined,
++): LlmFailureDiagnostic | undefined {
++  if (signal === undefined || signal.aborted) return undefined
++  const entries = liveContinuations.get(signal)
++  if (entries === undefined) return undefined
++  for (const entry of entries.values()) if (!entry.armed && Date.now() >= entry.expiresAt) entry.cleanup()
++  const armed = [...entries.values()].filter(value => value.armed && value.binding !== undefined)
++  if (armed.length === 0) return undefined
++  const value = armed[0]!
++  if (armed.length === 1 && Date.now() < value.expiresAt && value.provider === provider && value.binding!.model === model && value.binding!.adapter === adapter) return undefined
++  const { continuation: _usedContinuation, ...facts } = value.binding!.diagnostic
++  return facts
 +}
 diff --git a/packages/llm/llm/src/types.ts b/packages/llm/llm/src/types.ts
 index f2804ab5d9882ae7bffcf4856ba4d460f7cf5e4b..a1aa2d36769ea6ec30029b9e1b2ac34ed2e150d9 100644
@@ -2146,3 +3038,27 @@ index f2804ab5d9882ae7bffcf4856ba4d460f7cf5e4b..a1aa2d36769ea6ec30029b9e1b2ac34e
  }
  
  /** Serializable provider or transport failure facts; policy decides whether they are retryable. */
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 037b04034aa22b4693238c5f32b02b435a431021..f13592cae9c57be9a9253a7dd0b4d0142079eaf6 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -3250,6 +3250,9 @@ importers:
+         specifier: link:../../../vendor/schemastery
+         version: link:../../../vendor/schemastery
+     devDependencies:
++      '@deepseek-ai/dsh-client-ui-model-selection':
++        specifier: workspace:*
++        version: link:../ui-model-selection
+       '@deepseek-ai/cordis':
+         specifier: workspace:~
+         version: link:../../../vendor/cordis
+@@ -5980,6 +5983,9 @@ importers:
+ 
+   packages/client/ui-trajectory:
+     devDependencies:
++      '@deepseek-ai/dsh-client-ui-model-selection':
++        specifier: workspace:*
++        version: link:../ui-model-selection
+       '@deepseek-ai/cordis':
+         specifier: workspace:~
+         version: link:../../../vendor/cordis
