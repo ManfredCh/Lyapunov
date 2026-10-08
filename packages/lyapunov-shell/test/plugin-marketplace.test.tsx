@@ -1,14 +1,14 @@
 import {describe,expect,test} from 'bun:test'
 import React from 'react'
 import {createRequire} from 'node:module'
-import {mkdtemp,writeFile,chmod,rm} from 'node:fs/promises'
+import {mkdtemp,mkdir,writeFile,chmod,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {join,dirname} from 'node:path'
 import {integrationAssociations,classifyMcpIntegration,marketplaceEntries,filterMarketplace} from '../src/plugin-marketplace.ts'
-import {validExistingExecutable} from '../src/integration-discovery.ts'
+import {validExistingExecutable,discoverIntegrations} from '../src/integration-discovery.ts'
 import {ExternalToolsSettings,applyExternalToolsSettings} from '../src/external-tools-settings.tsx'
 import type {ExternalToolsState,ExternalMcpRow} from '../src/external-tools-state.ts'
-import type {Context} from '@deepseek-ai/cordis'
+import {Context} from '@deepseek-ai/cordis'
 
 const mcp=(name:string,over:Partial<ExternalMcpRow>={}):ExternalMcpRow=>({id:'native-'+name,serverName:name,transport:'stdio',command:'mcp-for-blender',url:null,argsCount:0,envNames:['PRIVATE_TOKEN'],headerNames:[],status:'configured',tools:[],revision:123,detail:'Await native connection',enabled:true,currentScope:false,owner:'Native profile',configLocation:'/owned/profile/cordis.patch.yml',commandLocation:'/tools/mcp-for-blender',integration:'blender',...over})
 const state=():ExternalToolsState=>({capturedAt:1791430000000,writable:true,scopeSessionId:'current',software:[{id:'blender',installed:true,detail:'Installed software only',location:'/tools/blender',adapter:'blender_run'},{id:'unity',installed:null,detail:'Editor not selected; Hub discovered',location:'/tools/unityhub',adapter:'MCP'}],mcp:[mcp('customBlender',{status:'connected',currentScope:true,tools:['mcp__customBlender__get_scene_info']})],skills:[{name:'robot-provisioning',description:'Acquire a robot',provider:'filesystem',source:'bundled',path:'/product/skills/robot-provisioning/SKILL.md',modelInvocable:true,userInvocable:true,toolVisible:true,currentScope:true}],skillsComplete:true,candidates:[{id:'blender:/tools/mcp-for-blender',kind:'blender',path:'/tools/mcp-for-blender',source:'PATH',modifiedAt:0,executable:true,addonPath:'/product/addon.py',addonExists:false}],associations:integrationAssociations([mcp('customBlender')]),blenderSupply:{ready:false,command:'/product/bin/mcp-for-blender',existingCommand:'/tools/mcp-for-blender',addon:'/product/addon.py',detail:'Addon not installed'},installJobs:[]})
@@ -57,6 +57,25 @@ describe('插件市场原生读数的薄投影',()=>{
    expect(await validExistingExecutable(file)).toMatchObject({path:file})
    expect(await validExistingExecutable(dir)).toBeNull();expect(await validExistingExecutable('mcp-for-blender')).toBeNull();expect(await validExistingExecutable(file+'\n--execute')).toBeNull()
   }finally{await rm(dir,{recursive:true,force:true})}
+ })
+ test('隔离HOME不遮蔽用户已装Addon和Unity Hub：两处固定公开安装根共用原picker用户目录',async()=>{
+  const box=await mkdtemp(join(tmpdir(),'lyapunov-installed-public-home-')),ctx=new Context(),before=process.env.HOME
+  const publicHome=join(box,'user-home'),privateHome=join(box,'account-private'),bridge=join(box,'bridge','mcp-for-blender')
+  try{
+   await mkdir(dirname(bridge),{recursive:true});await writeFile(bridge,'fixture must not execute');await chmod(bridge,0o700)
+   for(const home of [publicHome,privateHome]){
+    const addon=join(home,'.config','blender','5.2','scripts','addons','blender_mcp.py'),editor=join(home,'Unity','Hub','Editor','6000.0.1f1','Editor','Unity')
+    await mkdir(dirname(addon),{recursive:true});await writeFile(addon,'fixture must not execute')
+    await mkdir(dirname(editor),{recursive:true});await writeFile(editor,'fixture must not execute');await chmod(editor,0o700)
+   }
+   process.env.HOME=privateHome
+   ctx.provide('directoryPicker',{capability:()=>({kind:'browse',homeDirectory:publicHome})} as never)
+   const rows=await discoverIntegrations(ctx,{BLENDER_EXECUTABLE:bridge})
+   expect(rows.find(row=>row.path===bridge)).toMatchObject({addonPath:join(publicHome,'.config','blender','5.2','scripts','addons','blender_mcp.py'),addonExists:true})
+   expect(rows.some(row=>row.path===join(publicHome,'Unity','Hub','Editor','6000.0.1f1','Editor','Unity')&&row.source==='unity-hub')).toBe(true)
+   expect(rows.some(row=>row.path.startsWith(privateHome)||row.addonPath?.startsWith(privateHome))).toBe(false)
+   expect(process.env.HOME).toBe(privateHome)
+  }finally{if(before===undefined)delete process.env.HOME;else process.env.HOME=before;await ctx.fiber.dispose();await rm(box,{recursive:true,force:true})}
  })
  test('唯一原生Plugins页注册，保持社区来源无新的Settings nav或plugin registry',()=>{
   const rows:any[]=[];const ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context

@@ -4,7 +4,7 @@ import {tmpdir} from "node:os"
 import {join} from "node:path"
 import {runtimePaths} from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 import {backendEnvironment} from "./profile.ts"
-import {runtimePluginInsert} from "./runtime-patch.ts"
+import {runtimePluginInsert,publicChooserHome} from "./runtime-patch.ts"
 import {guestModelRows} from "../packages/lyapunov-product-bundle/src/guest-runtime.ts"
 import {applyEntryPatches} from "@deepseek-ai/cordis-plugin-include"
 
@@ -20,6 +20,7 @@ test("guest 环境不搬模型Key、账户、启动hook，HOME与env文件策略
     const paths=runtimePaths({root,mode:"guest"}),env=await backendEnvironment("guest",paths,{parent:{PATH:"/fixture/bin",HOME:"/foreign/home",DEEPSEEK_API_KEY:"fixture-only",LYAPUNOV_ACCOUNT_TOKEN:"fixture-only",OPENROUTER_API_KEY:"fixture-only",NODE_OPTIONS:"--import foreign-hook",DSH_HOME:"/foreign/dsh"}})
     expect(env.DEEPSEEK_API_KEY).toBeUndefined();expect(env.OPENROUTER_API_KEY).toBeUndefined();expect(env.LYAPUNOV_ACCOUNT_TOKEN).toBeUndefined();expect(env.NODE_OPTIONS).toBeUndefined()
     expect(env.HOME).toBe(join(paths.root,"private"));expect(env.USERPROFILE).toBe(env.HOME)
+    expect(publicChooserHome({HOME:"/foreign/home"},"linux","/system/home")).toBe("/foreign/home")
     expect(env.DSH_HOME).toBe(paths.dshHome);expect(env.DSH_ENV_FILES).toBe("disabled");expect(env.DSH_PERMISSION_MODE).toBe("workspace-write");expect(env.HF_ENDPOINT).toBe("https://hf-mirror.com")
   }finally{await rm(root,{recursive:true,force:true})}
 })

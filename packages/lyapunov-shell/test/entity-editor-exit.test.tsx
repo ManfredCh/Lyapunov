@@ -163,3 +163,62 @@ test('真实WorkSurface切Object到Scene或关闭只隐藏唯一editor，退出�
   expect(f.name()).toBe(originalNode);expect(f.name().value).toBe('dirty-across-tools');expect(f.name().closest('[hidden]')).toBeNull();expect((await f.participants.summary()).dirtyDrafts).toBe(0)
  }finally{await f.close()}
 })
+
+test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非编辑器内容卸载',async()=>{
+ const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div><div id="shared-panel"></div>',{url:'http://fixture.invalid'})
+ const previous=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){
+  previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})
+ }
+ const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),{EntityEditor}=await import('../src/entity-editor.tsx'),{WorkSurface}=await import('../src/work-surface.tsx'),{useWorkbenchUI}=await import('../src/workbench-ui.ts'),{appSidePanelHost}=await import('../src/app-side.ts'),{ToolRail}=await import('../src/tool-rail.tsx')
+ const priorPortal=appSidePanelHost.current;appSidePanelHost.current=document.getElementById('shared-panel')
+ const directory=await mkdtemp(join(tmpdir(),'two-session-portal-')),participants=new ExitParticipants(),root=createRoot(document.getElementById('root')!),host=document.body
+ const stores={a:new SceneOperations(join(directory,'a')),b:new SceneOperations(join(directory,'b'))},writes:Array<{owner:string;input:SceneCommit}>=[]
+ const snapshots={} as Record<'a'|'b',SceneSnapshot>
+ for(const id of ['a','b'] as const){const created=await stores[id].create({sceneId:'scene-'+id});snapshots[id]=await stores[id].scene.commit({sceneId:created.sceneId,expectedRevision:created.revision,patch:[{op:'add',entity:{entityId:'entity-'+id,name:'original-'+id,transform:identityTransform(),resources:[],components:{}}}]})}
+ const bridge={registerExitParticipant:(id:string,p:Parameters<ExitParticipants['register']>[1])=>participants.register(id,p)},transientMounts={a:0,b:0},transientLive=new Set<string>(),selected:Array<string>=[]
+ function CurrentPanel({owner}:{owner:'a'|'b'}){
+  React.useEffect(()=>{transientMounts[owner]++;transientLive.add(owner);return()=>{transientLive.delete(owner)}},[owner])
+  return React.createElement('select',{'data-testid':'lyapunov-scene-select','data-test-session':owner,defaultValue:'scene-'+owner,onChange:()=>selected.push(owner)},React.createElement('option',{value:'scene-'+owner},'Scene '+owner))
+ }
+ function Surface({owner,active}:{owner:'a'|'b';active:boolean}){
+  const ui=useWorkbenchUI(),snapshot=snapshots[owner]
+  const commit=async(input:SceneCommit)=>{writes.push({owner,input:structuredClone(input)});snapshots[owner]=await stores[owner].scene.commit(input);draw();return snapshots[owner]}
+  return React.createElement(WorkSurface,{sessionId:'session-'+owner,active,nativeTab:true,tr:(_zh:string,en:string)=>en,renderSlot:((name:string,props:any)=>name==='lyapunov.workbench.session'?props.children:null) as any,centre:null,panel:React.createElement(CurrentPanel,{owner}),retainedPanel:{tool:'object',children:React.createElement(EntityEditor,{sceneId:snapshot.sceneId,revision:snapshot.revision,entity:snapshot.entities[0]!,entities:snapshot.entities,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'entity-editor:'+owner})},deliverables:null})
+ }
+ let current:'a'|'b'='a'
+ function Harness(){const ui=useWorkbenchUI();return React.createElement(React.Fragment,null,
+  React.createElement('button',{onClick:()=>{current='a';draw()}},'Session A'),React.createElement('button',{onClick:()=>{current='b';draw()}},'Session B'),
+  React.createElement('button',{onClick:()=>ui.closeTool()},'Reset fixture tools'),React.createElement(ToolRail,{tr:(_zh:string,en:string)=>en,nativeSceneActive:true}),
+  React.createElement(Surface,{key:'a',owner:'a',active:current==='a'}),React.createElement(Surface,{key:'b',owner:'b',active:current==='b'}),
+ )}
+ const draw=()=>root.render(React.createElement(Harness)),click=async(text:string)=>{await React.act(async()=>Simulate.click([...host.querySelectorAll('button')].find(row=>row.textContent===text)!))}
+ const activePanels=()=>[...host.querySelectorAll<HTMLElement>('.lya-wb-panel')].filter(p=>!p.hidden&&!p.closest('[hidden],[inert]'))
+ const activeNames=()=>activePanels().flatMap(p=>[...p.querySelectorAll<HTMLInputElement>('input.lya-entity-name')])
+ try{
+  await React.act(async()=>draw());await click('Reset fixture tools');await click('Object');expect(host.querySelectorAll('nav[aria-label="Workbench tools"]')).toHaveLength(1)
+  expect(activePanels()).toHaveLength(1);expect((await participants.summary()).participants).toBe(1)
+  const a=activeNames()[0]!;await React.act(async()=>Simulate.change(a,{target:{value:'unsaved-a'}} as any));expect((await participants.summary()).dirtyDrafts).toBe(1)
+  await click('Session B')
+  expect(activePanels()).toHaveLength(1);expect(activeNames()[0]!.value).toBe('original-b');expect((await participants.summary()).participants).toBe(2)
+  expect(a.closest('[hidden]')).not.toBeNull();expect(a.closest('[inert]')).not.toBeNull();expect((a.closest('[hidden]') as HTMLElement).style.display).toBe('none')
+  const b=activeNames()[0]!;await React.act(async()=>Simulate.change(b,{target:{value:'unsaved-b'}} as any))
+  await click('Scene')
+  expect(activePanels()).toHaveLength(1);expect(host.querySelectorAll('select[data-testid="lyapunov-scene-select"]')).toHaveLength(1)
+  const visibleSelect=host.querySelector<HTMLSelectElement>('select[data-testid="lyapunov-scene-select"]')!;expect(visibleSelect.dataset.testSession).toBe('b')
+  await React.act(async()=>Simulate.change(visibleSelect,{target:{value:'scene-b'}} as any));expect(selected).toEqual(['b']);expect([...transientLive]).toEqual(['b'])
+  await click('Session A');expect(host.querySelectorAll('select[data-testid="lyapunov-scene-select"]')).toHaveLength(1);expect(host.querySelector<HTMLSelectElement>('select[data-testid="lyapunov-scene-select"]')!.dataset.testSession).toBe('a');expect([...transientLive]).toEqual(['a'])
+  // 浏览器Tab的候选集合必须排除hidden/inert分支；真正Chromium按键仍由VM验收。
+  const tabbable=[...host.querySelectorAll<HTMLElement>('input,select,button')].filter(e=>!e.closest('[hidden],[inert]'))
+  expect(tabbable).not.toContain(a);expect(tabbable).not.toContain(b);expect((await participants.summary()).dirtyDrafts).toBe(2)
+  await click('Object');expect(activeNames()[0]).toBe(a);expect(a.value).toBe('unsaved-a')
+  await click('Object');expect(activePanels()).toHaveLength(0);expect(transientLive.size).toBe(0);expect((await participants.summary()).dirtyDrafts).toBe(2)
+  await click('Session B');await click('Object');expect(activeNames()[0]).toBe(b);expect(b.value).toBe('unsaved-b')
+  const coordinator=new ExitCoordinator({summary:()=>participants.summary(),confirm:async()=>true,flush:()=>participants.flush(),stop:()=>participants.stop(),close:async()=>{},exit:()=>{},failed:async()=>undefined,shutdownTimeoutMs:100})
+  let result:Awaited<ReturnType<ExitCoordinator['request']>>|undefined;await React.act(async()=>{result=await coordinator.request('window')})
+  expect(result).toMatchObject({decision:'closed',cleanup:'confirmed'});expect(writes.map(v=>v.owner).sort()).toEqual(['a','b'])
+  expect((await stores.a.scene.snapshot('scene-a')).entities[0]!.name).toBe('unsaved-a');expect((await stores.b.scene.snapshot('scene-b')).entities[0]!.name).toBe('unsaved-b');expect((await participants.summary()).dirtyDrafts).toBe(0)
+ }finally{
+  await React.act(async()=>root.unmount());expect((await participants.summary()).participants).toBe(0);await rm(directory,{recursive:true,force:true});appSidePanelHost.current=priorPortal;dom.window.close();for(const[key,value]of previous){if(value)Object.defineProperty(globalThis,key,value);else Reflect.deleteProperty(globalThis,key)}
+ }
+})

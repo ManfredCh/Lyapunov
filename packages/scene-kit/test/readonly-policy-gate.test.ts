@@ -19,11 +19,12 @@ import SessionProjection from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathWithin } from '../../lyapunov-contracts/src/writable-boundary.ts'
 import * as scenePlugin from '../src/plugin.ts'
+import type {SceneOperations} from '../src/operations.ts'
 
 const signal = new AbortController().signal
 /**
@@ -274,5 +275,32 @@ describe('显式写出目标：规范化 + 会话归属（138 定向返修）', 
     const shared = join(workspace, 'full-out', 'shared.json')
     expect((await callTool(ctx, agent, 'scene_save', { sceneId: 'full_scope', path: shared })).isError).toBe(false)
     expect(existsSync(shared)).toBe(true)
+  })
+})
+
+describe('手工Scene持久工作通过原命令owner保留会话，不触发模型', () => {
+  test('create/edit/save真实成功才有声明；只读和未知命令不得伪标记', async () => {
+    const { ctx, agent } = await runtime('workspace-write', dataRoot)
+    const create = await ctx.commands.execute(agent, '/scene_create {"sceneId":"manual-work"}', [], signal)
+    expect(create?.result.kind).toBe('success')
+    const scene = (ctx.get('scene') as unknown as {forSession(id:string):SceneOperations}).forSession(agent.session.id)
+    const next = await ctx.commands.execute(agent, '/scene_edit '+JSON.stringify({sceneId:'manual-work',expectedRevision:0,patch:[{op:'add',entity:{entityId:'manual-entity',name:'saved manually',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}}}]}), [], signal)
+    expect(next?.result.kind).toBe('success')
+    const destination=join(workspace,'manual-scene.json')
+    const save=await ctx.commands.execute(agent, '/scene_save '+JSON.stringify({sceneId:'manual-work',path:destination,portable:true}), [], signal)
+    expect(save?.result.kind).toBe('success')
+    expect((await scene.scene.snapshot('manual-work')).revision).toBe(1)
+    expect(JSON.parse(await readFile(destination,'utf8')).entities.find((row:{entityId:string;name:string})=>row.entityId==='manual-entity').name).toBe('saved manually')
+    await ctx.commands.execute(agent, '/scene_list {}', [], signal)
+    await expect(ctx.commands.execute(agent, '/scene_edit '+JSON.stringify({sceneId:'manual-work',expectedRevision:0,patch:[]}), [], signal)).rejects.toThrow()
+    expect(await ctx.commands.execute(agent, '/scene_unknown {}', [], signal)).toBeUndefined()
+    const settlements=agent.session.snapshotEvents().filter(event=>event.type==='command/done')
+    expect(settlements.map(event=>event.data.retainsSession)).toEqual([true,true,true,undefined,undefined])
+    expect(agent.session.snapshotEvents().some(event=>event.type==='turn/start'||event.type==='user/message')).toBe(false)
+    const denied=await runtime('read-only',join(workspace,'readonly-catalog'))
+    await expect(denied.ctx.commands.execute(denied.agent,'/scene_create {"sceneId":"denied-work"}',[],signal)).rejects.toThrow('SCENE_POLICY_READ_ONLY')
+    const error=denied.agent.session.snapshotEvents().find(event=>event.type==='command/done')
+    expect(error?.type).toBe('command/done');if(error?.type!=='command/done')throw Error('missing denial settlement')
+    expect(error.data.kind).toBe('error');expect(error.data.retainsSession).toBeUndefined()
   })
 })

@@ -1,3 +1,224 @@
+diff --git a/packages/api/session-controller/src/list.ts b/packages/api/session-controller/src/list.ts
+index 54ebe1b334ade7650071f895910ab194b5bc0317..801f74c8238dfb62e37bd9d87aaa6e53455511ff 100644
+--- a/packages/api/session-controller/src/list.ts
++++ b/packages/api/session-controller/src/list.ts
+@@ -2,6 +2,7 @@
+ 
+ import type { Context } from '@deepseek-ai/cordis'
+ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
++import type {} from '@deepseek-ai/dsh-commands/types'
+ import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
+ import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+ import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
+@@ -47,6 +48,7 @@ export function applySessionListMetadata(
+   event: SessionEvent,
+ ): SessionListMetadata {
+   const blank = state.blank && event.type !== 'turn/start'
++    && !(event.type === 'command/done' && event.data.kind === 'success' && event.data.retainsSession === true)
+   const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
+     ? event.time
+     : state.lastPromptAt
+@@ -82,7 +84,7 @@ export class ApiSessionList {
+       init: () => ({ blank: true, lastPromptAt: null }),
+       apply: applySessionListMetadata,
+       wire: { viewSchema: sessionListMetadataSchema, view: state => state },
+-      stateVersion: 1,
++      stateVersion: 2,
+     })
+     ctx.inject(['attachments'], (attachmentCtx) => {
+       ctx.sessionProjections.register<'imageLimits', null>({
+diff --git a/packages/api/session-controller/src/types.ts b/packages/api/session-controller/src/types.ts
+index c6b7a8cb2c657f78c259e354927ceac6c14753ae..2fe351ac2da810cad84fad6387a7b1d50fd04f76 100644
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -43,7 +43,7 @@ declare module '@deepseek-ai/dsh-session/types' {
+ 
+ /** Persisted hints used to summarize a cold Session. */
+ export interface SessionListMetadata {
+-  /** Whether the folded prefix contains no turn. */
++  /** Whether the folded prefix contains neither a turn nor successful declared persistent user work. */
+   readonly blank: boolean
+   /** Latest human-authored prompt time in the folded prefix. */
+   readonly lastPromptAt: number | null
+diff --git a/packages/api/session-controller/tests/session-list-blank.host.spec.ts b/packages/api/session-controller/tests/session-list-blank.host.spec.ts
+index fce236d3e326ee7eab00bb9ebfe0f8301c2c09b1..6bb6615b4b78e79a1e93da6d4157513711f05b40 100644
+--- a/packages/api/session-controller/tests/session-list-blank.host.spec.ts
++++ b/packages/api/session-controller/tests/session-list-blank.host.spec.ts
+@@ -14,6 +14,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import SessionStore from '@deepseek-ai/dsh-session'
+ import type { Session } from '@deepseek-ai/dsh-session'
+ import { CommandId } from '@deepseek-ai/dsh-commands/brand'
++import Commands from '@deepseek-ai/dsh-commands'
++import { applySessionListMetadata } from '../src/list.ts'
+ // Side-effect type imports: the configuration-event SessionEventMap merges.
+ import type {} from '@deepseek-ai/dsh-permission-presets'
+ import type {} from '@deepseek-ai/dsh-sandbox-policy'
+@@ -72,3 +74,35 @@ describe('summary blank = conversation not started', () => {
+     expect(await listBlank(remote, session.id)).toBe(false)
+   })
+ })
++
++
++describe('declared successful persistent user work is not a provisional Session', () => {
++  it('uses the native command producer and current projection without adding a turn or prompt time', async () => {
++    const { ctx, remote, attach } = await harness()
++    await ctx.plugin(Commands)
++    const session = ctx.sessions.create(), agent = { id: session.id, session, status: 'idle', ctx } as Agent
++    await attach(session)
++    ctx.commands.register({ name: 'save', description: 'Persist user work', retainsSession: true, handler: () => ({ kind: 'success', text: 'Saved' }) })
++    expect(await listBlank(remote, session.id)).toBe(true)
++    const execution = await ctx.commands.execute(agent, '/save', [], new AbortController().signal)
++    expect(execution?.result.kind).toBe('success')
++    expect(await listBlank(remote, session.id)).toBe(false)
++    const events = session.snapshotEvents()
++    expect(events.some(event => event.type === 'turn/start' || event.type === 'user/message')).toBe(false)
++    const persisted = JSON.parse(JSON.stringify(events)) as typeof events
++    const folded = persisted.reduce(applySessionListMetadata, { blank: true, lastPromptAt: null })
++    expect(folded).toEqual({ blank: false, lastPromptAt: null })
++    await ctx.fiber.dispose()
++  })
++  it('old unmarked configuration history remains blank and a failed marked outcome cannot retain it', async () => {
++    const { ctx, remote, attach } = await harness()
++    const session = ctx.sessions.create()
++    await attach(session)
++    appendStandalone(session)
++    session.append('command/done', { commandId: CommandId('invalid-success-marker'), kind: 'error', retainsSession: true, text: 'Failed' })
++    expect(await listBlank(remote, session.id)).toBe(true)
++    const state = session.snapshotEvents().reduce(applySessionListMetadata, { blank: true, lastPromptAt: null })
++    expect(state).toEqual({ blank: true, lastPromptAt: null })
++    await ctx.fiber.dispose()
++  })
++})
+diff --git a/packages/api/session-controller/tsconfig.host.json b/packages/api/session-controller/tsconfig.host.json
+index 957249d13559c4f926b7bd514b581aa63b9314bd..cb93bfeafe6ae2c0395534d7f15b4666ad4f1455 100644
+--- a/packages/api/session-controller/tsconfig.host.json
++++ b/packages/api/session-controller/tsconfig.host.json
+@@ -34,6 +34,7 @@
+     { "path": "../../attachment/attachment" },
+     { "path": "../../client/file-upload/tsconfig.host.json" },
+     { "path": "../../client/connection/tsconfig.host.json" },
++    { "path": "../../interaction/commands" },
+     { "path": "../../interaction/permission-presets" },
+     { "path": "../../jobs/jobs" },
+     { "path": "../../fs/fs" },
+diff --git a/packages/api/workspace-controller/README.md b/packages/api/workspace-controller/README.md
+index ab96bb0114106d5c43e261c31b324c853f1ddea1..5467ee9361cfc9e620d1bbce48457f7eecf4b2aa 100644
+--- a/packages/api/workspace-controller/README.md
++++ b/packages/api/workspace-controller/README.md
+@@ -33,10 +33,13 @@ The Client entry provides `ClientWorkspaceModel` and `createWorkspaceStateStream
+ 
+ The [Workspace registry](../../workspace/workspace/README.md#first-use-workspace) owns eligibility, directory creation, and durable initialization. An existing default Workspace is returned without another Documents lookup and is never renamed or relocated. Ineligible first use returns `undefined`, so startup can leave directory selection to the user. Lookup and creation failures use standard Remote error handling. Initialization creates no Session and sends no message.
+ 
++Setting `autoInitializeDefault: false` in a product composition makes this startup operation return `undefined` without looking up a directory, creating a project, or registering a default Workspace; users select a directory through the existing picker. It does not delete or move existing Workspace registrations. Explicit creation, recent Workspace restoration, and multi-Workspace navigation remain owned by the registry and Client, with their existing file-access and approval policies unchanged.
++
+ `DEFAULT_WORKSPACE_DIRECTORY` and `workspaceDisplayTitle(title, localizedDefault)` are published from `./default-workspace` for browser consumers: a Workspace still carrying the automatic title reads as the reader's localized default name, and every other title reads verbatim. A Workspace the user renamed to exactly `default-workspace` — or a folder of that name adopted from the picker — is labeled as the default; nothing else depends on the distinction.
+ 
+ | Configuration | Default | Purpose |
+ | --- | --- | --- |
++| `autoInitializeDefault` | `true` | Whether first-use startup may create a default project automatically; disabling it waits for an explicit directory selection |
+ | `documentsDirectory` | System Documents directory | Fully qualified Host directory override |
+ | `documentsLookupTimeoutMs` | `10000` | Positive maximum duration of OS directory lookup, in milliseconds |
+ 
+diff --git a/packages/api/workspace-controller/README.zh.md b/packages/api/workspace-controller/README.zh.md
+index bcf713306eaea0b3177881ba7e63c6c4bbd297ea..17e8bd3e257e4d0f3a6d16eea504572aab74dda7 100644
+--- a/packages/api/workspace-controller/README.zh.md
++++ b/packages/api/workspace-controller/README.zh.md
+@@ -33,10 +33,13 @@ Client 入口提供 `ClientWorkspaceModel` 和 `createWorkspaceStateStream()`。
+ 
+ [Workspace 注册表](../../workspace/workspace/README.zh.md#first-use-workspace)负责资格判断、目录创建和持久化初始化。已有默认工作区直接返回，不再查询 Documents，也不会被重命名或迁移。不满足首次使用条件时返回 `undefined`，启动流程可将目录选择留给用户。查询和创建失败遵循标准 Remote 错误处理。初始化不创建 Session，也不发送消息。
+ 
++配置 `autoInitializeDefault: false` 时，该启动操作直接返回 `undefined`，不查询目录、不创建或登记默认工程，用户可通过已有选择器明确选择目录。它不删除或迁移已登记工作区；显式创建、最近工作区恢复和多工作区导航仍由原有注册表与客户端负责。
++
+ `./default-workspace` 为浏览器消费方导出 `DEFAULT_WORKSPACE_DIRECTORY` 与 `workspaceDisplayTitle(title, localizedDefault)`：仍保留自动标题的工作区按读者语言显示默认名称，其他标题一律原样显示。被用户重命名为 `default-workspace` 的工作区，或从选择器采用的同名文件夹，也会按默认工作区显示；除显示之外没有其他行为依赖该判断。
+ 
+ | 配置 | 默认值 | 用途 |
+ | --- | --- | --- |
++| `autoInitializeDefault` | `true` | 是否允许首次启动自动创建默认工程；关闭后等待用户明确选择目录 |
+ | `documentsDirectory` | 系统 Documents 目录 | 完全限定的 Host 目录覆盖值 |
+ | `documentsLookupTimeoutMs` | `10000` | 操作系统目录查询的正数最大时长，单位为毫秒 |
+ 
+diff --git a/packages/api/workspace-controller/src/index.ts b/packages/api/workspace-controller/src/index.ts
+index 0b23517921058fd26495138b9b2692d616cc2e6c..74890f0f7b8215972220e381dd6907a15f11eae2 100644
+--- a/packages/api/workspace-controller/src/index.ts
++++ b/packages/api/workspace-controller/src/index.ts
+@@ -31,6 +31,8 @@ export { DirectoryPickerController } from './directory-picker.ts'
+ 
+ /** First-use directory policy for the Host account. */
+ export interface Config {
++  /** Whether first-use startup may create a default project without a picker selection. */
++  autoInitializeDefault?: boolean
+   /** Override the system Documents directory with a fully qualified path. */
+   documentsDirectory?: string
+   /** Maximum duration of the operating system's Documents lookup. */
+@@ -38,7 +40,7 @@ export interface Config {
+ }
+ 
+ /** Directory policy after schema defaults have been applied. */
+-type ResolvedConfig = Config & { documentsLookupTimeoutMs: number }
++type ResolvedConfig = Config & { documentsLookupTimeoutMs: number; autoInitializeDefault: boolean }
+ 
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+@@ -53,6 +55,7 @@ export class WorkspaceController extends TypertRemoteService {
+ 
+   static Config: z<Config, ResolvedConfig> = z.object({
+     documentsDirectory: z.string(),
++    autoInitializeDefault: z.boolean().default(true),
+     documentsLookupTimeoutMs: z.natural().min(1).default(10_000),
+   })
+ 
+@@ -97,6 +100,7 @@ export class WorkspaceController extends TypertRemoteService {
+    */
+   @Remote('initializeDefault')
+   async initializeDefault(signal: AbortSignal): Promise<WorkspaceValue | undefined> {
++    if (!this.config.autoInitializeDefault) return undefined
+     const workspace = await this.ctx.workspaceRegistry.initializeDefault(async () => {
+       const timeout = AbortSignal.timeout(this.config.documentsLookupTimeoutMs)
+       return await defaultWorkspaceDirectory(
+diff --git a/packages/api/workspace-controller/tests/workspace-controller.host.spec.ts b/packages/api/workspace-controller/tests/workspace-controller.host.spec.ts
+index 35158490f2d73655c20665899048107f800eeace..12f5dd30466206ddeb30a9bf769a75fa23a5d588 100644
+--- a/packages/api/workspace-controller/tests/workspace-controller.host.spec.ts
++++ b/packages/api/workspace-controller/tests/workspace-controller.host.spec.ts
+@@ -50,7 +50,7 @@ function deferred<T>(): Deferred<T> {
+   return { promise, resolve }
+ }
+ 
+-async function harness(options: { systemDocuments?: boolean } = {}) {
++async function harness(options: { systemDocuments?: boolean; autoInitializeDefault?: boolean } = {}) {
+   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-workspace-controller-')))
+   tempDirs.push(root)
+   const ctx = new Context()
+@@ -68,7 +68,7 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
+     lookups: { configure: () => dispose },
+     contexts: { configureHost: () => dispose },
+   } as never)
+-  const controller = new WorkspaceController(ctx, options.systemDocuments === true ? {} : { documentsDirectory: root })
++  const controller = new WorkspaceController(ctx, { ...options.systemDocuments === true ? {} : { documentsDirectory: root }, ...options.autoInitializeDefault === undefined ? {} : { autoInitializeDefault: options.autoInitializeDefault } })
+   return { controller, ctx, root, storageDomain }
+ }
+ 
+@@ -87,6 +87,21 @@ async function nextFrame(
+ }
+ 
+ describe('WorkspaceController commands', () => {
++  it('产品首用须用户选择：不自动mkdir或登记，但显式工程和多工作区保留', async () => {
++    const { controller, ctx, root } = await harness({ autoInitializeDefault: false })
++    expect(await controller.initializeDefault(new AbortController().signal)).toBeUndefined()
++    expect(ctx.workspaceRegistry.list()).toEqual([])
++    expect(existsSync(join(root, 'deepseek-harness', DEFAULT_WORKSPACE_DIRECTORY))).toBe(false)
++    const selected = stageDir(root, 'selected-project'), second = stageDir(root, 'second-project')
++    const a = await controller.create({ path: selected }), b = await controller.create({ path: second })
++    expect(await controller.initializeDefault(new AbortController().signal)).toBeUndefined()
++    expect(ctx.workspaceRegistry.list().map(workspace => workspace.path).sort()).toEqual([realpathSync.native(selected), realpathSync.native(second)].sort())
++    expect((await controller.create({ path: selected })).workspace.workspaceId).toBe(a.workspace.workspaceId)
++    expect(b.workspace.path).toBe(realpathSync.native(second))
++    expect(ctx.sessions.list()).toEqual([])
++  })
++
++
+   it('serializes concurrent path adoption and preserves an existing title', async () => {
+     const { controller, root } = await harness()
+     const path = stageDir(root, 'alpha')
 diff --git a/packages/client/ui-commands/src/client/service.ts b/packages/client/ui-commands/src/client/service.ts
 index 2e8fd7a0fbb3e04f420cd4e97def872259bad54a..22b6000f6591cd85b185dc78213baca2b3c8d9fc 100644
 --- a/packages/client/ui-commands/src/client/service.ts
@@ -618,6 +839,68 @@ index cdee0965ba3f0fe49b7d26505308e895edf95fe6..76004342db99b5700c204903c1b5739e
    it.each(['/plan', '/plan '])('keeps the lexicon-listed %j claim plain and accent-styled until release', (token) => {
      const editor = makeEditor()
      let claim: string | null = token
+diff --git a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
+index 354e4e60b231b2dd194dc7bae4adbb9550b09f1d..76a9570c0f67c3844c8080fde8198194ae1dc519 100644
+--- a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
++++ b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
+@@ -1,7 +1,11 @@
+ // @vitest-environment jsdom
+ import { Context } from '@deepseek-ai/cordis'
++import { mkdir, mkdtemp, rm } from 'node:fs/promises'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import BrowseDirectoryPicker from '@deepseek-ai/dsh-host-directory-picker-browse'
+ import { afterEach, describe, expect, it, vi } from 'vitest'
+-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+ import type { DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
+ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+@@ -52,6 +56,44 @@ function owner(overrides: Partial<DirectoryFlowOwnerProps> = {}): DirectoryFlowO
+ }
+ 
+ describe('directory-picker-browse client half', () => {
++  it('真实browse用户目录进入原DOM流程，取消不采用目录，正常选择只提交明确的子工程', async () => {
++    const box = await mkdtemp(join(tmpdir(), 'dsh-picker-public-home-dom-'))
++    const ctx = new Context(), home = join(box, 'user-home'), project = join(home, 'chosen-project')
++    try {
++      await mkdir(project, { recursive: true })
++      await ctx.plugin(BrowseDirectoryPicker, { homeDirectory: home })
++      const capability = ctx.directoryPicker.capability()
++      if (capability.kind !== 'browse') throw new Error('expected browse provider')
++      const props = owner()
++      const listDirectory = vi.fn((path?: string, signal?: AbortSignal) => capability.list(path, signal))
++      const createDirectory = (path: string, name: string) => capability.createDirectory(path, name)
++      const view = render(<BrowseDirectoryFlow {...props} listDirectory={listDirectory}
++        createDirectory={createDirectory} t={key => key} />)
++      await waitFor(() => { expect(screen.getByRole('listitem').textContent).toBe('chosen-project') })
++      expect(listDirectory).toHaveBeenCalledWith(undefined, expect.any(AbortSignal))
++      expect(await listDirectory.mock.results[0]!.value).toMatchObject({ path: home, home })
++      expect(screen.getByRole('button', { name: 'browser.home' })).toBeTruthy()
++      expect(props.onPicked).not.toHaveBeenCalled()
++      fireEvent.click(screen.getByRole('button', { name: 'browser.cancel' }))
++      expect(props.onCancel).toHaveBeenCalledOnce()
++      expect(props.onPicked).not.toHaveBeenCalled()
++      view.rerender(<BrowseDirectoryFlow {...props} open={false} listDirectory={listDirectory}
++        createDirectory={createDirectory} t={key => key} />)
++      view.rerender(<BrowseDirectoryFlow {...props} listDirectory={listDirectory}
++        createDirectory={createDirectory} t={key => key} />)
++      await waitFor(() => { expect(screen.getByRole('listitem').textContent).toBe('chosen-project') })
++      fireEvent.click(within(screen.getByRole('listitem')).getByRole('button'))
++      await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: 'browser.open' }).disabled).toBe(false) })
++      fireEvent.click(screen.getByRole('button', { name: 'browser.open' }))
++      expect(props.onPicked).toHaveBeenCalledExactlyOnceWith(project)
++      expect(props.onError).not.toHaveBeenCalled()
++    } finally {
++      cleanup()
++      await ctx.fiber.dispose()
++      await rm(box, { recursive: true, force: true })
++    }
++  })
++
+   it('declares the services it drives', () => {
+     expect(inject).toEqual(['slots', 'uiWorkspace', 'locale'])
+   })
 diff --git a/packages/client/ui-model-selection/src/client/service.ts b/packages/client/ui-model-selection/src/client/service.ts
 index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..f96123b5b41a178447a0a2d57c0457e8779515dc 100644
 --- a/packages/client/ui-model-selection/src/client/service.ts
@@ -665,3 +948,287 @@ index 0154f315be7a0a13b0f4ef18a96dbcfb87e2680c..10c861a1a852649860ba3ca41a628e97
      })
      expect(b.calls.select).toBe(0)
    } finally { await b.ctx.fiber.dispose() }
+diff --git a/packages/host/directory-picker-browse/README.md b/packages/host/directory-picker-browse/README.md
+index 9618b6b2f7101aa5dd145fd2c8f7a659a44b0308..9507e2c39990f66648b263f1992ac107c2844ddf 100644
+--- a/packages/host/directory-picker-browse/README.md
++++ b/packages/host/directory-picker-browse/README.md
+@@ -29,7 +29,7 @@ Compose this backend when a workspace directory must be chosen without an OS cho
+ 
+ ### Listing a directory
+ 
+-`list(path?)` returns one directory level: name-sorted child directories with their absolute paths, a `hidden` flag (dot-prefixed on POSIX), a `home` anchor, and `crumbs` — the root-to-target ancestor chain where every crumb is a jump target and the root is labeled by its full path. An absent path lists the host account's home directory. One call returns at most `maxEntries` rows (config, default 1,000 — the bound GitHub's web UI applies to directory listings), and a cut level reports `truncated: true` so the client can say the level is incomplete. Symlinks to directories are followed; broken and cyclic links are skipped.
++`list(path?)` returns one directory level: name-sorted child directories with their absolute paths, a `hidden` flag (dot-prefixed on POSIX), a `home` anchor, and `crumbs` — the root-to-target ancestor chain where every crumb is a jump target and the root is labeled by its full path. An absent path lists the configured `homeDirectory`, or the host account's home directory when unset; an explicit `path` is still browsed as requested. The read-only capability property `homeDirectory` and the listing's `home` use the same provider configuration. An explicit user directory keeps these locations independent of an isolated process `HOME`. One call returns at most `maxEntries` rows (config, default 1,000 — the bound GitHub's web UI applies to directory listings), and a cut level reports `truncated: true` so the client can say the level is incomplete. Symlinks to directories are followed; broken and cyclic links are skipped.
+ 
+ ### Creating a directory
+ 
+@@ -44,6 +44,7 @@ Both primitives refuse a path that is not fully qualified — relative forms, an
+ | Field | Default | Meaning |
+ |---|---|---|
+ | `maxEntries` | `1,000` | Complete-result bound of one listing level; hidden rows count toward it |
++| `homeDirectory` | Host account's home directory | Fully qualified public user directory used for the browse start and read-only installation discovery; registers no Workspace and expands no model permissions |
+ 
+ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-host-directory-picker-browse) is the exhaustive source for every accepted field and its JSDoc.
+ 
+diff --git a/packages/host/directory-picker-browse/README.zh.md b/packages/host/directory-picker-browse/README.zh.md
+index 20c9267bd47dcf1500985465ea620027d7a47e99..ea93e87575591a601219aed53fad9c6346e35872 100644
+--- a/packages/host/directory-picker-browse/README.zh.md
++++ b/packages/host/directory-picker-browse/README.zh.md
+@@ -29,7 +29,7 @@ kind: "package-reference"
+ 
+ ### 列举目录
+ 
+-`list(path?)` 返回一个目录层级：按名称排序的子目录及其绝对路径、`hidden` 标志（POSIX 上为点前缀）、`home` 锚点，以及 `crumbs`——从根到目标的祖先链，其中每个 crumb 都是跳转目标，根以完整路径标注。不带路径时列举宿主账户的家目录。单次调用至多返回 `maxEntries` 行（配置项，默认 1,000——GitHub 网页端对目录列举采用的同一上限），被截断的层级会报告 `truncated: true`，供客户端提示层级不完整。指向目录的符号链接会被跟随；断链与循环链接被跳过。
++`list(path?)` 返回一个目录层级：按名称排序的子目录及其绝对路径、`hidden` 标志（POSIX 上为点前缀）、`home` 锚点，以及 `crumbs`——从根到目标的祖先链，其中每个 crumb 都是跳转目标，根以完整路径标注。不带路径时列举配置的 `homeDirectory`，未配置则使用宿主账户的家目录；显式 `path` 仍按原路径浏览。能力对象的只读 `homeDirectory` 与返回行的 `home` 来自同一配置，不受隔离进程 `HOME` 影响。单次调用至多返回 `maxEntries` 行（配置项，默认 1,000——GitHub 网页端对目录列举采用的同一上限），被截断的层级会报告 `truncated: true`，供客户端提示层级不完整。指向目录的符号链接会被跟随；断链与循环链接被跳过。
+ 
+ ### 创建目录
+ 
+@@ -44,6 +44,7 @@ kind: "package-reference"
+ | 字段 | 默认值 | 含义 |
+ |---|---|---|
+ | `maxEntries` | `1,000` | 单个列举层级的完整结果上限；隐藏行计入该上限 |
++| `homeDirectory` | 宿主账户的家目录 | 完全限定的公共用户目录；用于浏览起点及只读安装发现，不登记工程、不扩大模型权限 |
+ 
+ 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-host-directory-picker-browse)是每个受支持字段及其 JSDoc 的穷尽式真源。
+ 
+diff --git a/packages/host/directory-picker-browse/src/index.ts b/packages/host/directory-picker-browse/src/index.ts
+index 01fe5b9cd23e9c3318ed94db4f0f4a1488e46ba5..19bb54ac1f3cb839233b44854abe73ecd705f871 100644
+--- a/packages/host/directory-picker-browse/src/index.ts
++++ b/packages/host/directory-picker-browse/src/index.ts
+@@ -18,7 +18,7 @@ import {
+   DirectoryPicker, DirectoryPickerError,
+ } from '@deepseek-ai/dsh-host-directory-picker'
+ import type {
+-  DirectoryEntry, DirectoryListing, DirectoryPickerCapability,
++  DirectoryEntry, DirectoryListing, DirectoryPickerBrowseCapability, DirectoryPickerCapability,
+ } from '@deepseek-ai/dsh-host-directory-picker'
+ 
+ /**
+@@ -181,6 +181,8 @@ async function directoryRow(
+ export interface Config {
+   /** Complete-result bound of one listing level; see {@link BrowseDirectoryPicker.Config}. */
+   maxEntries: number
++  /** Public chooser start directory, independent of an isolated process HOME. */
++  homeDirectory?: string
+ }
+ 
+ /** The `ctx.directoryPicker` browse implementation (stable capability object per service life). */
+@@ -194,16 +196,23 @@ export default class BrowseDirectoryPicker extends DirectoryPicker {
+    */
+   static Config: z<Config> = z.object({
+     maxEntries: z.natural().min(1).default(1000),
++    homeDirectory: z.string(),
+   })
+ 
+-  private readonly browseCapability: DirectoryPickerCapability = {
+-    kind: 'browse',
+-    list: (path, signal) => this.list(path, signal),
+-    createDirectory: (path, name) => this.createDirectory(path, name),
+-  }
++  private readonly browseCapability: DirectoryPickerBrowseCapability
+ 
+   constructor(ctx: Context, private readonly config: Config) {
+     super(ctx)
++    if (config.homeDirectory !== undefined && !fullyQualified(config.homeDirectory)) {
++      throw new TypeError('Chooser homeDirectory must be a fully qualified path')
++    }
++    const provider = this
++    this.browseCapability = {
++      kind: 'browse',
++      get homeDirectory() { return provider.config.homeDirectory ?? homedir() },
++      list: (path, signal) => this.list(path, signal),
++      createDirectory: (path, name) => this.createDirectory(path, name),
++    }
+   }
+ 
+   /**
+@@ -215,7 +224,7 @@ export default class BrowseDirectoryPicker extends DirectoryPicker {
+   }
+ 
+   private async list(path?: string, signal?: AbortSignal): Promise<DirectoryListing> {
+-    const home = homedir()
++    const home = this.browseCapability.homeDirectory ?? homedir()
+     // The seam contract takes fully qualified paths only; resolve() would
+     // silently rebase a relative or empty wire value under the host process
+     // cwd (or, for rooted drive-less Windows forms, its current drive).
+diff --git a/packages/host/directory-picker-browse/tests/service.spec.ts b/packages/host/directory-picker-browse/tests/service.spec.ts
+index a96984563632634ebbb3139869d2f5fe8c492829..4e08ac3c0dfa9703a70eafa1c2b214c9a8bc42b6 100644
+--- a/packages/host/directory-picker-browse/tests/service.spec.ts
++++ b/packages/host/directory-picker-browse/tests/service.spec.ts
+@@ -45,6 +45,43 @@ afterAll(async () => {
+ })
+ 
+ describe('BrowseDirectoryPicker', () => {
++  it('明确public Home独立于隔离HOME，多个profile保各自起点且不改变显式路径', async () => {
++    const parent = await mkdtemp(join(tmpdir(), 'dsh-public-home-'))
++    const first = join(parent, 'human-a'), second = join(parent, 'human-b'), privateHome = join(parent, 'account-private')
++    await mkdir(first); await mkdir(second); await mkdir(privateHome)
++    await mkdir(join(first, 'project-a')); await mkdir(join(second, 'project-b'))
++    const beforeHome = process.env.HOME
++    process.env.HOME = privateHome
++    const contexts: Context[] = []
++    try {
++      for (const homeDirectory of [first, second]) {
++        const ctx = new Context(); contexts.push(ctx)
++        await ctx.plugin(BrowseDirectoryPicker, { homeDirectory })
++        const current = ctx.directoryPicker.capability()
++        if (current.kind !== 'browse') throw new Error('expected native browse owner')
++        expect(current.homeDirectory).toBe(homeDirectory)
++        const listing = await current.list()
++        expect(listing.path).toBe(homeDirectory); expect(listing.home).toBe(homeDirectory)
++        expect(listing.entries.map(entry => entry.name)).toEqual([homeDirectory === first ? 'project-a' : 'project-b'])
++        const explicit = await current.list(root)
++        expect(explicit.path).toBe(root); expect(explicit.home).toBe(homeDirectory)
++      }
++      expect(process.env.HOME).toBe(privateHome)
++    } finally {
++      if (beforeHome === undefined) delete process.env.HOME; else process.env.HOME = beforeHome
++      await Promise.all(contexts.map(ctx => ctx.fiber.dispose()))
++      await rm(parent, { recursive: true, force: true })
++    }
++  })
++
++  it('不把relative或空public Home rebased进cwd，坏配置明确失败', () => {
++    for (const homeDirectory of ['', 'relative-project']) {
++      const ctx = new Context()
++      expect(() => new BrowseDirectoryPicker(ctx, { maxEntries: 10, homeDirectory })).toThrow('fully qualified')
++      void ctx.fiber.dispose()
++    }
++  })
++
+   it('lists directories only, flags hidden rows, follows symlinks, skips broken links, sorts by name', async () => {
+     const listing = await capability.list(root)
+     expect(listing.path).toBe(root)
+diff --git a/packages/host/directory-picker/README.md b/packages/host/directory-picker/README.md
+index 5dc44cbf8a615e2ba4fe15656de5b5d01b75b7b4..78dd0a4d4167f74628adc22894e79972dc2881b7 100644
+--- a/packages/host/directory-picker/README.md
++++ b/packages/host/directory-picker/README.md
+@@ -33,7 +33,7 @@ The [native backend](../directory-picker-native/README.md) is the right choice w
+ 
+ ### The capability contract
+ 
+-`capability()` returns a discriminated union describing how an operator selects a directory: `{ kind: 'native', pick(signal) }` for the OS chooser, or `{ kind: 'browse', list(path?), createDirectory(path, name) }` for the in-app browser. Consumers switch on `kind`; a capability kind no composition implements means the UI hides the picking affordance rather than failing. Browse failures throw the typed `DirectoryPickerError` with a closed code set — `directory-unreadable`, `directory-exists`, or `directory-create-failed` — each carrying the subject path, which the picking Remote controller maps 1:1 onto wire failure codes.
++`capability()` returns a discriminated union describing how an operator selects a directory: `{ kind: 'native', pick(signal) }` for the OS chooser, or `{ kind: 'browse', list(path?), createDirectory(path, name) }` for the in-app browser. The browse capability may also expose a read-only `homeDirectory`, so Host consumers can read the same user directory without listing its contents; this property grants no model filesystem access. Consumers switch on `kind`; a capability kind no composition implements means the UI hides the picking affordance rather than failing. Browse failures throw the typed `DirectoryPickerError` with a closed code set — `directory-unreadable`, `directory-exists`, or `directory-create-failed` — each carrying the subject path, which the picking Remote controller maps 1:1 onto wire failure codes.
+ 
+ ### What rows carry
+ 
+diff --git a/packages/host/directory-picker/README.zh.md b/packages/host/directory-picker/README.zh.md
+index 972f5631ebc06d42b6b48c741147346e8dab5c79..b1bbec73f0e4060625d160f7278303cae0433479 100644
+--- a/packages/host/directory-picker/README.zh.md
++++ b/packages/host/directory-picker/README.zh.md
+@@ -33,7 +33,7 @@ web GUI 让操作者通过 OS 选择器或应用内浏览器选择工作区目
+ 
+ ### 能力约定
+ 
+-`capability()` 返回一个可辨识联合类型，说明操作者如何选择目录：OS 选择器为 `{ kind: 'native', pick(signal) }`，应用内浏览器为 `{ kind: 'browse', list(path?), createDirectory(path, name) }`。消费方按 `kind` 分支；遇到未知能力类型时，界面会隐藏选择入口，而不是失败。浏览失败抛出带类型的 `DirectoryPickerError`，其错误码集合是封闭的——`directory-unreadable`、`directory-exists` 或 `directory-create-failed`——每个都携带出错对象的路径，目录选择 Remote 控制器将其 1:1 映射为协议错误码。
++`capability()` 返回一个可辨识联合类型，说明操作者如何选择目录：OS 选择器为 `{ kind: 'native', pick(signal) }`，应用内浏览器为 `{ kind: 'browse', list(path?), createDirectory(path, name) }`。浏览能力可额外提供只读 `homeDirectory`，供宿主消费者读取同一用户目录，无须为此枚举目录；它不授予模型文件访问权限。消费方按 `kind` 分支；遇到未知能力类型时，界面会隐藏选择入口，而不是失败。浏览失败抛出带类型的 `DirectoryPickerError`，其错误码集合是封闭的——`directory-unreadable`、`directory-exists` 或 `directory-create-failed`——每个都携带出错对象的路径，目录选择 Remote 控制器将其 1:1 映射为协议错误码。
+ 
+ ### 行携带什么
+ 
+diff --git a/packages/host/directory-picker/src/index.ts b/packages/host/directory-picker/src/index.ts
+index f4eb0674a2d1e2dec93f35855ef4650f49974b25..256caa089ece9ed83b811f9c04367771317aab55 100644
+--- a/packages/host/directory-picker/src/index.ts
++++ b/packages/host/directory-picker/src/index.ts
+@@ -34,6 +34,8 @@ export interface DirectoryPickerNativeCapability {
+  */
+ export interface DirectoryPickerBrowseCapability {
+   kind: 'browse'
++  /** Public user directory offered by this provider, independent of a process's isolated HOME. */
++  readonly homeDirectory?: string
+   /**
+    * List one directory level.
+    * @param path - absolute directory to list; absent lists the home directory.
+diff --git a/packages/interaction/commands/src/index.ts b/packages/interaction/commands/src/index.ts
+index cc9aa47cbf8d4cb8731b1ca854b3978ca4c706d5..9458f0dca29ad66ff02091463b10f0b4f0da5b56 100644
+--- a/packages/interaction/commands/src/index.ts
++++ b/packages/interaction/commands/src/index.ts
+@@ -76,6 +76,8 @@ export interface CommandDefinition {
+    * that payload in the session log.
+    */
+   readonly recordInput?: boolean
++  /** A successful, persisted user-work result makes this Session non-provisional; grants no execution authority. */
++  readonly retainsSession?: true
+   /** Execute against the receiving agent without sending the command to the model. */
+   readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
+ }
+@@ -192,6 +194,9 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
+   if (typeof definition.handler !== 'function') {
+     throw new TypeError(`command "${definition.name}" handler must be a function`)
+   }
++  if (definition.retainsSession !== undefined && definition.retainsSession !== true) {
++    throw new TypeError(`command "${definition.name}" retainsSession must be true or absent`)
++  }
+   const rawInput: unknown = definition.input
+   let input: CommandInputDescriptor | undefined
+   if (rawInput !== undefined) {
+@@ -216,6 +221,7 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
+     description: definition.description,
+     ...input === undefined ? {} : { input },
+     ...definition.recordInput === undefined ? {} : { recordInput: definition.recordInput },
++    ...definition.retainsSession === true ? { retainsSession: true as const } : {},
+     handler: definition.handler,
+   })
+   const descriptor = Object.freeze({
+@@ -389,6 +395,7 @@ export class CommandRuntime extends TypertRemoteService {
+     const settle = (result: CommandResult): CommandExecution => {
+       this.appendLifecycle(agent.session, 'command/done', {
+         commandId, kind: result.kind,
++        ...result.kind === 'success' && command.definition.retainsSession === true ? { retainsSession: true as const } : {},
+         ...presentation?{display:presentation}:{},
+         ...result.text === undefined ? {} : { text: result.text },
+         ...result.kind === 'success' && result.sourceEventSeq !== undefined
+diff --git a/packages/interaction/commands/src/types.ts b/packages/interaction/commands/src/types.ts
+index f01b88769a6264dd51a4b9f57acaf92074a93c9f..ff2851b94f7abae55a5cacb6ce6c661d6eec7920 100644
+--- a/packages/interaction/commands/src/types.ts
++++ b/packages/interaction/commands/src/types.ts
+@@ -134,6 +134,8 @@ declare module '@deepseek-ai/dsh-session/types' {
+     'command/done': {
+       commandId: CommandId
+       kind: 'success' | 'error'
++      /** Only the resolved definition's successful persisted user work can retain this Session; never client input. */
++      retainsSession?: true
+       text?: string
+       sourceEventSeq?: import('@deepseek-ai/dsh-session/types').SessionSeq
+       display?: CommandDisplayMetadata
+diff --git a/packages/interaction/commands/tests/commands.spec.ts b/packages/interaction/commands/tests/commands.spec.ts
+index 4abc7bfc6898cd9dae856a366973cfb043731d98..1e4d43370c9cea73e15170a44b3a8da7984c7899 100644
+--- a/packages/interaction/commands/tests/commands.spec.ts
++++ b/packages/interaction/commands/tests/commands.spec.ts
+@@ -694,3 +694,38 @@ describe('command attachments', () => {
+     })
+   })
+ })
++
++describe('declared persistent user work retains a Session without a model turn', () => {
++  it('records only the resolved definition after real success; input, failures, and unknown commands cannot mark work', async () => {
++    const ctx = await mount()
++    const { agent, scope } = await mintAgentScope(ctx, 'retained-work')
++    ctx.commands.register({ ...command('save'), retainsSession: true })
++    ctx.commands.register({ ...command('inspect') })
++    ctx.commands.register({ name: 'failed', description: 'Persist but fail', retainsSession: true, handler: () => ({ kind: 'error', text: 'CAS conflict' }) })
++    ctx.commands.register({ name: 'thrown', description: 'Persist but throw', retainsSession: true, handler: () => { throw Error('CAS conflict') } })
++    const signal = new AbortController().signal
++    await ctx.commands.execute(agent, '/save', [], signal)
++    await ctx.commands.execute(agent, '/inspect {"retainsSession":true}', [], signal)
++    await ctx.commands.execute(agent, '/failed', [], signal)
++    await expect(ctx.commands.execute(agent, '/thrown', [], signal)).rejects.toThrow('CAS conflict')
++    expect(await ctx.commands.execute(agent, '/unknown {"retainsSession":true}', [], signal)).toBeUndefined()
++    const done = agent.session.snapshotEvents().filter(event => event.type === 'command/done')
++    expect(done.map(event => event.data.retainsSession)).toEqual([true, undefined, undefined, undefined])
++    expect(done.map(event => event.data.kind)).toEqual(['success', 'success', 'error', 'error'])
++    expect(agent.session.snapshotEvents().some(event => event.type === 'turn/start')).toBe(false)
++    // A scoped replacement without the declaration must not inherit the global mark.
++    scope.ctx.commands.register(command('save', 'scoped inspect'))
++    await ctx.commands.execute(agent, '/save', [], signal)
++    const last = agent.session.snapshotEvents().at(-1)
++    expect(last?.type).toBe('command/done')
++    if (last?.type !== 'command/done') throw Error('missing native command settlement')
++    expect(last.data.retainsSession).toBeUndefined()
++    expect(ctx.commands.list(agent).find(row => row.name === 'save')).not.toHaveProperty('retainsSession')
++    await ctx.fiber.dispose()
++  })
++  it('validates the plugin declaration without creating another command metadata owner', async () => {
++    const ctx = await mount()
++    expect(() => ctx.commands.register({ ...command('invalid'), retainsSession: false } as unknown as CommandDefinition)).toThrow('retainsSession must be true or absent')
++    await ctx.fiber.dispose()
++  })
++})

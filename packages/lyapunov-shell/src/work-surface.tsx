@@ -66,11 +66,13 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,
 }){
   const ui=useWorkbenchUI()
   const state=ui.getSnapshot()
+  // Portal脱离会话的隐藏树；根可见性必须消费原生当前会话/标签的active事实。
+  const panelVisible=active&&(nativeTab||state.centre==='canvas')&&Boolean(state.tool)
   // 缓存原React编辑器座位，不复制Draft/Scene；跨工具开合和暂时取消选择不卸载该owner。
   const retained=useRef<{sessionId?:string;tool:string;children:ReactNode}>()
   if(retained.current?.sessionId!==sessionId)retained.current=undefined
-  if(retainedPanel&&(retained.current||state.tool===retainedPanel.tool))retained.current={sessionId,...retainedPanel}
-  const retainedVisible=Boolean(retainedPanel&&state.tool===retainedPanel.tool)
+  if(retainedPanel&&(retained.current||panelVisible&&state.tool===retainedPanel.tool))retained.current={sessionId,...retainedPanel}
+  const retainedVisible=Boolean(panelVisible&&retainedPanel&&state.tool===retainedPanel.tool)
   // 交给占用者的开合请求（同进程函数，不是端点、不是新状态）；identity 稳定，避免占用者反复登记。
   const reveal=useMemo(()=>({canvas:()=>{revealScene?.();ui.showCentre("canvas")},file:()=>ui.showCentre("file"),terminal:()=>{revealScene?.();ui.showDrawer("terminal")},toggleTerminal:()=>{revealScene?.();if(nativeTab&&!active)ui.showDrawer("terminal");else ui.toggleDrawer("terminal")}}),[ui,revealScene,nativeTab,active])
   const exposed=active&&state.centre==="file"
@@ -86,9 +88,9 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,
       </div>
       {state.tool||retained.current?(()=>{
         const tool=state.tool??retained.current!.tool
-        const node=<PanelColumn key={sessionId} tr={tr} tool={tool} title={panelTitle(tr,tool)} hidden={!state.tool} onClose={()=>ui.closeTool()}>
+        const node=<PanelColumn key={sessionId} tr={tr} tool={tool} title={panelTitle(tr,tool)} hidden={!panelVisible} onClose={()=>ui.closeTool()}>
           {retained.current&&<div key="retained-editor" hidden={!retainedVisible} {...!retainedVisible?{inert:''}:{}} style={!retainedVisible?{display:'none'}:undefined}>{retained.current.children}</div>}
-          <div key="active-panel">{panel}</div>
+          <div key="active-panel">{panelVisible?panel:null}</div>
         </PanelColumn>
         return appSidePanelHost.current?createPortal(node,appSidePanelHost.current):node
       })():null}

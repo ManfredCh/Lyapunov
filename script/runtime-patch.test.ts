@@ -15,7 +15,7 @@ import { Config as PiAiSchema, type Options as PiAiOptions } from '@deepseek-ai/
 import { formalModelRows } from "../packages/lyapunov-product-bundle/src/account/formal.ts"
 import { runtimePaths } from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 import { backendEnvironment } from "./profile.ts"
-import { PRODUCT_LINK_SWITCH_AUDIT, INSTALLATION_MIRROR_AUDIT, censusModuleLinkScope, isaacRuntimeOptions, linkProductBundleSlot, migrateLegacyProfileAndReport, productLinkSwitchNotice, reconcileAndReportInstallationMirror, reconcileAndReportProductLinks, runtimePatch, runtimePluginInsert } from "./runtime-patch.ts"
+import { PRODUCT_LINK_SWITCH_AUDIT, INSTALLATION_MIRROR_AUDIT, censusModuleLinkScope, isaacRuntimeOptions, linkProductBundleSlot, migrateLegacyProfileAndReport, productLinkSwitchNotice, reconcileAndReportInstallationMirror, reconcileAndReportProductLinks, runtimePatch, runtimePluginInsert, publicChooserHome } from "./runtime-patch.ts"
 
 const root = join(import.meta.dirname, "..")
 const source = readFileSync(join(root, "script/runtime-patch.ts"), "utf8")
@@ -707,4 +707,34 @@ test("共享依赖镜像：镜像目录不存在时零动作零输出（不制�
   } finally {
     await rm(box, { recursive: true, force: true })
   }
+})
+
+
+test('public chooser起点来自隔离前真实用户位置，Windows完全限定路径与WSL Linux Home分开',()=>{
+  expect(publicChooserHome({HOME:'/home/customer',USERPROFILE:'C:\\Users\\customer'},'linux','/system/home')).toBe('/home/customer')
+  expect(publicChooserHome({HOME:'/home/customer',USERPROFILE:'C:\\Users\\customer'},'win32','C:\\Users\\system')).toBe('C:\\Users\\customer')
+  expect(publicChooserHome({HOME:'/home/wsl-user',USERPROFILE:'C:\\Users\\windows-user'},'linux','/system/home')).toBe('/home/wsl-user')
+  expect(publicChooserHome({HOME:'relative'},'linux','/system/home')).toBe('/system/home')
+  expect(publicChooserHome({USERPROFILE:'\\rooted-without-drive'},'win32','C:\\Users\\system')).toBe('C:\\Users\\system')
+  expect(publicChooserHome({HOME:'/home/customer'},'linux','invalid-system-fallback')).toBe('/home/customer')
+  expect(()=>publicChooserHome({},'linux','relative-system-home')).toThrow('fully qualified')
+  const parent={HOME:'/home/customer',PATH:'/usr/bin',DEEPSEEK_API_KEY:'never-forward'}
+  const rows=runtimePluginInsert({mode:'guest',surface:'web',sceneRoot:'/owned/runtime/guest/scene',engine:'none',grasp:'none',sdkEnvironment:parent})
+  expect(rows.find(row=>row.id==='lyapunov-directory-browse')?.config).toEqual({homeDirectory:'/home/customer'})
+  expect(JSON.stringify(rows)).not.toContain('never-forward')
+  expect(parent.HOME).toBe('/home/customer')
+})
+
+test('实际web补丁禁首用自动默认工程，只保存chooser公共起点，不改已注册用户工程与model文件策略',async()=>{
+  const box=await mkdtemp(join(tmpdir(),'lyapunov-public-home-overlay-')),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
+  try{
+    process.env.LYAPUNOV_SESSION_UNDO='0';const dir=join(box,'profile');await mkdir(dir)
+    const file=await runtimePatch({dir,mode:'guest',surface:'web',sceneRoot:join(box,'scene'),engine:'none',grasp:'none',sdkEnvironment:{HOME:'/home/customer'}})
+    const yaml=await import('yaml'),patches=yaml.parse(await readFile(file,'utf8')) as PatchOptions[]
+    const existing:EntryOptions[]=[{id:'workspace-controller',name:'@deepseek-ai/dsh-api-workspace-controller',config:{documentsDirectory:'/declared/existing-documents'}},{id:'directory-picker',name:'original-native-picker'}]
+    const effective=applyEntryPatches(existing,patches,()=>{})
+    expect(effective.find(row=>row.id==='workspace-controller')?.config).toEqual({autoInitializeDefault:false})
+    expect(effective.find(row=>row.id==='lyapunov-directory-browse')?.config).toEqual({homeDirectory:'/home/customer'})
+    expect(patches.some(row=>typeof row.config==='object'&&row.config!==null&&('cwd'in row.config||'permissionMode'in row.config))).toBe(false)
+  }finally{if(savedUndo===undefined)delete process.env.LYAPUNOV_SESSION_UNDO;else process.env.LYAPUNOV_SESSION_UNDO=savedUndo;await rm(box,{recursive:true,force:true})}
 })

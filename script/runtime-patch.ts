@@ -3,6 +3,8 @@ import {policyRuntimeCandidates} from "../packages/lyapunov-product-bundle/src/p
 import {writeFile} from "node:fs/promises"
 import {existsSync,realpathSync} from "node:fs"
 import {dirname,join} from "node:path"
+import {userInfo} from "node:os"
+import {fullyQualified} from "@deepseek-ai/dsh-host-directory-picker-browse"
 import {PRODUCT_ROOT,UPSTREAM,reconcileAndReportProductLinks} from "./profile.ts"
 import {formalModelRows} from "../packages/lyapunov-product-bundle/src/account/formal.ts"
 import type {VerifiedAdministrator} from '../packages/lyapunov-product-bundle/src/account/administrator.ts'
@@ -12,6 +14,15 @@ import {isMuJoCoGlBackend} from '../packages/sim-contract/src/mujoco-gl.ts'
 import {developerAgentDefaultModel, developerDefaultCatalog} from './developer-model.ts'
 import {ensurePluginModule} from './ensure-plugin.ts'
 import {UNITY_SERVER_NAME,unityMcpPluginEntry} from './unity-mcp.ts'
+
+/** Public chooser location is captured in the parent before HOME is isolated; it grants no workspace access. */
+export function publicChooserHome(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Platform=process.platform,systemHome?:string):string{
+  const chosen=(platform==='win32'?env.USERPROFILE:env.HOME)?.trim()
+  if(chosen&&fullyQualified(chosen,platform))return chosen
+  const fallback=systemHome??userInfo().homedir
+  if(!fullyQualified(fallback,platform))throw new TypeError('Public chooser home must be a fully qualified path')
+  return fallback
+}
 
 /**
  * Resolve the optional SAM3 checkpoint without putting a machine-specific
@@ -226,7 +237,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     {id:"lyapunov-pty",name:"@deepseek-ai/dsh-terminal"},
     {id:"lyapunov-terminal",name:"@deepseek-ai/dsh-terminal-bash",config:{shellDialect:process.platform==="win32"?"pwsh":"bash"}},
     {id:"lyapunov-tool-terminal",name:join(UPSTREAM,"packages/terminal/tool-terminal/lib/index.js")},
-    {id:"lyapunov-directory-browse",name:"@deepseek-ai/dsh-host-directory-picker-browse"},
+    {id:"lyapunov-directory-browse",name:"@deepseek-ai/dsh-host-directory-picker-browse",config:{homeDirectory:publicChooserHome(input.sdkEnvironment??process.env)}},
     {id:"lyapunov-directory-browse-ui",name:"@deepseek-ai/dsh-client-ui-directory-picker-browse"},
   )
   // 原生 computer-use 会访问宿主桌面，只有显式 LYAPUNOV_COMPUTER_USE=1 才挂载；普通启动不取得桌面能力。
@@ -296,7 +307,7 @@ export async function runtimePatch(input:RuntimePatchInput&{dir:string}){
     if(!input.accountApiUrl)throw new Error("正式Profile缺少已验证账户的API地址")
     for(const row of formalModelRows({apiUrl:input.accountApiUrl}))patch+="- "+JSON.stringify(row)+"\n"
   }
-  if(input.surface==="web")patch+="- id: directory-picker\n  disabled: true\n"
+  if(input.surface==="web")patch+="- id: directory-picker\n  disabled: true\n- id: workspace-controller\n  config:\n    autoInitializeDefault: false\n"
   // 正式/离线产品/guest 共用一处短角色与界面事实；权限、cwd、WebRuntime 与 HMR 仍由原生 owner 提供。
   if(input.mode!=="developer"){
     patch+="- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: true\n    personaPrefix: ''\n    personaSuffix: Your working directory is {{cwd}}.\n"

@@ -44,13 +44,14 @@ export async function discoverIntegrations(ctx:Context,env:NodeJS.ProcessEnv=pro
  }
  const supply=blenderMcpStatus(),paths=blenderMcpPaths()
  if(supply.readings.commandExists)await add('blender',paths.command,'product-supply')
- const existingAddons:string[]=[];const blenderConfig=join(homedir(),'.config','blender');let configs:string[]=[]
+ const picker=ctx.get('directoryPicker')?.capability(),userHome=picker?.kind==='browse'?picker.homeDirectory??homedir():homedir()
+ const existingAddons:string[]=[];const blenderConfig=join(userHome,'.config','blender');let configs:string[]=[]
  try{configs=(await readdir(blenderConfig)).filter(v=>/^\d+\.\d+$/.test(v)).slice(0,16)}catch{}
  for(const version of configs){const file=join(blenderConfig,version,'scripts','addons','blender_mcp.py');try{if((await stat(file)).isFile()){existingAddons.push(file)}}catch{}}
  for(const row of rows)if(row.kind==='blender'&&['mcp-for-blender','blender-mcp'].includes(basename(row.path))){row.addonPath=supply.readings.addonExists?paths.addon:existingAddons.length===1?existingAddons[0]:undefined;row.addonExists=supply.readings.addonExists||existingAddons.length>0}
 
  // Unity Hub 的公开标准安装根只枚举直接版本目录；不解析EditorPrefs/代理配置或登录数据。
- const roots=[join(homedir(),'Unity','Hub','Editor'),'/opt/unityhub/Editor']
+ const roots=[join(userHome,'Unity','Hub','Editor'),'/opt/unityhub/Editor']
  for(const root of roots){let entries:string[];try{entries=await readdir(root)}catch{continue}
   for(const version of entries.slice(0,32))if(/^\d{4}\.\d+\.\d+[abfp]\d+$/.test(version))await add('unity',join(root,version,'Editor','Unity'),'unity-hub')
  }

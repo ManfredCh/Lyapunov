@@ -443,6 +443,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx.commands.register({
       name: definition.name,
       description: definition.description,
+      ...['scene_create','scene_edit','scene_save'].includes(definition.name) ? { retainsSession: true as const } : {},
       ...(Object.keys(parameters).length ? { input: { hint: "Scene or resource parameters as JSON." } } : {}),
       async handler(invocation) {
         invocation.signal.throwIfAborted()
