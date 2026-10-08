@@ -1,5 +1,5 @@
 import {afterAll,describe,expect,test} from 'bun:test'
-import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,readlinkSync,rmSync,writeFileSync} from 'node:fs'
+import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,readlinkSync,rmSync,symlinkSync,writeFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import {dirname,join} from 'node:path'
 import {tmpdir} from 'node:os'
@@ -14,16 +14,18 @@ const put=(path:string,text:string,executable=false)=>{mkdirSync(dirname(path),{
 const sha=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex')
 const quote=(text:string)=>"'"+text.replaceAll("'","'\\''")+"'"
 const node=spawnSync('node',['-p','process.execPath'],{encoding:'utf8'}).stdout.trim()
+const curl=Bun.which('curl')!
 const versions={mujoco:'3.13.0',mink:'1.3.0',ompl:'2.0.1',daqp:'0.9.1',coacd:'1.0.7',trimesh:'5.1.0',numpy:'2.4.6',scipy:'1.17.0',pyzmq:'27.2.0',msgpack:'1.2.2','msgpack-numpy':'0.4.8'}
 
 function fixture(){
   const root=mkdtempSync(join(tmpdir(),'lya-install-'));directories.push(root)
   const prefix=join(root,'install dir safe'),bin=join(root,"user bin 'safe"),data=join(root,'data home'),home=join(root,'home')
   mkdirSync(home)
-  const manifests=new Map<string,LinuxReleaseManifest>(),files=new Map<string,Buffer>(),ranges:string[]=[]
+  const manifests=new Map<string,LinuxReleaseManifest>(),files=new Map<string,Buffer>(),ranges:string[]=[],requests:string[]=[]
   let selected=''
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
     const path=new URL(request.url).pathname.slice(1),release=path==='releases/latest/linux-x64.tsv'?selected:path.split('/')[1]!
+    requests.push(path)
     if(path.endsWith('/linux-x64.tsv')){const row=manifests.get(release);return row?new Response(releaseManifestTsv(row)):new Response('missing',{status:404})}
     const bytes=files.get(path);if(!bytes)return new Response('missing',{status:404})
     const range=request.headers.get('range')
@@ -56,8 +58,26 @@ function fixture(){
     }
     manifests.set(id,row);selected=id;return row
   }
-  async function run(flags:string[]=[],overrides:Record<string,string>={}){
-    const child=Bun.spawn(['/bin/sh',join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin,...flags],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,LYAPUNOV_MUJOCO_PYTHON:'/outside/python',...overrides},stdout:'pipe',stderr:'pipe'})
+  const storageBin=join(root,'storage fixture'),storageState=join(root,'df.state'),dfLog=join(root,'df.args'),curlLog=join(root,'curl.args')
+  function fakeSpace(availableKiB:number|'unreadable'|'malformed'=1_048_576){
+    put(storageState,String(availableKiB))
+    // 所有安装夹具都走此 PATH 替身，不读取主机真实磁盘容量。
+    put(join(storageBin,'df'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(dfLog)}\nvalue=$(cat ${quote(storageState)})\ncase "$value" in unreadable) exit 1;; malformed) printf '%s\\n' 'unreadable filesystem report';exit 0;; esac\nprintf '%s\\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on' "fixture-device 2097152 1048576 $value 50% /fixture mount"\n`,true)
+  }
+  function withoutDfPath(){
+    rmSync(join(storageBin,'df'))
+    for(const command of ['curl','sha256sum','tar','mktemp','getconf','tee','uname','mkdir','cat','rm','rmdir','wc','tr','mv','cp','dirname','readlink','ln','gzip']){
+      const executable=Bun.which(command);if(!executable)throw Error(`fixture command missing: ${command}`)
+      symlinkSync(executable,join(storageBin,command))
+    }
+    return storageBin
+  }
+  function fakeCurlFailure(code:number,availableAfter:number|'unreadable'=1_048_576,resource:'archive'|'manifest'='archive'){
+    put(join(storageBin,'curl'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(curlLog)}\nfor value in "$@";do case "$value" in http://127.0.0.1:*/releases/${resource==='manifest'?'*.tsv':'*.tar.gz'}) printf '%s' ${quote(String(availableAfter))} > ${quote(storageState)};printf '%s\\n' 'curl: (${code}) fixture transfer failure' >&2;exit ${code};; esac;done\nexec ${quote(curl)} "$@"\n`,true)
+  }
+  fakeSpace()
+  async function run(flags:string[]=[],overrides:Record<string,string>={},trace=false){
+    const child=Bun.spawn(['/bin/sh',...(trace?['-x']:[]),join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin,...flags],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,LYAPUNOV_MUJOCO_PYTHON:'/outside/python',...overrides,PATH:storageBin+':'+(overrides.PATH??process.env.PATH)},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
   const sudoBin=join(root,'sudo fixture'),sudoLog=join(root,'sudo.args'),sudoTty=join(root,'sudo.stdin-tty')
@@ -76,7 +96,7 @@ function fixture(){
   }
   async function runPty(input='qa-approve\n'){
     const cmd=`cat ${quote(join(source,'install.sh'))} | /bin/sh -s -- --prefix ${quote(prefix)} --bin-dir ${quote(bin)}`
-    const child=Bun.spawn(['script','--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn(['script','--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+':'+process.env.PATH},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
     child.stdin.write(input);child.stdin.end()
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
@@ -84,7 +104,7 @@ function fixture(){
     // A new session with no controlling terminal, even when CI was launched
     // from a terminal. The actual installer still reads a curl-style pipe.
     const code='import subprocess,sys;raise SystemExit(subprocess.run(["/bin/sh","-s","--",*sys.argv[2:]],input=open(sys.argv[1],"rb").read(),start_new_session=True).returncode)'
-    const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
   function legacyDesktop(wrapper=true){
@@ -96,7 +116,7 @@ function fixture(){
     const text=`[Desktop Entry]\nType=Application\nName=Lyapunov联测\nStartupWMClass=lyapunov-desktop\nExec=${desktopExecutable(executable)}\nIcon=${join(old,'packages/desktop/icons/lyapunov.png')}\nTerminal=false\n`
     put(entry,text);return {old,oldData,entry,text,executable}
   }
-  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,files,ranges,manifests,port:server.port,stop:()=>server.stop(true)}
+  return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,fakeSpace,withoutDfPath,fakeCurlFailure,dfLog,curlLog,files,ranges,requests,manifests,port:server.port,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
@@ -298,6 +318,117 @@ describe('公开 POSIX 用户安装入口',()=>{
   test('缺GUI库且无控制终端时明确停止，不从脚本流读取认证输入',async()=>{
     const f=fixture();try{f.candidate('a08-deps-no-tty',{desktopLibraries:'required'});f.fakeDependencies();const result=await f.runNoTty()
       expect(result.status,result.out+result.err).toBe(2);expect(result.err).toContain('DESKTOP_DEPENDENCIES_TERMINAL_REQUIRED');expect(existsSync(f.sudoLog)).toBe(false)
+    }finally{f.stop()}
+  })
+})
+describe('安装下载空间与写入失败回归（受控df、真实POSIX入口和loopback）',()=>{
+  test('低空间在归档下载前拒绝，保留current/previous/用户数据及partial，释放后同入口Range续传',async()=>{
+    const f=fixture();try{
+      f.candidate('storage-old');expect((await f.run()).status).toBe(0)
+      f.candidate('storage-current');expect((await f.run()).status).toBe(0)
+      const sentinel=join(f.home,'user-data/session');put(sentinel,'保留用户数据')
+      const row=f.candidate('storage-next'),bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!,partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial')
+      writeFileSync(partial,bytes.subarray(0,64));f.fakeSpace(0);f.requests.length=0
+      let result=await f.run([],{},true)
+      expect(result.status,result.err).toBe(2);expect(result.err).toContain('Lyapunov [storage] STORAGE_INSUFFICIENT')
+      expect(result.err).toContain(`target=${partial}; available=0 bytes; remaining download requires at least ${bytes.length-64} bytes`)
+      expect(result.err).toContain('rerun the same curl installer to resume');expect(result.err).toContain('additional space not specified by this manifest')
+      expect(result.err).toContain(`df -Pk ${join(f.prefix,'downloads')}`)
+      expect(f.requests).toEqual(['releases/latest/linux-x64.tsv']);expect(f.ranges).toEqual([])
+      expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/storage-current');expect(readlinkSync(join(f.prefix,'previous'))).toBe('versions/storage-old')
+      expect(readFileSync(sentinel,'utf8')).toBe('保留用户数据');expect(readFileSync(partial).equals(bytes.subarray(0,64))).toBe(true)
+      expect(existsSync(join(f.prefix,'versions/storage-next'))).toBe(false);expect(existsSync(join(f.prefix,'.install-lock'))).toBe(false)
+      expect(readFileSync(f.dfLog,'utf8').trim().split('\n').slice(-2)).toEqual(['-Pk',join(f.prefix,'downloads')])
+      f.fakeSpace();result=await f.run();expect(result.status,result.err).toBe(0)
+      expect(f.ranges).toContain('bytes=64-');expect(existsSync(partial)).toBe(false);expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/storage-next')
+      expect(readFileSync(sentinel,'utf8')).toBe('保留用户数据')
+    }finally{f.stop()}
+  })
+  test('首次安装空间不足时只取manifest，不创建partial或current',async()=>{
+    const f=fixture();try{const row=f.candidate('storage-empty');f.fakeSpace(0);const result=await f.run()
+      expect(result.status,result.err).toBe(2);expect(result.err).toContain(`remaining download requires at least ${row.archive.bytes} bytes`)
+      expect(f.requests).toEqual(['releases/latest/linux-x64.tsv']);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+      expect(existsSync(join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial'))).toBe(false)
+    }finally{f.stop()}
+  })
+  test('仅剩512字节时1KiB空间足够；真实HTTP Range完成后仍校验完整bytes/hash',async()=>{
+    const f=fixture();try{const row=f.candidate('storage-remainder'),bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!
+      expect(bytes.length).toBeGreaterThan(1024)
+      const partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial');mkdirSync(dirname(partial),{recursive:true});writeFileSync(partial,bytes.subarray(0,bytes.length-512));f.fakeSpace(1)
+      const result=await f.run();expect(result.status,result.err).toBe(0);expect(f.ranges).toContain(`bytes=${bytes.length-512}-`)
+      expect(readFileSync(partial.slice(0,-'.partial'.length)).equals(bytes)).toBe(true);expect(existsSync(partial)).toBe(false)
+    }finally{f.stop()}
+  })
+  test('已有校验通过的主包与runtime缓存不重复要求整包空间，也不再次下载归档',async()=>{
+    const f=fixture();try{const row=f.candidate('storage-cache');if(row.mujoco.mode!=='conda-pack')throw Error('fixture mode')
+      mkdirSync(join(f.prefix,'downloads'),{recursive:true})
+      for(const artifact of [row.archive,row.mujoco.runtime.archive])writeFileSync(join(f.prefix,'downloads',artifact.sha256+'.tar.gz'),f.files.get(`releases/${row.releaseId}/${artifact.path}`)!)
+      f.fakeSpace(0);const result=await f.run();expect(result.status,result.err).toBe(0)
+      expect(result.out.match(/Reusing verified download\./g)).toHaveLength(2);expect(f.requests).toEqual(['releases/latest/linux-x64.tsv']);expect(existsSync(f.dfLog)).toBe(false)
+      expect(existsSync(join(f.prefix,'versions/storage-cache/physics.args'))).toBe(true)
+    }finally{f.stop()}
+  })
+  test('完整partial先验hash再改名，不请求超出末尾的Range；同长度错hash保持拒绝且留原件',async()=>{
+    for(const corrupt of [false,true]){const f=fixture();try{const row=f.candidate('storage-full-partial',{mode:'install-provider'}),bytes=Buffer.from(f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!)
+      if(corrupt)bytes[0]^=1
+      const partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial');mkdirSync(dirname(partial),{recursive:true});writeFileSync(partial,bytes);f.fakeSpace(0)
+      const result=await f.run(['--without-mujoco']);expect(result.status,result.err).toBe(corrupt?2:0);expect(f.requests).toEqual(['releases/latest/linux-x64.tsv']);expect(f.ranges).toEqual([])
+      expect(existsSync(partial)).toBe(corrupt);expect(existsSync(partial.slice(0,-'.partial'.length))).toBe(!corrupt)
+      if(corrupt){expect(result.err).toContain('SHA256 mismatch');expect(readFileSync(partial).equals(bytes)).toBe(true);expect(existsSync(join(f.prefix,'current'))).toBe(false)}
+    }finally{f.stop()}}
+  })
+  test('df缺失、读取失败或格式不可解析均明示未知并保留原验证路径，不把未知当空间充足或零',async()=>{
+    for(const mode of ['missing','unreadable','malformed'] as const){const f=fixture();try{const row=f.candidate('storage-unknown')
+      const overrides=mode==='missing'?{PATH:f.withoutDfPath()}:{};if(mode!=='missing')f.fakeSpace(mode)
+      const result=await f.run([],overrides);expect(result.status,result.err).toBe(0)
+      expect(result.err).toContain('STORAGE_CHECK_UNAVAILABLE');expect(result.err).toContain('available=unknown')
+      expect(result.err).toContain(`remaining download requires at least ${row.archive.bytes} bytes`);expect(result.err).toContain('additional space not specified by this manifest')
+      expect(result.err).not.toContain('STORAGE_INSUFFICIENT');expect(existsSync(join(f.prefix,'versions/storage-unknown/physics.args'))).toBe(true)
+      expect(f.requests).toContain(`releases/${row.releaseId}/${row.archive.path}`)
+    }finally{f.stop()}}
+  })
+  test('curl23分别复查零/非零/未知容量：仅实测零指出无可用空间，所有失败保留partial和旧current',async()=>{
+    for(const availableAfter of [0,1_048_576,'unreadable'] as const){const f=fixture();try{
+      f.candidate('storage-before-write');expect((await f.run()).status).toBe(0)
+      const row=f.candidate('storage-write-failed'),bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!,partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial')
+      writeFileSync(partial,bytes.subarray(0,64));f.fakeCurlFailure(23,availableAfter)
+      const result=await f.run([],{},true);expect(result.status,result.err).toBe(2);expect(result.err).toContain('Lyapunov [storage] STORAGE_WRITE_FAILED: curl exit 23')
+      expect(result.err).toContain(`target=${partial}`);expect(result.err).toContain(`remaining download requires at least ${bytes.length-64} bytes`)
+      expect(result.err).toContain('rerun the same curl installer to resume');expect(result.err).not.toContain('MuJoCo installation failed')
+      if(availableAfter===0)expect(result.err).toContain('The destination filesystem reports no available space.')
+      else{expect(result.err).not.toContain('The destination filesystem reports no available space.');expect(result.err.toLowerCase()).toContain('check filesystem space and write permissions.')}
+      if(availableAfter==='unreadable')expect(result.err).toContain('available=unknown')
+      expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/storage-before-write');expect(readFileSync(partial).equals(bytes.subarray(0,64))).toBe(true)
+      expect(existsSync(join(f.prefix,'versions/storage-write-failed'))).toBe(false)
+      expect(readFileSync(f.curlLog,'utf8')).toContain('--continue-at\n-\n--output\n'+partial)
+    }finally{f.stop()}}
+  })
+  test('真实curl向临时partial的/dev/full写入失败为23；df仍有空间时只提示检查写入条件',async()=>{
+    const f=fixture();try{const row=f.candidate('storage-real-write'),partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial')
+      mkdirSync(dirname(partial),{recursive:true});symlinkSync('/dev/full',partial)
+      const result=await f.run();expect(result.status,result.err).toBe(2);expect(result.err).toContain('STORAGE_WRITE_FAILED: curl exit 23')
+      expect(result.err).toContain('Check filesystem space and write permissions.');expect(result.err).not.toContain('The destination filesystem reports no available space.')
+      expect(f.requests).toContain(`releases/${row.releaseId}/${row.archive.path}`);expect(readlinkSync(partial)).toBe('/dev/full');expect(existsSync(join(f.prefix,'current'))).toBe(false)
+    }finally{f.stop()}
+  })
+  test('manifest自身curl23也报实际写入目标和容量，清单未读时剩余归档体积保持未知',async()=>{
+    const f=fixture();try{
+      f.candidate('storage-before-manifest');expect((await f.run()).status).toBe(0)
+      const row=f.candidate('storage-manifest-failed'),bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!,partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial')
+      writeFileSync(partial,bytes.subarray(0,64));f.fakeCurlFailure(23,0,'manifest')
+      const result=await f.run([],{},true);expect(result.status,result.err).toBe(2);expect(result.err).toContain('Lyapunov [storage] STORAGE_WRITE_FAILED: curl exit 23')
+      expect(result.err).toContain('/manifest.tsv; available=0 bytes; Remaining archive download size is unknown until the release manifest is read.')
+      expect(result.err).toContain('The destination filesystem reports no available space.');expect(result.err).toContain('rerun the same curl installer to resume')
+      expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/storage-before-manifest');expect(readFileSync(partial).equals(bytes.subarray(0,64))).toBe(true)
+      expect(existsSync(join(f.prefix,'versions/storage-manifest-failed'))).toBe(false)
+      expect(readFileSync(f.dfLog,'utf8').trim().split('\n').at(-1)).toContain(join(f.prefix,'.incoming.'))
+    }finally{f.stop()}
+  })
+  test('非写入类curl失败仍报告实际退出码，不误报磁盘或依赖失败',async()=>{
+    const f=fixture();try{f.candidate('storage-curl-other');f.fakeCurlFailure(22,0);const result=await f.run()
+      expect(result.status,result.err).toBe(2);expect(result.err).toContain('Archive download failed (curl exit 22)')
+      expect(result.err).not.toContain('STORAGE_WRITE_FAILED');expect(result.err).not.toContain('STORAGE_INSUFFICIENT');expect(result.err).not.toContain('MuJoCo installation failed')
+      expect(existsSync(join(f.prefix,'current'))).toBe(false)
     }finally{f.stop()}
   })
 })

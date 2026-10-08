@@ -35,6 +35,38 @@ trap 'exit 130' INT
 trap 'exit 143' HUP TERM
 fail() { printf '%s\n' "Lyapunov [$stage] $*" >&2; exit 2; }
 log() { printf '%s\n' "Lyapunov [$stage] $*"; }
+read_available_bytes() {
+  storage_available=
+  command -v df >/dev/null 2>&1 || return 1
+  storage_report=$(LC_ALL=C df -Pk "${1:-$prefix/downloads}" 2>/dev/null) || return 1
+  {
+    read -r storage_header
+    read -r storage_filesystem storage_total storage_used storage_kib storage_percent storage_mount
+  } <<STORAGE_REPORT
+$storage_report
+STORAGE_REPORT
+  for storage_number in "$storage_total" "$storage_used" "$storage_kib"; do
+    case "$storage_number" in ''|*[!0-9]*) return 1 ;; esac
+  done
+  case "$storage_percent" in *%) storage_percent=${storage_percent%\%} ;; *) return 1 ;; esac
+  case "$storage_percent" in ''|*[!0-9]*) return 1 ;; esac
+  # Keep POSIX shell arithmetic bounded; unexpected df output is unknown,
+  # never zero available space. Linux/WSL df -Pk emits decimal KiB values.
+  [ "${#storage_kib}" -le 15 ] || return 1
+  while [ "$storage_kib" != 0 ] && [ "${storage_kib#0}" != "$storage_kib" ]; do storage_kib=${storage_kib#0}; done
+  storage_available=$((storage_kib * 1024))
+}
+write_failed() {
+  storage_target=$1; storage_requirement=$2
+  if read_available_bytes "${3:-$prefix/downloads}"; then
+    storage_free="$storage_available bytes"
+    if [ "$storage_available" -eq 0 ]; then storage_reason='The destination filesystem reports no available space.'; else storage_reason='Check filesystem space and write permissions.'; fi
+  else
+    storage_free=unknown; storage_reason='Available space could not be measured; check filesystem space and write permissions.'
+  fi
+  stage=storage
+  fail "STORAGE_WRITE_FAILED: curl exit 23 writing target=$storage_target; available=$storage_free; $storage_requirement $storage_reason Free space or resolve write access, then rerun the same curl installer to resume. Current, previous, user data and partial downloads are preserved."
+}
 usage() {
   printf '%s\n' 'Usage: sh install.sh [--prefix PATH] [--bin-dir PATH] [--version RELEASE_ID] [--without-mujoco] [--no-desktop]' \
     'Default: Linux x64, per-user version directories, MuJoCo prepared and verified before activation.' \
@@ -94,8 +126,12 @@ mkdir -p -- "$prefix/versions" "$prefix/downloads"
 incoming=$(mktemp -d "$prefix/.incoming.XXXXXX")
 stage=manifest
 log "Fetching $base_url/releases/$release_selector/linux-x64.tsv"
-curl --fail --location --silent --show-error --proto "$protocols" --proto-redir "$protocols" --connect-timeout 30 --max-time 60 --retry 3 --retry-delay 2 \
-  --output "$incoming/manifest.tsv" "$base_url/releases/$release_selector/linux-x64.tsv" || fail 'Release manifest download failed.'
+if curl --fail --location --silent --show-error --proto "$protocols" --proto-redir "$protocols" --connect-timeout 30 --max-time 60 --retry 3 --retry-delay 2 \
+  --output "$incoming/manifest.tsv" "$base_url/releases/$release_selector/linux-x64.tsv"; then :; else
+  curl_exit=$?
+  [ "$curl_exit" -ne 23 ] || write_failed "$incoming/manifest.tsv" 'Remaining archive download size is unknown until the release manifest is read.' "$incoming"
+  fail "Release manifest download failed (curl exit $curl_exit)."
+fi
 seen='|'
 while IFS="$(printf '\t')" read -r key value extra; do
   [ -n "$key" ] && [ -n "$value" ] && [ -z "$extra" ] || fail 'Malformed release manifest row.'
@@ -140,6 +176,27 @@ check_glibc() {
 }
 check_glibc "${minimum_glibc:-}"
 if [ "$with_mujoco" = true ]; then check_glibc "${mujoco_minimum_glibc:-}"; fi
+remaining_download_bytes() {
+  partial_bytes=0
+  if [ -f "$partial" ]; then partial_bytes=$(wc -c < "$partial" 2>/dev/null | tr -d ' '); fi
+  case "$partial_bytes" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$partial_bytes" -le "$expected_bytes" ] 2>/dev/null || return 1
+  remaining_bytes=$((expected_bytes - partial_bytes))
+}
+check_download_space() {
+  if read_available_bytes; then
+    if [ "$storage_available" -lt "$remaining_bytes" ]; then
+      stage=storage
+      fail "STORAGE_INSUFFICIENT: target=$partial; available=$storage_available bytes; remaining download requires at least $remaining_bytes bytes. Free space, then rerun the same curl installer to resume. Current, previous, user data and partial downloads are preserved. Extraction/runtime preparation needs additional space not specified by this manifest."
+    fi
+  else
+    printf '%s\n' "Lyapunov [storage] STORAGE_CHECK_UNAVAILABLE: target=$partial; available=unknown (df is unavailable or unreadable); remaining download requires at least $remaining_bytes bytes. Continuing without a space precheck; check filesystem space if the download fails. Only compressed download bytes can be checked; extraction/runtime preparation needs additional space not specified by this manifest." >&2
+  fi
+}
+download_write_failed() {
+  if remaining_download_bytes; then storage_need="remaining download requires at least $remaining_bytes bytes."; else storage_need='Remaining download size could not be read.'; fi
+  write_failed "$partial" "$storage_need"
+}
 download() {
   url_path=$1; expected_hash=$2; expected_bytes=$3
   downloaded="$prefix/downloads/$expected_hash.tar.gz"
@@ -149,9 +206,17 @@ download() {
     fail "Cached download failed verification: $downloaded"
   fi
   partial="$downloaded.partial"
-  log "Downloading $url_path ($expected_bytes bytes); interrupted downloads resume here: $partial"
-  curl --fail --location --show-error --progress-bar --proto "$protocols" --proto-redir "$protocols" --connect-timeout 30 --speed-limit 1024 --speed-time 60 --retry 3 --retry-delay 2 \
-    --continue-at - --output "$partial" "$base_url/$url_path" || fail "Archive download failed; partial download retained: $partial"
+  remaining_download_bytes || fail "Partial download size cannot be resumed; inspect the retained file: $partial"
+  if [ "$remaining_bytes" -gt 0 ]; then
+    check_download_space
+    log "Downloading $url_path ($expected_bytes bytes); interrupted downloads resume here: $partial"
+    if curl --fail --location --show-error --progress-bar --proto "$protocols" --proto-redir "$protocols" --connect-timeout 30 --speed-limit 1024 --speed-time 60 --retry 3 --retry-delay 2 \
+      --continue-at - --output "$partial" "$base_url/$url_path"; then :; else
+      curl_exit=$?
+      [ "$curl_exit" -ne 23 ] || download_write_failed
+      fail "Archive download failed (curl exit $curl_exit); partial download retained: $partial"
+    fi
+  fi
   [ "$(wc -c < "$partial" | tr -d ' ')" = "$expected_bytes" ] || fail "Archive byte count mismatch: $partial"
   actual_hash=$(sha256sum "$partial"); actual_hash=${actual_hash%% *}
   [ "$actual_hash" = "$expected_hash" ] || fail "Archive SHA256 mismatch: $partial"

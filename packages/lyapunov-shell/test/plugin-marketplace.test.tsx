@@ -1,11 +1,13 @@
 import {describe,expect,test} from 'bun:test'
 import React from 'react'
 import {createRequire} from 'node:module'
-import {mkdtemp,mkdir,writeFile,chmod,rm} from 'node:fs/promises'
+import {spawnSync} from 'node:child_process'
+import {fileURLToPath} from 'node:url'
+import {mkdtemp,mkdir,readFile,writeFile,chmod,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,dirname} from 'node:path'
 import {integrationAssociations,classifyMcpIntegration,marketplaceEntries,filterMarketplace} from '../src/plugin-marketplace.ts'
-import {validExistingExecutable,discoverIntegrations} from '../src/integration-discovery.ts'
+import {validExistingExecutable} from '../src/integration-discovery.ts'
 import {ExternalToolsSettings,applyExternalToolsSettings} from '../src/external-tools-settings.tsx'
 import type {ExternalToolsState,ExternalMcpRow} from '../src/external-tools-state.ts'
 import {Context} from '@deepseek-ai/cordis'
@@ -58,24 +60,52 @@ describe('插件市场原生读数的薄投影',()=>{
    expect(await validExistingExecutable(dir)).toBeNull();expect(await validExistingExecutable('mcp-for-blender')).toBeNull();expect(await validExistingExecutable(file+'\n--execute')).toBeNull()
   }finally{await rm(dir,{recursive:true,force:true})}
  })
- test('隔离HOME不遮蔽用户已装Addon和Unity Hub：两处固定公开安装根共用原picker用户目录',async()=>{
-  const box=await mkdtemp(join(tmpdir(),'lyapunov-installed-public-home-')),ctx=new Context(),before=process.env.HOME
-  const publicHome=join(box,'user-home'),privateHome=join(box,'account-private'),bridge=join(box,'bridge','mcp-for-blender')
+ test('隔离HOME共用原picker公共目录：已有产品供给优先，缺失时回用户Addon，Unity仍发现公共安装根',async()=>{
+  const box=await mkdtemp(join(tmpdir(),'lyapunov-installed-public-home-')),before=process.env.HOME
+  const publicHome=join(box,'user-home'),privateHome=join(box,'account-private'),bridge=join(box,'bridge','mcp-for-blender'),productRoot=join(box,'product')
+  const suppliedAddon=join(productRoot,'.runtime','blender-mcp','addon.py'),userAddon=join(publicHome,'.config','blender','5.2','scripts','addons','blender_mcp.py')
   try{
    await mkdir(dirname(bridge),{recursive:true});await writeFile(bridge,'fixture must not execute');await chmod(bridge,0o700)
+   await mkdir(productRoot);await writeFile(join(productRoot,'UPSTREAM_LOCK.json'),await readFile(new URL('../../../UPSTREAM_LOCK.json',import.meta.url)))
    for(const home of [publicHome,privateHome]){
     const addon=join(home,'.config','blender','5.2','scripts','addons','blender_mcp.py'),editor=join(home,'Unity','Hub','Editor','6000.0.1f1','Editor','Unity')
     await mkdir(dirname(addon),{recursive:true});await writeFile(addon,'fixture must not execute')
     await mkdir(dirname(editor),{recursive:true});await writeFile(editor,'fixture must not execute');await chmod(editor,0o700)
    }
-   process.env.HOME=privateHome
-   ctx.provide('directoryPicker',{capability:()=>({kind:'browse',homeDirectory:publicHome})} as never)
-   const rows=await discoverIntegrations(ctx,{BLENDER_EXECUTABLE:bridge})
-   expect(rows.find(row=>row.path===bridge)).toMatchObject({addonPath:join(publicHome,'.config','blender','5.2','scripts','addons','blender_mcp.py'),addonExists:true})
-   expect(rows.some(row=>row.path===join(publicHome,'Unity','Hub','Editor','6000.0.1f1','Editor','Unity')&&row.source==='unity-hub')).toBe(true)
-   expect(rows.some(row=>row.path.startsWith(privateHome)||row.addonPath?.startsWith(privateHome))).toBe(false)
-   expect(process.env.HOME).toBe(privateHome)
-  }finally{if(before===undefined)delete process.env.HOME;else process.env.HOME=before;await ctx.fiber.dispose();await rm(box,{recursive:true,force:true})}
+   // PRODUCT_ROOT is sampled when its module loads; each real child binds the public root before importing it.
+   const program=`
+    const {Context}=await import(${JSON.stringify(import.meta.resolve('@deepseek-ai/cordis'))});
+    const {default:BrowseDirectoryPicker}=await import(${JSON.stringify(import.meta.resolve('@deepseek-ai/dsh-host-directory-picker-browse'))});
+    const {discoverIntegrations}=await import(${JSON.stringify(new URL('../src/integration-discovery.ts',import.meta.url).href)});
+    const {blenderMcpPaths,blenderMcpStatus}=await import(${JSON.stringify(new URL('../../../script/blender-mcp.ts',import.meta.url).href)});
+    const {publicHome,bridge}=JSON.parse(process.env.LYAPUNOV_DISCOVERY_FIXTURE);
+    const ctx=new Context();
+    try{
+     await ctx.plugin(BrowseDirectoryPicker,{maxEntries:1000,homeDirectory:publicHome});
+     const rows=await discoverIntegrations(ctx,{BLENDER_EXECUTABLE:bridge});
+     console.log(JSON.stringify({rows,home:ctx.directoryPicker.capability().homeDirectory,supply:blenderMcpStatus(),supplyRoot:blenderMcpPaths().root}));
+    }finally{await ctx.fiber.dispose()}
+   `
+   const inspect=()=>{
+    const result=spawnSync(process.execPath,['--no-env-file','--no-install','-e',program],{
+     cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',timeout:10000,maxBuffer:256*1024,
+     env:{PATH:process.env.PATH,HOME:privateHome,LYAPUNOV_PRODUCT_ROOT:productRoot,LYAPUNOV_DISCOVERY_FIXTURE:JSON.stringify({publicHome,bridge})},
+    })
+    expect(result.error).toBeUndefined();expect(result.status).toBe(0);expect(result.stderr).toBe('')
+    const value=JSON.parse(result.stdout) as {rows:Array<{path:string;addonPath?:string;addonExists?:boolean;source:string}>;home:string;supply:{ready:boolean;readings:{addonExists:boolean}};supplyRoot:string}
+    expect(value.home).toBe(publicHome);expect(value.supplyRoot).toBe(join(productRoot,'.runtime','blender-mcp'));expect(value.supply.ready).toBe(false)
+    expect(value.rows.some(row=>row.path===join(publicHome,'Unity','Hub','Editor','6000.0.1f1','Editor','Unity')&&row.source==='unity-hub')).toBe(true)
+    expect(value.rows.some(row=>row.path.startsWith(privateHome)||row.addonPath?.startsWith(privateHome))).toBe(false)
+    return value
+   }
+   await mkdir(dirname(suppliedAddon),{recursive:true});await writeFile(suppliedAddon,'isolated supplied addon; never execute')
+   const supplied=inspect();expect(supplied.supply.readings.addonExists).toBe(true)
+   expect(supplied.rows.find(row=>row.path===bridge)).toMatchObject({addonPath:suppliedAddon,addonExists:true})
+   await rm(suppliedAddon)
+   const fallback=inspect();expect(fallback.supply.readings.addonExists).toBe(false)
+   expect(fallback.rows.find(row=>row.path===bridge)).toMatchObject({addonPath:userAddon,addonExists:true})
+   expect(process.env.HOME).toBe(before)
+  }finally{await rm(box,{recursive:true,force:true})}
  })
  test('唯一原生Plugins页注册，保持社区来源无新的Settings nav或plugin registry',()=>{
   const rows:any[]=[];const ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context
