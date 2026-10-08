@@ -1,9 +1,37 @@
+diff --git a/packages/client/ui-commands/src/client/service.ts b/packages/client/ui-commands/src/client/service.ts
+index 2e8fd7a0fbb3e04f420cd4e97def872259bad54a..22b6000f6591cd85b185dc78213baca2b3c8d9fc 100644
+--- a/packages/client/ui-commands/src/client/service.ts
++++ b/packages/client/ui-commands/src/client/service.ts
+@@ -380,6 +380,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
+     const line = `/${desc.name} `
+     return {
+       name: desc.name,
++      kind: 'host-command',
+       token,
+       ...(desc.input !== undefined ? { hint: desc.input.hint } : {}),
+       ...(desc.input?.attachments === true ? { attachments: true } : {}),
+diff --git a/packages/client/ui-commands/tests/service.client.spec.ts b/packages/client/ui-commands/tests/service.client.spec.ts
+index 7a82f9e553ce4d4f0f8e8be0613da61fdc722d33..ce934b1d9438512b63431b731b4535009ef3d5b5 100644
+--- a/packages/client/ui-commands/tests/service.client.spec.ts
++++ b/packages/client/ui-commands/tests/service.client.spec.ts
+@@ -478,6 +478,7 @@ describe('candidates', () => {
+       const outcome = menuPick(source, 'plan', proj('s1'))
+       if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected the claim')
+       expect(outcome.claim.token).toBe('/command:token.plan ')
++      expect(outcome.claim.kind).toBe('host-command')
+       await outcome.claim.submit('do x', new Context(), [])
+       expect(executeCalls).toEqual([{ sessionId: sid('s1'), line: '/plan do x', images: [] }])
+     })
 diff --git a/packages/client/ui-conversation/src/client/contract/composer-blocks.ts b/packages/client/ui-conversation/src/client/contract/composer-blocks.ts
-index bf25624b04c0d25d31692a97ba21d920d227f5e2..7d59b84545ec675cb9743f7e2f28da4bd7b01588 100644
+index bf25624b04c0d25d31692a97ba21d920d227f5e2..c08a600c172197d9b779265d2aa77d765a653142 100644
 --- a/packages/client/ui-conversation/src/client/contract/composer-blocks.ts
 +++ b/packages/client/ui-conversation/src/client/contract/composer-blocks.ts
-@@ -5,6 +5,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+@@ -3,8 +3,12 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ 
+ /** Why one session's composer is inert. */
  export interface ComposerBlock {
++  /** Explicit model-only refusal; absent or unknown classifications keep native commands locked. */
++  readonly kind?: 'model-unavailable'
    /** Localized placeholder owned by the plugin that raised the block. */
    readonly reason: string
 +  /** A model-only refusal may leave the existing file-permission control available. Other blocks stay locked. */
@@ -11,6 +39,28 @@ index bf25624b04c0d25d31692a97ba21d920d227f5e2..7d59b84545ec675cb9743f7e2f28da4b
  }
  
  /** The registry face other plugins reach through `ctx.conversation.blocks`. */
+diff --git a/packages/client/ui-conversation/src/client/contract/input.ts b/packages/client/ui-conversation/src/client/contract/input.ts
+index 360a8e1aceaaa72c0e20f40e4b4faa79e686ea88..37426f8dfb3fa08b4dda764433b1c719e9f999d6 100644
+--- a/packages/client/ui-conversation/src/client/contract/input.ts
++++ b/packages/client/ui-conversation/src/client/contract/input.ts
+@@ -48,6 +48,8 @@ export interface ConversationCommandSettled {
+ 
+ /** Command-mode credential supplied by one input-trigger source. */
+ export interface CommandClaim {
++  /** Only the effective Host catalog creates this native command route; absent claims retain the prompt gate. */
++  readonly kind?: 'host-command'
+   /** Catalog command name without the leading slash (the key of per-command composer copy such as `hint.*`). */
+   readonly name: string
+   /** Inserted command text with its argument separator; the bare complete name also retains the claim. */
+@@ -280,7 +282,7 @@ export interface InputState {
+   readonly draftRev: number
+   readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+   /** Present exactly while claimed/submitting (claim snapshot during flight; submit closure withheld). */
+-  readonly claim?: { readonly name: string; readonly token: string; readonly hint?: string; readonly attachments?: boolean }
++  readonly claim?: Pick<CommandClaim, 'kind' | 'name' | 'token' | 'hint' | 'attachments'>
+   /** Reference occurrence view of the editor's chips, sorted by offset. */
+   readonly occurrences: readonly Occurrence[]
+   /** Messages still waiting for their own turn. */
 diff --git a/packages/client/ui-conversation/src/client/contract/slots.ts b/packages/client/ui-conversation/src/client/contract/slots.ts
 index 01c0ca0a7988fe82872adb53fffb0dc9e1c1deb6..f517c8f2f5f0670cd97b1af3698e803155df3483 100644
 --- a/packages/client/ui-conversation/src/client/contract/slots.ts
@@ -25,7 +75,7 @@ index 01c0ca0a7988fe82872adb53fffb0dc9e1c1deb6..f517c8f2f5f0670cd97b1af3698e8031
    disabled?: boolean
    /** Whether the shared Workspace picker is expanded. */
 diff --git a/packages/client/ui-conversation/src/client/input/blocks.ts b/packages/client/ui-conversation/src/client/input/blocks.ts
-index 692b808f157122c42370ad4b456194edc3873933..c65c45778a4fcbdf2e6db5e9ff39256b0533a3f4 100644
+index 692b808f157122c42370ad4b456194edc3873933..d2a5b0e7a8bee3f43b3bcaa023cdc18efbcdc093 100644
 --- a/packages/client/ui-conversation/src/client/input/blocks.ts
 +++ b/packages/client/ui-conversation/src/client/input/blocks.ts
 @@ -24,7 +24,7 @@ export class ComposerBlockRegistry implements ComposerBlocks {
@@ -33,39 +83,118 @@ index 692b808f157122c42370ad4b456194edc3873933..c65c45778a4fcbdf2e6db5e9ff39256b
      const store = this.storeFor(sessionId)
      const current = store.getSnapshot()
 -    if (current?.reason === block?.reason) return
-+    if (current?.reason === block?.reason && current?.allowPermissionChanges === block?.allowPermissionChanges) return
++    if (current?.reason === block?.reason && current?.kind === block?.kind && current?.allowPermissionChanges === block?.allowPermissionChanges) return
      store.set(block)
    }
  
+diff --git a/packages/client/ui-conversation/src/client/input/machine.ts b/packages/client/ui-conversation/src/client/input/machine.ts
+index 3c972fa74e987b4b9c6a9a930cc8757494caf22e..ad10cb509e29f24c942ce2742ff688106d0215cf 100644
+--- a/packages/client/ui-conversation/src/client/input/machine.ts
++++ b/packages/client/ui-conversation/src/client/input/machine.ts
+@@ -58,6 +58,7 @@ export class SubmitMachine {
+           claim: {
+             name: c.name,
+             token: c.token,
++            ...(c.kind !== undefined ? { kind: c.kind } : {}),
+             ...(c.hint !== undefined ? { hint: c.hint } : {}),
+             ...(c.attachments === true ? { attachments: true } : {}),
+           },
 diff --git a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
-index edb1ff29c8794d4026f62fc18b3d19fd41d0a495..7ed8f71212c3f8d8ea33b8c47c5cf5198676bfd1 100644
+index edb1ff29c8794d4026f62fc18b3d19fd41d0a495..fa8cec970c83c2c8e2da2d87fa6a44d482fcc45b 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
-@@ -144,6 +144,10 @@ export const InputBar = memo(function InputBar({
+@@ -136,7 +136,17 @@ export const InputBar = memo(function InputBar({
+   // inert no-workspace state, the machine faces absent (no session), or a
+   // parent-offline continuable child. An owner block also disables input;
+   // adjudicating and submitting render read-only so the draft stays visible.
+-  const disabled = removed || inert || !live || blocked !== undefined || parentOffline
++  const sessionLocked = removed || inert || !live || parentOffline
++  // This is a route classification, not a permission grant: only a catalog
++  // command's retained claim may bypass a model-only refusal. Plain prompts,
++  // skills, arbitrary slash text and unclassified claims keep the model gate.
++  const nativeClaim = input?.claim?.kind === 'host-command'
++    && (input.phase === 'claimed' || input.phase === 'submitting')
++    && (draft.startsWith(input.claim.token) || draft === input.claim.token.trimEnd())
++  const modelOnlyBlock = blocked?.kind === 'model-unavailable'
++  const nativeCommandAvailable = modelOnlyBlock && nativeClaim
++  const promptLocked = sessionLocked || blocked !== undefined
++  const disabled = sessionLocked || (blocked !== undefined && !nativeCommandAvailable)
+   const locked = disabled
+   // The model seat is the ONE control a block leaves live: every block this
+   // contract has is cleared by choosing a model, so locking it too would leave
+@@ -144,6 +154,11 @@ export const InputBar = memo(function InputBar({
    // be disabled do lock it — there is no session to choose a model for.
    const modelSeatLocked = removed || inert || !live
    const machineBusy = input?.phase === 'adjudicating' || input?.phase === 'submitting'
++  const commandMenuLocked = sessionLocked || machineBusy || (blocked !== undefined && !modelOnlyBlock)
 +  // File authorization is independent of a missing model. Keep session, helper,
-+  // unknown-block and admission locks, while the prompt and plan retain `locked`.
++  // unknown-block and admission locks, while prompts and plans remain model-gated.
 +  const permissionLocked = removed || inert || !live || parentOffline || machineBusy
 +    || (blocked !== undefined && blocked.allowPermissionChanges !== true)
    // The no-workspace surface remains the resident DOM node but acts as the
    // existing picker trigger. Message controls stay locked until a Session
    // exists; the trigger itself is read-only rather than disabled so pointer
-@@ -447,7 +451,7 @@ export const InputBar = memo(function InputBar({
+@@ -152,7 +167,7 @@ export const InputBar = memo(function InputBar({
+   const editorDisabled = removed || (locked && !workspaceTrigger)
+   const editable = live && !locked && !machineBusy
+   const steeringAvailable = subagent === null || subagent.address.mode === 'continuable'
+-  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && steeringAvailable
++  const canSteerQueue = !promptLocked && !machineBusy && !commandMenuOpen && empty && running && steeringAvailable
+     && input.queue.length > 0
+ 
+   useEffect(() => {
+@@ -239,7 +254,7 @@ export const InputBar = memo(function InputBar({
+     if (rejected !== null) showToast(rejected)
+   }, [subagent, addFiles, attachments, imageLimits, showToast, t])
+ 
+-  const canAcceptDrop = subagent === null && !locked && !machineBusy && addFiles !== undefined
++  const canAcceptDrop = subagent === null && !promptLocked && !machineBusy && addFiles !== undefined
+ 
+   const fileInputRef = useRef<HTMLInputElement | null>(null)
+   const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
+@@ -307,7 +322,7 @@ export const InputBar = memo(function InputBar({
+   // describes a delivery the click cannot or does not perform; every other
+   // state keeps plain Send. A continuable child keeps Send primary and
+   // exposes Stop independently.
+-  const primaryStops = running && subagent === null && (empty || blocked !== undefined)
++  const primaryStops = running && subagent === null && (empty || (blocked !== undefined && !nativeCommandAvailable))
+   // Disabled native buttons may omit mouseleave; their tooltip must close from state.
+   const primaryDisabled = primaryStops ? stop === undefined : empty || disabled || machineBusy || uploadsPending
+   const interruptible = running && continuable
+@@ -431,7 +446,7 @@ export const InputBar = memo(function InputBar({
+                 aria-label={t('input.commands')}
+                 aria-haspopup="listbox"
+                 aria-expanded={commandMenuOpen}
+-                disabled={locked || toggleCommandMenu === undefined}
++                disabled={commandMenuLocked || toggleCommandMenu === undefined}
+                 onMouseDown={keepFocus}
+                 onClick={onToggleCommandMenu}
+               >
+@@ -447,8 +462,8 @@ export const InputBar = memo(function InputBar({
                onChange={onPickFiles}
              />
              <div className={css.modes}>
 -              {sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked })}
+-              {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
 +              {sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked: permissionLocked })}
-               {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
++              {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked: promptLocked })}
              </div>
              {input === undefined || sessionId === undefined
+               ? null
+@@ -462,7 +477,7 @@ export const InputBar = memo(function InputBar({
+               {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
+             </div>
+             {input === undefined || sessionId === undefined ? null : <div className={activity ? css.activityExpanded : css.activity}>
+-              {renderSlot('conversation.input.activity', { locked, onActiveChange: setActivity })}
++              {renderSlot('conversation.input.activity', { locked: promptLocked, onActiveChange: setActivity })}
+             </div>}
+             {interruptible && (
+               <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stop === undefined}>
 diff --git a/packages/client/ui-conversation/tests/composer-blocks.client.spec.ts b/packages/client/ui-conversation/tests/composer-blocks.client.spec.ts
-index febdc067a7a39686e18bb4b1f3485933f50480f8..b2c5eb858579bae6da00425e678aa7827e4face1 100644
+index febdc067a7a39686e18bb4b1f3485933f50480f8..1b9ba7d6da6d7946a5c06cb5379c1dcdc1cacf22 100644
 --- a/packages/client/ui-conversation/tests/composer-blocks.client.spec.ts
 +++ b/packages/client/ui-conversation/tests/composer-blocks.client.spec.ts
-@@ -25,4 +25,18 @@ describe('ComposerBlockRegistry', () => {
+@@ -25,4 +25,32 @@ describe('ComposerBlockRegistry', () => {
      registry.forget(SESSION)
      expect(registry.storeFor(SESSION).getSnapshot()).toBeUndefined()
    })
@@ -83,12 +212,36 @@ index febdc067a7a39686e18bb4b1f3485933f50480f8..b2c5eb858579bae6da00425e678aa782
 +    expect(listener).toHaveBeenCalledTimes(3)
 +    expect(store.getSnapshot()?.allowPermissionChanges).toBe(false)
 +  })
++  it('相同文案的model-only分类变化必须发布，未知分类恢复锁且重复分类稳定', () => {
++    const registry = new ComposerBlockRegistry(), listener = vi.fn(), store = registry.storeFor(SESSION)
++    store.subscribe(listener)
++    registry.set(SESSION, { reason: 'same copy', allowPermissionChanges: true })
++    registry.set(SESSION, { reason: 'same copy', kind: 'model-unavailable', allowPermissionChanges: true })
++    expect(store.getSnapshot()?.kind).toBe('model-unavailable')
++    expect(listener).toHaveBeenCalledTimes(2)
++    registry.set(SESSION, { reason: 'same copy', kind: 'model-unavailable', allowPermissionChanges: true })
++    expect(listener).toHaveBeenCalledTimes(2)
++    registry.set(SESSION, { reason: 'same copy', allowPermissionChanges: true })
++    expect(store.getSnapshot()?.kind).toBeUndefined()
++    expect(listener).toHaveBeenCalledTimes(3)
++  })
++
  })
 diff --git a/packages/client/ui-conversation/tests/input-bar.client.spec.tsx b/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
-index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..a5599614a1f966d3bd7602b9b618a4430a21e04d 100644
+index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..507c4a441ffe46a4265772ff8467ce4cd4d6007a 100644
 --- a/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
 +++ b/packages/client/ui-conversation/tests/input-bar.client.spec.tsx
-@@ -61,7 +61,7 @@ interface BenchOptions {
+@@ -24,7 +24,8 @@ import type { ContextPressureProjection } from '@deepseek-ai/dsh-token-meter/cli
+ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+-import type { SubmitOutcome } from '../src/client/contract/input.ts'
++import type { CommandClaim, SubmitOutcome } from '../src/client/contract/input.ts'
++import type { ComposerBlock } from '../src/client/contract/composer-blocks.ts'
+ import { SessionInputShell } from '../src/client/input/facade.ts'
+ import { $replaceDetectSpanWithText, $selectDetectSpan } from '../src/client/input/editor/span-map.ts'
+ import type {
+@@ -61,7 +62,7 @@ interface BenchOptions {
    /** The `goal` projection value used only to prove attachment intake remains ordinary. */
    goal?: { phase: 'active'; objective: string }
    modelEntry?: React.ReactNode
@@ -97,16 +250,16 @@ index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..a5599614a1f966d3bd7602b9b618a443
    /** Hot text-ref lexicon (injects a minimal slash stub exposing only lexicon()). */
    lexicon?: ReadonlyMap<'/' | '@', readonly string[]>
    /** The `imageLimits` projection value (absent = no attachment service). */
-@@ -78,7 +78,7 @@ interface BenchOptions {
+@@ -78,7 +79,7 @@ interface BenchOptions {
    subagent?: Exclude<SessionSnapshot['subagent'], null>
    disabled?: boolean
    inert?: boolean
 -  blocked?: { readonly reason: string }
-+  blocked?: { readonly reason: string; readonly allowPermissionChanges?: boolean }
++  blocked?: ComposerBlock
    workspacePickerOpen?: boolean
    onRequestWorkspace?: () => void
    promptError?: SessionSnapshot['promptError']
-@@ -165,7 +165,8 @@ function bench(over?: BenchOptions) {
+@@ -165,7 +166,8 @@ function bench(over?: BenchOptions) {
      if (key === 'conversation.input.right') return over?.rightItems ?? null
      if (key === 'conversation.composer.dock') return over?.footer ?? null
      if (key === 'conversation.input.plan') return over?.planEntry ?? null
@@ -116,7 +269,7 @@ index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..a5599614a1f966d3bd7602b9b618a443
      if (key === 'conversation.input.model') return over?.modelEntry ?? null
      if (key === 'conversation.input.activity') return over?.activityEntry?.(owner as InputActivityOwnerProps) ?? null
      return null
-@@ -1001,6 +1002,41 @@ describe('running and lock semantics', () => {
+@@ -1001,6 +1003,191 @@ describe('running and lock semantics', () => {
      expect(sink).not.toHaveBeenCalled()
    })
  
@@ -135,6 +288,156 @@ index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..a5599614a1f966d3bd7602b9b618a443
 +    fireEvent.keyDown(textarea, { key: 'Enter' })
 +    expect(sink).not.toHaveBeenCalled()
 +    expect(slotCalls.findLast(row => row.key === 'conversation.input.plan')?.owner).toMatchObject({ locked: true })
++  })
++
++  it('缺模型时菜单可选原生命令，普通prompt和任意slash仍锁', () => {
++    const toggle = vi.fn()
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model', allowPermissionChanges: true }, toggleCommandMenu: toggle })
++    const menu = b.view.container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
++    expect(menu.disabled).toBe(false)
++    fireEvent.click(menu)
++    expect(toggle).toHaveBeenCalledOnce()
++    expect(editableOf(b.textarea)).toBe(false)
++    act(() => { b.shell.setDraft('/unknown do something') })
++    expect(editableOf(b.textarea)).toBe(false)
++    fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    fireEvent.click(b.button)
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it.each(['click', 'enter'] as const)('缺模型已登记host-command可编辑参数并通过%s提交，模型sink保持零调用', async gesture => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success', commandResult: { kind: 'success' } }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model', allowPermissionChanges: true } })
++    act(() => {
++      b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev })
++      b.shell.setDraft('/list_mcp_servers local')
++    })
++    expect(b.shell.snapshot.claim?.kind).toBe('host-command')
++    expect(editableOf(b.textarea)).toBe(true)
++    expect(b.button.disabled).toBe(false)
++    if (gesture === 'click') fireEvent.click(b.button)
++    else fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    await vi.waitFor(() => { expect(submit).toHaveBeenCalledExactlyOnceWith('local', SCTX, []) })
++    expect(b.sink).not.toHaveBeenCalled()
++    await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
++    expect(editableOf(b.textarea)).toBe(false)
++    expect(b.slotCalls.findLast(row => row.key === 'conversation.input.plan')?.owner).toMatchObject({ locked: true })
++    expect(attachmentOwner(b.slotCalls).canAcceptDrop).toBe(false)
++  })
++
++  it('已登记命令名被删坏时立即丢claim并锁回prompt，不按slash前缀放行', () => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success' }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    act(() => { b.shell.setDraft('/list_mcp_servers') })
++    expect(editableOf(b.textarea)).toBe(true)
++    act(() => { b.shell.setDraft('/list_mcp_servers_bad') })
++    expect(b.shell.snapshot.claim).toBeUndefined()
++    expect(editableOf(b.textarea)).toBe(false)
++    fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    expect(submit).not.toHaveBeenCalled()
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it.each([
++    ['没有显式分类的claim', undefined],
++    ['未声明的模型生产claim', 'model-prompt'],
++  ] as const)('%s在缺模型时仍锁编辑和提交', (_name, kind) => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success' }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ ...kind === undefined ? {} : { kind: kind as never }, name: 'skill', token: '/skill ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    expect(editableOf(b.textarea)).toBe(false)
++    fireEvent.click(b.button)
++    fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    expect(submit).not.toHaveBeenCalled()
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it.each([
++    ['未知block', { blocked: { reason: 'other refusal' } }],
++    ['未知分类block', { blocked: { reason: 'other refusal', kind: 'unknown' as never } }],
++    ['permission-only不能冒充model-only', { blocked: { reason: 'same copy', allowPermissionChanges: true } }],
++    ['会话已移除', { disabled: true }],
++    ['工作区未就绪', { inert: true }],
++    ['continuable父离线', { subagent: { address: { parentSessionId: 'parent' as SessionId, childSessionId: SID, mode: 'continuable' as const }, parentAvailable: false } }],
++  ] as const)('%s即使有host-command也保持原门', (_name, options) => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success' }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' }, ...options })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    expect(editableOf(b.textarea)).toBe(false)
++    const menu = b.view.container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
++    expect(menu.disabled).toBe(true)
++    fireEvent.click(b.button)
++    fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    expect(submit).not.toHaveBeenCalled()
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it.each(['adjudicating', 'submitting'] as const)('host-command在%s时仍只读并禁菜单和提交', phase => {
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit: () => Promise.resolve({ kind: 'success' }) }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    const busy = createSnapshotStore({ ...b.shell.state.getSnapshot(), phase })
++    b.view.rerender(<InputBar {...b.props} useInput={bindSnapshotSelector(busy)} />)
++    expect(editableOf(b.textarea)).toBe(false)
++    expect(b.button.disabled).toBe(true)
++    expect(b.view.container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!.disabled).toBe(true)
++  })
++
++  it('运行中缺模型已有命令可提交，普通草稿仍保留Stop', async () => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success' }))
++    const b = bench({ running: true, blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    const send = b.view.container.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]')!
++    expect(send.disabled).toBe(false)
++    fireEvent.click(send)
++    await vi.waitFor(() => { expect(submit).toHaveBeenCalledOnce() })
++    expect(b.sink).not.toHaveBeenCalled()
++    await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
++    expect(b.view.container.querySelector('button[aria-label="停止生成"]')).not.toBeNull()
++  })
++
++  it('命令handler的模型拒绝原样返回，不调用普通模型sink', async () => {
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.reject(new Error('model-unavailable')))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'requires_model', token: '/requires_model ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    fireEvent.click(b.button)
++    await vi.waitFor(() => { expect(b.view.getByText('model-unavailable')).toBeTruthy() })
++    expect(b.shell.snapshot.phase).toBe('claimed')
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it('命令handler仍收到原模型拒绝结果，零普通sink且不改command结果', async () => {
++    const result = { kind: 'error' as const, text: 'native handler requires a model' }
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success', commandResult: result }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'requires_model', token: '/requires_model ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    fireEvent.click(b.button)
++    await vi.waitFor(() => { expect(submit).toHaveBeenCalledOnce() })
++    expect(await submit.mock.results[0]!.value).toEqual({ kind: 'success', commandResult: result })
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++
++  it('缺失live machine仍锁菜单和已保留命令参数', () => {
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit: () => Promise.resolve({ kind: 'success' }) }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    b.view.rerender(<InputBar {...b.props} keyboard={undefined} />)
++    expect(editableOf(b.textarea)).toBe(false)
++    expect(b.button.disabled).toBe(true)
++    expect(b.view.container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!.disabled).toBe(true)
++  })
++
++  it('缺模型命令不扩大附件入站，未声明接受附件的handler仍被原门拒绝', async () => {
++    const file = { kind: 'file' as const, id: 'file-1' as DraftAttachmentId, file: new File(['x'], 'note.txt', { type: 'text/plain' }) }
++    const submit = vi.fn<CommandClaim['submit']>(() => Promise.resolve({ kind: 'success' }))
++    const b = bench({ blocked: { kind: 'model-unavailable', reason: 'no model' }, attachments: [file], fileUploads: { [file.id]: { status: 'ready', receiptId: 'r-1' } as never } })
++    act(() => { b.shell.beginCommand({ kind: 'host-command', name: 'list_mcp_servers', token: '/list_mcp_servers ', submit }, { start: 0, end: 0, draftRev: b.shell.snapshot.draftRev }) })
++    expect(attachmentOwner(b.slotCalls).canAcceptDrop).toBe(false)
++    expect(b.shell.canPickFiles()).toBe(false)
++    fireEvent.click(b.button)
++    await vi.waitFor(() => { expect(b.view.getByText('/list_mcp_servers attachments-unsupported')).toBeTruthy() })
++    expect(submit).not.toHaveBeenCalled()
++    expect(b.sink).not.toHaveBeenCalled()
++    expect(b.shell.snapshot.attachmentIds).toEqual([file.id])
 +  })
 +
 +  it.each([
@@ -158,8 +461,78 @@ index cc1e20b9eb65a6fedc6ed6093d12f5c1ac4b9931..a5599614a1f966d3bd7602b9b618a443
    it('running plain Enter follows the busy-state Steer preference', () => {
      const { textarea, sink } = bench({ running: true, busyEnter: 'steer', draft: '直接插话' })
      fireEvent.keyDown(textarea, { key: 'Enter' })
+diff --git a/packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx b/packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx
+index c4df0217e837be15c89839293194ee35f5db1a40..85b5d8666c62f76822849cc911bf8074d98adba3 100644
+--- a/packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx
++++ b/packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx
+@@ -32,6 +32,7 @@ import { SessionInputShell } from '../src/client/input/facade.ts'
+ import { $replaceDetectSpanWithText } from '../src/client/input/editor/span-map.ts'
+ import { InputBar } from '../src/client/skeleton/InputBar.tsx'
+ import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
++import type { ComposerBlock } from '../src/client/contract/composer-blocks.ts'
+ import { zh } from '../src/client/locales.ts'
+ 
+ // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
+@@ -61,6 +62,7 @@ function commandSource(
+   const resolve = (name: string): FakeCommand | undefined => commands.find(c => c.name === name)
+   const leadingClaim = (desc: FakeCommand): CommandClaim => ({
+     name: desc.name,
++    kind: 'host-command',
+     token: `/${desc.name} `,
+     ...(desc.input !== undefined ? { hint: desc.input.hint } : {}),
+     ...(desc.input?.attachments === true ? { attachments: true } : {}),
+@@ -118,7 +120,7 @@ const COMMANDS: FakeCommand[] = [
+ const PNG: SubmitAttachment = { type: 'image', mediaType: 'image/png', data: 'AA==' }
+ 
+ /** Real scope bench: a Controller-owned Session scope + InputTriggerController + shell listeners. */
+-async function scopedBench(register?: (inputTriggers: InputTriggerService) => void) {
++async function scopedBench(register?: (inputTriggers: InputTriggerService) => void, blocked?: ComposerBlock) {
+   const runtime = await SlotTestRuntime.create()
+   onTestFinished(() => runtime.dispose())
+   const ctx = runtime.ctx
+@@ -194,6 +196,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
+     useStopShortcut: bindSnapshotSelector(createSnapshotStore<readonly string[]>([])),
+     t: makeTranslate(zh, commonZh),
+     variant: 'composer',
++    ...blocked === undefined ? {} : { blocked },
+   }
+   const view = render(<InputBar {...barProps} />)
+   const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
+@@ -242,6 +245,32 @@ describe('scenario A: menu-pick /goal, type args, enter submits', () => {
+   })
+ })
+ 
++describe('model-unavailable: registered native menu to claimed command', () => {
++  it('disabled plain editor opens the normal command menu, retains a Host claim and submits without a prompt', async () => {
++    const execute = vi.fn(() => Promise.resolve<SubmitOutcome>({ kind: 'success' }))
++    const { source } = commandSource([{ name: 'list_mcp_servers', description: 'Read registered MCP servers', input: { hint: 'Optional filter' } }], execute)
++    const b = await scopedBench(triggers => { triggers.registerSource(source) }, { kind: 'model-unavailable', reason: 'no model' })
++    expect(b.textarea.getAttribute('contenteditable')).toBe('false')
++    const menuButton = b.view.container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
++    expect(menuButton.disabled).toBe(false)
++    fireEvent.click(menuButton)
++    await vi.waitFor(() => {
++      const menu = b.controller.menu.getSnapshot()
++      expect(menu.open).toBe(true)
++      expect(menu.groups[0]?.items[0]?.name).toBe('list_mcp_servers')
++    })
++    act(() => { b.controller.pick('command', 0) })
++    expect(b.shell.snapshot.claim?.kind).toBe('host-command')
++    expect(b.textarea.getAttribute('contenteditable')).toBe('true')
++    b.type('/list_mcp_servers local')
++    fireEvent.keyDown(b.textarea, { key: 'Enter' })
++    await vi.waitFor(() => { expect(execute).toHaveBeenCalledExactlyOnceWith('/list_mcp_servers local', []) })
++    await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
++    expect(b.textarea.getAttribute('contenteditable')).toBe('false')
++    expect(b.sink).not.toHaveBeenCalled()
++  })
++})
++
+ describe('scenario C: pasted /goal xxx + enter (menu never opened)', () => {
+   it('adjudicates on enter, claims and submits in one stroke', async () => {
+     const b = await bench()
 diff --git a/packages/client/ui-model-selection/src/client/service.ts b/packages/client/ui-model-selection/src/client/service.ts
-index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..d3e5b4df00b07603d831a373ae9d1dcaf69920e9 100644
+index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..f96123b5b41a178447a0a2d57c0457e8779515dc 100644
 --- a/packages/client/ui-model-selection/src/client/service.ts
 +++ b/packages/client/ui-model-selection/src/client/service.ts
 @@ -91,7 +91,7 @@ export class ModelDirectoryResolver extends Service {
@@ -167,32 +540,41 @@ index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..d3e5b4df00b07603d831a373ae9d1dca
          const state = directory.store.getSnapshot()
          conversation.blocks.set(sessionId, state.current === null && state.routable === false
 -          ? { reason: config.blockReason(state) } : undefined)
-+          ? { reason: config.blockReason(state), allowPermissionChanges: true } : undefined)
++          ? { reason: config.blockReason(state), kind: 'model-unavailable', allowPermissionChanges: true } : undefined)
        }
        scope.effect(() => {
          const offDirectory = directory.store.subscribe(publish)
 diff --git a/packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts b/packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts
-index 0154f315be7a0a13b0f4ef18a96dbcfb87e2680c..931718351735cf6d638d810abeef89b6d8c60d3d 100644
+index 0154f315be7a0a13b0f4ef18a96dbcfb87e2680c..10c861a1a852649860ba3ca41a628e970be01991 100644
 --- a/packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts
 +++ b/packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts
-@@ -107,10 +107,10 @@ async function bench(locale: 'zh' | 'en' = 'zh', presentation: { manualOnly?: bo
+@@ -18,6 +18,7 @@ import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+ import type { ModelSelection, ModelSelectionProjection } from '@deepseek-ai/dsh-api-session-controller/types'
+ import type { CommandContribution, PopupSelectSpec, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
+ import type { ModelSelectInjected } from '../src/client/slots.ts'
++import type { ComposerBlock } from '@deepseek-ai/dsh-client-ui-conversation/client'
+ import { apply, inject } from '../src/client/index.ts'
+ import { zh, en } from '../src/client/locales.ts'
+ 
+@@ -107,10 +108,10 @@ async function bench(locale: 'zh' | 'en' = 'zh', presentation: { manualOnly?: bo
    }
    const remote = Object.assign(new TestRemote(ctx), { session: sessionRemote })
    ctx.reflect.provide('remote.session', sessionRemote)
 -  const blocks = new Map<SessionId, { reason: string } | undefined>()
-+  const blocks = new Map<SessionId, { reason: string; allowPermissionChanges?: boolean } | undefined>()
++  const blocks = new Map<SessionId, ComposerBlock | undefined>()
    ctx.provide('conversation', {
      blocks: {
 -      set: (id: SessionId, block: { reason: string } | undefined) => { blocks.set(id, block) },
-+      set: (id: SessionId, block: { reason: string; allowPermissionChanges?: boolean } | undefined) => { blocks.set(id, block) },
++      set: (id: SessionId, block: ComposerBlock | undefined) => { blocks.set(id, block) },
      },
    })
    let contribution: CommandContribution | undefined
-@@ -569,6 +569,7 @@ it.each(['zh', 'en'] as const)('uses the native resolver locale for an explicit
+@@ -569,6 +570,8 @@ it.each(['zh', 'en'] as const)('uses the native resolver locale for an explicit
      await vi.waitFor(() => {
        expect(face.directory.getSnapshot()).toMatchObject({ current: null, routable: false, manualOnlyPresentation: 'guest', status: 'ready' })
        expect(b.blockOf('guest')?.reason).toBe((locale === 'zh' ? zh : en)['blocked.guest'])
 +      expect(b.blockOf('guest')?.allowPermissionChanges).toBe(true)
++      expect(b.blockOf('guest')?.kind).toBe('model-unavailable')
      })
      expect(b.calls.select).toBe(0)
    } finally { await b.ctx.fiber.dispose() }

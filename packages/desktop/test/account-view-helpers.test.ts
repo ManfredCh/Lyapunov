@@ -1,7 +1,7 @@
 import {describe,expect,test} from "bun:test"
 import {accountIdentity,availablePaymentMethods,commerceErrorMessage,commerceResultIsCurrent,stablePaymentProvider} from "../src/account-view-helpers.ts"
 import {accountLocale,DesktopLocaleMirror} from "../src/account-locales.ts"
-import {desktopExitDialog,desktopWindowTitle} from "../src/window-chrome.ts"
+import {desktopExitDialog,desktopExitFailureDialog,desktopWindowTitle} from "../src/window-chrome.ts"
 
 describe("account view helpers",()=>{
   test("uses the authenticated user as the async result identity",()=>{
@@ -64,5 +64,17 @@ describe("桌面语言投影",()=>{
     }
     expect(desktopExitDialog("en").buttons).toEqual(["Cancel","Save and quit"])
     expect(desktopExitDialog("en",{dirtyDrafts:0,runningActions:-1}).buttons).toEqual(["Cancel","Save and quit"])
+  })
+  test("失败恢复提供返回、重试和显式强退，双语告知未确认草稿及任务",()=>{
+    const english=desktopExitFailureDialog("en","P500 sim_sync failed"),chinese=desktopExitFailureDialog("zh","P500 sim_sync failed")
+    expect(english.buttons).toEqual(["Return to workspace","Retry save and quit","Force quit"])
+    expect(chinese.buttons).toEqual(["返回工作台","重试保存并退出","强行退出"])
+    expect(english).toMatchObject({defaultId:0,cancelId:0,noLink:true})
+    expect(chinese).toMatchObject({defaultId:0,cancelId:0,noLink:true})
+    expect(english.detail).toContain("Unconfirmed drafts may be lost")
+    expect(english.detail).toContain("some tasks may not stop cleanly")
+    expect(chinese.detail).toContain("未确认保存的草稿可能丢失")
+    expect(JSON.stringify(english)).not.toMatch(/[\u3400-\u9fff]/)
+    expect(english.detail).toContain("P500 sim_sync failed")
   })
 })

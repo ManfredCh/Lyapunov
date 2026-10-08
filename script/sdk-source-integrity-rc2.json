@@ -2,31 +2,41 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "201aa1b3f38d27763a4a89953a3e6e38c533702a55a740f5f5fc4ee64e77c9b9": {
+    "63d0c823164a385563e9d4d27007aa641fcb639a3749f57aa170edfb03ea4c37": {
       "affectedPaths": [
+        "packages/client/ui-commands/src/client/service.ts",
+        "packages/client/ui-commands/tests/service.client.spec.ts",
         "packages/client/ui-conversation/src/client/contract/composer-blocks.ts",
+        "packages/client/ui-conversation/src/client/contract/input.ts",
         "packages/client/ui-conversation/src/client/contract/slots.ts",
         "packages/client/ui-conversation/src/client/input/blocks.ts",
+        "packages/client/ui-conversation/src/client/input/machine.ts",
         "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx",
         "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts",
         "packages/client/ui-conversation/tests/input-bar.client.spec.tsx",
+        "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx",
         "packages/client/ui-model-selection/src/client/service.ts",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts"
       ],
       "stageHashes": [
-        "bd555a90ca5546b2b87c52fa777ecf687abf6204d70c23b79e831c1f93c9ba36",
-        "8cc86e3f79fd687f41f6ce65db0a8d1a8208807e07b11b307753e662d6911a46"
+        "7e8847a8551f9e11306129e044bc126b9e891aaafc7f7ff8e62d7b24f01fa441",
+        "a396f5838b8c56b1b8fcab8f2591b70e9558afdd280e70a601d24445861c4abd"
       ],
-      "finalHash": "8cc86e3f79fd687f41f6ce65db0a8d1a8208807e07b11b307753e662d6911a46",
+      "finalHash": "a396f5838b8c56b1b8fcab8f2591b70e9558afdd280e70a601d24445861c4abd",
       "finalPostimages": {
-        "packages/client/ui-conversation/src/client/contract/composer-blocks.ts": "b0003299709c86bbb07cebf197edc153605a5d5145c8d7b3f3eaf0dce993a5de",
+        "packages/client/ui-commands/src/client/service.ts": "4fe716cbdc4a28e6d16af46f36f862baaacb97516a58cdc7724a82fd4cda1b8e",
+        "packages/client/ui-commands/tests/service.client.spec.ts": "d70f7b3218319c05ae8b235575b0694d971a9c542e4feacc040cf5ae22f14ddb",
+        "packages/client/ui-conversation/src/client/contract/composer-blocks.ts": "a1ae9e1aa3c3b96121d2f5251b608379cf294203aaef30262f6e3ba6b15415c9",
+        "packages/client/ui-conversation/src/client/contract/input.ts": "e279ca43447aa99fd8296426a56b30f87cebfca075ad02fc80df94ac74a6b862",
         "packages/client/ui-conversation/src/client/contract/slots.ts": "f29c0eb5cc176ab637b0e975c967c792131c1a778160d780ed6ddded77488c4a",
-        "packages/client/ui-conversation/src/client/input/blocks.ts": "83d8432d0aafa0e4f003a2605d228009872ed6cb14ff946b1768610ee04af1c6",
-        "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": "978151c791b00666c9884cc52a57027dc10431a6dbd241e804cdcfec5df46ef7",
-        "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts": "d156a5a17a4968d3e30e37ae71fd07cfb3a80ef19101ff30163a101ecfc797a2",
-        "packages/client/ui-conversation/tests/input-bar.client.spec.tsx": "27fd9ef1eb013d33c59e4bc8342553e322b00df8463132269fb3ab3b4f967f3f",
-        "packages/client/ui-model-selection/src/client/service.ts": "1509386463440083af3e4ee4652aa7ea143ea8e212870e532090bf6d4618f1c7",
-        "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "887f217e38db42a1057cebd642d53a9b927109b3bc40eb6d83f4172efc181929"
+        "packages/client/ui-conversation/src/client/input/blocks.ts": "9d750284b287e1b5173800a910de79ca046d1bde2c196dc6d5cf0de4982565cd",
+        "packages/client/ui-conversation/src/client/input/machine.ts": "ba731bb5aaf5238537e87573a8f401955011387c0a66f0787ed9db583335e800",
+        "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": "7bbd0141a204379b7f1ce2956884bfc82495eb9552e671f0af22239a3266fefd",
+        "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts": "4d007119a6cd88201c27a3746409168b912e3a2ea65a7433babe153a953a6594",
+        "packages/client/ui-conversation/tests/input-bar.client.spec.tsx": "459b770f6c436fcba3a2b638b337deed045d0f956df3fc5aafd5b9c60f8d3734",
+        "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx": "fd8f3801d04b78d4d85a64d3e183fe88945fe738152359635f6541871ec8f7e0",
+        "packages/client/ui-model-selection/src/client/service.ts": "055c152fc1b48916800f09db470f16cd3100187abe4140d747d0dd7aead958e5",
+        "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "ac8c238e860d06ed048060a5abcb7fff7fb33c3466029761d9ce57398f9643c6"
       }
     }
   }

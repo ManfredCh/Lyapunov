@@ -20,7 +20,7 @@ import {applySoftwareGlSwitches} from "./software-rendering.ts"
 import {resolveDesktopDataRoot} from "./data-root.ts"
 import {classifyStartupFailure,planRestartRecovery,readWorkspaceRecords,resolveWorkspaceHostMode} from "./restart-recovery.ts"
 import {LOCAL_IMPORT_FILE_FILTERS} from "../../lyapunov-shell/src/local-file-import.ts"
-import {desktopExitDialog,desktopShortcut,desktopWindowTitle} from "./window-chrome.ts"
+import {desktopExitDialog,desktopExitFailureDialog,desktopShortcut,desktopWindowTitle} from "./window-chrome.ts"
 import {accountLocale,DesktopLocaleMirror,desktopLocales,SUPPORT_MAILTO} from "./account-locales.ts"
 
 const mode=process.argv.includes("--developer")?"developer":"formal"
@@ -125,14 +125,14 @@ const exits=new ExitCoordinator({
   flush:async()=>{if(!host)return;await rendererExit("flush");exitOwnerContents()?.session.flushStorageData()},
   stop:async()=>{controller?.cancelLogin();if(host)await rendererExit("stop")},
   close:()=>owner.close(),
-  exit:origin=>{quitting=true;disposeWorkspaceView();if(origin==="update")updater.autoUpdater.quitAndInstall();else app.quit()},
-  failed:async(error,origin)=>{
+  exit:(origin,force)=>{quitting=true;if(force){recordIncident("exit-forced",{origin,code:"EXIT_CLEANUP_UNCONFIRMED"});try{disposeWorkspaceView()}finally{app.exit(0)}return}disposeWorkspaceView();if(origin==="update")updater.autoUpdater.quitAndInstall();else app.quit()},
+  failed:async(error,origin,forced)=>{
     const message=error instanceof Error?error.message:String(error)
     recordIncident("exit-failed",{origin,code:"EXIT_CLEANUP_UNCONFIRMED"})
-    if(origin==="system"||origin==="startup-error"){console.error("退出清理未确认：",message);return}
-    const t=desktopLocales[localeMirror.getSnapshot().active]
-    const options={type:"error" as const,title:t.exitFailedTitle,message:t.exitFailedMessage,detail:message,buttons:[t.workspace]}
-    if(win&&!win.isDestroyed())await dialog.showMessageBox(win,options);else await dialog.showMessageBox(options)
+    if(forced||origin==="system"||origin==="startup-error"){console.error("退出清理未确认：",message);return}
+    const options=desktopExitFailureDialog(localeMirror.getSnapshot().active,message)
+    const {response}=await(win&&!win.isDestroyed()?dialog.showMessageBox(win,options):dialog.showMessageBox(options))
+    return response===2?"force":response===1?"retry":"return"
   },
 })
 function detachWorkspaceView(){if(workspaceView&&viewAttached&&win&&!win.isDestroyed()){win.contentView.removeChildView(workspaceView);viewAttached=false;syncWindowTitle()}}

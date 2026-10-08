@@ -13,6 +13,11 @@ export function desktopExitDialog(locale:AccountLocale,summary?:{dirtyDrafts:num
  const detail=clean?(summary.runningActions?t.exitRunningDetail.replace("{runningActions}",String(summary.runningActions)):t.exitCleanDetail):known?t.exitDetail.replace("{dirtyDrafts}",String(summary.dirtyDrafts)).replace("{runningActions}",String(summary.runningActions)):t.exitUnknown
  return {type:"question" as const,title:t.exitTitle,message:clean||!known?t.exitCleanMessage:t.exitMessage,detail,buttons:[t.cancel,clean?t.exit:t.saveAndExit],defaultId:0,cancelId:0,noLink:true}
 }
+/** 清理失败由用户选返回、重试或强退；不把失败改成已保存/已停止。 */
+export function desktopExitFailureDialog(locale:AccountLocale,message:string){
+ const t=desktopLocales[locale]
+ return {type:"error" as const,title:t.exitFailedTitle,message:t.exitFailedMessage,detail:message+"\n\n"+t.forceExitDetail,buttons:[t.workspace,t.retryExit,t.forceExit],defaultId:0,cancelId:0,noLink:true}
+}
 
 export type DesktopShortcut='undo'|'redo'|'cut'|'copy'|'paste'|'selectAll'|'reload'|'fullscreen'|'close'|'quit'|'devtools'
 /** 只处理本窗口原有菜单快捷键；不注册抢占其它应用的全局快捷键。 */

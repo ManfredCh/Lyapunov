@@ -1,8 +1,10 @@
 import {expect,test} from "bun:test"
-import {ExitCoordinator,ExitParticipants,type ExitOrigin,type ExitParticipant} from "../src/exit-coordinator.ts"
+import {ExitCoordinator,ExitParticipants,type ExitOrigin,type ExitParticipant,type ExitFailureAction} from "../src/exit-coordinator.ts"
 import {apply as applyDesktopLifecycle} from "../src/client.tsx"
 import {SessionId} from "@deepseek-ai/dsh-session/types"
 import type {JobView} from "@deepseek-ai/dsh-api-job-controller/client"
+import {fileAddressFor} from "@deepseek-ai/dsh-util-workspace-path"
+import {fileDocument,documentExitParticipant} from "../../lyapunov-workspace/src/native-documents.ts"
 
 test("桌面退出消费原生Job roster，保留运行动作告警并释放目录订阅",async()=>{
   const previous=Object.getOwnPropertyDescriptor(globalThis,"window"),watched:string[]=[],released:string[]=[],listeners=new Set<()=>void>(),cleanups:Array<()=>void>=[]
@@ -28,7 +30,7 @@ test("桌面退出消费原生Job roster，保留运行动作告警并释放目�
 
 function bench(approve=true){
   const calls:string[]=[]
-  const options={summary:async()=>{calls.push("summary");return {dirtyDrafts:2,runningActions:1}},confirm:async()=>{calls.push("confirm");return approve},flush:async()=>{calls.push("flush")},stop:async()=>{calls.push("stop")},close:async()=>{calls.push("close")},exit:(origin:ExitOrigin)=>{calls.push("exit:"+origin)},failed:async()=>{calls.push("failed")},shutdownTimeoutMs:5}
+  const options={summary:async()=>{calls.push("summary");return {dirtyDrafts:2,runningActions:1}},confirm:async()=>{calls.push("confirm");return approve},flush:async()=>{calls.push("flush")},stop:async()=>{calls.push("stop")},close:async()=>{calls.push("close")},exit:(origin:ExitOrigin)=>{calls.push("exit:"+origin)},failed:async():Promise<ExitFailureAction|void>=>{calls.push("failed")},shutdownTimeoutMs:5}
   return {calls,options}
 }
 test("确认无未保存草稿时只停止关闭，不执行保存；运行动作不是草稿",async()=>{
@@ -57,11 +59,12 @@ test("普通四入口取消保原Host和草稿，不执行清理",async()=>{
   }
 })
 test("并发普通退出共用一确认，flush stop close 顺序各一次",async()=>{
-  const b=bench();let approve!:(value:boolean)=>void
-  b.options.confirm=()=>new Promise(resolve=>{b.calls.push("confirm");approve=resolve})
+  const b=bench();let approve!:(value:boolean)=>void,ready!:()=>void
+  const confirming=new Promise<void>(resolve=>{ready=resolve})
+  b.options.confirm=()=>new Promise(resolve=>{b.calls.push("confirm");approve=resolve;ready()})
   const exit=new ExitCoordinator(b.options),a=exit.request("window"),c=exit.request("shortcut")
   expect(a).toBe(c)
-  await Promise.resolve();approve(true)
+  await confirming;approve(true)
   expect((await a).cleanup).toBe("confirmed")
   expect(b.calls).toEqual(["summary","confirm","flush","stop","close","exit:window"])
   await exit.request("app")
@@ -113,10 +116,11 @@ test("系统结束错误回执也有界，坏回调不能卡住结束",async()=>
   expect(b.calls).toEqual(["stop","close","exit:system"])
 })
 test("系统结束升级挂起的普通确认，迟到取消不重新清理",async()=>{
-  const b=bench();let cancel!:(approved:boolean)=>void
-  b.options.confirm=()=>new Promise(resolve=>{b.calls.push("confirm");cancel=resolve})
+  const b=bench();let cancel!:(approved:boolean)=>void,ready!:()=>void
+  const confirming=new Promise<void>(resolve=>{ready=resolve})
+  b.options.confirm=()=>new Promise(resolve=>{b.calls.push("confirm");cancel=resolve;ready()})
   const exit=new ExitCoordinator(b.options),ordinary=exit.request("window")
-  await Promise.resolve()
+  await confirming
   expect(exit.request("system")).toBe(ordinary)
   expect(await ordinary).toMatchObject({origin:"system",decision:"closed"})
   cancel(false);await Promise.resolve()
@@ -148,4 +152,88 @@ test("普通保存失败的回执期间收到系统结束，未重放flush并继
   await reporting;expect(exit.request("system")).toBe(pending)
   expect(await pending).toMatchObject({origin:"system",decision:"closed",cleanup:"incomplete"})
   expect(b.calls).toEqual(["summary","confirm","flush","failed","stop","close","exit:system"])
+})
+
+test("普通失败显式强退共用原请求，不重放失败保存；未确认结果如实保留",async()=>{
+  const b=bench();let force=false
+  b.options.flush=async()=>{b.calls.push("flush");throw Error("FILE_STALE_VERSION")}
+  b.options.failed=async()=>{b.calls.push("failed");return "force"}
+  const exit=new ExitCoordinator({...b.options,exit:(origin,forced)=>{force=forced===true;b.options.exit(origin)}})
+  const pending=exit.request("window")
+  expect(exit.request("shortcut")).toBe(pending)
+  expect(await pending).toMatchObject({origin:"window",decision:"closed",cleanup:"incomplete",message:"FILE_STALE_VERSION"})
+  expect(force).toBe(true);expect(exit.approved).toBe(true)
+  expect(b.calls).toEqual(["summary","confirm","flush","failed","stop","close","exit:window"])
+  await exit.request("app");expect(b.calls.filter(x=>x==="close")).toHaveLength(1)
+})
+test("普通挂起保存先显示失败选择，用户强退后停止和关闭挂起也有界",async()=>{
+  const b=bench();const errors:string[]=[];const forcedStates:boolean[]=[]
+  b.options.flush=()=>{b.calls.push("flush");return new Promise(()=>{})}
+  b.options.stop=()=>{b.calls.push("stop");return new Promise(()=>{})}
+  b.options.close=()=>{b.calls.push("close");return new Promise(()=>{})}
+  const exit=new ExitCoordinator({...b.options,failed:async(error,_origin,forced)=>{errors.push(String(error));forcedStates.push(forced===true);return forced?undefined:"force"}})
+  expect(await exit.request("window")).toMatchObject({decision:"closed",cleanup:"incomplete"})
+  expect(errors).toHaveLength(3);expect(forcedStates).toEqual([false,true,true])
+  expect(b.calls).toEqual(["summary","confirm","flush","stop","close","exit:window"])
+})
+test("已显式强退的失败回执也有界，不二次弹窗等待",async()=>{
+  const b=bench();let reports=0
+  b.options.flush=async()=>{b.calls.push("flush");throw Error("save failed")}
+  b.options.stop=async()=>{b.calls.push("stop");throw Error("stop failed")}
+  const exit=new ExitCoordinator({...b.options,failed:async(_error,_origin,forced)=>{reports++;if(!forced)return "force";await new Promise(()=>{})}})
+  expect(await exit.request("app")).toMatchObject({decision:"closed",cleanup:"incomplete"})
+  expect(reports).toBe(2);expect(b.calls.slice(-3)).toEqual(["stop","close","exit:app"])
+})
+test("清洁草稿的停止失败仍可强退，迟到停止不重复close",async()=>{
+  const b=bench();let release!:()=>void
+  b.options.summary=async()=>{b.calls.push("summary");return {dirtyDrafts:0,runningActions:1}}
+  b.options.stop=()=>{b.calls.push("stop");return new Promise(resolve=>{release=resolve})}
+  b.options.failed=async()=>{b.calls.push("failed");return "force"}
+  const exit=new ExitCoordinator(b.options)
+  expect(await exit.request("window")).toMatchObject({decision:"closed",cleanup:"incomplete"})
+  expect(b.calls).not.toContain("flush");release();await Promise.resolve();await exit.request("menu")
+  expect(b.calls.filter(x=>x==="close")).toHaveLength(1)
+})
+test("返回工作台解除冻结并保留未保存；重试沿原pending重读owner而不自等",async()=>{
+  const b=bench();let attempt=0;const states:boolean[]=[]
+  b.options.flush=async()=>{b.calls.push("flush");if(++attempt===1)throw Error("FILE_STALE_VERSION")}
+  b.options.failed=async()=>{b.calls.push("failed");return "return"}
+  const exit=new ExitCoordinator({...b.options,stateChanged:value=>states.push(value)})
+  expect(await exit.request("window")).toMatchObject({decision:"failed"});expect(states).toEqual([true,false]);expect(exit.approved).toBe(false)
+  expect(await exit.request("window")).toMatchObject({decision:"closed",cleanup:"confirmed"})
+  const retry=bench();let tries=0
+  retry.options.flush=async()=>{retry.calls.push("flush");if(++tries===1)throw Error("temporary save failure")}
+  retry.options.failed=async()=>{retry.calls.push("failed");return "retry"}
+  expect(await new ExitCoordinator(retry.options).request("window")).toMatchObject({decision:"closed",cleanup:"confirmed"})
+  expect(retry.calls).toEqual(["summary","confirm","flush","failed","summary","confirm","flush","stop","close","exit:window"])
+})
+test("物理参与者失败仍完成独立文档保存，并保留原失败证据",async()=>{
+  const entries=new ExitParticipants();const calls:string[]=[]
+  entries.register("camera",{summary:()=>({dirtyDrafts:1,runningActions:0}),flush:async()=>{calls.push("camera");throw Error("P500 sim_sync rejected")},stop:async()=>{calls.push("camera stop");throw Error("stop unconfirmed")}})
+  entries.register("file",{summary:()=>({dirtyDrafts:1,runningActions:0}),flush:async()=>{calls.push("file saved version v2")},stop:async()=>{calls.push("file stop")}})
+  await expect(entries.flush()).rejects.toThrow("camera: P500 sim_sync rejected")
+  await expect(entries.stop()).rejects.toThrow("camera: stop unconfirmed")
+  expect(calls).toEqual(["camera","file saved version v2","camera stop","file stop"])
+})
+test("真实文件草稿沿原FileDocument版本写入，相机物理拒绝不能跳过文件owner",async()=>{
+  const fetchBefore=globalThis.fetch,doc=fileDocument(fileAddressFor("exit-isolation","/work","draft.txt"),true)
+  doc.edit("真实CAS文件稿");const writes:Array<unknown>=[]
+  globalThis.fetch=(async(_url:RequestInfo|URL,init?:RequestInit)=>{const body=JSON.parse(String(init?.body));writes.push(body);return Response.json({version:"v2"})}) as typeof fetch
+  try{
+    const entries=new ExitParticipants()
+    entries.register("camera",{summary:()=>({dirtyDrafts:1,runningActions:0}),flush:async()=>{throw Error("P500 MuJoCo sim_sync rejected")}})
+    entries.register("documents",documentExitParticipant())
+    await expect(entries.flush()).rejects.toThrow("P500 MuJoCo sim_sync rejected")
+    expect(writes).toEqual([{sessionId:"exit-isolation",action:"write",input:{path:"draft.txt",content:"真实CAS文件稿"}}])
+    expect(doc.snapshot().base?.version).toBe("v2");expect(doc.snapshot().base?.content).toBe(doc.snapshot().draft)
+    expect(documentExitParticipant().summary().dirtyDrafts).toBe(0)
+  }finally{globalThis.fetch=fetchBefore}
+})
+test("挂起的物理保存不占据独立文档写入，强退不把挂起owner算作已保存",async()=>{
+  const entries=new ExitParticipants();let documentSaved=false
+  entries.register("camera",{summary:()=>({dirtyDrafts:1,runningActions:0}),flush:()=>new Promise(()=>{})})
+  entries.register("documents",{summary:()=>({dirtyDrafts:documentSaved?0:1,runningActions:0}),flush:async()=>{documentSaved=true}})
+  const b=bench();b.options.flush=()=>entries.flush();b.options.failed=async()=>"force"
+  expect(await new ExitCoordinator(b.options).request("window")).toMatchObject({decision:"closed",cleanup:"incomplete"})
+  expect(documentSaved).toBe(true);expect((await entries.summary()).dirtyDrafts).toBe(1)
 })
