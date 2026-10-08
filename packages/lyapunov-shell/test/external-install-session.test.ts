@@ -1,7 +1,7 @@
 import {describe,expect,test,afterEach} from 'bun:test'
 import type {Context} from '@deepseek-ai/cordis'
 import {startExternalInstallSession,startExternalMcpRegistrationSession} from '../src/external-install-session.ts'
-import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState} from '../src/external-tools-host.ts'
+import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState,setExternalMcpEnabled,associateKnownBlender} from '../src/external-tools-host.ts'
 import {runBlenderMcpSupplyCommand,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 
 function fixture(ok=true,wait?:Promise<void>){
@@ -164,6 +164,8 @@ import ConfigEditor from '@deepseek-ai/dsh-config-editor'
 import Settings from '@deepseek-ai/dsh-settings'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as NativeMcp from '@deepseek-ai/dsh-mcp-client'
+import NativeSkills from '@deepseek-ai/dsh-skill'
+import {createScope} from '@deepseek-ai/dsh-scope'
 import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import { initProfile, mountRootInclude, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
@@ -236,11 +238,16 @@ test('原生静态MCP新增与已有更新真实事务，旧revision与跨profil
  const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`,h=await preferencesFixture()
  h.ctx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never)
  await h.ctx.plugin(ToolRuntime)
+ await h.ctx.plugin(NativeSkills)
+ const removeSkill=h.ctx.skills.register({name:'fixture-skill',description:'A native registered skill',content:'Not loaded by this test',source:'runtime',provider:'test-owned'})
  try{
   await saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',url,expectedRevision:null})
   expect(h.ctx.tools.schemas().map(v=>v.name)).toContain('mcp__fixture__read_fixture')
   const actual=await externalToolsState(h.ctx)
-  expect(actual.mcp.find(v=>v.serverName==='fixture')).toMatchObject({status:'connected',tools:['mcp__fixture__read_fixture'],detail:null})
+  expect(actual.mcp.find(v=>v.serverName==='fixture')).toMatchObject({status:'connected',tools:['mcp__fixture__read_fixture'],detail:null,currentScope:true,owner:'Native profile / 原生 profile',configLocation:h.profile.patchPath})
+  expect(actual.skills).toContainEqual({name:'fixture-skill',description:'A native registered skill',provider:'test-owned',source:'runtime',path:null,modelInvocable:true,userInvocable:true,toolVisible:false,currentScope:false})
+  expect(actual.skillsComplete).toBe(true);removeSkill()
+  expect((await externalToolsState(h.ctx)).skills).toEqual([])
   const row=actual.mcp.find(v=>v.serverName==='fixture')!
   expect(h.ctx.settings.describe().some(v=>v.ns===row.id)).toBe(false)
   await saveExternalMcp(h.ctx,{serverName:'fixture',transport:'streamable-http',expectedRevision:row.revision??undefined})
@@ -262,6 +269,15 @@ test('原生静态MCP新增与已有更新真实事务，旧revision与跨profil
   await expect(saveExternalMcp(h.ctx,{serverName:'duplicate',transport:'streamable-http',url,expectedRevision:null})).rejects.toThrow()
   expect(await readFile(h.profile.patchPath,'utf8')).toBe(persisted)
   expect(h.ctx.tools.schemas().map(v=>v.name)).toContain('mcp__fixture__read_fixture')
+  // A real native scoped MCP shadows the profile name. The agent below is
+  // only a scope identity fixture, not a running model or an AgentLoop claim.
+  const agent:any={},scope=createScope(h.ctx,agent);Object.assign(agent,{ctx:scope.ctx,session:{header:{cwd:h.profile.cwd}}})
+  h.ctx.provide('agents',{get:()=>agent} as never)
+  const scoped=await scope.ctx.plugin(NativeMcp,{transport:'streamable-http',serverName:'fixture',url,toolCallTimeoutMs:1000,headers:{},failOnStartupError:false})
+  await NativeMcp.connectionHandleOf(scoped.ctx)!.ready
+  const scopedRead=await externalToolsState(h.ctx,'scope-identity-fixture')
+  expect(scopedRead.mcp.find(v=>v.id===row.id)).toMatchObject({status:'configured',currentScope:false,tools:[]})
+  expect(scopedRead.mcp.find(v=>v.transport==='scope-owned'&&v.serverName==='fixture')).toMatchObject({status:'connected',currentScope:true,tools:['mcp__fixture__read_fixture'],owner:'Current native scope / 当前原生作用域'})
  }finally{await h.ctx.fiber.dispose();await new Promise<void>(r=>server.close(()=>r()))}
 },20000)
 
@@ -335,5 +351,39 @@ describe('RC2 原生偏好 Config/profile 事务', () => {
   expect(await readFile(h.profile.patchPath, 'utf8')).toBe(before)
   await h.ctx.settings.mutate(WORKSPACE_PREFERENCES, [{ op: 'unset', path: ['editorFontSize'] }], fresh.revision)
   expect(h.view(h.ctx, WORKSPACE_PREFERENCES).value).toMatchObject({ editorFontSize: workspaceDefaults.editorFontSize })
+ })
+})
+
+describe('插件市场只委托原生启用与真实scope读数',()=>{
+ test('自动关联只认明确原端口/可靠供给，已有server重复幂等，两个候选拒猜',async()=>{
+  const config={serverName:'custom-blender',transport:'stdio',command:'/tools/mcp-for-blender'}
+  const rows=[{options:{name:'@deepseek-ai/dsh-mcp-client',config}}]
+  const ctx={get:(name:string)=>name==='configEditor'?{entries:()=>rows}:undefined} as unknown as Context
+  expect(await associateKnownBlender(ctx,{})).toBe('existing');expect(await associateKnownBlender(ctx,{LYAPUNOV_BLENDER_MCP_PORT:'9988'})).toBe('existing')
+  rows.push({options:{name:'@deepseek-ai/dsh-mcp-client',config:{...config,serverName:'second'}}})
+  expect(await associateKnownBlender(ctx,{LYAPUNOV_BLENDER_MCP_PORT:'9988'})).toBe('ambiguous')
+  rows.splice(0)
+  expect(await associateKnownBlender(ctx,{})).toBe('unknown');expect(await associateKnownBlender(ctx,{LYAPUNOV_BLENDER_MCP_PORT:'9876-shell'})).toBe('unknown')
+ })
+ test('只切换已登记MCP，原manager只读/失败结果保留，不改变别的插件',async()=>{
+  const calls:any[]=[]
+  const manager={listPlugins:async()=>[{entryId:'native-blender',moduleName:'@deepseek-ai/dsh-mcp-client'},{entryId:'other',moduleName:'not-mcp'}],setPluginEnabled:async(id:unknown,enabled:boolean)=>{calls.push({id,enabled});return {status:'failed',error:{code:'unaddressable'}}}}
+  const ctx={get:(name:string)=>name==='pluginManager'?manager:undefined} as unknown as Context
+  await expect(setExternalMcpEnabled(ctx,{id:'native-blender',enabled:false})).rejects.toThrow('unaddressable')
+  expect(calls).toEqual([{id:'native-blender',enabled:false}])
+  await expect(setExternalMcpEnabled(ctx,{id:'other',enabled:true})).rejects.toThrow('MCP_ENABLE_TARGET_INVALID')
+  expect(calls).toHaveLength(1)
+ })
+ test('MCP public projection保留来源和明确端口，秘密env/header/URL查询不外发；无server不伪connected',async()=>{
+  const ctx=new NativeContext();ownedContexts.push(ctx)
+  ctx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await ctx.plugin(ToolRuntime)
+  const config={serverName:'blender',transport:'stdio',command:'/tools/mcp-for-blender',args:['--token','super-private-arg'],env:{PRIVATE_TOKEN:'secret-body',BLENDER_PORT:'9991'},headers:{Authorization:'Bearer super-secret'},url:'https://example.test/mcp?token=url-secret'}
+  ctx.provide('configEditor',{entries:()=>[{id:'include:native-blender',disabled:false,options:{id:'native-blender',name:'@deepseek-ai/dsh-mcp-client',config}}]} as never)
+  ctx.provide('profileContext',{patchPath:'/not-existing-profile/cordis.patch.yml'} as never)
+  const read=await externalToolsState(ctx),row=read.mcp[0]!
+  expect(row).toMatchObject({status:'configured',tools:[],currentScope:false,port:9991,integration:'blender',commandLocation:'/tools/mcp-for-blender',configLocation:'/not-existing-profile/cordis.patch.yml'})
+  const output=JSON.stringify(read)
+  for(const secret of ['super-private-arg','secret-body','super-secret','url-secret'])expect(output).not.toContain(secret)
+  expect(row.url).toBe('https://example.test/mcp');expect(read.associations?.[0]).toMatchObject({status:'associated',serverName:'blender'})
  })
 })

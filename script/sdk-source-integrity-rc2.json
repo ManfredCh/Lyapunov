@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "63d0c823164a385563e9d4d27007aa641fcb639a3749f57aa170edfb03ea4c37": {
+    "02f542f4f114ea1a7c895daff00cbdbec9c4682a55455268914f669ef5179c98": {
       "affectedPaths": [
         "packages/client/ui-commands/src/client/service.ts",
         "packages/client/ui-commands/tests/service.client.spec.ts",
@@ -10,19 +10,21 @@
         "packages/client/ui-conversation/src/client/contract/input.ts",
         "packages/client/ui-conversation/src/client/contract/slots.ts",
         "packages/client/ui-conversation/src/client/input/blocks.ts",
+        "packages/client/ui-conversation/src/client/input/editor/claim-decor.ts",
         "packages/client/ui-conversation/src/client/input/machine.ts",
         "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx",
         "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts",
         "packages/client/ui-conversation/tests/input-bar.client.spec.tsx",
         "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx",
+        "packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx",
         "packages/client/ui-model-selection/src/client/service.ts",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts"
       ],
       "stageHashes": [
-        "7e8847a8551f9e11306129e044bc126b9e891aaafc7f7ff8e62d7b24f01fa441",
-        "a396f5838b8c56b1b8fcab8f2591b70e9558afdd280e70a601d24445861c4abd"
+        "af6ae48579b3e8cd49401ebc2317e34f47e370af03d999a0a433d8370009df91",
+        "f5d1faea3c9adddd0b0871bb3c7fddb70864dedd5d88d5b0240d09b47de6dc35"
       ],
-      "finalHash": "a396f5838b8c56b1b8fcab8f2591b70e9558afdd280e70a601d24445861c4abd",
+      "finalHash": "f5d1faea3c9adddd0b0871bb3c7fddb70864dedd5d88d5b0240d09b47de6dc35",
       "finalPostimages": {
         "packages/client/ui-commands/src/client/service.ts": "4fe716cbdc4a28e6d16af46f36f862baaacb97516a58cdc7724a82fd4cda1b8e",
         "packages/client/ui-commands/tests/service.client.spec.ts": "d70f7b3218319c05ae8b235575b0694d971a9c542e4feacc040cf5ae22f14ddb",
@@ -30,11 +32,13 @@
         "packages/client/ui-conversation/src/client/contract/input.ts": "e279ca43447aa99fd8296426a56b30f87cebfca075ad02fc80df94ac74a6b862",
         "packages/client/ui-conversation/src/client/contract/slots.ts": "f29c0eb5cc176ab637b0e975c967c792131c1a778160d780ed6ddded77488c4a",
         "packages/client/ui-conversation/src/client/input/blocks.ts": "9d750284b287e1b5173800a910de79ca046d1bde2c196dc6d5cf0de4982565cd",
+        "packages/client/ui-conversation/src/client/input/editor/claim-decor.ts": "af16785b3328284a0d3796f67b0ddcde4b0ed8b51b2998599d31ca53686d5571",
         "packages/client/ui-conversation/src/client/input/machine.ts": "ba731bb5aaf5238537e87573a8f401955011387c0a66f0787ed9db583335e800",
         "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": "7bbd0141a204379b7f1ce2956884bfc82495eb9552e671f0af22239a3266fefd",
         "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts": "4d007119a6cd88201c27a3746409168b912e3a2ea65a7433babe153a953a6594",
         "packages/client/ui-conversation/tests/input-bar.client.spec.tsx": "459b770f6c436fcba3a2b638b337deed045d0f956df3fc5aafd5b9c60f8d3734",
         "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx": "fd8f3801d04b78d4d85a64d3e183fe88945fe738152359635f6541871ec8f7e0",
+        "packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx": "f602738e23b256f00b5b28323a675c59f6ebb7406b8f879f0a9603f1beef5a87",
         "packages/client/ui-model-selection/src/client/service.ts": "055c152fc1b48916800f09db470f16cd3100187abe4140d747d0dd7aead958e5",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "ac8c238e860d06ed048060a5abcb7fff7fb33c3466029761d9ce57398f9643c6"
       }

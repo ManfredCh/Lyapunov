@@ -16,7 +16,7 @@
  * 槽位由注册方声明，这里的 renderSlot 是注册方传下来的授权函数（与原生 AppFrame 把 renderSlot
  * 交给 MainPanel 的用法一致）。
  */
-import {useMemo} from "react"
+import {useMemo,useRef} from "react"
 import {createPortal} from "react-dom"
 import type {CSSProperties,ReactNode} from "react"
 import type {PropsRenderSlots} from "@deepseek-ai/dsh-client-ui-slots"
@@ -39,8 +39,8 @@ function MissingSurface({tr,what}:{tr:Translate;what:string}){
 /** 面板标题复用 rail 同一枚图标（同一套 Tabler 几何），让“点了哪个入口”在面板上仍然可读。 */
 const PANEL_ICONS:Record<string,WorkbenchIconId>={scene:"scene",environment:"environment",robot:"robot",object:"object",camera:"camera",asset:"asset"}
 
-export function PanelColumn({tr,title,tool,children,onClose}:{tr:Translate;title:string;tool:string;children:ReactNode;onClose:()=>void}){
-  return <aside className="lya-wb-panel" data-tool={tool} style={{width:TOOL_PANEL_WIDTH}} aria-label={title}>
+export function PanelColumn({tr,title,tool,children,onClose,hidden=false}:{tr:Translate;title:string;tool:string;children:ReactNode;onClose:()=>void;hidden?:boolean}){
+  return <aside className="lya-wb-panel" data-tool={tool} hidden={hidden} {...hidden?{inert:''}:{}} style={{width:TOOL_PANEL_WIDTH,...hidden?{display:'none'}:{}}} aria-label={title}>
     <div className="lya-wb-panel-body">{children}</div>
   </aside>
 }
@@ -48,7 +48,7 @@ export function PanelColumn({tr,title,tool,children,onClose}:{tr:Translate;title
 /**
  * 工具面板 / 抽屉的标题映射在 workbench.tsx（它握着场景状态）；这里只负责座位与几何。
  */
-export function WorkSurface({sessionId,tr,renderSlot,centre,panel,deliverables,active=true,nativeTab=false,revealScene}:{
+export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,deliverables,active=true,nativeTab=false,revealScene}:{
   active?:boolean
   nativeTab?:boolean
   revealScene?:()=>void
@@ -59,11 +59,18 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,deliverables,a
   centre:ReactNode
   /** 当前工具面板内容（由 workbench.tsx 按 state.tool 提供）。 */
   panel:ReactNode
+  /** 仅真实草稿编辑器常驻；物理/资源面板保持原按需生命周期。 */
+  retainedPanel?:{tool:string;children:ReactNode}
   /** 产物抽屉内容（录制/回放/截图）。 */
   deliverables:ReactNode
 }){
   const ui=useWorkbenchUI()
   const state=ui.getSnapshot()
+  // 缓存原React编辑器座位，不复制Draft/Scene；跨工具开合和暂时取消选择不卸载该owner。
+  const retained=useRef<{sessionId?:string;tool:string;children:ReactNode}>()
+  if(retained.current?.sessionId!==sessionId)retained.current=undefined
+  if(retainedPanel&&(retained.current||state.tool===retainedPanel.tool))retained.current={sessionId,...retainedPanel}
+  const retainedVisible=Boolean(retainedPanel&&state.tool===retainedPanel.tool)
   // 交给占用者的开合请求（同进程函数，不是端点、不是新状态）；identity 稳定，避免占用者反复登记。
   const reveal=useMemo(()=>({canvas:()=>{revealScene?.();ui.showCentre("canvas")},file:()=>ui.showCentre("file"),terminal:()=>{revealScene?.();ui.showDrawer("terminal")},toggleTerminal:()=>{revealScene?.();if(nativeTab&&!active)ui.showDrawer("terminal");else ui.toggleDrawer("terminal")}}),[ui,revealScene,nativeTab,active])
   const exposed=active&&state.centre==="file"
@@ -77,8 +84,12 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,deliverables,a
         <div className="lya-wb-layer" data-layer="canvas" hidden={fileVisible}>{centre}</div>
         {!nativeTab&&<div className="lya-wb-layer" data-layer="file" hidden={!fileVisible}>{fileSurface}</div>}
       </div>
-      {state.tool?(()=>{
-        const node=<PanelColumn tr={tr} tool={state.tool} title={panelTitle(tr,state.tool)} onClose={()=>ui.closeTool()}>{panel}</PanelColumn>
+      {state.tool||retained.current?(()=>{
+        const tool=state.tool??retained.current!.tool
+        const node=<PanelColumn key={sessionId} tr={tr} tool={tool} title={panelTitle(tr,tool)} hidden={!state.tool} onClose={()=>ui.closeTool()}>
+          {retained.current&&<div key="retained-editor" hidden={!retainedVisible} {...!retainedVisible?{inert:''}:{}} style={!retainedVisible?{display:'none'}:undefined}>{retained.current.children}</div>}
+          <div key="active-panel">{panel}</div>
+        </PanelColumn>
         return appSidePanelHost.current?createPortal(node,appSidePanelHost.current):node
       })():null}
     </div>

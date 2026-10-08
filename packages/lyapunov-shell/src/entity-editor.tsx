@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from "react"
 import type {Entity,SceneCommit,SceneSnapshot,ScenePatch} from "../../lyapunov-contracts/src/types.ts"
 import {entityDisplayName} from './scene-entity-name.ts'
+import type {CameraExitBridge} from './camera-authoring.ts'
 export type Translate=(cn:string,en:string)=>string
 export interface NumericProps {label:string;value:number;set:(value:number)=>void;min?:number;max?:number;step?:number;disabled?:boolean}
 export function NumericInput({label,value,set,min,max,step=.1,disabled}:NumericProps){
@@ -11,9 +12,11 @@ export function NumericInput({label,value,set,min,max,step=.1,disabled}:NumericP
 export function NumberField(props:NumericProps){return <label>{props.label}<NumericInput {...props}/></label>}
 interface Draft {sceneId:string;baseRevision:number;base:Entity;name:string;position:[number,number,number];quaternion:[number,number,number,number];scale:[number,number,number];parent:string;visible:boolean;dirty:boolean}
 function createDraft(sceneId:string,revision:number,entity:Entity):Draft{return {sceneId,baseRevision:revision,base:structuredClone(entity),name:entity.name,position:[...entity.transform.position],quaternion:[...entity.transform.quaternion],scale:[...entity.transform.scale],parent:entity.parentId??"",visible:entity.components.visual?.visible!==false,dirty:false}}
-export function EntityEditor({sceneId,revision,entity,entities,tr,commit}:{sceneId:string;revision:number;entity:Entity;entities:Entity[];tr:Translate;commit:(input:SceneCommit)=>Promise<SceneSnapshot>}){
+export function EntityEditor({sceneId,revision,entity,entities,tr,commit,exitBridge,exitId}:{sceneId:string;revision:number;entity:Entity;entities:Entity[];tr:Translate;commit:(input:SceneCommit)=>Promise<SceneSnapshot>;exitBridge?:CameraExitBridge;exitId?:string}){
  const key=sceneId+":"+entity.entityId,drafts=useRef(new Map<string,Draft>()),activeKey=useRef(key)
  const [draft,setDraft]=useState(()=>createDraft(sceneId,revision,entity)),[saving,setSaving]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("")
+ const draftRef=useRef(draft),pendingSave=useRef<Promise<void>>()
+ draftRef.current=draft
  const visible=useRef({key,sceneId,revision,entity});visible.current={key,sceneId,revision,entity}
  useEffect(()=>{
   if(activeKey.current!==key){activeKey.current=key;const cached=drafts.current.get(key);setDraft(cached?.dirty?cached:createDraft(sceneId,revision,entity));setError("");setNotice("");return}
@@ -22,8 +25,12 @@ export function EntityEditor({sceneId,revision,entity,entities,tr,commit}:{scene
  const edit=(changes:Partial<Draft>)=>{setNotice("");setDraft(current=>{const next={...current,...changes};next.dirty=next.name!==next.base.name||next.parent!==(next.base.parentId??"")||next.visible!==(next.base.components.visual?.visible!==false)||next.position.some((value,index)=>value!==next.base.transform.position[index])||next.quaternion.some((value,index)=>value!==next.base.transform.quaternion[index])||next.scale.some((value,index)=>value!==next.base.transform.scale[index]);drafts.current.set(key,next);return next})}
  const reload=()=>{const next=createDraft(sceneId,revision,entity);drafts.current.set(key,next);setDraft(next);setError("");setNotice("")}
  const descendant=(candidate:Entity)=>{let id=candidate.parentId;while(id){if(id===entity.entityId)return true;id=entities.find(value=>value.entityId===id)?.parentId}return false}
- const submit=async()=>{
-  const pending=structuredClone(draft),patch:ScenePatch=[],changes:Record<string,unknown>={}
+ const submit=(source=draftRef.current):Promise<void>=>{
+  if(pendingSave.current)return pendingSave.current
+  const sourceKey=source.sceneId+":"+source.base.entityId
+  const operation=(async()=>{
+  const pending=structuredClone(source),patch:ScenePatch=[],changes:Record<string,unknown>={}
+  if(!pending.dirty)return
   if(pending.name!==pending.base.name)changes.name=pending.name
   if(pending.position.some((value,index)=>value!==pending.base.transform.position[index])||pending.quaternion.some((value,index)=>value!==pending.base.transform.quaternion[index])||pending.scale.some((value,index)=>value!==pending.base.transform.scale[index]))changes.transform={...pending.base.transform,position:pending.position,quaternion:pending.quaternion,scale:pending.scale}
   if(pending.visible!==(pending.base.components.visual?.visible!==false))changes.components={...pending.base.components,visual:{...pending.base.components.visual,visible:pending.visible}}
@@ -35,14 +42,30 @@ export function EntityEditor({sceneId,revision,entity,entities,tr,commit}:{scene
    const snapshot=await commit({sceneId:pending.sceneId,expectedRevision:pending.baseRevision,patch})
    const updated=snapshot.entities.find(value=>value.entityId===pending.base.entityId)
    if(updated){
-    const current=visible.current,superseded=current.key===key&&current.revision>snapshot.revision
+    const current=visible.current,superseded=current.key===sourceKey&&current.revision>snapshot.revision
     const next=superseded?createDraft(current.sceneId,current.revision,current.entity):createDraft(snapshot.sceneId,snapshot.revision,updated)
-    drafts.current.set(key,next)
-    if(visible.current.key===key){setDraft(next);if(superseded)setNotice(tr("编辑已提交，场景随后又有更新；已显示当前版本。","Your edit was committed, then the scene changed again. Showing the current version."))}
+    drafts.current.set(sourceKey,next)
+    if(visible.current.key===sourceKey){draftRef.current=next;setDraft(next);if(superseded)setNotice(tr("编辑已提交，场景随后又有更新；已显示当前版本。","Your edit was committed, then the scene changed again. Showing the current version."))}
    }
-  }catch(value){if(visible.current.key===key)setError(tr("提交未成功，草稿已保留。 ","The draft was preserved. ")+(value instanceof Error?value.message:String(value)))}
+   else throw Error('ENTITY_DRAFT_SAVE_UNCONFIRMED: '+pending.base.entityId)
+  }catch(value){if(visible.current.key===sourceKey)setError(tr("提交未成功，草稿已保留。 ","The draft was preserved. ")+(value instanceof Error?value.message:String(value)));throw value}
   finally{setSaving(false)}
+  })()
+  pendingSave.current=operation
+  void operation.finally(()=>{if(pendingSave.current===operation)pendingSave.current=undefined}).catch(()=>undefined)
+  return operation
  }
+ const submitRef=useRef(submit);submitRef.current=submit
+ const pendingDrafts=()=>{
+  const current=draftRef.current
+  if(!Number.isSafeInteger(current.baseRevision)||current.baseRevision<0)throw Error('ENTITY_DRAFT_STATUS_UNKNOWN')
+  const known=new Map(drafts.current);known.set(current.sceneId+":"+current.base.entityId,current)
+  return [...known.values()].filter(value=>value.dirty)
+ }
+ useEffect(()=>exitBridge?.registerExitParticipant?.(exitId??'entity-editor:'+sceneId,{
+  summary:()=>({dirtyDrafts:pendingDrafts().length,runningActions:0}),
+  flush:async()=>{if(pendingSave.current)await pendingSave.current;for(const value of pendingDrafts())await submitRef.current(value);if(pendingDrafts().length)throw Error('ENTITY_DRAFT_SAVE_UNCONFIRMED')},
+ }),[exitBridge,exitId])
  return <fieldset className="lya-property-editor"><legend>{tr("属性","Properties")}</legend>
   {entity.locked&&<p className="lya-help" data-testid="entity-locked">{tr('此节点已锁定。请在场景层级中解锁后编辑变换；仍可显隐或删除。','This node is locked. Unlock it in the scene hierarchy to edit transforms. Visibility and deletion remain available.')}</p>}
   <label className="lya-field-label">{tr("名称","Name")}<input className="lya-entity-name" aria-label={tr("实体名称","Entity name")} value={entityDisplayName({...draft.base,name:draft.name},tr)} disabled={saving} onChange={event=>edit({name:event.target.value})}/></label>
@@ -54,7 +77,7 @@ export function EntityEditor({sceneId,revision,entity,entities,tr,commit}:{scene
   {draft.dirty&&revision!==draft.baseRevision&&<p className="lya-warning lya-help" data-testid="draft-revision-warning">{tr(`场景已更新到 rev ${revision}；这份草稿仍基于 rev ${draft.baseRevision}。`,`The scene is at rev ${revision}; this draft is based on rev ${draft.baseRevision}.`)}</p>}
   {error&&<p className="lya-error lya-help" role="alert">{error}</p>}
   {notice&&<p className="lya-help" role="status">{notice}</p>}
-  <div className="lya-row" style={{marginTop:8}}><button className="lya-primary" disabled={saving||!draft.dirty} onClick={()=>void submit()}>{saving?tr("保存中…","Saving…"):tr("提交编辑","Apply edit")}</button><button disabled={saving} onClick={reload}>{tr("读取当前版本","Reload current")}</button></div>
+  <div className="lya-row" style={{marginTop:8}}><button className="lya-primary" disabled={saving||!draft.dirty} onClick={()=>void submit().catch(()=>undefined)}>{saving?tr("保存中…","Saving…"):tr("提交编辑","Apply edit")}</button><button disabled={saving} onClick={reload}>{tr("读取当前版本","Reload current")}</button></div>
   <p className="lya-help" data-testid="draft-base-revision">rev {draft.baseRevision} · {entity.resources.length} {tr("资源引用","resource references")}{draft.dirty?tr(" · 草稿未保存"," · Unsaved draft"):""}</p>
  </fieldset>
 }

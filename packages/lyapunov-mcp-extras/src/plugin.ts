@@ -56,6 +56,6 @@ export function apply(ctx:Context,config:{guest?:boolean}={}){
    return operation.method==='readResource'?resourceAttachments(ctx,value,signal,agent):value
   }
   ctx.tools.register(defineTool({name:operation.name,description:operation.description,parameters:{input:{type:'json',required:true,description:'Read/get_prompt requires serverName (server is accepted for compatibility). Lists can omit the server to aggregate visible entries; with a server, cursor is supported. Read supplies uri; get_prompt supplies name and an arguments dictionary of strings.'}},output:{schema:{type:'json'},render:(_args,value)=>renderResource(value)},execute:(args,exec)=>run(args.input,exec.signal,exec.agent)}))
-  ctx.commands.register({name:operation.name,description:operation.description,input:{hint:'JSON parameters for the same operation.'},async handler(invocation){try{return {kind:'success',text:JSON.stringify(await run(JSON.parse(invocation.rawInput||'{}'),invocation.signal,invocation.agent))}}catch(error){return {kind:'error',text:error instanceof Error?error.message:String(error)}}}})
+  ctx.commands.register({name:operation.name,description:operation.description,input:{hint:'JSON parameters for the same operation.'},async handler(invocation){try{return {kind:'success',text:JSON.stringify(await run(JSON.parse(invocation.rawInput.trim()||'{}'),invocation.signal,invocation.agent))}}catch(error){return {kind:'error',text:error instanceof Error?error.message:String(error)}}}})
  }
 }

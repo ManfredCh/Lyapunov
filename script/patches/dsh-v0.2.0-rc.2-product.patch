@@ -87,6 +87,23 @@ index 692b808f157122c42370ad4b456194edc3873933..d2a5b0e7a8bee3f43b3bcaa023cdc18e
      store.set(block)
    }
  
+diff --git a/packages/client/ui-conversation/src/client/input/editor/claim-decor.ts b/packages/client/ui-conversation/src/client/input/editor/claim-decor.ts
+index 7e28273305957b688112ce0840f4ed914c44a498..5a532b9389509530efbd933abd0b2da8e181cef7 100644
+--- a/packages/client/ui-conversation/src/client/input/editor/claim-decor.ts
++++ b/packages/client/ui-conversation/src/client/input/editor/claim-decor.ts
+@@ -44,8 +44,11 @@ export function registerClaimDecoration(editor: LexicalEditor, activeToken: () =
+     if (text.length > token.length) {
+       // Typing at the token boundary lands in the styled node; split the
+       // overflow back out so only the token itself carries the color.
+-      const [tokenNode] = node.splitText(token.length)
++      const [tokenNode, suffixNode] = node.splitText(token.length)
+       if (tokenNode !== undefined && tokenNode.getStyle() !== TOKEN_STYLE) tokenNode.setStyle(TOKEN_STYLE)
++      // Clear inherited token styling in this same transform: otherwise
++      // normalization re-merges equal-style siblings before the suffix runs.
++      if (suffixNode?.getStyle() === TOKEN_STYLE) suffixNode.setStyle('')
+       return
+     }
+     if (node.getStyle() !== TOKEN_STYLE) node.setStyle(TOKEN_STYLE)
 diff --git a/packages/client/ui-conversation/src/client/input/machine.ts b/packages/client/ui-conversation/src/client/input/machine.ts
 index 3c972fa74e987b4b9c6a9a930cc8757494caf22e..ad10cb509e29f24c942ce2742ff688106d0215cf 100644
 --- a/packages/client/ui-conversation/src/client/input/machine.ts
@@ -531,6 +548,76 @@ index c4df0217e837be15c89839293194ee35f5db1a40..85b5d8666c62f76822849cc911bf8074
  describe('scenario C: pasted /goal xxx + enter (menu never opened)', () => {
    it('adjudicates on enter, claims and submits in one stroke', async () => {
      const b = await bench()
+diff --git a/packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx b/packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx
+index cdee0965ba3f0fe49b7d26505308e895edf95fe6..76004342db99b5700c204903c1b5739ef6970077 100644
+--- a/packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx
++++ b/packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx
+@@ -10,12 +10,13 @@ import { createHeadlessEditor } from '@lexical/headless'
+ import type { LexicalEditor, NodeKey, ParagraphNode } from 'lexical'
+ import {
+   $createLineBreakNode, $createParagraphNode, $createTextNode, $getRoot, $getSelection,
+-  $isTextNode, $setSelection,
++  $isTextNode, $isRangeSelection, $setSelection, CONTROLLED_TEXT_INSERTION_COMMAND,
+ } from 'lexical'
+ import type { ReferenceInsert } from '../src/client/contract/draft-editor.ts'
+ import {
+   $createReferenceChipNode, $isReferenceChipNode, ReferenceChipNode,
+ } from '../src/client/input/editor/chip-node.tsx'
++import { registerPlainText } from '@lexical/plain-text'
+ import { registerClaimDecoration } from '../src/client/input/editor/claim-decor.ts'
+ import { registerTextRefDecoration, TextRefNode } from '../src/client/input/editor/text-ref.ts'
+ import type { SerializedReferenceChipNode } from '../src/client/input/editor/chip-node.tsx'
+@@ -429,6 +430,50 @@ describe('claim precedence over text-ref entities', () => {
+   const TOKEN_STYLE = 'color: var(--dsw-alias-state-business-primary)'
+   const LEXICON: ReadonlyMap<'/' | '@', readonly string[]> = new Map([['/', ['plan']]])
+ 
++  it.each(['/list_mcp_servers ', '/计划 '])('继承蓝色token的实际PlainText键入更新canonical %j参数且不发生反复合并', async token => {
++    const editor = makeEditor(), id = idAssigner()
++    registerPlainText(editor)
++    registerClaimDecoration(editor, () => token)
++    editor.update(() => {
++      const text = $createTextNode(token).setStyle(TOKEN_STYLE)
++      $getRoot().clear().append($createParagraphNode().append(text))
++      text.selectEnd().setStyle(TOKEN_STYLE)
++    }, { discrete: true })
++    // This is the same PlainText insertion command browser beforeinput dispatches;
++    // it enters the actual Lexical node transaction rather than changing DOM text.
++    editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, '{}')
++    editor.read(() => {
++      const nodes = $getRoot().getAllTextNodes()
++      expect($projectComposer(id).clipboardText).toBe(token + '{}')
++      expect(nodes.map(node => ({ text: node.getTextContent(), style: node.getStyle() }))).toEqual([
++        { text: token, style: TOKEN_STYLE }, { text: '{}', style: '' },
++      ])
++      const selection = $getSelection()
++      expect($isRangeSelection(selection)).toBe(true)
++      if ($isRangeSelection(selection)) {
++        expect(selection.isCollapsed()).toBe(true)
++        expect(selection.anchor.getNode().getTextContent()).toBe('{}')
++        expect(selection.anchor.offset).toBe(2)
++      }
++    })
++  })
++
++  it('参数已有不同样式与格式时保留，不把普通参数覆盖成token蓝色', () => {
++    const editor = makeEditor(), token = '/plan ', ownStyle = 'font-style: italic'
++    registerClaimDecoration(editor, () => token)
++    editor.update(() => {
++      const text = $createTextNode(token + '参数').setStyle(ownStyle).setFormat('bold')
++      $getRoot().clear().append($createParagraphNode().append(text))
++      text.selectEnd()
++    }, { discrete: true })
++    editor.read(() => {
++      const nodes = $getRoot().getAllTextNodes()
++      expect(nodes.map(node => node.getStyle())).toEqual([TOKEN_STYLE, ownStyle])
++      expect(nodes[1]!.hasFormat('bold')).toBe(true)
++      expect(nodes[1]!.getTextContent()).toBe('参数')
++    })
++  })
++
+   it.each(['/plan', '/plan '])('keeps the lexicon-listed %j claim plain and accent-styled until release', (token) => {
+     const editor = makeEditor()
+     let claim: string | null = token
 diff --git a/packages/client/ui-model-selection/src/client/service.ts b/packages/client/ui-model-selection/src/client/service.ts
 index 6b1ea4b73854013415c07c55d69b77ffb62f41d5..f96123b5b41a178447a0a2d57c0457e8779515dc 100644
 --- a/packages/client/ui-model-selection/src/client/service.ts

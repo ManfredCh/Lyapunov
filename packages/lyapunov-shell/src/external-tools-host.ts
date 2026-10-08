@@ -5,12 +5,15 @@ import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-plugin-manager'
+import {pluginEntryId} from '@deepseek-ai/dsh-host-plugin-inventory'
 import {SessionId} from '@deepseek-ai/dsh-session'
 import {JobId,type JobOutcome} from '@deepseek-ai/dsh-jobs'
 import {writableRoots} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {Agent} from '@deepseek-ai/dsh-agent'
-import type {ScopeKey} from '@deepseek-ai/dsh-scope'
+import {scopeOf,scopeChainOf,scopeTarget,type ScopeKey} from '@deepseek-ai/dsh-scope'
 import {readProfilePatches,reconcileProfilePatches,composeEntries,loadProfileDirectory} from '@deepseek-ai/dsh-app-boot'
 import type {PatchOptions} from '@deepseek-ai/cordis-plugin-include'
 import {withFileLock,writeFileAtomic} from '@deepseek-ai/dsh-atomic-write'
@@ -25,10 +28,12 @@ import {createHash} from 'node:crypto'
 import {blenderMcpPaths,blenderMcpStatus,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 import {resolveBlenderExecutable} from '../../../script/runtime-patch.ts'
 import {CREATIVE_TOOLS_CATALOG,downloadPlan,HF_DEFAULT_MIRROR,type CreativeToolId} from '../../../script/creative-tools-catalog.ts'
-import {visibleServers} from '../../lyapunov-mcp-extras/src/plugin.ts'
+
 import {redactSecretsText} from '../../lyapunov-contracts/src/command-privacy.ts'
 import {canonicalTargetPath,pathWithin,isForeignSessionTarget} from '../../lyapunov-contracts/src/writable-boundary.ts'
 import type {ExternalToolsState,ExternalMcpInput,ExternalMcpRow,ExternalToolReading} from './external-tools-state.ts'
+import {integrationAssociations,classifyMcpIntegration,type ExternalSkillRow} from './plugin-marketplace.ts'
+import {discoverIntegrations} from './integration-discovery.ts'
 
 declare module '@deepseek-ai/dsh-jobs' {interface JobKindMap {'external-install':'external-install'}}
 const MCP_PLUGIN='@deepseek-ai/dsh-mcp-client'
@@ -136,25 +141,38 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
  const agent=sessionId?ctx.get('agents')?.get(SessionId(sessionId)):undefined
  if(sessionId&&!agent)throw Error('SESSION_NOT_LIVE: 只读取已经打开的会话。 / Only an already-open session can be inspected.')
  const target=agent?.ctx??ctx,tools=ctx.tools.schemas(agent as unknown as ScopeKey|undefined).map(v=>v.name)
- const servers=await visibleServers(target,signal)
- const settings=ctx.get('settings'),views=settings?.describe({redactSecrets:true})??[],entries=ctx.get('configEditor')?.entries()??[]
+ // Preserve the exact nearest native owner so a same-name child server cannot
+ // make a profile-global configuration look callable in that child's scope.
+ const scope=scopeOf(target),visible=new Map<string,{serverName:string;status:string;ownerScope:object|undefined}>()
+ for(const ownerScope of [...scopeChainOf(scope),undefined]){
+  const rows=await target.waterfall(scopeTarget({},scope),'mcp/content-request',{serverName:'',ownerScope,method:'listServers',params:{},signal},()=>Promise.resolve([])) as {serverName:string;status:string}[]
+  for(const row of rows)if(!visible.has(row.serverName))visible.set(row.serverName,{...row,ownerScope})
+ }
+ const servers=[...visible.values()]
+ const settings=ctx.get('settings'),entries=ctx.get('configEditor')?.entries()??[]
+ const profile=ctx.get('profileContext'),configLocation=profile?.patchPath??null
+ const configModifiedAt=configLocation?await stat(configLocation).then(v=>v.mtimeMs).catch(()=>null):null
+ const nativeManaged=await ctx.get('pluginManager')?.listPlugins().catch(()=>[])??[]
  const mcp:ExternalMcpRow[]=await Promise.all(entries.filter(e=>e.options.name===MCP_PLUGIN).map(async e=>{
-  const c=object(e.options.config),serverName=String(c.serverName??''),live=servers.find(v=>v.serverName===serverName)
+  const c=object(e.options.config),serverName=String(c.serverName??''),live=servers.find(v=>v.serverName===serverName&&v.ownerScope===scopeOf(e.fiber?.ctx??ctx))
   const connection=e.fiber?connectionHandleOf(e.fiber.ctx):undefined
   // ready是原生首次启动结果，读它不会重试或创建另一连接；与当前掉线状态明确区分。
   const initial=live?.status!=='connected'&&connection?await Promise.race([connection.ready,new Promise<undefined>(r=>{const timer=setTimeout(()=>r(undefined),100);timer.unref?.()})]):undefined
   const detail=live?.status==='connected'?null:initial?.error!==undefined?'首次启动失败 / Initial startup failed: '+errorText(initial.error):live?'当前连接不可用；原生客户端管理重连。 / Connection unavailable; inspect native reconnection diagnostics.':'该配置尚无活动连接实例。 / No active native connection instance.'
-  return {id:e.options.id,serverName,transport:String(c.transport??''),command:typeof c.command==='string'?basename(c.command):null,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:tools.filter(t=>t.startsWith('mcp__'+serverName+'__')),revision:externalMcpRevision(ctx.get('profileContext')?.patchPath??'',e.options.id,e.options.config),detail}
+  const command=typeof c.command==='string'?basename(c.command):null,integration=classifyMcpIntegration({serverName,command}),managed=nativeManaged.find(v=>String(v.entryId)===e.id)
+  const portValue=object(c.env).BLENDER_PORT,port=integration==='blender'&&typeof portValue==='string'&&/^\d+$/.test(portValue)&&Number(portValue)>0&&Number(portValue)<=65535?Number(portValue):null
+  return {id:e.options.id,serverName,transport:String(c.transport??''),command,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:live?tools.filter(t=>t.startsWith('mcp__'+serverName+'__')):[],revision:externalMcpRevision(profile?.patchPath??'',e.options.id,e.options.config),detail,enabled:!e.disabled,currentScope:live!==undefined,owner:'Native profile / 原生 profile',configLocation,commandLocation:typeof c.command==='string'&&isAbsolute(c.command)?redactSecretsText(c.command):null,port,...integration?{integration}:{},modifiedAt:configModifiedAt,nativeEntryId:managed?String(managed.entryId):undefined,canToggle:managed!==undefined&&managed.readOnlyReason===undefined}
  }))
- for(const live of servers)if(!mcp.some(v=>v.serverName===live.serverName))mcp.push({id:'',serverName:live.serverName,transport:'scope-owned',command:null,url:null,argsCount:0,envNames:[],headerNames:[],status:live.status==='connected'?'connected':'unavailable',tools:tools.filter(t=>t.startsWith('mcp__'+live.serverName+'__')),revision:null,detail:null})
- const blender=await version(resolveBlenderExecutable(),['--version']),unity=process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()
+ for(const live of servers)if(!mcp.some(v=>v.serverName===live.serverName&&v.currentScope===true))mcp.push({id:'',serverName:live.serverName,transport:'scope-owned',command:null,url:null,argsCount:0,envNames:[],headerNames:[],status:live.status==='connected'?'connected':'unavailable',tools:tools.filter(t=>t.startsWith('mcp__'+live.serverName+'__')),revision:null,detail:null,enabled:true,currentScope:true,owner:'Current native scope / 当前原生作用域',configLocation:null,...classifyMcpIntegration({serverName:live.serverName,command:null})?{integration:classifyMcpIntegration({serverName:live.serverName,command:null})}:{}})
+ const candidates=await discoverIntegrations(ctx)
+ const blenderPath=resolveBlenderExecutable(),blender=await version(blenderPath,['--version']),unity=process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()??candidates.find(v=>v.kind==='unity'&&basename(v.path)==='Unity')?.path
  const unityVersion=unity?await version(unity,['-version']):null
  const samEntry=entries.find(e=>String(e.options.name).includes('segment-sam3')),sam=object(samEntry?.options.config)
  const samPath=typeof sam.checkpointPath==='string'?sam.checkpointPath:process.env.LYAPUNOV_SAM3_CHECKPOINT
  const samPython=typeof sam.pythonPath==='string'?sam.pythonPath:process.env.LYAPUNOV_SAM3_PYTHON
  const software:ExternalToolReading[]=[
-  {id:'blender',installed:blender!==null,version:blender??undefined,detail:blender?'软件版本检查通过；addon 与 MCP 连接需另行检查。 / Software checked; addon and MCP are separate.':'未找到可用 Blender 命令。 / No usable Blender executable.',adapter:'blender_run'},
-  {id:'unity',installed:unityVersion?true:null,version:unityVersion??undefined,detail:unityVersion?'编辑器版本检查通过，MCP 连接另行检查。 / Editor checked; inspect MCP separately.':'未指定编辑器命令；可连接已运行的 Unity MCP，或从 Unity Hub 选择编辑器。 / No editor command supplied; existing MCP may still be connected.',adapter:'MCP'},
+  {id:'blender',installed:blender!==null,version:blender??undefined,detail:blender?'软件版本检查通过；addon 与 MCP 连接需另行检查。 / Software checked; addon and MCP are separate.':'未找到可用 Blender 命令。 / No usable Blender executable.',adapter:'blender_run',location:candidates.find(v=>v.kind==='blender'&&basename(v.path)==='blender')?.path??blenderPath},
+  {id:'unity',installed:unityVersion?true:null,version:unityVersion??undefined,detail:unityVersion?'编辑器版本检查通过，MCP 连接另行检查。 / Editor checked; inspect MCP separately.':'未指定编辑器命令；可连接已运行的 Unity MCP，或从 Unity Hub 选择编辑器。 / No editor command supplied; existing MCP may still be connected.',adapter:'MCP',location:unity??candidates.find(v=>v.kind==='unity')?.path},
   {id:'sam3',installed:!!samPath&&existsSync(samPath)&&!!samPython&&existsSync(samPython),location:samPath,detail:'本地 checkpoint 与 Python 仅检查文件存在；推理、授权与模型兼容性尚需实际调用验证。 / File checks only; inference remains unverified.',adapter:'segment_sam3'},
   {id:'sam3d',installed:null,detail:'可下载目录锁定权重；当前没有 SAM 3D Objects 运行适配器。 / Downloadable; no runtime adapter.',adapter:'none'},
   {id:'da3',installed:null,detail:'可下载 DA3 BASE；当前 depth-estimation 使用 DA-V2，不会因下载而切换模型。 / DA3 acquisition does not replace DA-V2.',adapter:'DA-V2'},
@@ -162,7 +180,9 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
  const supply=blenderMcpStatus(),paths=blenderMcpPaths()
  const existingCommand=await ctx.get('subprocess')?.resolveExecutable('mcp-for-blender').catch(()=>null)??null
  const installJobs=ctx.get('jobs')?.list(agent?.id).filter(j=>j.kind==='external-install'||j.kind==='fastgs-external').map(j=>({jobId:String(j.id),registryId:j.registryId??null,status:j.status,label:j.label,progress:j.progress??null,detail:j.detail??null}))??[]
- return {capturedAt:Date.now(),writable:!!settings?.writable,software,mcp,blenderSupply:{ready:supply.ready,command:paths.command,existingCommand,addon:paths.addon,detail:supply.detail},installJobs}
+ const skillOwner=ctx.get('skills'),skills:ExternalSkillRow[]=[];let skillsComplete=false,skillsDetail:string|null=null
+ if(skillOwner){try{const snapshot=await skillOwner.snapshot({scope:agent as unknown as ScopeKey|undefined,cwd:agent?.session.header.cwd??profile?.cwd,signal});skillsComplete=snapshot.complete;for(const row of snapshot.skills)skills.push({name:row.name,description:row.description,provider:row.provider,source:row.source,path:row.path??null,modelInvocable:row.invocation.modelInvocable,userInvocable:row.invocation.userInvocable,toolVisible:tools.includes('skill'),currentScope:agent!==undefined});if(!snapshot.complete)skillsDetail='技能来源探测未完整；保留原生不完整读数。 / Native skill discovery is incomplete.'}catch(error){skillsDetail=errorText(error)}}else skillsDetail='原生技能目录未装配。 / Native skill catalog is unavailable.'
+ return {capturedAt:Date.now(),writable:!!settings?.writable,software,mcp,skills,skillsComplete,skillsDetail,scopeSessionId:sessionId??null,candidates,associations:integrationAssociations(mcp),blenderSupply:{ready:supply.ready,command:paths.command,existingCommand,addon:paths.addon,detail:supply.detail},installJobs}
 }
 
 /** 安装仅在显式点击后起原生 Jobs；目录、版本与HF端点来自现有 owner。 */
@@ -200,10 +220,40 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
  }})
 }
 
+/** 只自动消费已明确的非秘密端口与可靠既有供给；未知/歧义保持未关联，不猜默认端口。 */
+export async function associateKnownBlender(ctx:Context,env:NodeJS.ProcessEnv=process.env):Promise<'existing'|'associated'|'unknown'|'ambiguous'>{
+ const entries=ctx.get('configEditor')?.entries()??[]
+ const matches=entries.filter(e=>e.options.name===MCP_PLUGIN&&classifyMcpIntegration({serverName:String(object(e.options.config).serverName??''),command:typeof object(e.options.config).command==='string'?object(e.options.config).command as string:null})==='blender')
+ if(matches.length>1)return 'ambiguous'
+ if(matches.length===1)return 'existing'
+ const port=env.LYAPUNOV_BLENDER_MCP_PORT?.trim()
+ if(!port||!/^\d+$/.test(port)||Number(port)<1||Number(port)>65535||ctx.get('settings')?.writable!==true)return 'unknown'
+ const candidates=(await discoverIntegrations(ctx,env)).filter(v=>v.kind==='blender'&&v.knownPackage)
+ const supply=blenderMcpStatus(),paths=blenderMcpPaths()
+ if(candidates.length>1)return 'ambiguous'
+ const command=candidates.length===1?candidates[0]!.path:supply.ready?paths.command:undefined
+ if(!command)return 'unknown'
+ await saveExternalMcp(ctx,{serverName:'blender',transport:'stdio',command,args:[],blenderPort:Number(port),expectedRevision:null})
+ return 'associated'
+}
+
+/** 显式用户切换沿原生 PluginManager，不自建 enablement 或绕过只读/依赖门。 */
+export async function setExternalMcpEnabled(ctx:Context,input:{id:string;enabled:boolean}):Promise<unknown>{
+ if(typeof input.id!=='string'||typeof input.enabled!=='boolean')throw Error('MCP_ENABLE_INPUT_INVALID')
+ const manager=ctx.get('pluginManager');if(!manager)throw Error('MCP_ENABLE_OWNER_UNAVAILABLE: 原生插件管理器未装配。 / Native plugin manager is unavailable.')
+ const row=(await manager.listPlugins()).find(v=>String(v.entryId)===input.id)
+ if(!row||row.moduleName!==MCP_PLUGIN)throw Error('MCP_ENABLE_TARGET_INVALID: 仅允许切换已登记 MCP 服务。 / Select a registered MCP service.')
+ const result=await manager.setPluginEnabled(pluginEntryId(input.id),input.enabled)
+ if(result.error||result.application==='failed'||result.application==='cancelled')throw Error('MCP_ENABLE_FAILED: '+JSON.stringify(result.error??result.warnings))
+ return result
+}
+
 export function applyExternalToolsHost(ctx:Context):void{
+ ctx.on('agent/created',async()=>{await associateKnownBlender(ctx).catch(error=>ctx.logger.warn('Existing Blender association failed: '+errorText(error)))})
  const register=(path:string,methods:readonly ('GET'|'POST')[],handler:(r:Request)=>Promise<Response>)=>ctx.effect(()=>ctx.connection.fetch.register({path:'/api/lyapunov/external-tools/'+path,methods,requestBody:'buffered',fetch:async r=>{try{return await handler(r)}catch(e){return Response.json({error:errorText(e)},{status:400})}}}))
  register('state',['GET'],async r=>Response.json(await externalToolsState(ctx,new URL(r.url).searchParams.get('sessionId')??undefined,r.signal),{headers:{'cache-control':'private, no-store'}}))
  register('mcp',['POST'],async r=>{await saveExternalMcp(ctx,await r.json() as ExternalMcpInput);return Response.json({saved:true,handshake:'Read the native server state and tool list separately.'})})
+ register('enable',['POST'],async r=>Response.json(await setExternalMcpEnabled(ctx,await r.json() as {id:string;enabled:boolean})))
  register('acquire',['POST'],async r=>Response.json({jobId:await startExternalAcquisition(ctx,await r.json() as {id:string;localDir?:string;sessionId?:string})}))
  register('job',['GET'],async r=>{
   const q=new URL(r.url).searchParams,agent=q.get('sessionId')?ctx.agents.get(SessionId(q.get('sessionId')!)):undefined

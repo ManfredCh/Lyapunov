@@ -2960,6 +2960,20 @@
       "markers": [],
       "decision": "include",
       "reason": "Alpha5 原生 RC2 Terminal 的离线 Inbox、V4工具消息、同源URL及原生 RemoteStream 的首锚点/断流/恢复测试；仅内存流和临时上下文，不连接真实远端、不调用模型、不读取凭据或启动物理。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/entity-editor-exit.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha6.2退出：现成SDK jsdom/真实React EntityEditor+WorkSurface跨Object-Scene-关闭/取消选择、临时SceneStore CAS/历史磁盘、原ExitCoordinator；未提交稿/冲突Return-Retry-Force、在途单写、选择归属注销、clean/unknown。隐藏常驻仅编辑器，物理面板按原需卸载。仅本地逻辑/临时文件，无模型/网络/引擎进程，非VM实际退出证明。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/plugin-marketplace.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "只读原生MCP/技能目录projection、合法路径发现、真实React DOM搜索/类型/可用性/详情/关联选择与原配置委托；本地临时文件与localhost夹具，不下载、不访问模型/平台Billing、不启动客户Blender或Unity。"
     }
   ]
 }
