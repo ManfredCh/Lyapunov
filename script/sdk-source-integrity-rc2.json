@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "5f1f2a85ae2edc6cdb4c878563d405c9296098055252efbf9b6b836da04a3abe": {
+    "4651480376add3d889f6e03294d58877a057fd472cbe525658abb34b1b8eda84": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -41,9 +41,9 @@
       ],
       "stageHashes": [
         "0bd109dd769d60fd8a9c4d38c84a06f59484de35f4e4ccb2dc2d7c1fddec8eeb",
-        "7ea6e2800a11a8baf36436f59fca9d57e0f39209062a1c983e0f55efc7d33fce"
+        "10608ecb43a967dd28d0f279d6bad9f70a505c7655a031cbc4f36cad84d56328"
       ],
-      "finalHash": "7ea6e2800a11a8baf36436f59fca9d57e0f39209062a1c983e0f55efc7d33fce",
+      "finalHash": "10608ecb43a967dd28d0f279d6bad9f70a505c7655a031cbc4f36cad84d56328",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -66,13 +66,13 @@
         "packages/client/ui-conversation/tests/input-bar.client.spec.tsx": "459b770f6c436fcba3a2b638b337deed045d0f956df3fc5aafd5b9c60f8d3734",
         "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx": "fd8f3801d04b78d4d85a64d3e183fe88945fe738152359635f6541871ec8f7e0",
         "packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx": "f602738e23b256f00b5b28323a675c59f6ebb7406b8f879f0a9603f1beef5a87",
-        "packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx": "6733b9a1a2e76fd295a53e1af340b9404a62c5473728f1c97b66cf2f0de23831",
+        "packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx": "6f2a253d039f3176e747b3c00e7e1148beeb79a0caa539583b0822b1d81c72ac",
         "packages/client/ui-model-selection/src/client/service.ts": "055c152fc1b48916800f09db470f16cd3100187abe4140d747d0dd7aead958e5",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "ac8c238e860d06ed048060a5abcb7fff7fb33c3466029761d9ce57398f9643c6",
         "packages/host/directory-picker-browse/README.md": "a30bb9d4d1663808710844e8d632ae7c903a7db2cbcf1c6de26d81299a4910e1",
         "packages/host/directory-picker-browse/README.zh.md": "9b05070591f591590245071a84615e7c83a3e64352bb2039696a2a8601111dd9",
         "packages/host/directory-picker-browse/src/index.ts": "4855f66a3e215472b232341f33c91310e974a7cce4c0411c94050b0dd79c643e",
-        "packages/host/directory-picker-browse/tests/service.spec.ts": "cc8830bb15bd6366c1a4040882d72e2ba08b22e8d2b2d059a9f8a2770bfa1bd0",
+        "packages/host/directory-picker-browse/tests/service.spec.ts": "5bde82c287a4667c633923da005fb6d870f726f86d233faa4031fda1c029d257",
         "packages/host/directory-picker/README.md": "7b9572931e939caf55699677342eed5645408ad10438053d93ac547095b511ab",
         "packages/host/directory-picker/README.zh.md": "44232043194dcb6f44ebb726266ad1914ba113b770245536b5eec7d44955b182",
         "packages/host/directory-picker/src/index.ts": "c7dc84355421b4ac8748be809ebad00ef33a8a44ce2b7f9ea7b44a79fa073a9e",

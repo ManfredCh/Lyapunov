@@ -840,23 +840,35 @@ index cdee0965ba3f0fe49b7d26505308e895edf95fe6..76004342db99b5700c204903c1b5739e
      const editor = makeEditor()
      let claim: string | null = token
 diff --git a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
-index 354e4e60b231b2dd194dc7bae4adbb9550b09f1d..76a9570c0f67c3844c8080fde8198194ae1dc519 100644
+index 354e4e60b231b2dd194dc7bae4adbb9550b09f1d..fe59b38fd19a0bab623d778607f7da17524c0526 100644
 --- a/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
 +++ b/packages/client/ui-directory-picker-browse/tests/client-flow.client.spec.tsx
-@@ -1,7 +1,11 @@
+@@ -1,7 +1,12 @@
  // @vitest-environment jsdom
  import { Context } from '@deepseek-ai/cordis'
 +import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 +import { tmpdir } from 'node:os'
 +import { join } from 'node:path'
-+import BrowseDirectoryPicker from '@deepseek-ai/dsh-host-directory-picker-browse'
++import { createRequire } from 'node:module'
++import type BrowseDirectoryPickerClass from '../../../host/directory-picker-browse/lib/types/index.js'
  import { afterEach, describe, expect, it, vi } from 'vitest'
 -import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 +import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
  import type { DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
  import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
  import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-@@ -52,6 +56,44 @@ function owner(overrides: Partial<DirectoryFlowOwnerProps> = {}): DirectoryFlowO
+@@ -20,6 +25,10 @@ afterEach(cleanup)
+ const HOLES = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow', 'sidebar.right.tab.files.directoryFlow'] as const
+ 
+ const HOME = '/home/u'
++
++// This cross-face fixture consumes the Host build's public runtime and declarations.
++const { default: BrowseDirectoryPicker }: { default: typeof BrowseDirectoryPickerClass }
++  = createRequire(import.meta.url)('@deepseek-ai/dsh-host-directory-picker-browse')
+ const homeListing: DirectoryListing = {
+   path: HOME,
+   home: HOME,
+@@ -52,6 +61,44 @@ function owner(overrides: Partial<DirectoryFlowOwnerProps> = {}): DirectoryFlowO
  }
  
  describe('directory-picker-browse client half', () => {
@@ -865,7 +877,7 @@ index 354e4e60b231b2dd194dc7bae4adbb9550b09f1d..76a9570c0f67c3844c8080fde8198194
 +    const ctx = new Context(), home = join(box, 'user-home'), project = join(home, 'chosen-project')
 +    try {
 +      await mkdir(project, { recursive: true })
-+      await ctx.plugin(BrowseDirectoryPicker, { homeDirectory: home })
++      await ctx.plugin(BrowseDirectoryPicker, { maxEntries: 1000, homeDirectory: home })
 +      const capability = ctx.directoryPicker.capability()
 +      if (capability.kind !== 'browse') throw new Error('expected browse provider')
 +      const props = owner()
@@ -1051,7 +1063,7 @@ index 01fe5b9cd23e9c3318ed94db4f0f4a1488e46ba5..19bb54ac1f3cb839233b44854abe73ec
      // silently rebase a relative or empty wire value under the host process
      // cwd (or, for rooted drive-less Windows forms, its current drive).
 diff --git a/packages/host/directory-picker-browse/tests/service.spec.ts b/packages/host/directory-picker-browse/tests/service.spec.ts
-index a96984563632634ebbb3139869d2f5fe8c492829..4e08ac3c0dfa9703a70eafa1c2b214c9a8bc42b6 100644
+index a96984563632634ebbb3139869d2f5fe8c492829..13e1878f10737375c9c004903b6829b509cef60a 100644
 --- a/packages/host/directory-picker-browse/tests/service.spec.ts
 +++ b/packages/host/directory-picker-browse/tests/service.spec.ts
 @@ -45,6 +45,43 @@ afterAll(async () => {
@@ -1069,7 +1081,7 @@ index a96984563632634ebbb3139869d2f5fe8c492829..4e08ac3c0dfa9703a70eafa1c2b214c9
 +    try {
 +      for (const homeDirectory of [first, second]) {
 +        const ctx = new Context(); contexts.push(ctx)
-+        await ctx.plugin(BrowseDirectoryPicker, { homeDirectory })
++        await ctx.plugin(BrowseDirectoryPicker, { maxEntries: 1000, homeDirectory })
 +        const current = ctx.directoryPicker.capability()
 +        if (current.kind !== 'browse') throw new Error('expected native browse owner')
 +        expect(current.homeDirectory).toBe(homeDirectory)
