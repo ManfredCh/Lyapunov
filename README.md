@@ -71,6 +71,10 @@ sh lyapunov-install.sh
 
 `--version RELEASE_ID` selects a published release. `--prefix /absolute/install/path` and `--bin-dir /absolute/bin/path` customize its location. Spaces in the install prefix are supported; a prefix containing a single quote (`'`) is rejected for the default MuJoCo runtime. Manual archives, checksums, updates, rollback, and removal are covered in the [installation guide](https://vorynel.com/lyapunov/guide.html).
 
+## Desktop input compatibility
+
+Normal keyboard input and GUI operations have been verified on the local X11 desktop. In the tested Ubuntu 26.04 QEMU/KVM Wayland session, native screenshots, accessibility trees and semantic interaction worked, but the RemoteDesktop Start authorization response could time out after 120 seconds; the actual Return key did not pass verification. For desktop automation that needs reliable keyboard input, prefer an X11 session. This is a known compatibility limitation of the tested Wayland path, not a claim that all Wayland interaction is unsupported.
+
 ## First run
 
 Peiri is the language model name used for conversation and tool orchestration. Pontryagin is the backend world model name. MCP integrations provide tools.

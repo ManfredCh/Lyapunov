@@ -71,6 +71,10 @@ sh lyapunov-install.sh
 
 `--version RELEASE_ID` 选择一个实际发布批次。`--prefix /absolute/install/path` 和 `--bin-dir /absolute/bin/path` 用于指定安装位置。安装前缀支持空格；默认 MuJoCo 环境不接受前缀中的单引号（`'`）。手工归档、校验值、升级、回滚和卸载见[完整安装手册](https://vorynel.com/lyapunov/guide.html)。
 
+## 桌面输入兼容性
+
+本机 X11 桌面的普通键盘输入与 GUI 操作已验证。在测试的 Ubuntu 26.04 QEMU/KVM Wayland 会话中，原生截图、控件树与语义交互可用，但 RemoteDesktop Start 授权响应可能在 120 秒后超时，实际 Return 按键未通过验证。需要稳定桌面自动输入时，建议优先使用 X11 会话。这是所测 Wayland 路径的已知兼容限制，不表示所有 Wayland 交互均不支持。
+
 ## 首次运行
 
 Peiri 是对话与工具编排使用的语言模型代称；Pontryagin 是后台世界模型名称。MCP 集成提供工具。
