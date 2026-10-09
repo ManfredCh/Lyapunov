@@ -1,8 +1,23 @@
 import * as THREE from "three"
+import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 
 /** 大源的交互预览使用固定 Spark 的 tiny-LOD，仍保留完整输入；小/未知源沿质量路径。 */
 export function splatInitializationLod(sourcePoints:number|null):true|"quality"{
  return sourcePoints!==null&&Number.isFinite(sourcePoints)&&sourcePoints>=1_000_000?true:"quality"
+}
+
+/**
+ * 已识别"高精场景"的判据（只用于 auto 画质的默认预算，不改用户显式画质）：
+ *  · 新标准 High（`first_camera_opengl_v3`）总是按高精场景对待；
+ *  · 旧合格 High（`first_camera_c2w_v2`）只在**大型**（源点数≥100 万，与 tiny-LOD 同一阈值）时对待。
+ * 普通/未知资产没有标记，返回 false，原 auto 预算不变。
+ */
+export function recognizedHighSplatVisual(visual:Record<string,unknown>|undefined):boolean{
+  const frame=visual?.gaussianCameraFrame
+  if(!isGaussianCameraFrame(frame))return false
+  if(frame==="first-camera-opengl-v3")return true
+  const count=visual?.sourcePointCount
+  return typeof count==="number"&&Number.isSafeInteger(count)&&count>=1_000_000
 }
 
 /** 交互安全初值；实际硬件签收前不能把这些参数当成帧率保证。全量源和 LOD 树仍保留。 */
@@ -14,9 +29,16 @@ export const SPLAT_INTERACTIVE_BUDGET = Object.freeze({
 })
 export type SplatQuality = 'auto' | 'fast' | 'balanced' | 'quality'
 export interface SplatInteractiveBudget {lodSplatCount:number;lodRenderScale:number;minSortIntervalMs:number;maxPixelRatio:number}
-/** 只改变当前绘制LOD；原始点和解码数据保持。未知设备先取较小预算，可由用户调画质。 */
-export function interactiveSplatBudget(vendorFamily:string,quality:SplatQuality='auto'):SplatInteractiveBudget {
+/**
+ * 只改变当前绘制LOD；原始点和解码数据保持。未知设备先取较小预算，可由用户调画质。
+ *
+ * `options.recognizedHighScene` 只在 `quality==='auto'` 且**非软件渲染**时把上限提到既有的 500k：
+ * 数百万高斯的已识别场景此前在非 NVIDIA 设备上只画 100k/250k，默认画面"一团糊"；软件渲染保持
+ * 既有低预算。用户显式 fast/balanced/quality 永远优先于这条默认。
+ */
+export function interactiveSplatBudget(vendorFamily:string,quality:SplatQuality='auto',options:{recognizedHighScene?:boolean}={}):SplatInteractiveBudget {
  const count=quality==='fast'?100_000:quality==='balanced'?250_000:quality==='quality'?500_000
+  :options.recognizedHighScene===true&&vendorFamily!=='software'?500_000
   :vendorFamily==='nvidia'?500_000:vendorFamily==='amd'?250_000:vendorFamily==='software'?50_000:100_000
  return {...SPLAT_INTERACTIVE_BUDGET,lodSplatCount:count}
 }

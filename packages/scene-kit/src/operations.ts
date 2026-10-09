@@ -9,8 +9,9 @@ import { isDeepStrictEqual } from "node:util"
 import { Matrix4, Quaternion, Vector3 } from "three"
 import type { Entity, ResourceRef, SceneGeometryBinding, SceneMeshCollisionComponent, ScenePatch, SceneSnapshot, Transform, Vec3 } from "../../lyapunov-contracts/src/types.ts"
 import { identityTransform, SCENE_COORDINATES, sceneCollisionAlignmentGate } from "../../lyapunov-contracts/src/types.ts"
+import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 import { atomicJSON, fileTransaction, readJSON, safeId } from "./persistence.ts"
-import { glbEntities, localPath, parseAsset, robotVisual, sourceTransform, assetBounds } from "./formats.ts"
+import { glbEntities, localPath, parseAsset, robotVisual, sourceTransform, gaussianSourceTransform, assetBounds } from "./formats.ts"
 import type {SourceTexturePolicy} from './geometry-source-deps.ts'
 import { compareGlbGeometry, glbGeometryFacts, type GlbGeometryFacts } from "./mesh-geometry.ts"
 import { resolveSceneLayout, type ResolvedSceneLayout, type SceneLayout } from "./layout.ts"
@@ -54,10 +55,12 @@ function visualGeometryUri(ref: ResourceRef): string | undefined {
 }
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-function applySplatPreviewFacts(resource: ResourceRecord, visual: Record<string, unknown>): void {
+export function applySplatPreviewFacts(resource: ResourceRecord, visual: Record<string, unknown>): void {
   // 只投影当前资源版本的数值事实，不把磁盘路径或万能 metadata 带进 Scene。
   // 此处保留源坐标中心边界；Viewer 的 sourceTransform wrapper 负责一次坐标换算。
-  delete visual.sourceBounds; delete visual.sourcePointCount
+  // `gaussianCameraFrame` 与其它预览事实一起**先清后写**：资源被替换成未知/另一版本时，旧 frame
+  // 绝不能作为"上一版残留"继承下去（否则默认机位会按错误的坐标约定跳）。
+  delete visual.sourceBounds; delete visual.sourcePointCount; delete visual.gaussianCameraFrame
   const aabb = resource.parsed.metadata.aabb as { min?: unknown; max?: unknown } | undefined
   const min = aabb?.min, max = aabb?.max
   if (Array.isArray(min) && Array.isArray(max) && min.length === 3 && max.length === 3
@@ -67,12 +70,24 @@ function applySplatPreviewFacts(resource: ResourceRecord, visual: Record<string,
   }
   const count = resource.parsed.metadata.vertexCount ?? resource.parsed.metadata.splatCount
   if (typeof count === "number" && Number.isSafeInteger(count) && count > 0) visual.sourcePointCount = count
+  const frame = resource.parsed.metadata.gaussianCameraFrame
+  if (isGaussianCameraFrame(frame)) visual.gaussianCameraFrame = frame
+}
+
+/** 已识别 splat 的权威源坐标适配：显式 `visualSourceTransform` 优先且不叠加；否则按已识别首相机 frame
+ *  用 `gaussianSourceTransform`（v2 CV 用 Rx(−90)，v3/未知沿用既有 +90）。挂载装配（写进 visual）与
+ *  落地包围盒（assetBounds）必须用**同一份**矩阵，含单位缩放与显式覆盖，绝不双转。 */
+function effectiveSplatSourceTransform(resource: ResourceRecord): Transform {
+  const frame = resource.parsed.metadata.gaussianCameraFrame
+  return resource.visualSourceTransform ?? gaussianSourceTransform(resource.ref.source, isGaussianCameraFrame(frame) ? frame : undefined)
 }
 
 /** 单文件与 SSOG 多块共用这一份 splat 源坐标/可信碰撞装配规则。 */
-function applySplatMountFacts(resource: ResourceRecord, components: Entity["components"]): void {
+export function applySplatMountFacts(resource: ResourceRecord, components: Entity["components"]): void {
   components.visual ??= { kind: "splat" }
-  components.visual.sourceTransform = resource.visualSourceTransform ?? sourceTransform(resource.ref.source)
+  // 调用方显式 `visualSourceTransform` 永远优先、且不叠加；没有显式时才按已识别的首相机坐标标记
+  // 选源坐标适配（v2 CV 需要 Rx(−90)，v3/未知沿用既有 Yup→Zup）。默认 v2 的改正只在这里发生一次。
+  components.visual.sourceTransform = effectiveSplatSourceTransform(resource)
   components.visual.sourceTransformApplied = false
   applySplatPreviewFacts(resource, components.visual)
   if (resource.sceneGeometryBinding) {
@@ -801,7 +816,9 @@ export class SceneOperations {
       }
       // 落地对齐优先用碰撞产物包围盒（物理基准，含凸包/盒组真实外形）；物理化未完成或无产物时退回视觉 aabb。
       // 泼溅件现在也带 aabb（formats.ts 解码自身点云），落地对齐一视同仁；仍以碰撞产物包围盒优先。
-      const bounds=resource.physicalization?.collisionBounds??assetBounds(resource.parsed,resource.ref.source)
+      // 已识别 splat 的视觉 aabb 必须与 applySplatMountFacts 写进 visual 的源坐标适配用同一矩阵
+      // （含显式 visualSourceTransform 与单位缩放），否则会出现"画面方向对、模型高度错"。
+      const bounds=resource.physicalization?.collisionBounds??assetBounds(resource.parsed,resource.ref.source,resource.parsed.kind==="splat"?effectiveSplatSourceTransform(resource):undefined)
       if(!bounds){const facts=resource.parsed.metadata.boundsFacts as {issue?:string}|undefined;throw new Error(`PROTOTYPE_BOUNDS_UNAVAILABLE: 资源 ${input.resourceId}@${resource.ref.version} 没有可用的几何包围盒，默认的"底面贴到 position 高度"无法执行——造型/底面/尺度都不可判定，因此不把这份原型复制进场景（ENV-21：原型不通过不铺开）。可采取的动作：先核对原型原件（几何范围/底面/法线/材质/尺度）后重新导入；确实要按原点精确落位时显式传 alignBottomToSurface:false。${facts?.issue?' '+facts.issue:''}`)}
       const matrix=new Matrix4().compose(new Vector3(),new Quaternion(...transform.quaternion),new Vector3(...transform.scale))
       let lift=Infinity
@@ -1101,7 +1118,7 @@ export class SceneOperations {
         if (carrier.resources.every(ref => referenceKey(ref) === key)) applySplatPreviewFacts(record, components.visual!)
         else {
           // 多源实体不能把选中的另一份资源误作当前基础视觉；让 Viewer 从实际数据源分片重算。
-          delete components.visual!.sourceBounds; delete components.visual!.sourcePointCount
+          delete components.visual!.sourceBounds; delete components.visual!.sourcePointCount; delete components.visual!.gaussianCameraFrame
         }
         if (!isDeepStrictEqual(components, carrier.components)) changes.components = components
       }

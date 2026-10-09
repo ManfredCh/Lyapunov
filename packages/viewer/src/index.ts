@@ -16,10 +16,12 @@ import { HDRLoader } from "three/addons/loaders/HDRLoader.js"
 import { EXRLoader } from "three/addons/loaders/EXRLoader.js"
 import { SparkRenderer, SplatMesh, SplatFileType } from "@sparkjsdev/spark"
 import { assessSplatDecoded, assessSplatDeclaration, assessSplatFailure, splatWarningCode } from "./splat-support.ts"
-import { appendFrameSample, cachedSplatCenterBounds, frameSampleSummary, scanSplatCenterBounds, splatDataSource, splatPointCount,splatInitializationLod, SPLAT_INTERACTIVE_BUDGET, viewerWebglFacts,interactiveSplatBudget,type SplatInteractiveBudget,type SplatQuality } from "./splat-runtime.ts"
+import { appendFrameSample, cachedSplatCenterBounds, frameSampleSummary, scanSplatCenterBounds, splatDataSource, splatPointCount,splatInitializationLod, SPLAT_INTERACTIVE_BUDGET, viewerWebglFacts,interactiveSplatBudget,recognizedHighSplatVisual,type SplatInteractiveBudget,type SplatQuality } from "./splat-runtime.ts"
 import { retainedSplats, retainedSplatFootprint,restoreSplatData, retainSplatData, type SplatRetentionScope } from "./splat-retention.ts"
 import { assetFormatOf, pairDocumentAssets } from "./asset-locator.ts"
 import { axisSuspectForGltf } from "./source-axis.ts"
+import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
+import { gaussianFirstCameraPose } from "./gaussian-first-camera.ts"
 import type { Entity, Frame, ResourceRef, SceneSnapshot, Transform, WorldHandle } from "../../lyapunov-contracts/src/types.ts"
 import { FrameProjection } from "./projection.ts"
 import { sceneEditTarget } from '../../lyapunov-contracts/src/scene-edit-target.ts'
@@ -404,6 +406,8 @@ export class SceneViewer {
   private frameIntervalSamplesMs: number[] = []
   private lastRenderFrameStarted?: number
   private splatBudget:SplatInteractiveBudget = SPLAT_INTERACTIVE_BUDGET
+  /** 当前 Scene 是否含已识别的"高精"高斯场景（新标准 v3，或大型旧 v2）；只影响 auto 画质默认预算。 */
+  private recognizedHighSplat=false
   /** 内置环境光（RoomEnvironment 的 PMREM）：没有 HDRI 时的 IBL 兜底，也是 HDRI 加载失败后的退路。 */
   private readonly materialEnvironment: THREE.WebGLRenderTarget
   /**
@@ -525,7 +529,7 @@ export class SceneViewer {
       throw new WebGLUnavailableError(error)
     }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, SPLAT_INTERACTIVE_BUDGET.maxPixelRatio))
-    this.splatBudget=interactiveSplatBudget(viewerWebglFacts(this.renderer).vendorFamily)
+    this.refreshSplatBudget()
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     // 金属 PBR 材质需要反射环境；仅有方向光时会近乎黑色。
@@ -703,6 +707,10 @@ export class SceneViewer {
     const generation = ++this.generation
     if(this.snapshot?.sceneId!==snapshot.sceneId||this.snapshot?.revision!==snapshot.revision)this.displayedFrame=undefined
     this.snapshot = structuredClone(snapshot)
+    // auto 画质默认预算随 Scene 里的"已识别高精"事实变化：新标准 v3，或大型旧 v2。普通/未知资产
+    // 不置位。必须在下面创建 SparkRenderer 之前刷新（startLoad 里的初始化读的就是 this.splatBudget）。
+    this.recognizedHighSplat = snapshot.entities.some(entity => recognizedHighSplatVisual(entity.components.visual as Record<string, unknown> | undefined))
+    this.refreshSplatBudget()
     this.projection.setScene(snapshot)
     this.syncRobotAnchors()
     this.syncCollisionTopology()
@@ -1167,7 +1175,12 @@ export class SceneViewer {
     const transform = visual.sourceTransform as Transform | undefined
     if (transform) applyTransform(wrapper, transform)
     else {
-      if (ref.source.upAxis === "Y") wrapper.rotateX(Math.PI / 2)
+      // 已识别的旧 CV 首相机约定（X 右/Y 下/Z 前）：真实的 up=−Y 经既有 +90 会变成 −Z（画面倒置）。
+      // 这一段只在**没有显式 sourceTransform** 时生效（mount 路径会在 operations 里装配好显式变换）；
+      // v2 需要 Rx(−90) 让 up→+Z、forward→水平前方；v3/未知沿用既有 Yup→Zup(+90)。
+      const frame = visual.gaussianCameraFrame
+      if (frame === "first-camera-c2w-v2" && ref.source.upAxis === "Y") wrapper.rotateX(-Math.PI / 2)
+      else if (ref.source.upAxis === "Y") wrapper.rotateX(Math.PI / 2)
       else if (ref.source.upAxis === "X") wrapper.rotateY(-Math.PI / 2)
       if (ref.source.handedness !== "right") throw new Error("VIEWER_SOURCE_COORDINATE_ADAPTER_REQUIRED")
       wrapper.scale.setScalar(ref.source.metersPerUnit ?? 1)
@@ -2462,10 +2475,22 @@ export class SceneViewer {
     this.scene.add(group)
     this.placeMarker = group
   }
+  /**
+   * 自动画质预算的唯一写入口：真实显卡族 + 当前用户画质 + "这个 Scene 是否已识别高精"三者合成。
+   * 构造函数、setDisplaySettings、setScene 都只调它，避免三处各写一套 `interactiveSplatBudget` 参数。
+   */
+  private refreshSplatBudget(): void {
+    const vendorFamily = viewerWebglFacts(this.renderer).vendorFamily
+    // `display` 在真实实例里一定已初始化；部分测试用 Object.create 跳过了字段初始化，读缺省即 auto。
+    this.splatBudget = interactiveSplatBudget(vendorFamily, this.display?.splatQuality ?? "auto", { recognizedHighScene: this.recognizedHighSplat })
+    if (this.spark) {
+      this.spark.lodSplatCount = this.splatBudget.lodSplatCount
+      this.spark.lodRenderScale = this.splatBudget.lodRenderScale
+    }
+  }
   setDisplaySettings(settings: Partial<ViewerDisplaySettings>): void {
     this.display = { ...this.display, ...settings }
-    this.splatBudget=interactiveSplatBudget(viewerWebglFacts(this.renderer).vendorFamily,this.display.splatQuality??'auto')
-    if(this.spark){this.spark.lodSplatCount=this.splatBudget.lodSplatCount;this.spark.lodRenderScale=this.splatBudget.lodRenderScale}
+    this.refreshSplatBudget()
     this.syncCollisionTopology()
     this.grid.visible = this.display.grid
     this.axes.visible = this.display.axes
@@ -2782,6 +2807,8 @@ export class SceneViewer {
   }
   /** 环境首次打开进入主体内部；小物件、机器人继续使用物体视角。 */
   openDefaultView(entityId?:string):void {
+    // 已识别首相机优先：这类文件自己声明了首帧机位，默认打开就该落在那里，而不是 bbox 中心。
+    if(this.openFirstCameraView(entityId))return
     const candidates=[...this.objects.entries()].filter(([id])=>!entityId||id===entityId)
     const environment=candidates.some(([id,loaded])=>{
       const entity=this.snapshot?.entities.find(item=>item.entityId===id)
@@ -2792,6 +2819,47 @@ export class SceneViewer {
     if(environment)this.enterSceneCenter(entityId)
     else if(entityId)this.focus(entityId)
     else this.frameAll()
+  }
+  /**
+   * "没有保存机位"的默认打开入口：若这次要显示的对象里有**唯一一个**已识别的首相机标记，就把相机放到
+   * 该文件声明的首帧位姿上；否则返回 false，调用方沿用既有 enterSceneCenter/focus/frameAll。
+   *
+   * 归属与歧义：给了 `entityId` 就只看该实体；没给时若命中的已识别实体不是一个（0 个或≥2 个），
+   * 一律不跳（多环境无指定实体存在歧义时保留既有行为）。位姿由文件 frame + 该可视对象真实的
+   * `matrixWorld`（实体放置 × 源坐标适配 × 单位缩放）算出，不硬编码任何场景坐标。
+   *
+   * 只在默认打开路径生效：保存机位（workbench 的 savedView）、显式 Fit/focus、手工导航都不经过这里。
+   */
+  private openFirstCameraView(entityId?:string):boolean {
+    const recognized:Array<[string,Loaded]>=[]
+    for(const [id,loaded] of this.objects){
+      if(entityId&&id!==entityId)continue
+      const frame=loaded.planVisual?.gaussianCameraFrame
+      if(isGaussianCameraFrame(frame))recognized.push([id,loaded])
+    }
+    if(recognized.length!==1)return false
+    const loaded=recognized[0]![1],visual=loaded.visual
+    if(!visual)return false
+    visual.updateWorldMatrix(true,false)
+    const pose=gaussianFirstCameraPose(loaded.planVisual!.gaussianCameraFrame,visual.matrixWorld)
+    if(!pose)return false
+    const box=objectWorldBounds(loaded.group,this.splatViewBounds)
+    const size=box.isEmpty()?undefined:box.getSize(new THREE.Vector3())
+    const span=size&&Number.isFinite(size.x)&&Number.isFinite(size.y)&&Number.isFinite(size.z)?Math.max(size.x,size.y,size.z):1
+    const distance=Number.isFinite(span)&&span>0?Math.max(1,span):1
+    this.exitCameraMode({restoreView:false})
+    this.clearAppliedIntrinsics();this.lastFraming=undefined
+    this.camera.up.copy(pose.up)
+    this.camera.position.copy(pose.position)
+    this.camera.near=0.02
+    this.camera.far=Math.max(100,distance*4)
+    const target=pose.position.clone().addScaledVector(pose.forward,distance)
+    this.camera.lookAt(target)
+    this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true)
+    this.controls.target.copy(target);this.controls.update()
+    this.firstPerson.speed=Math.max(3,Math.min(20,distance/10))
+    this.select(undefined)
+    return true
   }
   enterSceneCenter(entityId?:string):void {
     this.exitCameraMode({restoreView:false})
@@ -2930,6 +2998,7 @@ export class SceneViewer {
         sorting: this.spark?.sorting ?? null,
         lodTarget: this.spark ? this.spark.lodSplatCount ?? this.spark.defaultSplatTarget() : null,
         budget: this.splatBudget,
+        recognizedHighScene: this.recognizedHighSplat,
         initializationWorkerCancellation: "unsupported",
         decodedRetention: this.options?.splatRetentionScope ? retainedSplats.report : null,
       },

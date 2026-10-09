@@ -566,6 +566,13 @@
       "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
     },
     {
+      "path": "packages/lyapunov-contracts/test/gaussian-frame.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑。用真实字节验证已终止 Gaussian PLY 头里唯一一条 v2/v3 首相机坐标标记的严格识别——冲突多 frame、正文伪装、前后缀扩展、非 Gaussian、坏头、未终止/超窗一律拒绝；只读内存字节，不触碰文件系统之外的外部世界。"
+    },
+    {
       "path": "packages/lyapunov-mcp-extras/test/export.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1410,6 +1417,13 @@
       "reason": "W13/DEV-011 ① 尺寸绝对误差与 ② 动画≠物理：声明 0.9×0.06×2.0m 对产品几何事实 glbGeometryFacts 绝对误差 [0,0,0]（<1e-6m），世界系（绕Z 90°）误差 <1e-5m；负对照把 Y-up 当 Z-up 错 1.94m、本地当世界错 0.84m。被动画驱动的节点要静态几何 ⇒ GEOMETRY_ANIMATION_UNSUPPORTED；负对照同 BIN 去动画即成功且包围盒逐轴相同 <1e-9。物理化一例依赖 LYAPUNOV_ALGORITHM_PYTHON，缺则显式 skip。Lead 登记。"
     },
     {
+      "path": "packages/scene-kit/test/gaussian-camera-frame.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑 + 临时目录里的真实 .ply 字节。验证 parseAsset 把已识别的首相机坐标标记写进 metadata（冲突/无标记不写）、gaussianSourceTransform 对 v2 用 Rx(−90)/对 v3 与普通沿用既有 +90、applySplatMountFacts 装入 frame 与源坐标适配且显式 visualSourceTransform 优先、applySplatPreviewFacts 在换到未知/另一版本时清掉旧 frame hint。不访问供应商、网络、GPU 或真实资产。"
+    },
+    {
       "path": "packages/scene-kit/test/glb-material-facts.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -2217,6 +2231,13 @@
       "markers": [],
       "decision": "include",
       "reason": "第一人称相机真实按键事件与位移：默认速度、Shift加速和释放、失焦停止及组合归一化；不创建GUI或GPU上下文。"
+    },
+    {
+      "path": "packages/viewer/test/gaussian-first-camera.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑 + 真实 three 数学。验证首相机位姿由文件坐标标记与真实 matrixWorld（放置/旋转/缩放）导出、退化/非有限拒绝；openDefaultView 对唯一已识别实体的默认机位（含 entityId 与多实体歧义回退）不调用 bbox 中心；wrapSourceCoordinates 的 v2 Rx(−90) 与显式 sourceTransform/已烘焙优先；auto 画质仅对已识别高精场景提上限且用户显式画质与软件渲染优先。使用显式 WebGL 替身读数，不创建真实 GUI/GPU。"
     },
     {
       "path": "script/administrator-engine.test.ts",

@@ -30,6 +30,7 @@ import {parseFileAddress} from '@deepseek-ai/dsh-util-workspace-path/src/file-ad
 import {pathPartsOf} from '@deepseek-ai/dsh-util-workspace-path'
 import {createViewer,type SceneViewer} from '@lyapunov/viewer/client'
 import {SCENE_COORDINATES,identityTransform,type Entity,type ResourceRef,type SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
+import {parseGaussianPlyFacts,type GaussianCameraFrame} from '../../lyapunov-contracts/src/gaussian-frame.ts'
 
 /** 模型标签认得的渲染管线（`canOpen` 与标签体共用，扩展名知识只有这一份）。 */
 export type ModelFormat='glb'|'gltf'|'splat'|'ply'|'stl'|'obj'|'fbx'|'dae'|'3mf'|'usdz'|'vtk'|'robot'|'convert'
@@ -114,11 +115,13 @@ function mimeOf(path:string):string{
  const extension=(path.toLowerCase().split('.').pop()??'')
  return ({bin:'application/octet-stream',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',bmp:'image/bmp',gif:'image/gif',tga:'image/x-tga',dds:'image/vnd-ms.dds',ktx2:'image/ktx2',gltf:'model/gltf+json',glb:'model/gltf-binary',mtl:'text/plain',obj:'text/plain',stl:'model/stl'})[extension]??'application/octet-stream'
 }
-/** 单实体合成场景（泼溅件）：一个资源、一份视觉声明。 */
-function splatScene(name:string):SceneSnapshot{
+/** 单实体合成场景（泼溅件）：一个资源、一份视觉声明；已识别首相机标记与同源安全顶点数随预览透传，
+ *  使文件标签页与工作台挂载对"旧大 v2 / 新 v3"的事实一致（auto 默认预算同判据）。 */
+function splatScene(name:string,frame?:GaussianCameraFrame,sourcePointCount?:number):SceneSnapshot{
  const representation={uri:name,mimeType:'application/octet-stream',role:'visual'}
  const resource:ResourceRef={resourceId:'lyapunov-model-preview',version:1,original:representation,representations:[representation],source:{units:'m',upAxis:'Y',handedness:'right',metersPerUnit:1}}
- const entity:Entity={entityId:'lyapunov-model-preview',name,transform:identityTransform(),resources:[resource],components:{visual:{kind:'splat',sourceTransformApplied:false}}}
+ // 点数只在同一条严格识别的 frame 一起给出时才透传：未知/冲突头不升级预算，也不影响普通资产。
+ const entity:Entity={entityId:'lyapunov-model-preview',name,transform:identityTransform(),resources:[resource],components:{visual:{kind:'splat',sourceTransformApplied:false,...(frame?{gaussianCameraFrame:frame}:{}),...(frame&&sourcePointCount!==undefined?{sourcePointCount}:{})}}}
  return{sceneId:'lyapunov-model-preview',revision:1,coordinates:SCENE_COORDINATES,entities:[entity]}
 }
 /** 机器人合成场景：与工作台里的 MJCF/URDF 实体同形，viewer 走既有的机器人装配路径。 */
@@ -222,9 +225,9 @@ async function rangeHead(ctx:LoadContext,length:number):Promise<{url:string;head
   return undefined
  }
 }
-/** 泼溅件快照：资源地址既可能是宿主 Range 路由，也可能是回落时的 blob URL。 */
-function splatPreview(ctx:LoadContext,uri:string,detail:string):Preview{
- return{via:'scene',snapshot:splatScene(nameOf(ctx.path)),resolveResource:()=>uri,detail}
+/** 泼溅件快照：资源地址既可能是宿主 Range 路由，也可能是回落时的 blob URL；已识别 frame 与安全顶点数随快照透传。 */
+function splatPreview(ctx:LoadContext,uri:string,detail:string,frame?:GaussianCameraFrame,sourcePointCount?:number):Preview{
+ return{via:'scene',snapshot:splatScene(nameOf(ctx.path),frame,sourcePointCount),resolveResource:()=>uri,detail}
 }
 /** 深度收集 glTF 里所有字符串型 `uri` 字段（`buffers[].uri` 与 `images[].uri` 都在其中）。 */
 function collectUris(value:unknown,found=new Set<string>()):Set<string>{
@@ -328,7 +331,12 @@ async function loadPly(ctx:LoadContext):Promise<Preview>{
  const route=await rangeHead(ctx,SPLAT_SNIFF_BYTES)
  const head=route?route.head:await readPath(ctx,ctx.path)
  const marker=SPLAT_PLY_MARKERS.find(key=>decodeText(head.subarray(0,SPLAT_SNIFF_BYTES)).includes(key))
- if(marker)return splatPreview(ctx,route?route.url:blobUrl(ctx,head,'application/octet-stream'),`泼溅件 · 文件头含 ${marker}${route?' · 宿主 Range 路由':` · ${sizeText(head.byteLength)}`}`)
+ if(marker){
+  // 只在已终止、确实 Gaussian 的头里识别唯一一条精确坐标标记与同源安全顶点数；
+  // 未知/冲突/正文欺骗 ⇒ 两者都不透传，沿用既有默认视角与 auto 预算。技术 frame 字符串不对用户展示。
+  const facts=parseGaussianPlyFacts(head.subarray(0,SPLAT_SNIFF_BYTES))
+  return splatPreview(ctx,route?route.url:blobUrl(ctx,head,'application/octet-stream'),`泼溅件 · 文件头含 ${marker}${route?' · 宿主 Range 路由':` · ${sizeText(head.byteLength)}`}`,facts?.frame,facts?.sourcePointCount)
+ }
  const bytes=route?await readPath(ctx,ctx.path):head
  const geometry=new PLYLoader().parse(toArrayBuffer(bytes))
  return{via:'object',object:meshOf(geometry,nameOf(ctx.path)),detail:`网格 · ${geometryText(geometry)}`,upAxis:'Z',flippable:true}
