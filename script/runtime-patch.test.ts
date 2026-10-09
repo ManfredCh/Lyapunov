@@ -786,3 +786,21 @@ test('三个known原生默认包括Unity固定stdio供给，公开registry和opt
   expect(await prepareUnityMcpSupply()).toMatchObject({version:'10.2.0',license:'MIT',editorIncluded:false,wheelSha256:'596e2a7322d829b6cf73510bad5ad87ba7e0ba2eee7e1b19645e8caf4ebf1460'})
  }finally{await rm(box,{recursive:true,force:true})}
 })
+
+
+test('Unity发行缓存无需distribution，三个pins损坏明确拒绝而不回退',async()=>{
+ const {prepareUnityMcpSupply,unityMcpSupplyPaths,ensureUnityMcp}=await import('./unity-mcp-supply.ts')
+ const box=await mkdtemp(join(tmpdir(),'unity-packed-cache-')),paths=unityMcpSupplyPaths(box)
+ const wheel=readFileSync(join(root,'distribution/native/unity-mcp/mcpforunityserver-10.2.0-py3-none-any.whl')),license=readFileSync(join(root,'distribution/licenses/unity-mcp-10.2.0.LICENSE'))
+ try{
+  const metadata=await prepareUnityMcpSupply()
+  await mkdir(join(paths.root,'cache'),{recursive:true});await writeFile(paths.wheel,wheel);await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify(metadata))
+  expect(existsSync(join(box,'distribution'))).toBe(false)
+  expect(await prepareUnityMcpSupply(box)).toEqual(metadata)
+  await expect(ensureUnityMcp({root:box,env:{HOME:join(box,'fresh-home'),PATH:'/usr/bin:/bin'},offline:true,forceProduct:true})).rejects.toThrow('UNITY_MCP_RUNTIME_MISSING')
+  await writeFile(paths.wheel,'damaged');await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_WHEEL_CHECKSUM_FAILED');expect(await readFile(paths.wheel,'utf8')).toBe('damaged')
+  await writeFile(paths.wheel,wheel);await writeFile(paths.license,'damaged');await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
+  await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify({...metadata,version:'invalid'}));await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_PROVENANCE_PIN_MISMATCH')
+  await rm(paths.provenance);await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_PACKED_SUPPLY_INCOMPLETE')
+ }finally{await rm(box,{recursive:true,force:true})}
+})

@@ -908,7 +908,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  },[open,viewerVisible,Boolean(scene),renderRetry,sessionId,hostId.current])
  // 权限变化只切提交能力，不重建 viewer。注意这条依赖里**没有** renderRetry——重试要重建。
  useEffect(()=>{const instance=viewer.current;if(!instance)return;instance.setEditCommit(readOnly?undefined:commitEditRef.current)},[readOnly,open,viewerVisible])
- useEffect(()=>{const instance=viewer.current;if(!scene||!instance)return;const version=++loadVersion.current
+ useEffect(()=>{const instance=viewer.current;if(!scene||!instance||observerOwner!==(instance as unknown as CameraAuthoringViewer))return;const version=++loadVersion.current
   // 同一场景的编辑只更新内容；自动取景会打断用户刚调整好的观察视角。
   const sameScene=presentedScene.current?.viewer===instance&&presentedScene.current.sceneId===scene.sceneId
   const camera=sameScene?undefined:savedCameraViews.get(cacheKey+"\0"+scene.sceneId)
@@ -925,7 +925,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   void loaded.then(()=>{if(version!==loadVersion.current||viewer.current!==instance)return;settleSceneCameraLoad(instance,sameScene,camera);if(worldRef.current?.sceneId===scene.sceneId)instance.setWorld(worldRef.current);if(selectedRef.current)instance.select(selectedRef.current);setCollisionStatus(instance.collisionStatus());const focus=pendingFocus.current;if(focus?.sceneId===scene.sceneId){instance.openDefaultView(focus.entityId);pendingFocus.current=undefined}}).catch(value=>setError(String(value)))
  // 这一版 setScene 落定（含 HDRI 加载）之后再读一次环境读数：面板显示的是画面真正生效的那一份。
  void loaded.then(()=>{if(viewer.current===instance)readEnvironmentStatus()}).catch(()=>undefined)
- },[open,viewerVisible,scene,readOnly])
+ },[open,viewerVisible,scene,readOnly,observerOwner])
  // 批注按场景装载/落盘：换场景换一份，刷新/重开工作台后回来；只在 sceneId 变化时重读，编辑不反复读盘。
  useEffect(()=>{setAnnotations(readAnnotations(scene?.sceneId));setActiveAnnotation(undefined)},[scene?.sceneId])
  useEffect(()=>{if(!scene?.sceneId)return;writeAnnotations(scene.sceneId,annotations)},[annotations,scene?.sceneId])

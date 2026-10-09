@@ -25,13 +25,25 @@ export function installedUnityMcpCommand(env:NodeJS.ProcessEnv=process.env,root=
 }
 /** 正常发行缓存包含固定wheel/MIT；venv在目标机器用本机Python正常重建，不打包构建机shebang。 */
 export async function prepareUnityMcpSupply(root=PRODUCT_ROOT){
- const paths=unityMcpSupplyPaths(root),source=join(root,'distribution/native/unity-mcp',UNITY_MCP_WHEEL),bytes=await readFile(source)
- if(digest(bytes)!==UNITY_MCP_WHEEL_SHA256)throw Error('UNITY_MCP_WHEEL_CHECKSUM_FAILED')
- const license=await readFile(join(root,'distribution/licenses/unity-mcp-10.2.0.LICENSE'));if(digest(license)!==UNITY_MCP_LICENSE_SHA256)throw Error('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
- if(!existsSync(paths.wheel)||digest(await readFile(paths.wheel))!==UNITY_MCP_WHEEL_SHA256){await mkdir(dirname(paths.wheel),{recursive:true});await copyFile(source,paths.wheel)}
- if(!existsSync(paths.license)||digest(await readFile(paths.license))!==UNITY_MCP_LICENSE_SHA256)await writeFile(paths.license,license)
+ const paths=unityMcpSupplyPaths(root)
  const metadata={version:UNITY_MCP_VERSION,source:UNITY_MCP_SOURCE,sourceCommit:'d8504c16a72f8d4b8195720f0b266debb1054427',package:'mcpforunityserver',license:'MIT',licenseSha256:UNITY_MCP_LICENSE_SHA256,wheelSource:UNITY_MCP_WHEEL_URL,wheelSha256:UNITY_MCP_WHEEL_SHA256,requiresPython:'>=3.10',transport:'stdio',editorAddonSource:UNITY_MCP_SOURCE+'/tree/v10.2.0/MCPForUnity',editorAddonInstall:'Unity Package Manager: https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.2.0',editorIncluded:false,entry:'bin/mcp-for-unity'}
- const text=JSON.stringify(metadata,null,2)+'\n';if(!existsSync(paths.provenance)||readFileSync(paths.provenance,'utf8')!==text)await writeFile(paths.provenance,text);return metadata
+ // 发行只带这三项固定供给，不依赖distribution源码；存在但损坏的件必须拒绝。
+ for(const [file,pin,code] of [[paths.wheel,UNITY_MCP_WHEEL_SHA256,'UNITY_MCP_WHEEL_CHECKSUM_FAILED'],[paths.license,UNITY_MCP_LICENSE_SHA256,'UNITY_MCP_LICENSE_CHECKSUM_FAILED']] as const){
+  if(existsSync(file)&&digest(await readFile(file))!==pin)throw Error(code+': '+file)
+ }
+ if(existsSync(paths.provenance)){
+  let recorded:unknown;try{recorded=JSON.parse(await readFile(paths.provenance,'utf8'))}catch{throw Error('UNITY_MCP_PROVENANCE_INVALID')}
+  if(recorded===null||typeof recorded!=='object'||Array.isArray(recorded)||Object.entries(metadata).some(([key,value])=>(recorded as Record<string,unknown>)[key]!==value))throw Error('UNITY_MCP_PROVENANCE_PIN_MISMATCH')
+ }
+ if(existsSync(paths.wheel)&&existsSync(paths.license)&&existsSync(paths.provenance))return metadata
+ const source=join(root,'distribution/native/unity-mcp',UNITY_MCP_WHEEL),licenseSource=join(root,'distribution/licenses/unity-mcp-10.2.0.LICENSE')
+ if(!existsSync(source)||!existsSync(licenseSource))throw Error('UNITY_MCP_PACKED_SUPPLY_INCOMPLETE: 发行缓存、MIT或来源回执缺失；不能从不存在的源码目录安装。 / The packaged wheel, MIT license or provenance is missing; a source distribution is unavailable.')
+ const bytes=await readFile(source);if(digest(bytes)!==UNITY_MCP_WHEEL_SHA256)throw Error('UNITY_MCP_WHEEL_CHECKSUM_FAILED')
+ const license=await readFile(licenseSource);if(digest(license)!==UNITY_MCP_LICENSE_SHA256)throw Error('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
+ if(!existsSync(paths.wheel)){await mkdir(dirname(paths.wheel),{recursive:true});await copyFile(source,paths.wheel)}
+ if(!existsSync(paths.license))await writeFile(paths.license,license)
+ if(!existsSync(paths.provenance))await writeFile(paths.provenance,JSON.stringify(metadata,null,2)+'\n')
+ return metadata
 }
 export async function ensureUnityMcp(options:{root?:string;env?:NodeJS.ProcessEnv;offline?:boolean;forceProduct?:boolean;signal?:AbortSignal}={}){
  if(process.platform!=='linux')throw Error('UNITY_MCP_SUPPLY_PLATFORM_UNSUPPORTED: 此产品供给入口仅Linux；其它平台保留显式原生配置。')
