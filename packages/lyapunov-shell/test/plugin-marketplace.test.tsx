@@ -127,7 +127,7 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
  const change=async(input:HTMLInputElement|HTMLSelectElement,value:string)=>{await act(async()=>{const setter=Object.getOwnPropertyDescriptor(input.tagName==='SELECT'?dom.window.HTMLSelectElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!;setter.call(input,value);input.dispatchEvent(new dom.window.Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})}
  const button=(text:string)=>[...document.querySelectorAll('button')].find(v=>v.textContent===text)!
  try{
-  await render();expect(document.body.textContent).toContain('customBlender');expect(document.body.textContent).toContain('robot-provisioning');expect(document.body.textContent).not.toContain('PRIVATE_TOKEN=')
+  await render();const associationPanel=[...document.querySelectorAll('fieldset')].find(row=>row.querySelector('legend')?.textContent==='Existing installations and native server association')!;expect([...associationPanel.querySelectorAll('strong')].map(row=>row.textContent)).toEqual(['Blender','Unity','Computer Use for Linux']);expect(document.body.textContent).toContain('customBlender');expect(document.body.textContent).toContain('robot-provisioning');expect(document.body.textContent).not.toContain('PRIVATE_TOKEN=')
   const search=document.querySelector<HTMLInputElement>('input[type="search"]')!
   await change(search,'robot');expect(document.body.textContent).toContain('robot-provisioning')
   await change(search,'');const selects=document.querySelectorAll('select');await change(selects[0]!,'skill')

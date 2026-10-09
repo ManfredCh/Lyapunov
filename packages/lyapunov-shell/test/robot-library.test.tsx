@@ -56,3 +56,36 @@ test('机器人库新增状态按当前语言投影，未知技术值和原始�
  expect(robotLibraryText('POLICY_RUNTIME_UNAVAILABLE: {"detail":"原始诊断"}',en)).toBe('The motion runtime is unavailable; install policy-cpu and refresh.')
  for(const value of ['MIT · Improbable-AI/walk-these-ways','GPL-3.0-or-later','GPT6 policy author credit','SOME_NEW_ADAPTER_CODE'])expect(robotLibraryText(value,en)).toBe(value)
 })
+
+test('坏可选供给不拒绝原Scene命令；同owner刷新单次重试，修复后登记并重开去重',async()=>{
+ const {Context}=await import('@deepseek-ai/cordis'),{default:SystemPrompt}=await import('@deepseek-ai/dsh-system-prompt'),{default:Tools}=await import('@deepseek-ai/dsh-tools'),{default:Sessions,SessionId}=await import('@deepseek-ai/dsh-session'),{default:Commands}=await import('@deepseek-ai/dsh-commands'),scenePlugin=await import('../../scene-kit/src/plugin.ts')
+ const root=await mkdtemp(join(tmpdir(),'optional-default-scene-')),product=join(root,'product'),dataRoot=join(root,'data'),sessionKey='optional-default-fixture',signal=new AbortController().signal
+ const mount=async()=>{const ctx=new Context();await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Sessions);await ctx.plugin(Commands);await ctx.plugin(scenePlugin,{dataRoot,productRoot:product});return ctx}
+ try{
+  await mkdir(join(product,'packs/franka_panda/asset'),{recursive:true})
+  const registry=JSON.parse(await readFile(new URL('../../../packs/registry.json',import.meta.url),'utf8')),roster=JSON.parse(await readFile(new URL('../../../packs/t0-roster.json',import.meta.url),'utf8'))
+  roster.packs=roster.packs.filter((row:any)=>row.packId==='franka_panda');roster.conflicts=[]
+  await writeFile(join(product,'packs/registry.json'),JSON.stringify(registry));await writeFile(join(product,'packs/t0-roster.json'),'{坏清单')
+  await writeFile(join(product,'packs/franka_panda/pack.json'),JSON.stringify({packId:'franka_panda',version:'fixture',family:'arm',pieces:{},capabilities:{channels:[]}}))
+  const path=join(product,'packs/franka_panda/asset/robot.xml');await writeFile(path,'<mujoco><worldbody><body><joint name="axis"/><geom type="sphere" size="0.1" mass="1"/></body></worldbody></mujoco>')
+  await writeFile(join(product,'packs/default-t0-supply.json'),JSON.stringify({models:[{packId:'franka_panda',modelEntry:'asset/robot.xml',license:'MIT',bytes:(await hashFile(path)).bytes}]}))
+  const ctx=await mount(),session=ctx.sessions.create(SessionId(sessionKey),{meta:{cwd:root}}),agent={id:session.id,session} as import('@deepseek-ai/dsh-agent').Agent,operations=ctx.scene.forSession(sessionKey)
+  await operations.create({sceneId:'existing-scene'})
+  const blocked=await ctx.scene.initializeDefaults!(sessionKey)
+  expect(blocked).toMatchObject({status:'BLOCKED',code:'DEFAULT_ROBOT_LIBRARY_BLOCKED',registered:[]});expect(blocked.blocked[0]?.detail).toBeTruthy()
+  expect((await ctx.commands.execute(agent,'/scene_list {}',[],signal))?.result.kind).toBe('success')
+  const entity={entityId:'existing-entity',name:'user edit',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}}
+  expect((await ctx.commands.execute(agent,'/scene_edit '+JSON.stringify({sceneId:'existing-scene',expectedRevision:0,patch:[{op:'add',entity}]}),[],signal))?.result.kind).toBe('success')
+  const savePath=join(root,'existing.scene.json');await operations.save('existing-scene',savePath)
+  expect((await ctx.commands.execute(agent,'/scene_open '+JSON.stringify({path:savePath,sceneId:'opened-existing'}),[],signal))?.result.kind).toBe('success')
+  expect((await operations.scene.snapshot('opened-existing')).entities[0]?.name).toBe('user edit')
+  expect(await ctx.scene.initializeDefaults!(sessionKey)).toBe(blocked)
+  await writeFile(join(product,'packs/t0-roster.json'),JSON.stringify(roster))
+  const retry=ctx.scene.initializeDefaults!(sessionKey,true),sameFlight=ctx.scene.initializeDefaults!(sessionKey,true)
+  expect(sameFlight).toBe(retry);expect(await retry).toMatchObject({status:'READY',registered:['franka_panda'],blocked:[]})
+  const reopened=await mount(),reopenedOperations=reopened.scene.forSession(sessionKey)
+  expect(await reopened.scene.initializeDefaults!(sessionKey)).toMatchObject({status:'READY',registered:[],blocked:[]})
+  expect(await reopenedOperations.resources.list()).toHaveLength(1)
+  expect((await reopenedOperations.scene.snapshot('existing-scene')).entities[0]?.name).toBe('user edit')
+ }finally{await rm(root,{recursive:true,force:true})}
+})

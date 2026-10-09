@@ -51,3 +51,29 @@ export async function ensureDefaultRobotLibrary(productRoot:string,scene:SceneOp
  }
  return {registered,blocked,models:await robotLibraryRows(productRoot,scene,policies)}
 }
+
+export type DefaultRobotLibraryInitialization=Awaited<ReturnType<typeof ensureDefaultRobotLibrary>>&{
+ status:'READY'|'BLOCKED'|'SKIPPED';code?:'DEFAULT_ROBOT_LIBRARY_BLOCKED'
+}
+/** 可选示例不能拒绝普通Scene入口；失败回执缓存到用户刷新，刷新复用同一在途任务。 */
+export function createDefaultRobotLibraryInitializer(
+ initialize:(key:string,operations:SceneOperations)=>Promise<Awaited<ReturnType<typeof ensureDefaultRobotLibrary>>|undefined>,
+ warn:(detail:string)=>void,
+){
+ const entries=new Map<string,{pending:boolean;promise:Promise<DefaultRobotLibraryInitialization>}>()
+ return (key:string,operations:SceneOperations,retry=false):Promise<DefaultRobotLibraryInitialization>=>{
+  const previous=entries.get(key)
+  if(previous&&(!retry||previous.pending))return previous.promise
+  const entry={pending:true,promise:undefined as unknown as Promise<DefaultRobotLibraryInitialization>}
+  entry.promise=Promise.resolve().then(()=>initialize(key,operations)).then((value):DefaultRobotLibraryInitialization=>value
+   ?{...value,status:value.blocked.length?'BLOCKED':'READY',...value.blocked.length?{code:'DEFAULT_ROBOT_LIBRARY_BLOCKED' as const}:{}}
+   :{status:'SKIPPED',registered:[],blocked:[],models:[]}
+  ).catch((error):DefaultRobotLibraryInitialization=>{
+   const detail=error instanceof Error?error.message:String(error)
+   try{warn('DEFAULT_ROBOT_LIBRARY_BLOCKED: '+detail)}catch{}
+   return {status:'BLOCKED',code:'DEFAULT_ROBOT_LIBRARY_BLOCKED',registered:[],blocked:[{packId:'default-library',detail}],models:[]}
+  }).finally(()=>{entry.pending=false})
+  entries.set(key,entry)
+  return entry.promise
+ }
+}

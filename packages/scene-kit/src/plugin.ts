@@ -1,4 +1,4 @@
-import {ensureDefaultRobotLibrary} from "./default-robots.ts"
+import {ensureDefaultRobotLibrary,createDefaultRobotLibraryInitializer,type DefaultRobotLibraryInitialization} from "./default-robots.ts"
 import type {} from "../../policy-registry/src/default-robot-policies.ts"
 import type { Context } from "@deepseek-ai/cordis"
 import type { Entity } from '../../lyapunov-contracts/src/types.ts'
@@ -79,6 +79,7 @@ export interface UnityExchangeConfig {
  */
 export interface SceneService {
   forSession(sessionKey: string): SceneOperations
+  initializeDefaults?(sessionKey:string,retry?:boolean):Promise<DefaultRobotLibraryInitialization>
 }
 declare module "@deepseek-ai/cordis" { interface Context { scene: SceneService } }
 
@@ -226,12 +227,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     catalog: join(domainRoots.catalog, "sessions", safeSessionKey(key)),
   }
   const sessionOperations = new Map<string, SceneOperations>()
-  const defaultLibraries=new Map<string,Promise<unknown>>()
-  const initializeDefaults=(key:string,operations:SceneOperations)=>{
-   let ready=defaultLibraries.get(key)
-   if(!ready){const root=detectedProductRoot(config.productRoot);ready=root&&existsSync(join(root,'packs/default-t0-supply.json'))?(async()=>{const policies=await (ctx.get('policyDefaults')?.prepare()??Promise.resolve([]));return ensureDefaultRobotLibrary(root,operations,policies)})():Promise.resolve();defaultLibraries.set(key,ready);void ready.catch(error=>ctx.logger.warn('DEFAULT_ROBOT_LIBRARY_BLOCKED: '+String(error)))}
-   return ready
-  }
+  const initializeDefaults=createDefaultRobotLibraryInitializer(async(_key,operations)=>{
+   const root=detectedProductRoot(config.productRoot)
+   if(!root||!existsSync(join(root,'packs/default-t0-supply.json')))return undefined
+   const policies=await (ctx.get('policyDefaults')?.prepare()??Promise.resolve([]))
+   return ensureDefaultRobotLibrary(root,operations,policies)
+  },detail=>ctx.logger.warn(detail))
   /** 取该会话的场景/资源操作；同一个会话只建一次。缺会话键明确失败，不落到共享存储。 */
   const operationsFor = (sessionKey: string): SceneOperations => {
     const key = typeof sessionKey === "string" ? sessionKey.trim() : ""
@@ -296,7 +297,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     readProjection("scene-history", async query => (await projectionOperations(query)).versions(query.get("sceneId") ?? ""))
     readProjection("missing-assets", async query => (await projectionOperations(query)).resources.listMissing())
   })
-  ctx.reflect.provide("scene", { forSession: operationsFor } satisfies SceneService)
+  ctx.reflect.provide("scene", { forSession: operationsFor,initializeDefaults:(key,retry=false)=>initializeDefaults(key,operationsFor(key),retry) } satisfies SceneService)
   const json = { type: "json" as const, required: true as const, description: "Operation parameters as JSON, using the public Scene interface fields." }
   // 每个定义都接收**本次调用会话**的 operations（不是 Host 级那一套）：同名工具在两个会话里
   // 各自读写自己的场景存储与资源索引。定义表本身与会话无关，只有调用时才解析归属。
