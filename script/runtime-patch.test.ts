@@ -117,7 +117,7 @@ test("native Models plugin is enabled and product overlays do not replace it", (
   expect(row).not.toMatch(/disabled:\s*true/)
   expect(source).not.toContain("ui-settings-models")
   expect(productBundle).not.toContain("ui-settings-models")
-  expect(source).toContain('patch+="- id: ui-agent-preset\\n  disabled: true\\n"')
+  expect(source).toContain('patch+="- id: ui-agent-preset\\n  disabled: false\\n"')
   const web = runtimePluginInsert({mode:"local",surface:"web",sceneRoot:"/tmp/single-jobs-owner",engine:"mujoco"})
   expect(web.filter(plugin=>plugin.name==="@deepseek-ai/dsh-tool-jobs")).toHaveLength(0)
   const base = readFileSync(join(root, upstream, "packages/bundle/base/cordis.patch.yml"), "utf8")
@@ -764,10 +764,25 @@ test('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checks
   const env={HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus'}
   expect(installedKnownMcpDefaults(env,'linux').find(row=>row.kind==='computer-use-linux')).toMatchObject({command:computerUseLinuxPaths().command,env:{HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi'}})
   expect(computerUseLinuxReady()).toBe(true)
+  expect(installedKnownMcpDefaults(env,'linux').find(row=>row.kind==='computer-use-linux')?.env.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP).toBe('1')
+  expect(installedKnownMcpDefaults({...env,COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP:'0'},'linux').find(row=>row.kind==='computer-use-linux')?.env.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP).toBe('0')
   expect(installedKnownMcpDefaults({...env,LYAPUNOV_COMPUTER_USE_LINUX_VARIANT:'official'},'linux').find(row=>row.kind==='computer-use-linux')?.command).toBe(computerUseLinuxPaths(undefined,'official').command)
   expect(()=>installedKnownMcpDefaults({...env,LYAPUNOV_COMPUTER_USE_LINUX_VARIANT:'unknown'},'linux')).toThrow('COMPUTER_USE_LINUX_VARIANT_INVALID')
   expect(JSON.parse(await readFile(computerUseLinuxPaths().provenance,'utf8'))).toMatchObject({version:'0.7.13+local.atsbus.1',license:'MIT',assets:expect.arrayContaining([expect.objectContaining({name:'computer-use-linux',sha256:'c0f90d7249dfedfdb19a49fd4460799ae0a7d8f00e6a76bfea73cb4df36c170e'})])})
   await expect(ensureComputerUseLinux({root:box,env,offline:true})).rejects.toThrow('COMPUTER_USE_LINUX_LOCAL_ARCHIVE_MISSING')
   await expect(ensureComputerUseLinux({root:box,platform:'darwin'})).rejects.toThrow('COMPUTER_USE_LINUX_PLATFORM_UNSUPPORTED')
+ }finally{await rm(box,{recursive:true,force:true})}
+})
+
+test('三个known原生默认包括Unity固定stdio供给，公开registry和optional更新参数明确',async()=>{
+ const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
+ const {unityMcpSupplyPaths,unityMcpSupplyReady,prepareUnityMcpSupply}=await import('./unity-mcp-supply.ts')
+ const box=await mkdtemp(join(tmpdir(),'unity-native-default-'))
+ try{
+  expect(unityMcpSupplyReady()).toBe(true)
+  const env={HOME:box,PATH:'/usr/bin:/bin'}
+  expect(installedKnownMcpDefaults(env).find(row=>row.kind==='unity')).toEqual({kind:'unity',command:unityMcpSupplyPaths().command,args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:join(box,'.unity-mcp'),FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}})
+  expect(installedKnownMcpDefaults({...env,LYAPUNOV_UNITY_MCP_URL:'http://localhost:8888/mcp'}).some(row=>row.kind==='unity')).toBe(false)
+  expect(await prepareUnityMcpSupply()).toMatchObject({version:'10.2.0',license:'MIT',editorIncluded:false,wheelSha256:'596e2a7322d829b6cf73510bad5ad87ba7e0ba2eee7e1b19645e8caf4ebf1460'})
  }finally{await rm(box,{recursive:true,force:true})}
 })

@@ -73,6 +73,9 @@ jobs:
       - name: Prepare pinned product Computer Use Linux runtime
         run: bun --no-env-file script/computer-use-linux.ts
 
+      - name: Prepare pinned product Unity MCP runtime
+        run: bun --no-env-file script/unity-mcp-supply.ts --product
+
       - name: Build desktop
         run: bun run script/build-desktop.ts
 

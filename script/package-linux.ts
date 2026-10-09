@@ -1,3 +1,5 @@
+import {stageDefaultRobotPolicies} from "./default-robot-policies.ts"
+import {stageDefaultT0Robots} from "./default-t0-robots.ts"
 import {cp,mkdir,readdir,readFile,writeFile,realpath,readlink,symlink,chmod,rm,stat,rename} from 'node:fs/promises'
 import {existsSync,writeSync,createReadStream} from 'node:fs'
 import {dirname,join,relative,resolve,isAbsolute,basename} from 'node:path'
@@ -14,6 +16,7 @@ import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mamba
 import {checkedRuntimeManifest,checkedReleaseManifest,releaseManifestTsv,type LinuxReleaseManifest} from '../distribution/linux/release-manifest.ts'
 import {prepareLinuxNativeSystem,LINUX_NATIVE_LOADER_PACKAGES,verifyLinuxNativeLoaders} from './native-system.ts'
 import {ensureComputerUseLinux,computerUseLinuxPaths,computerUseLinuxReady,computerUseLinuxAssets} from './computer-use-linux.ts'
+import {prepareUnityMcpSupply,unityMcpSupplyPaths,UNITY_MCP_WHEEL} from './unity-mcp-supply.ts'
 
 const root=resolve(import.meta.dirname,'..')
 const {values}=parseArgs({options:{output:{type:'string',default:join(root,'.runtime/releases')},node:{type:'string',default:process.env.LYAPUNOV_PACKAGE_NODE??'node'},micromamba:{type:'string',default:join(root,'.runtime/bin/micromamba')},'check-source':{type:'boolean',default:false},root:{type:'string'},'release-id':{type:'string'},'mujoco-runtime-archive':{type:'string'},'mujoco-runtime-manifest':{type:'string'}}})
@@ -112,6 +115,7 @@ const upstream=resolve(root,lock.directory)
 const upstreamReal=await realpath(upstream)
 // 固定桌面MCP修复变体归产品运行根；新安装不依赖Codex缓存。
 const computerUseLinuxSupply=await ensureComputerUseLinux({root})
+const unityMcpSupply=await prepareUnityMcpSupply(root)
 const minimumGlibc=String(computerUseLinuxSupply.minimumGlibc)
 if(!/^\d+\.\d+$/.test(minimumGlibc))throw new Error('COMPUTER_USE_LINUX_MINIMUM_GLIBC_INVALID')
 async function fileSha256(path:string){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex')}
@@ -269,8 +273,16 @@ stampDesktopAppVersion(stage,product.version)
 // 指向旧版本运行根"的升级会在 PRODUCT_PACKAGE_CONFLICT 上失败关闭（实测原链接被保留）。
 // 发行产物名（`lyapunov-dsh-<版本>-linux-x64`）、目录名与判定用的都是同一身份串，这里对齐。
 await writeFile(join(stage,'package.json'),JSON.stringify({name:'lyapunov-dsh',version:product.version,license:product.license,private:true,type:'module'},null,2)+'\n')
+const robotSupply=await stageDefaultT0Robots(root,stage,process.env.LYAPUNOV_ROBOT_STAGING_ROOT??root)
+if(robotSupply.models.length!==9)throw Error('DEFAULT_T0_SUPPLY_INCOMPLETE: '+JSON.stringify(robotSupply.blocked)+'；请提供许可与哈希闭包齐全的 LYAPUNOV_ROBOT_STAGING_ROOT')
+const policySupply=await stageDefaultRobotPolicies(root,stage,process.env.LYAPUNOV_ROBOT_POLICY_STAGING_ROOT??join(root,'.runtime/default-policy-sources'))
+const defaultPolicyFiles=new Set(policySupply.allowedFiles)
+console.log(JSON.stringify({phase:'default-robot-policies',entries:policySupply.entries.map(row=>({packId:row.packId,bytes:row.bytes})),blocked:policySupply.blocked}))
+console.log(JSON.stringify({phase:'default-t0-models',models:robotSupply.models.length,blocked:robotSupply.blocked}))
 await cp(join(root,'UPSTREAM_LOCK.json'),join(stage,'UPSTREAM_LOCK.json'))
 await cp(computerUseLinuxPaths(root).root,computerUseLinuxPaths(stage).root,{recursive:true})
+await mkdir(dirname(unityMcpSupplyPaths(stage).wheel),{recursive:true})
+for(const key of ['wheel','license','provenance'] as const)await cp(unityMcpSupplyPaths(root)[key],unityMcpSupplyPaths(stage)[key])
 for(const file of ['LICENSE','NOTICE','README.md','README.zh-CN.md'])await cp(join(root,file),join(stage,file))
 await cp(join(upstream,'LICENSE'),join(stage,'DSH-LICENSE'))
 await mkdir(join(stage,lock.directory),{recursive:true})
@@ -406,20 +418,21 @@ sourceCommitMatchesPayload:provenanceAtStart.verdict==='CLEAN'&&!provenanceMoved
 worktreeProvenance:{scope:[...PAYLOAD_SCOPE],changed:provenanceAtWrite.changed?.length??null,payloadScoped:provenanceAtWrite.payloadRaw?.length??null,payloadChanged:provenanceAtWrite.payloadChanged?.length??null,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,startWorktree:provenanceAtStart.worktree,movedDuringPackaging:provenanceMoved,sample:(provenanceAtStart.payloadChanged??[]).slice(0,10),dirtyOverride:allowDirty?ALLOW_DIRTY_ENV:null},
 // 随包法律产物的来源与身份：从入库件、缓存、环境变量覆盖还是网络取到，sha256 一并入册，
 // 让"这份许可证是谁、从哪来"在产物里可查，而不是只有一句"包里有 LICENSE"。
-micromambaLicense:mambaLicenseRecord,computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
+micromambaLicense:mambaLicenseRecord,unityMcp:{...unityMcpSupply,runtimePrepared:'on-target',wheel:relative(stage,unityMcpSupplyPaths(stage).wheel),licensePath:relative(stage,unityMcpSupplyPaths(stage).license),provenancePath:relative(stage,unityMcpSupplyPaths(stage).provenance)},computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
 await writeFile(join(stage,'RELEASE.json'),JSON.stringify(release,null,2)+'\n')
 const symlinks:Array<{path:string;target:string}>=[]
 // 发行包只携带代码和许可证；用户凭据、运行时状态和模型权重必须在包外。
 // 这里在 staging 阶段 fail-closed，而不是只依赖归档后的人工扫描。
 // 仅产品固定CLI供给可进入.runtime；其它用户/运行数据仍拒绝。
-const computerUseLinuxDirectories=new Set(['.runtime','.runtime/computer-use-linux','.runtime/computer-use-linux/bin','.runtime/computer-use-linux/official'])
-const computerUseLinuxFiles=new Set([...computerUseLinuxAssets.map(asset=>'.runtime/computer-use-linux/bin/'+asset.name),'.runtime/computer-use-linux/LICENSE','.runtime/computer-use-linux/provenance.json','.runtime/computer-use-linux/official/computer-use-linux','.runtime/computer-use-linux/atspi-bus.patch'])
+const computerUseLinuxDirectories=new Set(['.runtime','.runtime/computer-use-linux','.runtime/computer-use-linux/bin','.runtime/computer-use-linux/official','.runtime/unity-mcp','.runtime/unity-mcp/cache'])
+const computerUseLinuxFiles=new Set([...computerUseLinuxAssets.map(asset=>'.runtime/computer-use-linux/bin/'+asset.name),'.runtime/computer-use-linux/LICENSE','.runtime/computer-use-linux/provenance.json','.runtime/computer-use-linux/official/computer-use-linux','.runtime/computer-use-linux/atspi-bus.patch','.runtime/unity-mcp/cache/'+UNITY_MCP_WHEEL,'.runtime/unity-mcp/LICENSE','.runtime/unity-mcp/provenance.json'])
 const forbiddenName=/^(?:auth|credentials?|secrets?|session-secrets)\.(?:json|ya?ml|toml|env|db|sqlite)$/i
 const forbiddenExtension=/\.(?:pt|pth|ckpt|safetensors|onnx|gguf|npz|npy|engine|plan|pem|key|token)$/i
+const policyWeightExtension=/\.(?:pt|pth|ckpt|safetensors|onnx|gguf|npz|npy|engine|plan)$/i
 async function verify(dir:string){for(const item of await readdir(dir,{withFileTypes:true})){const path=join(dir,item.name)
   const relPath=relative(stage,path)
   if((relPath==='.runtime'||relPath.startsWith('.runtime/'))&&(item.isDirectory()?!computerUseLinuxDirectories.has(relPath):!computerUseLinuxFiles.has(relPath)))throw new Error('禁止把用户/运行数据加入发行包：'+relPath)
-  if(item.isFile()&&(forbiddenName.test(item.name)||forbiddenExtension.test(item.name)))throw new Error(`发行包包含禁止的凭据/模型文件：${relPath}`)
+  if(item.isFile()&&(forbiddenName.test(item.name)||forbiddenExtension.test(item.name)&&!(policyWeightExtension.test(item.name)&&defaultPolicyFiles.has(relPath))))throw new Error(`发行包包含禁止的凭据/模型文件：${relPath}`)
   if(item.isSymbolicLink()){const target=await readlink(path),actual=await realpath(path),rel=relative(stage,actual);if(isAbsolute(target)||rel==='..'||rel.startsWith('../'))throw new Error('发行包链接越界：'+relative(stage,path));symlinks.push({path:relative(stage,path),target})}
   else if(item.isDirectory()){if((item.name==='.runtime'&&relPath!=='.runtime')||item.name==='session-secrets')throw new Error('禁止把用户/运行数据加入发行包');await verify(path)}
 }}

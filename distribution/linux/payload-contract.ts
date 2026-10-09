@@ -122,6 +122,9 @@ export function sandboxRuntimeViolations(stage: string): string[] {
 
 /** 项目许可、原文件、内联消费方worker和运行产物都须进入同一个发行根。 */
 export const PRODUCT_RUNTIME_FILES = [
+  '.runtime/unity-mcp/cache/mcpforunityserver-10.2.0-py3-none-any.whl',
+  '.runtime/unity-mcp/LICENSE',
+  '.runtime/unity-mcp/provenance.json',
   '.runtime/computer-use-linux/bin/computer-use-linux',
   '.runtime/computer-use-linux/bin/computer-use-linux-cosmic',
   '.runtime/computer-use-linux/bin/computer-use-linux-indicator',

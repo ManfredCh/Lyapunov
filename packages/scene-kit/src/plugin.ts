@@ -1,3 +1,5 @@
+import {ensureDefaultRobotLibrary} from "./default-robots.ts"
+import type {} from "../../policy-registry/src/default-robot-policies.ts"
 import type { Context } from "@deepseek-ai/cordis"
 import type { Entity } from '../../lyapunov-contracts/src/types.ts'
 import { defineTool, ToolArgsError, validateArgs, type ToolExecutionInput } from "@deepseek-ai/dsh-tools"
@@ -224,6 +226,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     catalog: join(domainRoots.catalog, "sessions", safeSessionKey(key)),
   }
   const sessionOperations = new Map<string, SceneOperations>()
+  const defaultLibraries=new Map<string,Promise<unknown>>()
+  const initializeDefaults=(key:string,operations:SceneOperations)=>{
+   let ready=defaultLibraries.get(key)
+   if(!ready){const root=detectedProductRoot(config.productRoot);ready=root&&existsSync(join(root,'packs/default-t0-supply.json'))?(async()=>{const policies=await (ctx.get('policyDefaults')?.prepare()??Promise.resolve([]));return ensureDefaultRobotLibrary(root,operations,policies)})():Promise.resolve();defaultLibraries.set(key,ready);void ready.catch(error=>ctx.logger.warn('DEFAULT_ROBOT_LIBRARY_BLOCKED: '+String(error)))}
+   return ready
+  }
   /** 取该会话的场景/资源操作；同一个会话只建一次。缺会话键明确失败，不落到共享存储。 */
   const operationsFor = (sessionKey: string): SceneOperations => {
     const key = typeof sessionKey === "string" ? sessionKey.trim() : ""
@@ -238,6 +246,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       casRoot: sharedCasRoot,
     })
     sessionOperations.set(key, created)
+    void initializeDefaults(key,created)
     return created
   }
   /**
@@ -272,8 +281,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }))
     // 会话投影必须由请求方给出可核实的会话：缺 sessionId / 会话不存在一律明确失败（400），
     // 不落到某个共享存储去读别人的资源清单。内置素材库是产品只读清单，不随会话变化。
-    const projectionOperations = async (query: URLSearchParams): Promise<SceneOperations> =>
-      operationsFor(await bindSessionId(ctx, query.get("sessionId"), "场景/资源投影"))
+    const projectionOperations = async (query: URLSearchParams): Promise<SceneOperations> => {
+      const key=await bindSessionId(ctx,query.get('sessionId'),'场景/资源投影'),operations=operationsFor(key)
+      await initializeDefaults(key,operations);return operations
+    }
     readProjection("assets", async query => (await projectionOperations(query)).resources.list({ query: query.get("query") ?? undefined, includeDeleted: query.get("includeDeleted") === "true" }))
     readProjection('resource-physics',async query=>{
       const operations=await projectionOperations(query),resourceId=query.get('resourceId'),version=Number(query.get('version'))
@@ -424,14 +435,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // 无例外清单：`path` 这类参数的**值语义**（`""`/纯空白/`file:`/跨会话私有目录）schema 表达不了，
     // 仍由 `sessionPath` 抛 `SCENE_PATH_INVALID` 等结构化码——但那发生在"已是字符串"之后；
     // 缺 `path`/非字符串在两面都先由这条 `INVALID_ARGS` 拦下（L391 统一）。
-    const invoke = (source: string, owner: unknown, input: any, signal: AbortSignal | undefined, scope: SessionScope | undefined) => {
+    const invoke = async (source: string, owner: unknown, input: any, signal: AbortSignal | undefined, scope: SessionScope | undefined) => {
       // 零参数schema没有input槽；不能把合法{}变成JSON会丢弃的{input:undefined}。
       // 有参数的工具/命令仍共享原判据，值直接传递，不用JSON往返归一化。
       const violations = validateArgs(parameters, Object.keys(parameters).length === 0 ? {} : { input })
       if (violations.length > 0) throw new ToolArgsError(violations)
       const label = `${source} ${definition.name}`
       if (definition.persists) requireWritableScene(ctx, owner, label)
-      return definition.operation(sceneOperationsFor(ctx, owner, label), input, signal, scope)
+      const operations=sceneOperationsFor(ctx, owner, label);await initializeDefaults(requireSessionId(owner,label),operations)
+      return definition.operation(operations, input, signal, scope)
     }
     ctx.tools.register(compatibleToolInput(defineTool({
       name: definition.name,

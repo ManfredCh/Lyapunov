@@ -1,3 +1,4 @@
+import {robotLibraryRows,ensureDefaultRobotLibrary} from "./robot-library.ts"
 import {validateRegisteredControlDisplay,projectControlActionRows} from "./control-gesture.ts"
 import {worldFrameSelection} from "./collision-frame-request.ts"
 import {CameraUIReadCache} from "./camera-ui-query.ts"
@@ -1483,6 +1484,11 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   path:"/api/lyapunov/"+path,methods,requestBody:"buffered",
   fetch:async request=>{try{return await handler(request)}catch(error){return Response.json({error:error instanceof Error?error.message:String(error)},{status:400})}},
  }))
+ register("robot-library",["GET","POST"],async request=>{
+  const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"机器人库")
+  const scene=sceneFor(sessionKey),policies=await (ctx.get('policyDefaults')?.prepare(request.method==="POST")??Promise.resolve([]))
+  return Response.json(request.method==="POST"?await ensureDefaultRobotLibrary(PRODUCT_ROOT_FOR_ENGINE,scene,policies):{models:await robotLibraryRows(PRODUCT_ROOT_FOR_ENGINE,scene,policies)},{headers:{"cache-control":"private, no-store"}})
+ })
  register("execution-graph",["GET"],async request=>{
   const sessionId=new URL(request.url).searchParams.get("sessionId")??""
   const agent=ctx.agents.get(SessionId(sessionId))

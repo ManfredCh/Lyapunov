@@ -343,9 +343,11 @@ export async function prepareProfile(options: {mode: RunMode; surface: "web" | "
 /** 凭据只供对应后端使用；不读正式账号存储。 */
 export async function backendEnvironment(mode:RunMode, paths:ReturnType<typeof runtimePaths>, options:{account?:VerifiedAccount;parent?:NodeJS.ProcessEnv;isolated?:boolean}={}) {
   const parent=options.parent??process.env
-  const permitted=["PATH","HOME","USER","LOGNAME","SHELL","LANG","LC_ALL","TZ","TMPDIR","DISPLAY","WAYLAND_DISPLAY","XDG_RUNTIME_DIR","DBUS_SESSION_BUS_ADDRESS","HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","NO_PROXY","http_proxy","https_proxy","all_proxy","no_proxy","SystemRoot","WINDIR","APPDATA","LOCALAPPDATA","USERPROFILE","COMSPEC","PATHEXT"]
+  const permitted=["PATH","HOME","USER","LOGNAME","SHELL","LANG","LC_ALL","TZ","TMPDIR","DISPLAY","WAYLAND_DISPLAY","XAUTHORITY","AT_SPI_BUS_ADDRESS","XDG_SESSION_TYPE","XDG_CURRENT_DESKTOP","XDG_SESSION_DESKTOP","DESKTOP_SESSION","NIRI_SOCKET","SWAYSOCK","HYPRLAND_INSTANCE_SIGNATURE","I3SOCK","YDOTOOL_SOCKET","XDG_RUNTIME_DIR","DBUS_SESSION_BUS_ADDRESS","HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","NO_PROXY","http_proxy","https_proxy","all_proxy","no_proxy","SystemRoot","WINDIR","APPDATA","LOCALAPPDATA","USERPROFILE","COMSPEC","PATHEXT"]
   const inherited=mode!=="developer"||options.isolated?Object.fromEntries(permitted.filter(k=>parent[k]!==undefined).map(k=>[k,parent[k]])):{...parent}
   const env:NodeJS.ProcessEnv={...inherited,DSH_HOME:paths.dshHome,DSH_AGENTS_HOME:join(paths.root,"agents-home"),DSH_TELEMETRY_DISABLED:"1",HF_ENDPOINT:"https://hf-mirror.com",[RUNTIME_ENV.sceneRoot]:paths.sceneRoot,[RUNTIME_ENV.pluginRoot]:paths.pluginRoot,[RUNTIME_ENV.mode]:mode}
+  // 仅请求原portal记忆正常授予；原服务仍需一次用户许可，显式0与原entry env优先。
+  env.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP=parent.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP??"1"
   if(mode==="guest"){env.DSH_ENV_FILES="disabled";env.DSH_PERMISSION_MODE="workspace-write"}
   // 用户级技能根(~/.agents/skills)不属于产品;钉到运行根私有目录,产品技能只经显式 customSkillDirs 装配。
   const agentsHome=join(paths.root,"agents-home")

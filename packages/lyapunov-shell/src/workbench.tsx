@@ -1,3 +1,4 @@
+import {ViewerContextMenu,writeViewerReference,type ViewerContextRequest,type InsertViewerReference} from './viewer-context-menu.tsx'
 import {requireFullJointTargets,jointTargetError} from "./joint-target-input.tsx"
 import {controlGestureKey,upsertControlActionRow,type ControlGestureDisplay} from "./control-gesture.ts"
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useCallback,useSyncExternalStore} from "react"
@@ -65,7 +66,7 @@ import {adoptWorldHandle,isStaleStateResponse,projectionWorldLanded} from "./wor
 import {sameWorldBinding} from "./workbench-batch-binding.ts"
 const savedCameraViews=new Map<string,ViewerViewState>()
 const WORKBENCH_STATE_POLL_MS=250
-export const VIEWER_NAVIGATION_HELP={zh:"漫游模式：右键拖动环顾，点画面后 WASD 移动，Q 下降 / E 上升，按住 Shift 加速 5 倍；Esc 切换环绕。",en:"First-person mode: right-drag to look, click the canvas then WASD to move, Q down / E up, hold Shift for 5x speed; Esc switches to orbit."} as const
+export const VIEWER_NAVIGATION_HELP={zh:"漫游模式：中键拖动环顾，Shift+中键平移，滚轮前后移动，点画面后 WASD 移动，Q 下降 / E 上升，按住 Shift 加速 5 倍；Esc 切换环绕。",en:"First-person mode: middle-drag to look, Shift+middle-drag to pan, wheel to dolly, click the canvas then WASD to move, Q down / E up, hold Shift for 5x speed; Esc switches to orbit."} as const
 const initialDisplay:ViewerDisplaySettings={grid:true,axes:true,background:"#191d25",wireframe:false,splats:true,collision:true}
 function readCache(key:string):{sceneId?:string;worldId?:string;hostInstanceId?:string;selectedEntityId?:string}{try{return JSON.parse(sessionStorage.getItem(key)??"{}")}catch{return {}}}
 /** 机器人判定：关节/控制器映射，或带关节名的引擎映射；官方投影里地板/桌子的 mujoco 映射没有关节，不算机器人。 */
@@ -372,8 +373,9 @@ export function WorldFacts({world,tr}:{world:WorldHandle|undefined;tr:Translate}
  </div>
 }
 
-export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeTab=false,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession}:{
+export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeTab=false,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession,insertViewerReference}:{
  sessionId?:string
+ insertViewerReference?:InsertViewerReference
  t:(key:"open")=>string
  /** 原生中央内容（`main.surface` 座位交过来的原生对话节点）。 */
  main?:ReactNode
@@ -530,6 +532,9 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // `openResource` 的接线随挂载/注册项变化，但与 state 轮询的闭包解耦（同 ownsSurfaceRef 的理由）。
  const openResourceRef=useRef(openResource);openResourceRef.current=openResource
  // 窗口身份由 api 持有（`api.clientId`，按会话 memo）：选择上报、UI 动作目标与主动观察的目标窗口共用同一个 id。
+ const [viewerMenu,setViewerMenu]=useState<ViewerContextRequest>(),[viewerMenuBusy,setViewerMenuBusy]=useState(false)
+ const closeViewerMenu=useCallback(()=>setViewerMenu(undefined),[])
+ useEffect(()=>{setViewerMenu(undefined)},[sessionId,scene?.sceneId,scene?.revision,selected])
  const selectionSequence=useRef(0)
  /** 显式选场景的单调序号：只有**最后一次**显式选择自己的响应能落进视图（见 refreshState 的归属判据）。 */
  const sceneLoadSeq=useRef(0)
@@ -881,7 +886,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 资源也按会话取（`api.mediaURL` 会带上本窗口的会话标识）：同一个 sceneId/uri 在两个会话里
   // 指向各自那份存储，Viewer 不会用别的会话的资源字节拼这一版场景。走 apiRef 是因为这个
   // 效应不随 api 重建，闭包里直接捕 api 会在换会话后继续用旧身份。
-  instance=createViewer({container:host,translate:(zh,en)=>cameraTranslateRef.current(zh,en),splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>setPlacingPoint(point),onError:value=>setError(String(value)),
+  instance=createViewer({container:host,translate:(zh,en)=>cameraTranslateRef.current(zh,en),splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,...{onContextMenu:(input:ViewerContextRequest)=>setViewerMenu(input)},onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>setPlacingPoint(point),onError:value=>setError(String(value)),
    // 新批注只在这里生成 id/编号：编号是显示序号（面板、标记、截图三处必须同一个），身份始终是 annotationId。
    onAnnotationCreate:anchor=>{const created=createAnnotation(anchor,annotationIds.current.length+1,new Date().toISOString());setAnnotations(old=>[...old,created]);setActiveAnnotation(created.annotationId)},
    onAnnotationSelect:annotationId=>setActiveAnnotation(annotationId),
@@ -1893,9 +1898,24 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 
  const annotationPanel=<AnnotationPanel annotations={annotations} activeId={activeAnnotation} annotating={annotating} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} entityName={entityId=>scene?.entities.find(item=>item.entityId===entityId)?.name} onToggleMode={annotationActions.toggleMode} onSelect={annotationActions.select} onText={annotationActions.text} onRemove={annotationActions.remove} onCapture={()=>perform(annotationActions.capture)} inject={injectAnnotations} onInject={setInjectAnnotations} prompt={annotationPrompt} captures={annotationCaptures} tr={tr}/>
  const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,object:objectPanel,camera:cameraPanel,asset:assetPanel,annotation:annotationPanel}
+ const addViewerToChat=async()=>{
+  const menu=viewerMenu,snapshot=sceneRef.current,currentSession=sessionId,requestAPI=apiRef.current
+  if(!menu||!snapshot||!currentSession||!insertViewerReference)throw Error('VIEWER_REFERENCE_NATIVE_INPUT_UNAVAILABLE')
+  if(menu.sceneId!==snapshot.sceneId||menu.sceneRevision!==snapshot.revision||menu.entityId!==selectedRef.current)throw Error('VIEWER_REFERENCE_SELECTION_CHANGED')
+  setViewerMenuBusy(true)
+  try{
+   const authoritative=(await api.state({sceneId:snapshot.sceneId})).scene
+   if(!authoritative||authoritative.sceneId!==snapshot.sceneId||authoritative.revision!==snapshot.revision)throw Error('VIEWER_REFERENCE_SCENE_CHANGED')
+   const reference=await writeViewerReference(currentSession,authoritative,menu.entityId,async(action,input)=>{const response=await fetch('/api/lyapunov/workspace',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sessionId:currentSession,action,input})});const result=await response.json();if(!response.ok)throw Error(result.error??response.statusText);return result})
+   if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==menu.sceneId||sceneRef.current.revision!==menu.sceneRevision||selectedRef.current!==menu.entityId)throw Error('VIEWER_REFERENCE_SELECTION_CHANGED')
+   if(!insertViewerReference(reference))throw Error('VIEWER_REFERENCE_INPUT_CHANGED_OR_BUSY')
+   closeViewerMenu();setNotice(tr('已将所选实体与资源来源加入聊天草稿。','Selected entity and resource provenance added to the chat draft.'))
+  }finally{setViewerMenuBusy(false)}
+ }
  const canvas=<div className="lya-wb-canvas" aria-busy={renderLoading||Boolean(sceneCreating)} data-drop-target={dropTarget==="scene"||undefined}>
   <ViewerSurfaceState visible={viewerVisible} failure={renderFailure} hasScene={Boolean(scene)} available={!readOnly&&Boolean(sessionId)} creating={sceneCreating} stop={world&&sessionId&&!replayActive?()=>perform(()=>stop(true)):undefined} tr={tr} create={template=>perform(()=>createScene(template))} retry={()=>{setRenderFailure(undefined);setRenderRetry(value=>value+1)}} reopen={()=>{setRenderFailure(undefined);setViewerVisible(true)}}>
    <div ref={container} className="lya-canvas"/>
+   {viewerMenu&&<ViewerContextMenu request={viewerMenu} tr={tr} busy={viewerMenuBusy} close={closeViewerMenu} addToChat={()=>perform(addViewerToChat)} annotate={()=>{viewerMenu.annotate();closeViewerMenu();ui.openTool('annotation')}}/>}
    {official&&world&&officialCamera&&<img className="lya-canvas" style={{position:"absolute",inset:0,objectFit:"contain",background:"#151b24"}} alt="official agentview" src={api.mediaURL("official-view",{worldId:world.worldId,step:String(frame?.stepIndex??0)})}/>}
    {scene&&<ViewerOverlays navigation={tr(VIEWER_NAVIGATION_HELP.zh,VIEWER_NAVIGATION_HELP.en)} importChoice={sessionId?<ImportPurposeChoice compact value={importUsage} disabled={importBusy} onChange={setImportUsageChoice} tr={tr}/>:undefined}>
     {placingAsset&&<AssetPlacementBar asset={placingAsset} point={placingPoint} tr={tr} alignment={value=>setPlacingAsset(current=>current?{...current,alignBottomToSurface:value}:undefined)} confirm={()=>perform(confirmPlacement)} cancel={exitPlacement}/>}

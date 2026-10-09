@@ -65,6 +65,8 @@ export interface ViewerOptions {
   splatRetentionScope?: SplatRetentionScope
   commitEdit?: (input: { sceneId: string; expectedRevision: number; entityId: string; transform: Transform }) => Promise<SceneSnapshot>
   onSelection?: (entityId: string | undefined) => void
+  /** 右键只贡献当前选择与真实命中；聊天引用仍由原生会话 owner 处理。 */
+  onContextMenu?: (input: { clientX:number; clientY:number; sceneId:string; sceneRevision:number; entityId:string; annotate:()=>void }) => void
   onRobotAnchorSelect?: (selection: RobotAnchorSelection) => void
   onPlacePoint?: (point: [number, number, number]) => void
   onError?: (error: Error) => void
@@ -527,7 +529,11 @@ export class SceneViewer {
     this.scene.background = new THREE.Color(0x121a24)
     this.camera.up.set(0, 0, 1)
     this.camera.position.set(5, -6, 4)
+    this.renderer.domElement.addEventListener("pointerdown", this.orbitFocusPointer, true)
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
+    // 左键保留选择，右键保留原生上下文菜单；OrbitControls 的 Shift+中键路径自动平移。
+    this.controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: null } as unknown as typeof this.controls.mouseButtons
+    this.controls.enableDamping = false
     this.firstPerson=new FirstPersonNavigation(this.camera,this.renderer.domElement,this.controls.target,()=>this.setNavigationMode("orbit"),()=>this.worldUp())
     this.initializeNavigationBar()
     let navigation:"orbit"|"first-person"="first-person"
@@ -572,6 +578,7 @@ export class SceneViewer {
     })
     this.transformControls.addEventListener("objectChange",()=>{if(this.cameraRigGizmoKey!==undefined)this.publishObserverState()})
     this.renderer.domElement.addEventListener("keydown",this.observerKeyDown,true)
+    this.renderer.domElement.addEventListener("contextmenu", this.contextPointer)
     this.renderer.domElement.addEventListener("pointerdown", this.selectPointer)
     this.renderer.domElement.addEventListener("pointerup", this.placePointer)
     this.renderer.domElement.addEventListener("pointerdown", this.annotatePointer)
@@ -1973,11 +1980,11 @@ export class SceneViewer {
     }
     if(this.navigationBar){const name=tr('查看器导航','Viewer navigation');if(this.navigationBar.getAttribute('aria-label')!==name)this.navigationBar.setAttribute('aria-label',name)}
     for(const {mode,button} of this.navigationButtons??[]){
-      if(mode==='orbit')copy(button,tr('环绕','Orbit'),tr('查看器环绕','Orbit view'),tr('环绕查看场景','Orbit the scene'))
-      else copy(button,tr('漫游','Roam'),tr('查看器漫游','Roam view'),tr('漫游场景 · WASD/QE','Roam the scene · WASD/QE'))
+      if(mode==='orbit')copy(button,tr('环绕','Orbit'),tr('查看器环绕','Orbit view'),tr('中键环绕所选资产 · Shift+中键平移 · 滚轮缩放','Middle-drag to orbit selection · Shift+middle-drag to pan · wheel to zoom'))
+      else copy(button,tr('漫游','Roam'),tr('查看器漫游','Roam view'),tr('中键转头 · Shift+中键平移 · 滚轮前后移动 · WASD/QE · Shift加速','Middle-drag to look · Shift+middle-drag to pan · wheel to dolly · WASD/QE · Shift to accelerate'))
     }
     if(this.observerExitButton)copy(this.observerExitButton,tr('退出相机','Exit camera'),tr('退出相机','Exit camera'),tr('返回主视图','Return to the main view'))
-    if(current&&this.observerLabel){const caption=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 右键拖动调朝向','Origin locked · right-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit');if(this.observerLabel.textContent!==caption)this.observerLabel.textContent=caption}
+    if(current&&this.observerLabel){const caption=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 中键拖动调朝向','Origin locked · middle-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit');if(this.observerLabel.textContent!==caption)this.observerLabel.textContent=caption}
     if(current&&this.observerExitButton&&this.observerExitButton.hidden!==(current.mode==="free"))this.observerExitButton.hidden=current.mode==="free"
   }
   private publishObserverState():void {
@@ -2327,8 +2334,11 @@ export class SceneViewer {
    */
   private annotatePointer = (event: PointerEvent): void => {
     if (!this.annotating || event.button !== 0 || this.transformControls.axis) return
+    this.annotateAtPointer(event.clientX,event.clientY)
+  }
+  private annotateAtPointer(clientX:number,clientY:number,expectedEntityId?:string):void {
     const rect = this.renderer.domElement.getBoundingClientRect()
-    const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1)
+    const pointer = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1)
     const ray = new THREE.Raycaster(); ray.setFromCamera(pointer, this.camera)
     const onMarker = ray.intersectObjects([...this.markers.values()].map(entry => entry.pick), false)[0]
     const annotationId = onMarker?.object.userData.annotationId
@@ -2338,7 +2348,7 @@ export class SceneViewer {
     let object: THREE.Object3D | undefined = hit.object
     while (object && !object.userData.entityId) object = object.parent ?? undefined
     const entityId = object?.userData.entityId
-    if (typeof entityId !== "string") return
+    if (typeof entityId !== "string" || expectedEntityId!==undefined&&entityId!==expectedEntityId) return
     const carrier = this.objects.get(entityId)
     if (!carrier) return
     if(!this.snapshot)return
@@ -2550,6 +2560,23 @@ export class SceneViewer {
     const distance = Math.max(0.2, this.camera.position.distanceTo(this.controls.target))
     const directions = { top: new THREE.Vector3(0, -0.001, 1), front: new THREE.Vector3(0, -1, 0.12), side: new THREE.Vector3(1, 0, 0.12), perspective: new THREE.Vector3(1, -1.4, 0.9) }
     this.camera.position.copy(this.controls.target).add(directions[preset].normalize().multiplyScalar(distance)); this.controls.update()
+  }
+  private contextPointer = (event: MouseEvent): void => {
+    if(!this.options.onContextMenu||!this.selected||!this.snapshot)return
+    event.preventDefault()
+    const entityId=this.selected,sceneId=this.snapshot.sceneId,sceneRevision=this.snapshot.revision
+    this.options.onContextMenu({clientX:event.clientX,clientY:event.clientY,entityId,sceneId,sceneRevision,annotate:()=>{
+      if(this.selected!==entityId||this.snapshot?.sceneId!==sceneId||this.snapshot.revision!==sceneRevision)return
+      this.annotateAtPointer(event.clientX,event.clientY,entityId)
+    }})
+  }
+  private orbitFocusPointer = (event: PointerEvent): void => {
+    if(event.button!==1||event.shiftKey||this.firstPerson?.active||this.cameraRigPilot||this.cameraRigLook||!this.selected)return
+    const object=this.objects.get(this.selected)?.group
+    if(!object)return
+    object.updateWorldMatrix(true,true)
+    const bounds=new THREE.Box3().setFromObject(object)
+    if(!bounds.isEmpty())this.controls.target.copy(bounds.getCenter(new THREE.Vector3()))
   }
   private selectPointer = (event: PointerEvent): void => {
     // 批注模式下左键的语义归 annotatePointer：否则"点一个物体加批注"会顺带把它选中并挂上 gizmo。
@@ -2855,6 +2882,8 @@ export class SceneViewer {
     this.navigationBar?.remove();if(typeof window!=="undefined"){window.removeEventListener("lyapunov-viewer-navigation",this.navigationChanged);window.removeEventListener("storage",this.navigationStored)}
     this.exitCameraMode({restoreView:false,focus:false});this.observerListeners?.clear();this.renderer.domElement.removeEventListener("keydown",this.observerKeyDown,true)
     this.disposed = true; cancelAnimationFrame(this.raf); this.resize.disconnect(); this.firstPerson?.dispose(); this.controls.dispose(); this.transformControls.dispose()
+    this.renderer.domElement.removeEventListener("contextmenu", this.contextPointer)
+    this.renderer.domElement.removeEventListener("pointerdown", this.orbitFocusPointer, true)
     this.renderer.domElement.removeEventListener("pointerdown", this.selectPointer)
     this.renderer.domElement.removeEventListener("pointerup", this.placePointer)
     this.renderer.domElement.removeEventListener("pointerdown", this.annotatePointer)

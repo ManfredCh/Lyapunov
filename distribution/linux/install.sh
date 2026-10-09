@@ -287,6 +287,19 @@ if [ "$with_mujoco" = true ]; then
     : > "$product/.install/mujoco-provider-ready"
   fi
 fi
+if [ -f "$product/packs/default-policy-supply.json" ]; then
+  stage=policy-runtime
+  log 'Preparing default robot policy CPU runtime. / 准备默认机器人策略 CPU 运行环境。'
+  (
+    set +e
+    "$product/lyapunov" install-provider policy-cpu 2>&1
+    policy_status=$?
+    printf '%s\n' "$policy_status" > "$product/.install/policy-cpu.exit"
+    exit 0
+  ) | tee "$product/.install/policy-cpu.log"
+  policy_status=$(cat "$product/.install/policy-cpu.exit")
+  [ "$policy_status" -eq 0 ] || fail 'DEFAULT_POLICY_RUNTIME_FAILED: normal CPU runtime preparation failed; previous version preserved. / 默认策略 CPU 环境准备失败，保留旧版本。 See .install/policy-cpu.log.'
+fi
 stage=doctor
 log 'Checking the installed product with its normal doctor.'
 doctor_log="$product/.install/doctor.log"

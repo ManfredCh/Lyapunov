@@ -1,3 +1,4 @@
+import {prepareDefaultRobotPolicies} from "./default-robot-policies.ts"
 import type { Context } from '@deepseek-ai/cordis'
 import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import {requireWritableScene} from '../../scene-kit/src/plugin.ts'
@@ -217,6 +218,13 @@ export function apply(ctx:Context,config:Config={}){
   if(input?.identity!==undefined)for(const key of ['provider','modelId','revision'])if(input[key]!==undefined&&selected[key]!==undefined&&input[key]!==selected[key])throw new Error('POLICY_IDENTITY_CONFLICT: '+key)
   return {provider:policySource(selected.provider),modelId:policyId(selected.modelId),revision:policyRevision(selected.revision)}
  }
+ let defaultReady:Promise<import('./default-robot-policies.ts').DefaultRobotPolicy[]>|undefined,defaultPreparing=false
+ const defaultPolicies={prepare:(refresh=false)=>{
+  if(!defaultReady||refresh&&!defaultPreparing){defaultPreparing=true;defaultReady=(config.guest||!directory?Promise.resolve([]):prepareDefaultRobotPolicies(resolve(import.meta.dirname,'../../..'),directory,config)).finally(()=>{defaultPreparing=false})}
+  return defaultReady
+ }}
+ ctx.reflect.provide('policyDefaults',defaultPolicies)
+ ctx.effect(()=>{void defaultPolicies.prepare().catch(error=>ctx.logger.warn(String(error)));return()=>{}})
  const running=new Map<string,{runId:string;jobId:string;controller:AbortController}>()
  const localPath=(value:unknown,exec:any)=>{if(typeof value!=="string"||!value.trim())throw new Error("POLICY_LOCAL_PATH_REQUIRED");if(value.startsWith("file:"))return fileURLToPath(value);if(isAbsolute(value))return value;const cwd=exec?.agent?.session?.header?.cwd??exec?.agent?.session?.header?.meta?.cwd;if(typeof cwd!=="string")throw new Error("POLICY_WORKSPACE_REQUIRED: 相对路径需要当前会话工作区");return resolve(cwd,value)}
  const blocked=(error:unknown)=>{if(error instanceof RobotDownloadFailure)return {status:"BLOCKED",ready:false,...error.toJSON()};const message=error instanceof Error?error.message:String(error),code=message.match(/^(POLICY_[A-Z0-9_]+|ROBOT_[A-Z0-9_]+|GUEST_PRODUCT_SERVICE_FORBIDDEN)(?=:)/)?.[1]??'POLICY_LOCAL_LOAD_FAILED';return {status:"BLOCKED",ready:false,code,message,retryable:false}}

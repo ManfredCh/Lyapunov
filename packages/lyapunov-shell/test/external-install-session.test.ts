@@ -451,10 +451,10 @@ test('自然语言原生catalog工具复用实际版本探测的软件，不开U
 
 test('默认known MCP保用户namespace和停用条目，不重新配置或启用',async()=>{
  const {associateInstalledKnownMcp}=await import('../src/external-tools-host.ts')
- const rows=[{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-desktop',command:'/user/bin/computer-use-linux'}}},{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-blender',command:'/user/bin/mcp-for-blender'}}}]
+ const rows=[{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-unity',command:'/user/bin/mcp-for-unity'}}},{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-desktop',command:'/user/bin/computer-use-linux'}}},{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-blender',command:'/user/bin/mcp-for-blender'}}}]
  const ctx={get:(name:string)=>name==='settings'?{writable:true}:name==='configEditor'?{entries:()=>rows}:undefined} as unknown as Context
- await associateInstalledKnownMcp(ctx,[{kind:'computer-use-linux',command:'/new/computer-use-linux',args:['mcp'],env:{HOME:'/real-user'}},{kind:'blender',command:'/new/mcp-for-blender',args:[],env:{},port:9876}])
- expect(rows.map(row=>row.options.config.serverName)).toEqual(['my-desktop','my-blender']);expect(rows.every(row=>row.disabled)).toBe(true)
+ await associateInstalledKnownMcp(ctx,[{kind:'unity',command:'/new/mcp-for-unity',args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:'/user/.unity-mcp'}},{kind:'computer-use-linux',command:'/new/computer-use-linux',args:['mcp'],env:{HOME:'/real-user'}},{kind:'blender',command:'/new/mcp-for-blender',args:[],env:{},port:9876}])
+ expect(rows.map(row=>row.options.config.serverName)).toEqual(['my-unity','my-desktop','my-blender']);expect(rows.every(row=>row.disabled)).toBe(true)
 })
 
 test('已装计算机MCP通过真实原生profile事务追加桌面env，重复关联幂等',async()=>{

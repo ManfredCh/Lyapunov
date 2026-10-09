@@ -2981,6 +2981,20 @@
       "markers": [],
       "decision": "include",
       "reason": "只读原生MCP/技能目录projection、合法路径发现、真实React DOM搜索/类型/可用性/详情/关联选择与原配置委托；本地临时文件与localhost夹具，不下载、不访问模型/平台Billing、不启动客户Blender或Unity。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/robot-library.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "机器人库薄投影与原资源库登记重开去重、许可阻断；最小本地闭包，不联网、不运行机器人、不代表真实UI验收。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/viewer-context-menu.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-10-09: real DOM bilingual viewer menu and original workspace manifest write/readback with structured entity/resource provenance; no live model or desktop."
     }
   ]
 }

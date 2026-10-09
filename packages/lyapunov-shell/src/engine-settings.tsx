@@ -250,7 +250,7 @@ export function applyEngineSettings(ctx:Context):void{
  const tr:Translate=(zh,en)=>t("open")==="Scene workbench"?en:zh
  const inject=(kinds:readonly ProviderRow["kind"][],title:string,blurb:string,showSwitch:boolean)=>()=>({tr,kinds,title,blurb,showSwitch})
  ctx.slots.inject("settings.section",()=>ctx.slots.register({
-  name:"settings.section",id:"lyapunov-engine",order:20,label:()=>tr("物理引擎","Physics engine"),
+  name:"settings.section",id:"lyapunov-engine",order:30,label:()=>tr("物理引擎","Physics engine"),
   inject:inject(["engine"],tr("物理引擎","Physics engine"),
    tr("引擎在启动时装配（一个世界只能有一个 Provider），所以切换后需重启工作台生效，运行中的会话与动作不会被打断。",
       "The engine is composed at startup (one provider per world), so a switch takes effect after the workbench restarts; running sessions and actions are unaffected."),true),

@@ -77,11 +77,11 @@ test('原导航DOM随同一locale显示Orbit/Roam和相机出口；换语言不�
     viewer.options.container=host;viewer.options.translate=(zh:string,en:string)=>language==='en'?en:zh
     viewer.navigationButtons=[];viewer.initializeNavigationBar();viewer.setNavigationMode('orbit',false)
     const buttons=()=>[...host.querySelectorAll('button')],find=(label:string)=>buttons().find(button=>button.textContent===label)!
-    expect(find('环绕').getAttribute('aria-label')).toBe('查看器环绕');expect(find('漫游').title).toBe('漫游场景 · WASD/QE')
+    expect(find('环绕').getAttribute('aria-label')).toBe('查看器环绕');expect(find('漫游').title).toBe('中键转头 · Shift+中键平移 · 滚轮前后移动 · WASD/QE · Shift加速')
     const before=viewer.getViewState();let updates=0;const unsubscribe=viewer.subscribeObserverState(()=>updates++)
     language='en';viewer.renderFrame()
     expect(host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Viewer navigation')
-    expect(find('Orbit').title).toBe('Orbit the scene');expect(find('Roam').getAttribute('aria-label')).toBe('Roam view')
+    expect(find('Orbit').title).toBe('Middle-drag to orbit selection · Shift+middle-drag to pan · wheel to zoom');expect(find('Roam').getAttribute('aria-label')).toBe('Roam view')
     expect(host.querySelector('[role="status"]')?.textContent).toBe('Free orbit')
     expect(updates).toBe(0);expectSameView(viewer.getViewState(),before)
     find('Roam').click();expect(viewer.observerState().navigation).toBe('first-person');expect(find('Roam').getAttribute('aria-pressed')).toBe('true')

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import * as THREE from "three"
+import { createRequire } from "node:module"
 import { FirstPersonNavigation, placeInsideScene } from "../src/first-person.ts"
 
 // 只补画布的事件表面；方向、相机矩阵、位移和归一化均执行真实 three 对象及控制器。
@@ -93,13 +94,23 @@ describe("第一人称速度与 Shift 加速",() => {
       const move=control.advance();expect(move.delta.toArray().every(Number.isFinite)).toBe(true);expect(move.delta.x).toBeCloseTo(0);expect(move.delta.y).toBeCloseTo(3);expect(move.delta.z).toBeCloseTo(0);control.key('keyup','KeyW')
     }
   })
-  test("右键绕世界up偏航与俯仰保光学roll，竖直附近不产生NaN",()=>{
+  test("中键绕世界up偏航与俯仰保光学roll，竖直附近不产生NaN",()=>{
     const control=rig();control.camera.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2));control.camera.up.set(0,1,0).applyQuaternion(control.camera.quaternion)
-    const pointer=(type:string,x:number,y:number)=>{const event=new Event(type,{cancelable:true});Object.defineProperties(event,{button:{value:2},pointerId:{value:1},clientX:{value:x},clientY:{value:y}});control.canvas.dispatchEvent(event)}
+    const pointer=(type:string,x:number,y:number)=>{const event=new Event(type,{cancelable:true});Object.defineProperties(event,{button:{value:1},pointerId:{value:1},clientX:{value:x},clientY:{value:y}});control.canvas.dispatchEvent(event)}
     pointer('pointerdown',100,100);pointer('pointermove',200,80);pointer('pointerup',200,80)
     const opticalUp=new THREE.Vector3(0,1,0).applyQuaternion(control.camera.quaternion),direction=control.camera.getWorldDirection(new THREE.Vector3())
     expect(control.camera.up.distanceTo(opticalUp)).toBeLessThan(1e-9);expect(Math.abs(opticalUp.dot(new THREE.Vector3(0,0,1)))).toBeLessThan(1e-8);expect(direction.toArray().every(Number.isFinite)).toBe(true);expect(control.target.clone().sub(control.camera.position).normalize().distanceTo(direction)).toBeLessThan(1e-9)
     control.camera.quaternion.identity();pointer('pointerdown',10,10);pointer('pointermove',30,40);expect(control.camera.quaternion.toArray().every(Number.isFinite)).toBe(true)
+  })
+  test("只有中键按住旋转；左右键保留，Shift中键平移、离开画布停转且不捕获指针",()=>{
+    const control=rig();let captures=0;control.canvas.setPointerCapture=()=>{captures++}
+    const pointer=(type:string,button:number,x:number,y:number,shift=false,buttons=4)=>{const event=new Event(type,{cancelable:true});Object.defineProperties(event,{button:{value:button},buttons:{value:buttons},shiftKey:{value:shift},pointerId:{value:1},clientX:{value:x},clientY:{value:y}});control.canvas.dispatchEvent(event);return event}
+    const before=control.camera.quaternion.clone(),position=control.camera.position.clone()
+    for(const button of [0,2]){expect(pointer('pointerdown',button,0,0).defaultPrevented).toBe(false);pointer('pointermove',button,50,20);expect(control.camera.quaternion.equals(before)).toBe(true)}
+    pointer('pointerdown',1,0,0);pointer('pointermove',1,50,20);expect(control.camera.quaternion.equals(before)).toBe(false);expect(control.camera.position.equals(position)).toBe(true);expect(captures).toBe(0)
+    pointer('pointerleave',1,50,20);const stopped=control.camera.quaternion.clone();pointer('pointermove',1,100,40);expect(control.camera.quaternion.equals(stopped)).toBe(true)
+    pointer('pointerdown',1,0,0,true);pointer('pointermove',1,50,20,true);expect(control.camera.position.equals(position)).toBe(false);expect(control.camera.quaternion.equals(stopped)).toBe(true)
+    pointer('pointerup',1,50,20);const menu=new Event('contextmenu',{cancelable:true});control.canvas.dispatchEvent(menu);expect(menu.defaultPrevented).toBe(false)
   })
   test("默认连续前进 1 秒移动 3 m，相机和目标同步平移",() => {
     const control = rig()
@@ -209,4 +220,18 @@ describe("第一人称速度与 Shift 加速",() => {
     control.key("keydown","KeyW")
     expect(control.advance().delta.length()).toBeCloseTo(3)
   })
+})
+
+test("真实DOM画布中键转头、Shift中键平移及window释放，不使用指针capture",()=>{
+  const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+  const dom=new JSDOM('<canvas></canvas>',{pretendToBeVisual:true}),canvas=dom.window.document.querySelector('canvas') as HTMLCanvasElement
+  const camera=new THREE.PerspectiveCamera(60,1,.1,100),target=new THREE.Vector3(0,1,0);camera.up.set(0,0,1);camera.lookAt(target)
+  canvas.setPointerCapture=()=>{throw Error('不应捕获指针')};canvas.hasPointerCapture=()=>false
+  const nav=new FirstPersonNavigation(camera,canvas,target,()=>{});nav.setActive(true)
+  const pointer=(type:string,button:number,x:number,y:number,shift=false,surface:EventTarget=canvas)=>surface.dispatchEvent(new dom.window.MouseEvent(type,{button,buttons:4,clientX:x,clientY:y,shiftKey:shift,bubbles:true,cancelable:true}))
+  const initial=camera.quaternion.clone();pointer('pointerdown',0,0,0);pointer('pointermove',0,60,20);expect(camera.quaternion.equals(initial)).toBe(true)
+  pointer('pointerdown',1,0,0);pointer('pointermove',1,60,20);expect(camera.quaternion.equals(initial)).toBe(false);expect(camera.position.length()).toBe(0)
+  pointer('pointerup',1,60,20,false,dom.window);const released=camera.quaternion.clone();pointer('pointermove',1,120,40);expect(camera.quaternion.equals(released)).toBe(true)
+  pointer('pointerdown',1,0,0,true);pointer('pointermove',1,60,20,true);expect(camera.position.length()).toBeGreaterThan(0);expect(camera.quaternion.equals(released)).toBe(true)
+  nav.dispose();dom.window.close()
 })

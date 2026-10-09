@@ -12,12 +12,13 @@ import {applyBalanceSection} from "./balance-section.tsx"
 import {applyEngineSettings} from "./engine-settings.tsx"
 import {applyExternalToolsSettings} from "./external-tools-settings.tsx"
 import {applyExecutionGraphClient} from "./execution-graph-client.tsx"
+import {applyRobotLibrarySettings} from "./robot-library-settings.tsx"
 import {applyFilesNavigationClient} from "./files-navigation-client.tsx"
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
  interface LocaleNamespaceMap {lyapunov:"open"|"sceneTab"|"balance"|"credits"|"refresh"|"openAccount"|"signinHint"|"devHint"}
 }
-export const inject=["slots","locale","configForms","layout","sidebarRightTabs","sidebarRight","sessions","workspaces","uiWorkspace"]
+export const inject=["slots","locale","conversation","configForms","layout","sidebarRightTabs","sidebarRight","sessions","workspaces","uiWorkspace"]
 export function apply(ctx:Context){
  applyProductUI(ctx)
  applyPreferencesClient(ctx)
@@ -32,4 +33,5 @@ export function apply(ctx:Context){
  applyExternalToolsSettings(ctx)
  applyExecutionGraphClient(ctx)
  applyFilesNavigationClient(ctx)
+ applyRobotLibrarySettings(ctx)
 }

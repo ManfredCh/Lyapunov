@@ -41,3 +41,17 @@ test("guest 使用原生 include 替换唯一 credential owner并开启空自有
   expect(effective.find(row=>row.id==="credentials")?.disabled).toBe(true)
   expect(effective.filter(row=>!row.disabled).map(row=>row.name)).toEqual(["@deepseek-ai/dsh-settings-file","llm-pi-ai","ui-settings-models","@lyapunov/desktop/guest-credentials"])
 })
+
+
+test('隔离Host继承实际桌面窄环境但保持HOME隔离且不透传未知秘密',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'guest-desktop-env-'))
+ try{
+  const parent={HOME:'/actual/desktop-home',DISPLAY:':1',XAUTHORITY:'/run/user/1000/gdm/Xauthority',AT_SPI_BUS_ADDRESS:'unix:path=/actual/accessibility/bus',XDG_SESSION_TYPE:'x11',XDG_CURRENT_DESKTOP:'ubuntu:GNOME',NIRI_SOCKET:'/run/user/1000/niri.sock',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus',UNKNOWN_SECRET:'must-not-cross'}
+  const env=await backendEnvironment('guest',runtimePaths({root,mode:'guest'}),{parent,isolated:true})
+  for(const key of ['DISPLAY','XAUTHORITY','AT_SPI_BUS_ADDRESS','XDG_SESSION_TYPE','XDG_CURRENT_DESKTOP','NIRI_SOCKET','DBUS_SESSION_BUS_ADDRESS'] as const)expect(env[key]).toBe(parent[key])
+  expect(env.HOME).not.toBe(parent.HOME);expect(env.UNKNOWN_SECRET).toBeUndefined()
+  expect(env.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP).toBe('1')
+  const optedOut=await backendEnvironment('guest',runtimePaths({root,mode:'guest'}),{parent:{...parent,COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP:'0'},isolated:true})
+  expect(optedOut.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP).toBe('0')
+ }finally{await rm(root,{recursive:true,force:true})}
+})

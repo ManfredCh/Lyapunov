@@ -28,7 +28,7 @@ export function centralSplatBounds(count:number, read:(index:number)=>{center:TH
   return new THREE.Box3(new THREE.Vector3(...min),new THREE.Vector3(...max))
 }
 
-/** 右键环顾、WASD 移动、Q 下降/E 上升、Shift 加速 5 倍；失焦立刻停。按键只监听本画布。 */
+/** 中键环顾、WASD 移动、Q 下降/E 上升、Shift 加速 5 倍；失焦立刻停。按键只监听本画布。 */
 export class FirstPersonNavigation {
   active=false
   speed=3
@@ -38,7 +38,7 @@ export class FirstPersonNavigation {
   private keys=new Set<string>()
   private shiftHeld=false
   private lastTime=0
-  private pointer?:{id:number;x:number;y:number}
+  private pointer?:{id:number;x:number;y:number;pan:boolean}
   private heading=new THREE.Vector3(0,1,0)
   constructor(private camera:THREE.PerspectiveCamera,private canvas:HTMLCanvasElement,private target:THREE.Vector3,private exit:()=>void,private getWorldUp:()=>THREE.Vector3=()=>new THREE.Vector3(0,0,1)){
     canvas.tabIndex=0
@@ -50,7 +50,10 @@ export class FirstPersonNavigation {
     canvas.addEventListener("keyup",this.keyUp)
     canvas.addEventListener("blur",this.blur)
     canvas.ownerDocument?.defaultView?.addEventListener("blur",this.blur)
-    canvas.addEventListener("contextmenu",this.contextMenu)
+    canvas.ownerDocument?.defaultView?.addEventListener("pointerup",this.up as EventListener)
+    canvas.ownerDocument?.defaultView?.addEventListener("pointercancel",this.up as EventListener)
+    canvas.addEventListener("pointerleave",this.up)
+    canvas.addEventListener("wheel",this.wheel,{passive:false})
   }
   setActive(active:boolean){this.active=active;this.blur();this.canvas.dataset.navigation=active?"first-person":"orbit"}
   clearInput(){this.blur()}
@@ -66,13 +69,23 @@ export class FirstPersonNavigation {
   private down=(event:PointerEvent)=>{
     if(!this.active)return
     this.canvas.focus({preventScroll:true})
-    if(event.button!==2)return
+    if(event.button!==1)return
     event.preventDefault();event.stopImmediatePropagation();this.canvas.focus({preventScroll:true})
-    this.pointer={id:event.pointerId,x:event.clientX,y:event.clientY};this.canvas.setPointerCapture(event.pointerId)
+    this.pointer={id:event.pointerId,x:event.clientX,y:event.clientY,pan:event.shiftKey===true}
   }
   private move=(event:PointerEvent)=>{
     const start=this.pointer;if(!this.active||!start)return
     event.preventDefault();event.stopImmediatePropagation()
+    if(event.pointerId!==start.id)return
+    if(event.buttons!==undefined&&(event.buttons&4)===0){this.pointer=undefined;return}
+    if(start.pan){
+      if(!this.rotationOnly){
+        const scale=2*Math.max(.001,this.camera.position.distanceTo(this.target))*Math.tan(THREE.MathUtils.degToRad(this.camera.fov/2))/Math.max(1,this.canvas.clientHeight||600)
+        const delta=new THREE.Vector3(-(event.clientX-start.x)*scale,(event.clientY-start.y)*scale,0).applyQuaternion(this.camera.quaternion)
+        this.camera.position.add(delta);this.target.add(delta)
+      }
+      start.x=event.clientX;start.y=event.clientY;return
+    }
     const up=this.worldUp(),yaw=-(event.clientX-start.x)*.003,distance=Math.max(.001,this.camera.position.distanceTo(this.target))
     this.heading.applyAxisAngle(up,yaw)
     this.camera.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(up,yaw)).normalize()
@@ -86,7 +99,12 @@ export class FirstPersonNavigation {
     this.onRotate?.()
   }
   private up=(event:PointerEvent)=>{if(!this.pointer)return;this.pointer=undefined;if(this.canvas.hasPointerCapture(event.pointerId))this.canvas.releasePointerCapture(event.pointerId)}
-  private contextMenu=(event:Event)=>{if(this.active)event.preventDefault()}
+  private wheel=(event:WheelEvent)=>{
+    if(!this.active||this.rotationOnly)return
+    event.preventDefault()
+    const delta=this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(-event.deltaY*.002*this.speed)
+    this.camera.position.add(delta);this.target.add(delta)
+  }
   private keyDown=(event:KeyboardEvent)=>{
     if(!this.active||!this.ownsInput()||event.isComposing||event.ctrlKey||event.altKey||event.metaKey)return
     if(event.code==="Escape"){event.preventDefault();this.exit();return}
@@ -116,6 +134,7 @@ export class FirstPersonNavigation {
     c.ownerDocument?.defaultView?.removeEventListener("blur",this.blur)
     c.removeEventListener("pointerdown",this.down,true);c.removeEventListener("pointermove",this.move,true)
     c.removeEventListener("pointerup",this.up,true);c.removeEventListener("pointercancel",this.up,true)
-    c.removeEventListener("keydown",this.keyDown);c.removeEventListener("keyup",this.keyUp);c.removeEventListener("blur",this.blur);c.removeEventListener("contextmenu",this.contextMenu)
+    c.removeEventListener("keydown",this.keyDown);c.removeEventListener("keyup",this.keyUp);c.removeEventListener("blur",this.blur);c.removeEventListener("pointerleave",this.up);c.removeEventListener("wheel",this.wheel)
+    c.ownerDocument?.defaultView?.removeEventListener("pointerup",this.up as EventListener);c.ownerDocument?.defaultView?.removeEventListener("pointercancel",this.up as EventListener)
   }
 }

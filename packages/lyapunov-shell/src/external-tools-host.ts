@@ -26,6 +26,7 @@ import {existsSync} from 'node:fs'
 import {join,resolve,basename,isAbsolute} from 'node:path'
 import {execFile} from 'node:child_process'
 import {createHash} from 'node:crypto'
+import {ensureUnityMcp,unityMcpSupplyPaths} from '../../../script/unity-mcp-supply.ts'
 import {blenderMcpPaths,blenderMcpStatus,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 import {resolveBlenderExecutable} from '../../../script/runtime-patch.ts'
 import {CREATIVE_TOOLS_CATALOG,downloadPlan,HF_DEFAULT_MIRROR,type CreativeToolId} from '../../../script/creative-tools-catalog.ts'
@@ -209,6 +210,14 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
   return jobs.start({kind:'external-install',label:'Blender MCP locked supply',owner:agent?.id,run:job=>{
    const controller=new AbortController()
    const done=ensureBlenderMcp({signal:controller.signal,log:line=>job.append(redactSecretsText(line)+'\n',{channel:'stdout'})}).then(v=>({status:'completed' as const,result:JSON.stringify(v),detail:'Supply checked; editor addon activation and MCP handshake remain separate.'}),e=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:errorText(e),detail:controller.signal.aborted?'Owned supply cancelled; existing installation and editor were retained.':'Locked supply failed.'}))
+   return {cancel:()=>controller.abort(),done}
+  }})
+ }
+ if(input.id==='unity-mcp'){
+  requireExternalWrite(ctx,agent,unityMcpSupplyPaths().root)
+  return jobs.start({kind:'external-install',label:'Unity MCP pinned supply',owner:agent?.id,run:()=>{
+   const controller=new AbortController()
+   const done=ensureUnityMcp({signal:controller.signal}).then(async v=>{const picker=ctx.get('directoryPicker')?.capability(),home=picker?.kind==='browse'?picker.homeDirectory:undefined;await associateInstalledKnownMcp(ctx,[{kind:'unity',command:v.command,args:['--transport','stdio'],env:{...home?{UNITY_MCP_STATUS_DIR:join(home,'.unity-mcp')}:{},FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}}]);return {status:'completed' as const,result:JSON.stringify(v),detail:'Unity stdio bridge supplied; editor addon and live instance are separate.'}},e=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:errorText(e),detail:'Unity bridge supply did not complete; existing editor and settings retained.'}))
    return {cancel:()=>controller.abort(),done}
   }})
  }

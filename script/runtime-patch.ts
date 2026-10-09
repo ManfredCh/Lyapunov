@@ -13,6 +13,7 @@ import {resolveSdkPython} from '../packages/lyapunov-product-bundle/src/sdk-pyth
 import {isMuJoCoGlBackend} from '../packages/sim-contract/src/mujoco-gl.ts'
 import {developerAgentDefaultModel, developerDefaultCatalog} from './developer-model.ts'
 import {ensurePluginModule} from './ensure-plugin.ts'
+import {ensureUnityMcp} from './unity-mcp-supply.ts'
 import {ensureComputerUseLinux} from './computer-use-linux.ts'
 import {installedKnownMcpDefaults} from './known-mcp.ts'
 import {UNITY_SERVER_NAME,unityMcpPluginEntry} from './unity-mcp.ts'
@@ -306,10 +307,11 @@ export async function runtimePatch(input:RuntimePatchInput&{dir:string}){
     await ensurePluginModule(benchmarkProvider==="gymnasium"?"benchmark-gymnasium":"benchmark-libero")
   }
   if(process.platform==='linux'&&process.arch==='x64'&&!(input.sdkEnvironment??process.env).COMPUTER_USE_LINUX_BIN?.trim())await ensureComputerUseLinux({env:input.sdkEnvironment??process.env})
+  if(process.platform==='linux'&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_URL?.trim())await ensureUnityMcp({env:input.sdkEnvironment??process.env,signal:AbortSignal.timeout(120000)}).catch(error=>console.warn('Unity MCP供给尚未就绪：'+String(error instanceof Error?error.message:error)))
   const plugins=runtimePluginInsert(input)
   let patch="- insert: "+JSON.stringify(plugins)+"\n"
-  // 模型仍由登录/开发者后台装配；原生 Models 设置页沿用上游启用状态，Agent 预设选择保持关闭。
-  patch+="- id: ui-agent-preset\n  disabled: true\n"
+  // 模型仍由登录/开发者后台装配；原生 Models 与 Agent 预设设置页沿用上游 owner，显式恢复已有 profile 的预设入口。
+  patch+="- id: ui-agent-preset\n  disabled: false\n"
   // 去掉原生base的固定付费搜索默认值；客户端fetch保留，显式自有provider仍按Native规则选择。
   if(input.mode!=="developer")patch+="- id: web-search-deepseek\n  disabled: true\n- id: web\n  config:\n    searchProvider: !!js undefined\n    fetchProvider: http\n"
   if(input.mode==="guest"){

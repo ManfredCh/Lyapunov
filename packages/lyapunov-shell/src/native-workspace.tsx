@@ -1,3 +1,5 @@
+import type {InputActions,SessionInput} from "@deepseek-ai/dsh-client-ui-conversation/client"
+import type {InsertViewerReference} from "./viewer-context-menu.tsx"
 import {useCallback,useEffect,useState} from "react"
 /** 原生标签与场景工具的薄接线；标签状态仍归DSH sidebarRight。 */
 import type {Context} from "@deepseek-ai/cordis"
@@ -88,7 +90,16 @@ export function registerNativeWorkspace(ctx:Context){
  }
  function SceneTab({sessionId,t,renderSlot,useTabInfo}:SceneTabProps){
   const {tab}=useTabInfo()
-  return <Workbench key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} nativeTab visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={entry=>openExistingHistorySession(entry,{refresh:()=>sessions.refresh(),snapshot:()=>sessions.list.getSnapshot(),open:id=>ctx.uiWorkspace.openSession(id as SessionId)},ctx.layout.beginNavigation())}/>
+  const insertViewerReference:InsertViewerReference=reference=>{
+   if(!sessionId)return false
+   const scope=sessions.scope(sessionId as SessionId)
+   if(!scope)return false
+   const input=ctx.conversation.input.for(scope) as SessionInput & {actions:InputActions}
+   const applied=input.insertReference(reference,input.actions.captureInsertion())
+   if(applied)input.focus()
+   return applied
+  }
+  return <Workbench insertViewerReference={insertViewerReference} key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} nativeTab visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={entry=>openExistingHistorySession(entry,{refresh:()=>sessions.refresh(),snapshot:()=>sessions.list.getSnapshot(),open:id=>ctx.uiWorkspace.openSession(id as SessionId)},ctx.layout.beginNavigation())}/>
  }
  ctx.effect(()=>{
   // 宿主带 lya-wb：portal 过去的工具窗在 DOM 上脱离工作台，令牌（--lya-*）与按钮/输入皮肤
