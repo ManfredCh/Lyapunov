@@ -2335,15 +2335,20 @@ export class SceneViewer {
    */
   private annotatePointer = (event: PointerEvent): void => {
     if (!this.annotating || event.button !== 0 || this.transformControls.axis) return
-    this.annotateAtPointer(event.clientX,event.clientY)
+    this.applyAnnotationHit(this.annotationHitAtPointer(event.clientX,event.clientY))
   }
-  private annotateAtPointer(clientX:number,clientY:number,expectedEntityId?:string):void {
+  private applyAnnotationHit(hit:{annotationId:string}|{anchor:ViewerAnnotationAnchor}|undefined):void {
+    if(!hit)return
+    if('annotationId' in hit)this.options.onAnnotationSelect?.(hit.annotationId)
+    else this.options.onAnnotationCreate?.(hit.anchor)
+  }
+  private annotationHitAtPointer(clientX:number,clientY:number,expectedEntityId?:string):{annotationId:string}|{anchor:ViewerAnnotationAnchor}|undefined {
     const rect = this.renderer.domElement.getBoundingClientRect()
     const pointer = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1)
     const ray = new THREE.Raycaster(); ray.setFromCamera(pointer, this.camera)
     const onMarker = ray.intersectObjects([...this.markers.values()].map(entry => entry.pick), false)[0]
     const annotationId = onMarker?.object.userData.annotationId
-    if (typeof annotationId === "string") { this.options.onAnnotationSelect?.(annotationId); return }
+    if (typeof annotationId === "string") return {annotationId}
     const hit = firstVisibleHit(ray.intersectObjects([...this.objects.values()].map(value => value.group), true))
     if (!hit) return
     let object: THREE.Object3D | undefined = hit.object
@@ -2354,7 +2359,7 @@ export class SceneViewer {
     if (!carrier) return
     if(!this.snapshot)return
     const normal = hit.face?.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
-    this.options.onAnnotationCreate?.(annotationAnchorAtHit(entityId,carrier,hit.object,hit.point,normal,this.snapshot,currentRobotFrame(this.snapshot,this.world,this.displayedFrame)))
+    return {anchor:annotationAnchorAtHit(entityId,carrier,hit.object,hit.point,normal,this.snapshot,currentRobotFrame(this.snapshot,this.world,this.displayedFrame))}
   }
   /** 面板可能改锚点（例如换实体）——锚点变了必须重建标记位置，否则显示与实际不一致。 */
   setAnnotationAnchor(annotationId: string, anchor: ViewerAnnotationAnchor): void {
@@ -2562,13 +2567,17 @@ export class SceneViewer {
     const directions = { top: new THREE.Vector3(0, -0.001, 1), front: new THREE.Vector3(0, -1, 0.12), side: new THREE.Vector3(1, 0, 0.12), perspective: new THREE.Vector3(1, -1.4, 0.9) }
     this.camera.position.copy(this.controls.target).add(directions[preset].normalize().multiplyScalar(distance)); this.controls.update()
   }
-  private contextPointer = (event: MouseEvent): void => {
+  private contextPointer = (event: MouseEvent): void => { this.openContextMenu(event) }
+  private openContextMenu(event: MouseEvent):void {
     if(!this.options.onContextMenu||!this.selected||!this.snapshot)return
     event.preventDefault()
     const entityId=this.selected,sceneId=this.snapshot.sceneId,sceneRevision=this.snapshot.revision
+    // 保存右键当帧的真实表面锚点；菜单焦点/面板布局变化后旧屏幕坐标不能再次投射。
+    const carrier=this.objects.get(entityId),hit=this.annotationHitAtPointer(event.clientX,event.clientY,entityId)
     this.options.onContextMenu({clientX:event.clientX,clientY:event.clientY,entityId,sceneId,sceneRevision,annotate:()=>{
-      if(this.selected!==entityId||this.snapshot?.sceneId!==sceneId||this.snapshot.revision!==sceneRevision)return
-      this.annotateAtPointer(event.clientX,event.clientY,entityId)
+      if(this.selected!==entityId||this.snapshot?.sceneId!==sceneId||this.snapshot.revision!==sceneRevision||!carrier||this.objects.get(entityId)!==carrier)throw Error('VIEWER_ANNOTATION_TARGET_CHANGED: 当前批注对象已变化 / The annotation target has changed.')
+      if(!hit)throw Error('VIEWER_ANNOTATION_SURFACE_REQUIRED: 当前位置没有可批注的所选对象表面 / No annotatable surface of the selected object was hit.')
+      this.applyAnnotationHit(hit)
     }})
   }
   private orbitFocusPointer = (event: PointerEvent): void => {

@@ -12,6 +12,8 @@
  * 用法：`bun test packages/lyapunov-shell/test/workbench-import-surface.test.tsx`
  */
 import { test, expect, mock } from "bun:test"
+import * as THREE from "three"
+import {SceneViewer} from "../../viewer/src/index.ts"
 import { readFileSync } from "node:fs"
 
 import {projectSceneCameraRigs} from "../../viewer/src/scene-camera-rigs.ts"
@@ -42,16 +44,19 @@ test("漫游帮助写明Q下降/E上升及Shift倍率，视角中心与模型平
 })
 
 
-test("同Scene引用重建Viewer仍加载新实例；旧加载结果不重放新相机或清新loading",async()=>{
+test("原Workbench同Scene重建与旧promise隔离；右键当帧批注跨布局仍建marker并保存",async()=>{
  const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','HTMLElement','Node','navigator','localStorage','sessionStorage','requestAnimationFrame','cancelAnimationFrame','IS_REACT_ACT_ENVIRONMENT']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,value:key==='IS_REACT_ACT_ENVIRONMENT'?true:typeof dom.window[key]==='function'&&key.includes('AnimationFrame')?dom.window[key].bind(dom.window):dom.window[key]})}
  saved.set('ResizeObserver',Object.getOwnPropertyDescriptor(globalThis,'ResizeObserver'));Object.defineProperty(globalThis,'ResizeObserver',{configurable:true,value:class{observe(){}disconnect(){}}})
  saved.set('fetch',Object.getOwnPropertyDescriptor(globalThis,'fetch'))
- const scene={sceneId:'same-scene',revision:1,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[]};let host='host-a'
+ const scene={sceneId:'same-scene',revision:1,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'annotation-entity',name:'Toolbox body',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}}]};let host='host-a'
  globalThis.fetch=(async(input:any)=>{const url=String(input);const data=url.includes('/state?')?{hostInstanceId:host,scene,worlds:[],providerAvailable:false}:url.includes('/scenes')?[{sceneId:scene.sceneId}]:url.includes('/engine-preference')?{engine:'mujoco'}:url.includes('/selection')?{updated:true}:url.includes('/assets')?{assets:[]}:[];return Response.json(data)}) as typeof fetch
  const instances:any[]=[];const view={position:[5,-6,4],quaternion:[0,0,0,1],target:[0,0,.7],up:[0,0,1],fov:50,near:.1,far:1000,zoom:1,navigation:'orbit'}
- viewerFactory=()=>{let resolve!:()=>void;const pending=new Promise<void>(done=>{resolve=done}),state={mode:'free',navigation:'orbit',dirty:false,saving:false,scope:{}};const calls:any[]=[];const instance=new Proxy({calls,resolve,setScene:(value:any)=>{calls.push(['setScene',value]);return pending},subscribeObserverState:()=>()=>{},observerState:()=>state,getViewState:()=>view,environmentStatus:()=>({hdriMimeTypes:[],warnings:[],ignored:[]}),collisionStatus:()=>({status:'disabled'}),animationStatus:()=>({playing:false,clips:[]})},{get(target,key){if(key in target)return (target as any)[key];return (...args:any[])=>{calls.push([key,...args])}}});instances.push(instance);return instance}
+ viewerFactory=(options:any)=>{let resolve!:()=>void;const pending=new Promise<void>(done=>{resolve=done}),state={mode:'free',navigation:'orbit',dirty:false,saving:false,scope:{}};const calls:any[]=[];const mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial()),group=new THREE.Group(),camera=new THREE.PerspectiveCamera(50,1,.1,100);group.userData.entityId='annotation-entity';group.add(mesh);group.updateMatrixWorld(true);camera.position.set(0,0,5);camera.lookAt(0,0,0);camera.updateMatrixWorld(true);let width=200;const canvas=document.createElement('canvas');canvas.getBoundingClientRect=()=>({left:0,top:0,width,height:200,right:width,bottom:200,x:0,y:0,toJSON(){}});options.container.appendChild(canvas)
+ const instance:any=new Proxy({calls,resolve,options,camera,renderer:{domElement:canvas},objects:new Map([['annotation-entity',{group}]]),markers:new Map(),annotationRoot:new THREE.Group(),annotations:[],selected:'annotation-entity',resize:()=>{width=800},select:(id:string)=>{instance.selected=id},setAnnotations:SceneViewer.prototype.setAnnotations,annotationHitAtPointer:(SceneViewer.prototype as any).annotationHitAtPointer,applyAnnotationHit:(SceneViewer.prototype as any).applyAnnotationHit,openContextMenu:(SceneViewer.prototype as any).openContextMenu,setScene:(value:any)=>{instance.snapshot=value;calls.push(['setScene',value]);return pending},subscribeObserverState:()=>()=>{},observerState:()=>state,getViewState:()=>view,environmentStatus:()=>({hdriMimeTypes:[],warnings:[],ignored:[]}),collisionStatus:()=>({status:'disabled'}),animationStatus:()=>({playing:false,clips:[]})},{get(target,key){if(key in target)return (target as any)[key];return (...args:any[])=>{calls.push([key,...args])}}});instances.push(instance);return instance}
+ dom.window.HTMLCanvasElement.prototype.getContext=()=>null
+ dom.window.HTMLElement.prototype.attachEvent=()=>{};dom.window.HTMLElement.prototype.detachEvent=()=>{}
  const {createElement,act}=await import('react'),{createRoot}=await import('react-dom/client'),{Workbench}=await import('../src/workbench.tsx'),root=createRoot(document.getElementById('root')!)
  const flush=()=>act(async()=>{await new Promise(done=>setTimeout(done,320))})
  try{
@@ -61,5 +66,14 @@ test("同Scene引用重建Viewer仍加载新实例；旧加载结果不重放新
   expect(rebuilt.calls.filter((call:any[])=>call[0]==='setScene').length).toBe(1)
   await act(async()=>original.resolve());expect(document.querySelector('.lya-wb-canvas')?.getAttribute('aria-busy')).toBe('true');expect(rebuilt.calls.some((call:any[])=>call[0]==='setViewState'||call[0]==='openDefaultView')).toBe(false)
   await act(async()=>rebuilt.resolve());expect(rebuilt.calls.filter((call:any[])=>call[0]==='setViewState').length).toBe(1);expect(document.querySelector('.lya-wb-canvas')?.getAttribute('aria-busy')).toBe('false')
+  await act(async()=>rebuilt.options.onSelection('annotation-entity'))
+  await act(async()=>rebuilt.openContextMenu(new dom.window.MouseEvent('contextmenu',{clientX:100,clientY:100,cancelable:true})))
+  rebuilt.resize() // 菜单打开后布局改变；旧像素二次射线已偏离Toolbox，真实旧表面锚点必须保留。
+  expect(rebuilt.annotationHitAtPointer(100,100,'annotation-entity')).toBeUndefined()
+  await act(async()=>{const annotate=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='批注');expect(annotate).toBeDefined();annotate!.click()})
+  expect(rebuilt.markers.size).toBe(1);expect(rebuilt.annotations.length).toBe(1);expect(rebuilt.annotations[0].anchor.entityId).toBe('annotation-entity')
+  expect(rebuilt.annotations[0].anchor.world[2]).toBeCloseTo(.512);expect(rebuilt.annotations[0].anchor.normal).toEqual([0,0,1])
+  expect(JSON.parse(localStorage.getItem('lyapunov.annotations.same-scene')??'[]').length).toBe(1)
+  await flush();expect(rebuilt.markers.size).toBe(1);expect(JSON.parse(localStorage.getItem('lyapunov.annotations.same-scene')??'[]').length).toBe(1)
  }finally{await act(async()=>root.unmount());viewerFactory=()=>({});dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
 })
