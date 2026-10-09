@@ -795,7 +795,7 @@ function fakeCanvasViewer(size: { width: number; height: number }) {
   const viewer: any = Object.create(SceneViewer.prototype)
   const canvas = { width: size.width, height: size.height, toDataURL: () => pngOfSize(viewer.renderer.domElement.width, viewer.renderer.domElement.height) }
   viewer.renderer = {
-    domElement: canvas, toneMappingExposure: 1, pixelRatio: 1,
+    domElement: canvas, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1, pixelRatio: 1,
     getPixelRatio() { return viewer.renderer.pixelRatio as number },
     setPixelRatio(value: number) { viewer.renderer.pixelRatio = value },
     // 与 three 的 `setSize` 同一件事：改的是**着色缓冲**像素（`canvasPixels()` 读的就是它）。
@@ -829,9 +829,11 @@ function fakeCanvasViewer(size: { width: number; height: number }) {
   viewer.display = { grid: true, axes: true, background: "#121a24", wireframe: false, splats: true, collision: false }
   viewer.environmentDiagnostics = []
   viewer.environmentClock = { playing: false, offsetHours: 0, advancedSeconds: 0 }
-  // `environmentStatus()` 会读这三项（回执里的环境窄面由它折出来）：给"内置光、无阴影变化"的初值。
-  viewer.hemisphere = { intensity: 1 }
-  viewer.sun = { castShadow: true, intensity: 1 }
+  // Object.create 绕过 Viewer 构造；Scene 已提供真实环境旋转，灯也用原生对象补齐 shadow 读数。
+  // 保留本 fixture 的光强和阴影状态，环境回执仍由产品 environmentStatus()/environmentCaptureFace() 计算。
+  viewer.hemisphere = new THREE.HemisphereLight(0xe7efff, 0x47515c, 1)
+  viewer.sun = new THREE.DirectionalLight(0xffffff, 1)
+  viewer.sun.castShadow = true
   return viewer
 }
 class SimCamera {
