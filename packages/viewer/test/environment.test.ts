@@ -48,6 +48,24 @@ const hdriResource = (resourceId: string, version: number, uri: string, mimeType
 })
 
 describe("组件解析", () => {
+  test("色调映射、环境旋转与阴影参数有同一规范化入口，旧默认保持", () => {
+    for (const toneMapping of ["aces", "agx", "neutral", "linear", "none"]) {
+      const parsed=parseEnvironmentComponent({kind:ENVIRONMENT_KIND,toneMapping,environmentRotationDeg:[90,-90,450],shadow:{mapSize:4096,bias:-.002,normalBias:.03}})
+      if("error" in parsed)throw Error(parsed.error)
+      expect(parsed.component.toneMapping).toBe(toneMapping as any)
+      expect(parsed.component.environmentRotationDeg).toEqual([90,270,90])
+      expect(parsed.component.shadow).toEqual({mapSize:4096,bias:-.002,normalBias:.03})
+      const composed=composeEnvironment(parsed.component,{shadow:{bias:.001}})
+      expect(composed.component.shadow).toEqual({mapSize:4096,bias:.001,normalBias:.03})
+      expect(composed.component.toneMapping).toBe(toneMapping as any)
+    }
+    const parsed=parseEnvironmentComponent({kind:ENVIRONMENT_KIND,toneMapping:"missing",shadow:{mapSize:999,bias:-8,normalBias:8},environmentRotationDeg:[1,2]})
+    if("error" in parsed)throw Error(parsed.error)
+    expect(parsed.component.toneMapping).toBe("aces")
+    expect(parsed.component.environmentRotationDeg).toEqual([0,0,0])
+    expect(parsed.component.shadow).toEqual({mapSize:512,bias:-.01,normalBias:1})
+    expect(parsed.warnings).toHaveLength(5)
+  })
   test("只认 kind 完全相等的记录：同名不同 kind 不静默当环境用", () => {
     const wrong = parseEnvironmentComponent({ kind: "scene/lighting", exposure: 2 })
     expect("error" in wrong && wrong.error).toContain("ENVIRONMENT_KIND_UNSUPPORTED")
@@ -63,6 +81,9 @@ describe("组件解析", () => {
       environmentIntensity: 0.7,
       hemisphereIntensity: 2.4,
       exposure: 1,
+      toneMapping: "aces",
+      environmentRotationDeg: [0, 0, 0],
+      shadow: { mapSize: 512, bias: -0.0005, normalBias: 0 },
       background: "color",
       shadows: false,
       sun: { azimuthDeg: 90, elevationDeg: 45, intensity: 3 },

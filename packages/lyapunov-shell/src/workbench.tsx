@@ -55,6 +55,10 @@ import {SceneNodeLock,sceneNodeName,infiniteGround,lockCommit,SceneNodeVisibilit
 import {PackLibraryPanel} from "./pack-library-panel.tsx"
 import {PolicyLibraryPanel} from "./policy-library-panel.tsx"
 import {EnvironmentPanel,type EnvironmentPatch,type EnvironmentStatus} from "./environment-panel.tsx"
+import {MaterialPanel,type MaterialPatch,type MaterialStatus} from "./material-panel.tsx"
+import {SceneLightPanel} from "./scene-light-panel.tsx"
+import {renderControlDiagnostic} from "./render-control-diagnostics.ts"
+import type {SceneLight} from "../../viewer/src/scene-light.ts"
 import {WorkSurface,type WorkbenchRenderSlot} from "./work-surface.tsx"
 import {surfaceDisposition,useWorkbenchUI,TOOL_PANEL_WIDTH,type ToolId} from "./workbench-ui.ts"
 // openResource 回执判据（与宿主 `plugin.ts` 共用同一份纯函数，防两边漂移出假成功）。
@@ -514,6 +518,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const [envQuery,setEnvQuery]=useState(""),[envBusy,setEnvBusy]=useState(false),[envCandidates,setEnvCandidates]=useState<EnvironmentCandidate[]>([]),[envDetail,setEnvDetail]=useState<EnvironmentDetail>(),[envNote,setEnvNote]=useState(""),[builtinAssets,setBuiltinAssets]=useState<BuiltinAssetRecord[]>([])
  // 环境光照：读数（Viewer 出）与已登记的 HDRI 引用（资源库出）。都不是第二份"环境状态"——
  // 提交后这里立刻重读，真相始终是 Viewer 解析出来的那一份。
+ const [materialStatus,setMaterialStatus]=useState<MaterialStatus>(),[materialBusy,setMaterialBusy]=useState(false)
  const [environmentStatus,setEnvironmentStatus]=useState<EnvironmentStatus>(),[hdriAssets,setHdriAssets]=useState<Array<{ref:ResourceRef;name:string}>>([]),[hdriBusy,setHdriBusy]=useState(false)
  const hdriMimeRef=useRef<string[]>([])
  // main 就是原生对话；万一没有可容纳的中央（座位异常）也不允许"对话专注"，否则会剩一块空中央。
@@ -1380,7 +1385,9 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // ---- 环境光照（Scene 的 environment 组件）：面板读 Viewer 的读数，写回走既有 scene_edit/scene_mount ----
  // 读数由 Viewer 出（格式 owner），这里只做三件事：轮询取回、补丁提交、资源引用准备。
  // 本文件不解析环境组件的字段，也不保存第二份环境状态（面板渲染的就是 Viewer 的读数）。
- const readEnvironmentStatus=()=>{const instance=viewer.current;if(!instance)return;const next=instance.environmentStatus();setEnvironmentStatus(old=>JSON.stringify(old)===JSON.stringify(next)?old:next);const types=[...next.hdriMimeTypes];if(types.join("\x00")!==hdriMimeRef.current.join("\x00")){hdriMimeRef.current=types;void refreshHdriAssets(types).catch(()=>undefined)}}
+ const readMaterialStatus=()=>{const instance=viewer.current,id=selectedRef.current;const next=instance&&id?instance.materialStatus?.(id):undefined;setMaterialStatus(old=>JSON.stringify(old)===JSON.stringify(next)?old:next)}
+ useEffect(()=>{readMaterialStatus()},[selected,scene?.revision])
+ const readEnvironmentStatus=()=>{readMaterialStatus();const instance=viewer.current;if(!instance)return;const next=instance.environmentStatus();setEnvironmentStatus(old=>JSON.stringify(old)===JSON.stringify(next)?old:next);const types=[...next.hdriMimeTypes];if(types.join("\x00")!==hdriMimeRef.current.join("\x00")){hdriMimeRef.current=types;void refreshHdriAssets(types).catch(()=>undefined)}}
  /** 素材库里已登记的 HDRI（按 Viewer 给出的 mimeType 清单筛；本文件不猜扩展名）。 */
  const refreshHdriAssets=async(types=hdriMimeRef.current):Promise<Array<{ref:ResourceRef;name:string}>>=>{
   const list=await api.request<Array<AssetRecord&{ref:ResourceRef}>>("assets?"+new URLSearchParams({query:"",includeDeleted:"false"}))
@@ -1421,7 +1428,32 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    await updateScene({sceneId:current.sceneId,expectedRevision:current.revision,patch:[{op:"add",entity}]})
   }
   readEnvironmentStatus()
-  setNotice(composed.warnings.length?tr(`环境光照已提交；${composed.warnings.length} 个字段被规范化：${composed.warnings.join("；")}` ,`Lighting committed; ${composed.warnings.length} field(s) normalized: ${composed.warnings.join("; ")}`):tr("环境光照已提交。","Lighting committed."))
+  const warnings=composed.warnings.map(warning=>renderControlDiagnostic(warning,tr)).join(tr("；","; "))
+  setNotice(composed.warnings.length?tr(`环境光照已提交；${composed.warnings.length} 个字段被规范化：${warnings}` ,`Lighting committed; ${composed.warnings.length} field(s) normalized: ${warnings}`):tr("环境光照已提交。","Lighting committed."))
+ }
+ const applySceneLight=async(light:SceneLight)=>{
+  const current=sceneRef.current,id=selectedRef.current,target=current?.entities.find(item=>item.entityId===id)
+  if(!current||!target)return
+  await updateScene({sceneId:current.sceneId,expectedRevision:current.revision,patch:[{op:"update",entityId:target.entityId,changes:{components:{...target.components,light}}}]})
+ }
+ const addAreaLight=async()=>{
+  const current=sceneRef.current;if(!current)return
+  const light:Entity={entityId:crypto.randomUUID(),name:tr("面积灯","Area light"),transform:{position:[0,0,4],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{light:{kind:"area",color:[1,1,1],energy:500,widthM:2,heightM:2,direction:[0,0,-1]}}}
+  await updateScene({sceneId:current.sceneId,expectedRevision:current.revision,patch:[{op:"add",entity:light}]})
+  selectedRef.current=light.entityId;setSelected(light.entityId);ui.openTool("object")
+ }
+ /** 选中视觉实体的普通 Scene 组件，沿原 CAS/history/save/reopen 链路写入；null 恢复原材质。 */
+ const applyMaterialPatch=async(patch:MaterialPatch|null)=>{
+  const instance=viewer.current,current=sceneRef.current,id=selectedRef.current,target=current?.entities.find(item=>item.entityId===id)
+  if(!instance||!current||!target)return
+  setMaterialBusy(true)
+  try{
+   const components={...target.components},composed=patch===null?undefined:instance.composeMaterial(target.entityId,patch)
+   if(composed)components.materialOverride=composed.component;else delete components.materialOverride
+   await updateScene({sceneId:current.sceneId,expectedRevision:current.revision,patch:[{op:"update",entityId:target.entityId,changes:{components}}]})
+   readMaterialStatus()
+   setNotice(composed?.warnings.length?composed.warnings.map(warning=>renderControlDiagnostic(warning,tr)).join(tr("；","; ")):patch===null?tr("已恢复原始材质。","Source materials restored."):tr("材质覆盖已随场景提交。","Material override committed to the scene."))
+  }finally{setMaterialBusy(false)}
  }
  /** 去掉整条环境组件：回到组件出现之前那组内置光照读数（不删除实体/资源，用户写的都还在）。 */
  const removeEnvironment=async()=>{
@@ -1677,7 +1709,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 
  const editableEntity=scene&&selected?sceneEditTarget(scene,selected):undefined
  const objectInfo=entity&&scene&&<div className="lya-help" data-testid="scene-edit-target"><strong>{sceneNodeName(entity,tr)}</strong> · {nodeRoleLabel(entity)}{editableEntity&&editableEntity.entityId!==entity.entityId&&<span> · {tr('编辑实例：','Editing instance: ')}{editableEntity.name} <button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('选择编辑实例','Select editing instance')}</button></span>}{entity.parentId&&<span> · {tr('父节点：','Parent: ')}{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId} <button type="button" onClick={()=>chooseSceneEntity(entity.parentId!)}>{tr('选择父实例','Select parent instance')}</button></span>}<button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button></div>
- const objectEditor=entity&&scene&&!readOnly?<>{objectInfo}<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/></>:undefined
+ const objectEditor=entity&&scene&&!readOnly?<>{objectInfo}<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/>{entity.components.light&&<SceneLightPanel key={scene.sceneId+':light:'+entity.entityId} light={entity.components.light as SceneLight} disabled={readOnly||replayActive} apply={light=>perform(()=>applySceneLight(light))} tr={tr}/>}<MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/></>:undefined
  const objectPanel=<>
   {!objectEditor&&objectInfo}
   {!objectEditor&&<p className="lya-help">{!sessionId?tr("先在左侧选择工作区，再编辑对象。","Choose a workspace on the left to edit objects."):readOnly?tr("当前世界是只读投影，不能编辑。","The current world is a read-only projection."):tr("先选择一个对象：在场景层级里点它的名字，或在画布上点它。","Select an object first: click its name in the scene tree or click it on the canvas.")}</p>}
@@ -1867,7 +1899,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 
  const environmentPanel=<>
   {!sessionId&&<p className="lya-help">{tr("先在左侧选择工作区，再搜索或下载环境素材。","Choose a workspace on the left to search for or download environment assets.")}</p>}
-  <EnvironmentPanel status={environmentStatus} hdris={hdriAssets.map(item=>({resourceId:item.ref.resourceId,version:item.ref.version,name:item.name,mimeType:item.ref.original.mimeType}))} hdriBusy={hdriBusy} readOnly={readOnly} viewerVisible={viewerVisible} busy={!sessionId}
+  <EnvironmentPanel addAreaLight={()=>perform(addAreaLight)} status={environmentStatus} hdris={hdriAssets.map(item=>({resourceId:item.ref.resourceId,version:item.ref.version,name:item.name,mimeType:item.ref.original.mimeType}))} hdriBusy={hdriBusy} readOnly={readOnly} viewerVisible={viewerVisible} busy={!sessionId}
    apply={patch=>perform(()=>applyEnvironmentPatch(patch))} remove={()=>perform(removeEnvironment)} setPlaying={playing=>toggleDayNight(playing)}
    color={display.background} setColor={value=>setDisplay(old=>({...old,background:value}))} importHdri={path=>perform(()=>importHdriAsset(path))} refresh={()=>perform(()=>refreshHdriAssets())} tr={tr}/>
   <div className="lya-section"><span>{tr("环境素材","Environment assets")}</span>{envCandidates.length>0&&<span className="lya-section-side">{envCandidates.length}</span>}</div>

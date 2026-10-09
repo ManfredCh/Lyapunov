@@ -13,6 +13,7 @@
 import {useState} from "react"
 import type {SceneViewer} from "@lyapunov/viewer/client"
 import type {Translate} from "./entity-editor.tsx"
+import {renderControlDiagnostic} from "./render-control-diagnostics.ts"
 
 /** 读数与补丁的形状都从 Viewer 的公开面派生：格式一旦改动，这里编译期就会跟着变。 */
 export type EnvironmentStatus=ReturnType<SceneViewer["environmentStatus"]>
@@ -39,6 +40,7 @@ export interface EnvironmentPanelProps{
  setColor:(color:string)=>void
  importHdri:(path:string)=>void
  refresh:()=>void
+ addAreaLight?:()=>void
  tr:Translate
 }
 
@@ -54,16 +56,18 @@ function sceneColorSeed(value:string):string{
 
 /** 拖动期间显示草稿值，松手/回车/失焦提交一次；提交后清空草稿，显示回到 Viewer 的实际读数。 */
 function Slider({label,value,min,max,step,disabled,onCommit,format}:{label:string;value:number;min:number;max:number;step:number;disabled?:boolean;onCommit:(value:number)=>void;format?:(value:number)=>string}){
- const [draft,setDraft]=useState<number>()
- const shown=draft??value
- const commit=()=>{if(draft===undefined)return;const next=draft;setDraft(undefined);if(next!==value)onCommit(next)}
+ const [draft,setDraft]=useState<string>()
+ const shown=draft?.trim()&&Number.isFinite(Number(draft))?Number(draft):value
+ const commit=()=>{if(draft===undefined)return;const next=draft.trim()?Number(draft):NaN;setDraft(undefined);if(Number.isFinite(next)&&next!==value)onCommit(next)}
  return <label className="lya-field-label">{label} <span className="lya-muted">{format?format(shown):shown.toFixed(2)}</span>
   <input className="lya-wide" type="range" aria-label={label} min={min} max={max} step={step} value={shown} disabled={disabled}
-   onChange={event=>setDraft(Number(event.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit}/>
+   onChange={event=>setDraft(event.target.value)} onPointerUp={commit} onKeyUp={commit} onBlur={commit}/>
+  <input className="lya-wide" type="number" aria-label={`${label} (${min}–${max})`} min={min} max={max} step={step} value={draft??String(value)} disabled={disabled}
+   onChange={event=>setDraft(event.target.value)} onBlur={commit} onKeyUp={event=>{if(event.key==="Enter")(event.target as HTMLInputElement).blur()}}/>
  </label>
 }
 
-export function EnvironmentPanel({status,hdris,hdriBusy,readOnly,viewerVisible,busy,apply,remove,setPlaying,color,setColor,importHdri,refresh,tr}:EnvironmentPanelProps){
+export function EnvironmentPanel({status,hdris,hdriBusy,readOnly,viewerVisible,busy,apply,remove,setPlaying,color,setColor,importHdri,refresh,addAreaLight,tr}:EnvironmentPanelProps){
  const [path,setPath]=useState("")
  const [cycleDraft,setCycleDraft]=useState<string>("")
  const component=status?.component
@@ -80,21 +84,36 @@ export function EnvironmentPanel({status,hdris,hdriBusy,readOnly,viewerVisible,b
   <fieldset className="lya-property-editor"><legend>{tr("光照","Lighting")}</legend>
    <div className="lya-row">
     <span className="lya-badge">{status.environmentSource==="hdri"?tr("HDRI 环境光","HDRI lighting"):tr("内置环境光","Built-in lighting")}</span>
-    {component&&<span className="lya-badge">{`IBL ${status.environmentIntensity.toFixed(2)} · ${tr("曝光","exposure")} ${status.exposure.toFixed(2)}`}</span>}
+    {component&&<span className="lya-badge">{`IBL ${status.environmentIntensity.toFixed(2)} · ${tr("曝光倍率","exposure multiplier")} ${status.exposure.toFixed(2)}`}</span>}
     {!component&&<span className="lya-badge">{tr("未启用环境组件","No environment component")}</span>}
    </div>
+   {addAreaLight&&<button disabled={disabled} onClick={addAreaLight}>{tr("添加面积灯","Add area light")}</button>}
    {!component&&<><p className="lya-help">{tr("当前场景没有 environment 组件，读到的就是内置光照（与旧版一致）。启用后会往场景文档里写入一条实体组件，可被 Agent 用 scene_edit 改、也随版本历史回退。","This scene has no environment component, so it reads the built-in lighting (unchanged from before). Enabling writes one entity component into the scene document: agents can change it with scene_edit and it follows scene history.")}</p>
     <div className="lya-row"><button className="lya-primary" disabled={disabled} onClick={()=>apply({})}>{tr("启用环境光照","Enable environment lighting")}</button><button disabled={busy} onClick={refresh}>{tr("刷新素材","Refresh assets")}</button></div></>}
    {component&&<>
-    <Slider label={tr("曝光","Exposure")} value={component.exposure} min={0} max={8} step={0.05} disabled={disabled} onCommit={value=>apply({exposure:value})}/>
+    <label className="lya-field-label">{tr("色调映射","Tone mapping")}<select className="lya-wide" aria-label={tr("色调映射","Tone mapping")} value={component.toneMapping} disabled={disabled} onChange={event=>apply({toneMapping:event.target.value as EnvironmentPatch["toneMapping"]})}>
+     <option value="aces">ACES Filmic</option><option value="agx">AgX</option><option value="neutral">Neutral</option><option value="linear">{tr("线性","Linear")}</option><option value="none">{tr("无映射","None")}</option>
+    </select></label>
+    <div className="lya-row"><button disabled={disabled} onClick={()=>apply({toneMapping:"agx",exposure:1,environmentIntensity:1,hemisphereIntensity:0,sun:{intensity:0}})}>{tr("AgX 中性起点","AgX neutral starting point")}</button></div>
+    <p className="lya-help">{tr("中性起点使用 AgX、曝光倍率 1、IBL 1，并关闭半球补光和太阳；可继续选择 HDRI。曝光 1 对应 0 EV。材质与光照仍由当前实时渲染器计算。","The starting point uses AgX, exposure 1, IBL 1 and no hemisphere fill or sun. Choose an HDRI as needed. Exposure 1 equals 0 EV; this realtime renderer calculates the result.")}</p>
+    <Slider label={tr("曝光倍率（1 = 0 EV）","Exposure multiplier (1 = 0 EV)")} value={component.exposure} min={0} max={8} step={0.05} disabled={disabled||component.toneMapping==="none"} onCommit={value=>apply({exposure:value})}/>
+    {component.toneMapping==="none"&&<p className="lya-help">{tr("无映射模式不应用曝光倍率。","None tone mapping does not apply the exposure multiplier.")}</p>}
     <Slider label={tr("环境光强（IBL）","Environment intensity (IBL)")} value={component.environmentIntensity} min={0} max={8} step={0.05} disabled={disabled} onCommit={value=>apply({environmentIntensity:value})}/>
     <Slider label={tr("半球补光","Hemisphere fill")} value={component.hemisphereIntensity} min={0} max={8} step={0.1} disabled={disabled} onCommit={value=>apply({hemisphereIntensity:value})}/>
     <label><input type="checkbox" checked={component.shadows} disabled={disabled} onChange={event=>apply({shadows:event.target.checked})}/>{tr("阴影（太阳投影）","Shadows (sun)")}</label>
+    {component.shadows&&<>
+     <label className="lya-field-label">{tr("太阳阴影精度","Sun shadow resolution")}<select className="lya-wide" aria-label={tr("太阳阴影精度","Sun shadow resolution")} disabled={disabled} value={component.shadow.mapSize} onChange={event=>apply({shadow:{mapSize:Number(event.target.value) as 512|1024|2048|4096}})}>{[512,1024,2048,4096].map(size=><option key={size} value={size}>{size} × {size}</option>)}</select></label>
+     <Slider label={tr("阴影深度偏移","Shadow depth bias")} value={component.shadow.bias} min={-.01} max={.01} step={.0001} disabled={disabled} onCommit={bias=>apply({shadow:{bias}})} format={value=>value.toFixed(4)}/>
+     <Slider label={tr("阴影法线偏移（米）","Shadow normal bias (m)")} value={component.shadow.normalBias} min={0} max={1} step={.001} disabled={disabled} onCommit={normalBias=>apply({shadow:{normalBias}})} format={value=>value.toFixed(3)}/>
+    </>}
     <div className="lya-row"><button className="lya-chip" disabled={disabled} onClick={remove}>{tr("移除环境组件","Remove environment component")}</button><span className="lya-help">{tr("移除后回到内置光照；HDRI 资源仍留在素材库。","Removing returns to the built-in lighting; the HDRI stays in your library.")}</span></div>
    </>}
   </fieldset>
   {component&&<>
    <fieldset className="lya-property-editor"><legend>{tr("HDRI 环境贴图","HDRI environment map")}</legend>
+    {component.environmentRotationDeg.map((value,index)=><Slider key={index} label={tr(`环境方向 ${["X","Y","Z"][index]}（度）`,`Environment ${["X","Y","Z"][index]} rotation (deg)`)} value={value} min={0} max={360} step={1} disabled={disabled} onCommit={next=>{const rotation=[...component.environmentRotationDeg] as [number,number,number];rotation[index]=next;apply({environmentRotationDeg:rotation})}} format={next=>`${next.toFixed(0)}°`}/>)}
+    <div className="lya-row"><button disabled={disabled} onClick={()=>apply({environmentRotationDeg:[90,0,0]})}>{tr("Y 向上 HDRI 转 Z 向上","Align Y-up HDRI to Z-up")}</button><button disabled={disabled} onClick={()=>apply({environmentRotationDeg:[0,0,0]})}>{tr("重置环境方向","Reset environment rotation")}</button></div>
+    <p className="lya-help">{tr("方向同时作用于环境反射与天空背景；Z 调朝向，X/Y 可对齐原图坐标轴。","Rotation applies to reflections and the sky background together. Z controls yaw; X/Y align the source axes.")}</p>
     <div className="lya-row"><span className="lya-badge">{hdri?(hdri.loaded?tr("已加载","loaded"):hdri.loading?tr("正在加载","loading"):tr("没装上（见下方原因）","not applied (see reason)")):tr("未设置，用内置环境光","Not set, built-in lighting")}</span>{hdri?.size&&<span className="lya-badge">{`${hdri.size[0]}×${hdri.size[1]}`}</span>}{hdri&&!hdri.loaded&&hdri.applied&&<span className="lya-badge">{tr(`画面仍在用 ${hdri.applied.resourceId}@${hdri.applied.version}`,`still showing ${hdri.applied.resourceId}@${hdri.applied.version}`)}</span>}</div>
     {hdri?.uri&&<p className="lya-help" title={hdri.uri}>{hdri.uri}</p>}
     {status.error&&<p className="lya-help lya-error">{status.error}</p>}
@@ -131,7 +150,7 @@ export function EnvironmentPanel({status,hdris,hdriBusy,readOnly,viewerVisible,b
    </fieldset>
   </>}
   {(status.warnings.length>0||status.ignored.length>0)&&<fieldset className="lya-property-editor"><legend>{tr("文档里的问题","Document issues")}</legend>
-   {status.warnings.map(warning=><p className="lya-help" key={warning}>{warning}</p>)}
+   {status.warnings.map(warning=><p className="lya-help" key={warning}>{renderControlDiagnostic(warning,tr)}</p>)}
    {status.ignored.map(item=><p className="lya-help" key={`${item.entityId}:${item.reason}`}>{`${item.entityId}: ${item.reason}`}</p>)}
   </fieldset>}
  </>

@@ -71,7 +71,7 @@ The contract rejects mistakes explicitly rather than silently selecting the wron
 
 Annotations carry **entity identity, entity-local coordinates and world coordinates at submission**. `viewer_annotation_send_ui` delivers a user message; `viewer_annotation_read` retrieves the same image/text. Interpret it as a request to change the indicated location. **Apply expressible `scene_edit` changes immediately to the current Scene**:
 
-1. **In-place changes first**, retaining sceneId and annotations with rev+1: entity movement/rotation/scale, visibility, parentage, deletion/duplication and replacement below. Check whether a real consumer exists. `components.light` has a Viewer consumer for kind/color/energy/direction. **Entity colour/material fields have no consumer**: changing components does not change appearance. Edit source Blender materials/textures and export instead of claiming annotation-driven recolouring.
+1. **In-place changes first**, retaining sceneId and annotations with rev+1: entity movement/rotation/scale, visibility, parentage, deletion/duplication and replacement below. Check whether a real consumer exists. `components.light` has a Viewer consumer for kind/color/energy/direction. 选中实体的 PBR 材质可用 `components.materialOverride`（`kind:"visual/material-override"`）控制，支持 `baseColor:"#rrggbb"`、`roughness`、`metalness`、`emissive:"#rrggbb"`、`emissiveIntensity`、`opacity`、`textures`、`normalScale`。未声明字段保留原材质；底色乘原贴图；法线倍率只对原有法线贴图生效。只覆盖该实体的视觉子树，GLB 共享实例互不污染；删除这个组件即恢复原材质。点云和非 PBR 不适用。普通 UI 在对象属性的“视觉材质”中写同一组件。
 2. **Escalate to Blender only when new geometry/source material is required**: opening/arch shapes, roof profiles, whole structures or source textures. Use `mcp__blender__*` or `blender_run` on the source project, then export.
 3. **Continue in the same Scene after escalation**:
    - Receive with `scene_open` if it aligns with the document. Identical same-scene content is an idempotent reopen; only same-identity resource-location changes may overwrite. Changed entity structure/resource identity reports `SCENE_ALREADY_EXISTS`.
@@ -80,6 +80,12 @@ Annotations carry **entity identity, entity-local coordinates and world coordina
    - **Never evade in-place updates by inventing a new sceneId**, which would discard annotations, cameras and the user's working context.
 
 Explain which layer changed and why each round: an in-place Scene edit or source geometry reconstruction in Blender. Do not replace that explanation with a generic fixed claim.
+
+## 光照与材质的普通 Scene 控制
+
+- 全局环境仍使用 `components.environment`（`kind:"scene/environment"`），可写 `toneMapping:"aces"|"agx"|"neutral"|"linear"|"none"`、环境旋转 `environmentRotationDeg:[x,y,z]`（XYZ 欧拉角度，同步 IBL/天空；Z 是世界竖轴朝向，X/Y 可做源 HDRI 轴对齐）、曝光倍率 `exposure`（乘数 1 对应 Blender 0 EV；不要把 0 EV 写成 exposure:0，0 倍率会使有映射的画面变黑）、`environmentIntensity`、`hemisphereIntensity`、原 HDRI 引用、`sun`、`shadows` 与 `shadow:{mapSize:512|1024|2048|4096,bias,normalBias}`。未声明色调映射时保持历史 ACES。不要创建第二份灯光状态。
+- 场景面积灯为 `components.light:{kind:"area",energy:500,widthM:2,heightM:1,color:[1,1,1],direction:[0,0,-1]}`。尺寸单位为米；显式 direction 是世界照射方向，省略时沿实体局部 -Z（可由 transform.quaternion 定向）。沿用 sizeM 的旧场景可继续读取。面积灯使用矩形辐射与实时渲染器功率，不支持投影阴影，圆盘形状近似为矩形；不能把 Blender 瓦数或任意 Shader/Cycles 结果宣称为逐像素等价。
+- 示例：对 `scene_inspect` 返回的选中实体保留其它组件，提交 `scene_edit {sceneId,expectedRevision,patch:[{op:"update",entityId,changes:{components:{...原组件,materialOverride:{kind:"visual/material-override",roughness:0.4,metalness:0.7}}}}]}`。省略号表示先读取后合并，不能把它当作字面 JSON。组件随原 CAS、历史与保存重开持久化。需要新增纹理、烘焙或任意源着色器时再编辑源 Blender；不要为了普通材质参数覆盖重写 GLB。
 
 ## Boundaries
 

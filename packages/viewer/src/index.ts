@@ -1,4 +1,7 @@
 import * as THREE from "three"
+import { buildSceneLight, orientAreaLight, type SceneLight } from "./scene-light.ts"
+import { EntityMaterialOverride, composeMaterialOverride, parseMaterialOverride, MATERIAL_OVERRIDE_KEY, type MaterialOverridePatch, type MaterialStatus } from "./material-override.ts"
+export type { MaterialOverride, MaterialOverridePatch, MaterialStatus } from "./material-override.ts"
 import { type GLTF, type GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import {clone as cloneSkeleton} from 'three/addons/utils/SkeletonUtils.js'
 // glTF 装载器**只在 `draco-decoder.ts` 里造**：它是唯一一处把 DRACO / KTX2 / meshopt 三种解码器接上去的地方
@@ -25,7 +28,7 @@ import {
   advanceEnvironmentClock, composeEnvironment as composeEnvironmentComponent, environmentDaylightFactor,
   environmentLiveState, resolveEnvironmentHdri, scanSceneEnvironment,
   sunDirectionVector, ENVIRONMENT_COMPONENT_KEY, HDRI_MIME_TYPES, type EnvironmentClockState, type EnvironmentPatch,
-  type EnvironmentHdriResolution, type EnvironmentScan, type SceneEnvironment,
+  type EnvironmentHdriResolution, type EnvironmentScan, type SceneEnvironment, type EnvironmentToneMapping, SCENE_ENVIRONMENT_DEFAULTS,
 } from "./environment.ts"
 /**
  * 环境组件的格式与纯计算由 `./environment.ts` 唯一拥有，这里再导出给消费方（面板/测试）：
@@ -57,6 +60,8 @@ import { cameraRequestFromRig, captureGateLabel, captureGateRect, frustumFromRec
 import { currentRobotFrame } from "../../lyapunov-contracts/src/robot-frame.ts"
 import { projectSceneCameraRigs } from "./scene-camera-rigs.ts"
 import { staticAnimationReference, type StaticAnimationReference } from "./animation-reference.ts"
+
+const TONE_MAPPINGS: Record<EnvironmentToneMapping, THREE.ToneMapping> = { aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping, linear: THREE.LinearToneMapping, none: THREE.NoToneMapping }
 
 export interface ViewerOptions {
   container: HTMLElement
@@ -184,6 +189,9 @@ export interface EnvironmentStatus {
   /** 纯色背景**实际生效**的颜色：组件自带色优先，否则是查看器/相机面板那一份（背景色的唯一回落处）。 */
   colorBackground: string
   exposure: number
+  toneMapping: EnvironmentToneMapping
+  environmentRotationDeg: [number, number, number]
+  shadow: SceneEnvironment["shadow"]
   environmentIntensity: number
   hemisphereIntensity: number
   shadows: boolean
@@ -267,6 +275,7 @@ interface Loaded {
    */
   pending?: Promise<void>
   /** 基础级别（`visual` 表示）的可视对象；LOD 交换只换 `visual`，它一直留着。 */
+  materialOverride?: EntityMaterialOverride
   baseVisual?: THREE.Object3D
   /** 当前挂在 group 上显示的可视对象（LOD 交换会替换它）。 */
   visual?: THREE.Object3D
@@ -716,19 +725,28 @@ export class SceneViewer {
       // 此前 Viewer 只用构造时硬编码的两盏灯，完全忽略 Scene；Blender 打的灯因此不可见
       // （官方建筑 case 的"可开关顶灯"也就不成立）。这里把带 `light` 组件的实体建成 THREE 灯，
       // 每个实体一个 `THREE.Group` 包着，变换仍走既有 applyTransform 路径，不新增定位逻辑。
-      const light = entity.components.light as { kind?: string; color?: number[]; energy?: number; direction?: number[]; sizeM?: number; angleRad?: number; spotSizeRad?: number } | undefined
+      const light = entity.components.light as SceneLight | undefined
       if (light) {
         const signature = JSON.stringify({ light })
         let loaded = this.objects.get(entity.entityId)
-        if (loaded && loaded.signature !== signature) { this.release(loaded); this.objects.delete(entity.entityId); loaded = undefined }
+        if (loaded && loaded.signature !== signature) {
+          // 改灯参数保留当前实体 Group/选择，属性面板可连续调整。
+          if (loaded.group.userData.sceneLight) { loaded.group.clear(); loaded.signature = signature; loaded.lodWarnings = [] }
+          else { this.release(loaded); this.objects.delete(entity.entityId); loaded = undefined }
+        }
         if (!loaded) {
           loaded = { group: new THREE.Group(), signature, lodWarnings: [] }
           loaded.group.name = entity.name
           loaded.group.userData.entityId = entity.entityId
           loaded.group.userData.sceneLight = true
-          loaded.group.add(buildSceneLight(light))
           this.objects.set(entity.entityId, loaded)
         }
+        if (!loaded.group.children.length) {
+          loaded.group.add(buildSceneLight(light))
+          if (light.kind === "area" && light.shape && !["rectangle", "square"].includes(light.shape)) loaded.lodWarnings.push(`AREA_SHAPE_RECTANGULAR: ${light.shape} uses a rectangular emitter in the viewer; area lights do not cast shadows`)
+        }
+        loaded.group.userData.loaded = true
+        this.refreshVisualWarnings(entity.entityId, loaded)
         applyTransform(loaded.group, entity.transform)
         loaded.group.visible = this.sceneLightsVisible&&entity.components.visual?.visible!==false
         continue
@@ -747,6 +765,7 @@ export class SceneViewer {
       applyTransform(loaded.group, entity.transform)
       loaded.robot?.resetPose()
       loaded.group.visible = entity.components.visual?.visible !== false
+      this.applyEntityMaterial(loaded)
       this.trackAnimation(entity.entityId, loaded)
     }
     // DEV-010（N227 rev，方案 B）：同上（挂树循环）——每 64 个实体让出一次事件循环。
@@ -758,6 +777,8 @@ export class SceneViewer {
       if (!parent) throw new Error(`VIEWER_PARENT_MISSING: ${entity.parentId}`)
       if (group.parent !== parent) parent.add(group)
     }
+    this.scene.updateMatrixWorld(true)
+    for (const entity of snapshot.entities) if (entity.components.light) orientAreaLight(this.objects.get(entity.entityId)!.group, entity.components.light as SceneLight)
     for (const loaded of this.objects.values()) {
       loaded.group.updateWorldMatrix(true, false)
       loaded.documentWorldMatrix = loaded.group.matrixWorld.clone()
@@ -840,6 +861,7 @@ export class SceneViewer {
         // 成功但有缺件：记进 `visualWarnings` 而不是失败台账。归属与下面失败侧同一条判据——只有当前这个
         // Loaded 的警告才记（上面的身份检查已经挡掉"迟到的旧结果"）。
         this.setupLod(entity, loaded)
+        this.applyEntityMaterial(loaded)
         this.refreshVisualWarnings(entity.entityId, loaded)
         loaded.group.userData.loaded = true
         this.applyDisplay(loaded)
@@ -1241,6 +1263,7 @@ export class SceneViewer {
     void this.buildLodLevel(loaded, level).then(object => {
       if (this.disposed || this.objects.get(entityId) !== loaded || loaded.lod !== lod) return
       lod.levels.set(level, object)
+      this.applyEntityMaterial(loaded)
       lod.triangles.set(level, meshTriangles(object))
       if (lod.wanted === level) this.applyLodLevel(entityId, loaded, level)
     }, error => {
@@ -1305,6 +1328,7 @@ export class SceneViewer {
         loaded.group.add(wrapped)
         loaded.lod = { plan, levels: new Map([[index, wrapped]]), triangles: new Map([[index, meshTriangles(wrapped)]]), anchorLocal: localCenterOf(wrapped, loaded.group), current: index, wanted: index, distance: 0, failed: new Set(), switches: 0 }
         loaded.lodWarnings.push(`LOD_BASE_FALLBACK: 基础级别加载失败，当前显示派生级别 ${entry.role}（${String(baseError)}）`)
+        this.applyEntityMaterial(loaded)
         this.refreshVisualWarnings(entity.entityId, loaded)
         loaded.group.userData.loaded = true
         this.applyDisplay(loaded)
@@ -1395,6 +1419,10 @@ export class SceneViewer {
     const component = this.environment?.component
     const live = component ? environmentLiveState(component, this.environmentClock) : undefined
     const daylight = component && live ? environmentDaylightFactor(live, component) : 1
+    this.renderer.toneMapping = TONE_MAPPINGS[component?.toneMapping ?? "aces"]
+    const rotation = component?.environmentRotationDeg ?? [0, 0, 0]
+    this.scene.environmentRotation.set(...rotation.map(THREE.MathUtils.degToRad) as [number, number, number], "XYZ")
+    this.scene.backgroundRotation.copy(this.scene.environmentRotation)
     this.renderer.toneMappingExposure = component ? component.exposure : LEGACY_LIGHTING.exposure
     this.scene.environmentIntensity = (component ? component.environmentIntensity : LEGACY_LIGHTING.environmentIntensity) * daylight
     this.hemisphere.intensity = (component ? component.hemisphereIntensity : LEGACY_LIGHTING.hemisphereIntensity) * daylight
@@ -1448,7 +1476,14 @@ export class SceneViewer {
       camera.left = -radius * 1.5; camera.right = radius * 1.5; camera.top = radius * 1.5; camera.bottom = -radius * 1.5
       camera.near = 0.1; camera.far = this.sunDistance + radius * 3
       camera.updateProjectionMatrix()
-      this.sun.shadow.bias = -0.0005
+      const settings = this.environment?.component.shadow ?? SCENE_ENVIRONMENT_DEFAULTS.shadow
+      if (this.sun.shadow.mapSize.x !== settings.mapSize || this.sun.shadow.mapSize.y !== settings.mapSize) {
+        this.sun.shadow.mapSize.set(settings.mapSize, settings.mapSize)
+        this.sun.shadow.map?.dispose(); this.sun.shadow.map = null
+        this.sun.shadow.mapPass?.dispose(); this.sun.shadow.mapPass = null
+      }
+      this.sun.shadow.bias = settings.bias
+      this.sun.shadow.normalBias = settings.normalBias
     }
     if (meshes) for (const loaded of this.objects.values()) this.applyDisplay(loaded)
   }
@@ -1589,6 +1624,40 @@ export class SceneViewer {
     }
   }
 
+  private materialRoots(loaded: Loaded): THREE.Object3D[] {
+    return [...new Set([loaded.baseVisual, loaded.visual, ...loaded.lod?.levels.values() ?? []].filter((root): root is THREE.Object3D => Boolean(root)))]
+  }
+
+  private applyEntityMaterial(loaded: Loaded): void {
+    const entity = this.snapshot?.entities.find(item => item.entityId === loaded.group.userData.entityId)
+    const raw = entity?.components[MATERIAL_OVERRIDE_KEY]
+    if (raw === undefined && !loaded.materialOverride && !loaded.lodWarnings?.some(warning => warning.startsWith("MATERIAL_"))) return
+    const parsed = parseMaterialOverride(raw)
+    if (parsed.component && !loaded.materialOverride) loaded.materialOverride = new EntityMaterialOverride()
+    loaded.materialOverride?.apply(this.materialRoots(loaded), parsed.component)
+    loaded.lodWarnings = (loaded.lodWarnings ?? []).filter(warning => !warning.startsWith("MATERIAL_"))
+    loaded.lodWarnings.push(...(parsed.component ? this.materialStatus(loaded.group.userData.entityId).warnings : parsed.warnings))
+    this.refreshVisualWarnings(loaded.group.userData.entityId, loaded)
+  }
+
+  composeMaterial(entityId: string, patch: MaterialOverridePatch) {
+    const entity = this.snapshot?.entities.find(item => item.entityId === entityId)
+    if (!entity) throw new Error(`MATERIAL_ENTITY_MISSING: ${entityId}`)
+    return composeMaterialOverride(entity.components[MATERIAL_OVERRIDE_KEY], patch)
+  }
+
+  /** 已加载的 PBR 材质实值；无网格/点云/非 PBR 不返回可操作的伪读数。 */
+  materialStatus(entityId: string): MaterialStatus {
+    const entity = this.snapshot?.entities.find(item => item.entityId === entityId)
+    const parsed = parseMaterialOverride(entity?.components[MATERIAL_OVERRIDE_KEY]), loaded = this.objects.get(entityId)
+    const roots = loaded?.visual ? [loaded.visual] : []
+    const reading = (loaded?.materialOverride ?? new EntityMaterialOverride()).readings(roots)
+    const warnings = [...parsed.warnings], declared = entity?.components[MATERIAL_OVERRIDE_KEY] !== undefined
+    if (parsed.component && (roots.length || loaded?.group.userData.loaded) && !reading.supported) warnings.push("MATERIAL_PBR_UNSUPPORTED: The entity has no overridable PBR mesh materials; values were not applied")
+    if (parsed.component?.normalScale !== undefined && reading.supported && !reading.materials.some(material => material.hasNormalMap)) warnings.push("MATERIAL_NORMAL_MAP_MISSING: Source materials have no normal map; normal strength was not applied")
+    return { entityId, loaded: loaded?.group.userData.loaded === true, declared, ...parsed, warnings, ...reading }
+  }
+
   /**
    * 界面用的一条环境补丁 → **完整的组件值**（格式归 environment.ts：默认值、上界、归一化都在那边）。
    *
@@ -1637,6 +1706,9 @@ export class SceneViewer {
       ...(this.environment?.component.backgroundColor ? { backgroundColor: this.environment.component.backgroundColor } : {}),
       colorBackground: this.environmentColor(),
       exposure: this.renderer.toneMappingExposure,
+      toneMapping: (Object.keys(TONE_MAPPINGS) as EnvironmentToneMapping[]).find(key => TONE_MAPPINGS[key] === this.renderer.toneMapping) ?? "aces",
+      environmentRotationDeg: [this.scene.environmentRotation.x, this.scene.environmentRotation.y, this.scene.environmentRotation.z].map(THREE.MathUtils.radToDeg) as [number, number, number],
+      shadow: { mapSize: this.sun.shadow.mapSize.x as SceneEnvironment["shadow"]["mapSize"], bias: this.sun.shadow.bias, normalBias: this.sun.shadow.normalBias },
       environmentIntensity: this.scene.environmentIntensity,
       hemisphereIntensity: this.hemisphere.intensity,
       shadows: this.sun.castShadow,
@@ -2880,6 +2952,7 @@ export class SceneViewer {
     // 共享的可视对象（几何/材质/贴图归 GLTF 缓存所有）在 `disposeObject` 里按 `sharedVisual` 跳过：
     // 同一个 GLB 的其它实例可能还在画面上，绝不能因为其中一个实体离开就把共用的几何/贴图销毁掉。
     // 不共享的部分（机器人网格、碰撞线框、LOD 交换下来的派生对象）照常释放。
+    loaded.materialOverride?.reset()
     disposeObject(loaded.group)
     loaded.lod = undefined; loaded.baseVisual = undefined; loaded.visual = undefined
     // 几何减少后包围球变小：阴影取景缓存作废（下一帧 applyEnvironment 会按新半径重取）。
@@ -3076,43 +3149,4 @@ function disposeGltfSource(gltf: GLTF): void {
     }
   })
   for (const texture of textures) texture.dispose()
-}
-
-/**
- * Scene 的 `light` 组件 → THREE 灯。语义对齐 Blender 的四种灯，不做"看起来差不多"的映射：
- *  · sun  → DirectionalLight（平行光；Blender 的 SUN 强度是辐照度，故做有界换算）
- *  · area → RectAreaLight 在无 LTC 环境下不可靠，改用等价的 DirectionalLight，并按尺寸给强度
- *  · point/spot → 各自原生类型
- * 颜色按**线性**解释（Blender 的 `light.color` 就是线性值）。
- */
-function buildSceneLight(light: { kind?: string; color?: number[]; energy?: number; direction?: number[]; sizeM?: number; angleRad?: number; spotSizeRad?: number }): THREE.Light {
-  const rgb = Array.isArray(light.color) && light.color.length >= 3 ? light.color.slice(0, 3) : [1, 1, 1]
-  const energy = typeof light.energy === "number" && Number.isFinite(light.energy) ? light.energy : 1
-  const kind = (light.kind ?? "point").toLowerCase()
-  const built: THREE.Light = (() => {
-    if (kind === "sun") {
-      const value = new THREE.DirectionalLight(0xffffff, Math.min(6, Math.max(0, energy)))
-      // 平行光用位置表达朝向：放在"反方向"上，让光线沿 direction 打过来。
-      const d = light.direction ?? [0, 0, -1]
-      value.position.set(-d[0]!, -d[1]!, -d[2]!)
-      return value
-    }
-    if (kind === "area") {
-      const value = new THREE.DirectionalLight(0xffffff, Math.min(8, Math.max(0, energy / 250)))
-      const d = light.direction ?? [0, 0, -1]
-      value.position.set(-d[0]!, -d[1]!, -d[2]!)
-      return value
-    }
-    if (kind === "spot") {
-      const value = new THREE.SpotLight(0xffffff, Math.min(40, Math.max(0, energy / 25)), 0, typeof light.spotSizeRad === "number" ? light.spotSizeRad : Math.PI / 6, 0.3)
-      const d = light.direction ?? [0, 0, -1]
-      value.target.position.set(d[0]!, d[1]!, d[2]!)
-      value.add(value.target)
-      return value
-    }
-    return new THREE.PointLight(0xffffff, Math.min(40, Math.max(0, energy / 25)))
-  })()
-  built.color.setRGB(rgb[0]!, rgb[1]!, rgb[2]!, THREE.LinearSRGBColorSpace)
-  built.name = `scene-light-${kind}`
-  return built
 }

@@ -77,3 +77,64 @@ test("原Workbench同Scene重建与旧promise隔离；右键当帧批注跨布�
   await flush();expect(rebuilt.markers.size).toBe(1);expect(JSON.parse(localStorage.getItem('lyapunov.annotations.same-scene')??'[]').length).toBe(1)
  }finally{await act(async()=>root.unmount());viewerFactory=()=>({});dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
 })
+
+test("原环境/材质/面积灯面板提交真实补丁；空数值不写0，重置恢复源引用",async()=>{
+ const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+ const dom=new JSDOM('<div id="controls"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','HTMLElement','Node','navigator','IS_REACT_ACT_ENVIRONMENT']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key]})}
+ dom.window.HTMLElement.prototype.attachEvent=()=>{};dom.window.HTMLElement.prototype.detachEvent=()=>{}
+ const {createElement,act}=await import('react'),{createRoot}=await import('react-dom/client'),{MaterialPanel}=await import('../src/material-panel.tsx'),{EnvironmentPanel}=await import('../src/environment-panel.tsx'),{SceneLightPanel}=await import('../src/scene-light-panel.tsx')
+ const {EntityMaterialOverride,composeMaterialOverride,parseMaterialOverride}=await import('../../viewer/src/material-override.ts'),{defaultSceneEnvironment,parseEnvironmentComponent}=await import('../../viewer/src/environment.ts')
+ const {renderControlDiagnostic}=await import('../src/render-control-diagnostics.ts')
+ const owner=new EntityMaterialOverride(),source=new THREE.MeshStandardMaterial({roughness:.38,metalness:.1,map:new THREE.Texture()}),group=new THREE.Group(),mesh=new THREE.Mesh(new THREE.BoxGeometry(),source);group.add(mesh)
+ const root=createRoot(document.getElementById('controls')!),patches:any[]=[],tr=(zh:string)=>zh
+ let component:any
+ const renderMaterial=()=>root.render(createElement(MaterialPanel,{status:{entityId:'selected',loaded:true,declared:Boolean(component),component,warnings:[],...owner.readings([group])},busy:false,readOnly:false,tr,apply:(patch:any)=>{patches.push(patch);component=composeMaterialOverride(component,patch).component;owner.apply([group],component);renderMaterial()},reset:()=>{component=undefined;owner.reset();renderMaterial()}}))
+ const input=(label:string)=>document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+ const setValue=async(element:HTMLInputElement,value:string)=>{await act(async()=>{element.focus();Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new dom.window.Event('input',{bubbles:true}));element.dispatchEvent(new dom.window.Event('change',{bubbles:true}));element.dispatchEvent(new dom.window.KeyboardEvent('keyup',{key:'1',bubbles:true}))});await act(async()=>element.blur())}
+ try{
+  await act(async()=>renderMaterial())
+  expect(input('粗糙度').value).toBe('0.38');expect(input('法线强度倍率').disabled).toBe(true)
+  await setValue(input('粗糙度'),'0.66')
+  expect(patches.at(-1)).toEqual({roughness:.66});expect((mesh.material as THREE.MeshStandardMaterial).roughness).toBe(.66);expect(source.roughness).toBe(.38)
+  const count=patches.length;await setValue(input('不透明度'),'');expect(patches.length).toBe(count)
+  await act(async()=>input('使用原贴图').click());expect((mesh.material as THREE.MeshStandardMaterial).map).toBeNull();expect(source.map).toBeInstanceOf(THREE.Texture)
+  await act(async()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='重置为原始材质')!.click());expect(mesh.material).toBe(source)
+  const env=defaultSceneEnvironment(),status:any={component:env,hdriMimeTypes:[],warnings:[],ignored:[],environmentSource:'builtin',environmentIntensity:.7,exposure:1,hemisphereIntensity:2.4,shadows:false,sun:{...env.sun,source:'manual'},timeHours:12,clock:{playing:false,offsetHours:0,advancedSeconds:0},colorBackground:'#121a24'}
+  await act(async()=>root.render(createElement(EnvironmentPanel,{status,hdris:[],hdriBusy:false,readOnly:false,viewerVisible:true,busy:false,tr,color:'#121a24',apply:(patch:any)=>patches.push(patch),remove:()=>{},setPlaying:()=>{},setColor:()=>{},importHdri:()=>{},refresh:()=>{}})))
+  expect(input('曝光倍率（1 = 0 EV） (0–8)').value).toBe('1')
+  const mapping=document.querySelector<HTMLSelectElement>('select[aria-label="色调映射"]')!
+  await act(async()=>{mapping.value='agx';mapping.dispatchEvent(new dom.window.Event('change',{bubbles:true}))});expect(patches.at(-1)).toEqual({toneMapping:'agx'})
+  await act(async()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='AgX 中性起点')!.click());expect(patches.at(-1)).toEqual({toneMapping:'agx',exposure:1,environmentIntensity:1,hemisphereIntensity:0,sun:{intensity:0}})
+  await setValue(input('环境方向 Z（度） (0–360)'),'75');expect(patches.at(-1)).toEqual({environmentRotationDeg:[0,0,75]})
+  await act(async()=>root.render(createElement(SceneLightPanel,{light:{kind:'area',energy:500,widthM:2,heightM:1,color:[1,1,1]},disabled:false,tr,apply:(value:any)=>patches.push(value)})))
+  await setValue(input('面光高度（米）'),'3');expect(patches.at(-1)).toMatchObject({kind:'area',energy:500,widthM:2,heightM:3,color:[1,1,1]})
+  const en=(_zh:string,english:string)=>english
+  const materialWarnings=parseMaterialOverride({kind:'visual/material-override',baseColor:'red',roughness:4,opacity:'',textures:'no'}).warnings
+  const parsedEnv=parseEnvironmentComponent({kind:'scene/environment',toneMapping:'unsupported',environmentRotationDeg:[1,NaN,450],shadow:{mapSize:999,bias:-2,normalBias:'bad'}})
+  if('error' in parsedEnv)throw Error(parsedEnv.error)
+  const areaWarning='AREA_SHAPE_RECTANGULAR: disk uses a rectangular emitter in the viewer; area lights do not cast shadows'
+  const runtimeWarnings=['MATERIAL_PBR_UNSUPPORTED: The entity has no overridable PBR mesh materials; values were not applied','MATERIAL_NORMAL_MAP_MISSING: Source materials have no normal map; normal strength was not applied',areaWarning]
+  for(const warning of [...materialWarnings,...parsedEnv.warnings,...runtimeWarnings]){
+   expect(renderControlDiagnostic(warning,en)).not.toMatch(/\p{Script=Han}/u)
+   expect(renderControlDiagnostic(warning,tr)).toMatch(/\p{Script=Han}/u)
+   expect(renderControlDiagnostic(warning,en).split(':')[0]).toBe(warning.split(':')[0])
+  }
+  expect(renderControlDiagnostic('Oak | UV: '+areaWarning,tr).startsWith('Oak | UV: AREA_SHAPE_RECTANGULAR:')).toBe(true)
+  const legacy='ENVIRONMENT_FIELD_DEFAULTED: sun 不是对象，用默认值'
+  expect(renderControlDiagnostic(legacy,en)).toBe(legacy)
+  const materialStatus={entityId:'selected',loaded:true,declared:true,warnings:materialWarnings,...owner.readings([group])}
+  await act(async()=>root.render(createElement(MaterialPanel,{status:materialStatus,busy:false,readOnly:false,tr:en,apply:()=>{},reset:()=>{}})))
+  expect(document.getElementById('controls')!.textContent).not.toMatch(/\p{Script=Han}/u)
+  expect(document.getElementById('controls')!.textContent).toContain('roughness clamped to [0, 1]')
+  await act(async()=>root.render(createElement(MaterialPanel,{status:materialStatus,busy:false,readOnly:false,tr,apply:()=>{},reset:()=>{}})))
+  expect(document.getElementById('controls')!.textContent).toContain('roughness 已收敛到 [0, 1]')
+  const envProps={status:{...status,warnings:parsedEnv.warnings},hdris:[],hdriBusy:false,readOnly:false,viewerVisible:true,busy:false,color:'#121a24',apply:()=>{},remove:()=>{},setPlaying:()=>{},setColor:()=>{},importHdri:()=>{},refresh:()=>{}}
+  await act(async()=>root.render(createElement(EnvironmentPanel,{...envProps,tr:en})))
+  expect(document.getElementById('controls')!.textContent).not.toMatch(/\p{Script=Han}/u)
+  expect(input('Exposure multiplier (1 = 0 EV) (0–8)').value).toBe('1')
+  await act(async()=>root.render(createElement(EnvironmentPanel,{...envProps,tr})))
+  expect(document.getElementById('controls')!.textContent).toContain('toneMapping 不受支持')
+
+ }finally{await act(async()=>root.unmount());owner.reset();dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
+})

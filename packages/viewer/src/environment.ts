@@ -28,6 +28,10 @@ export interface SceneEnvironmentSun { azimuthDeg: number; elevationDeg: number;
  * （`offsetHours`），不写 Scene、不碰物理。
  */
 export interface SceneEnvironmentDayNight { enabled: boolean; timeHours: number; cycleSeconds: number }
+/** Three r180 的原生色调映射；历史场景保持 ACES。 */
+export const ENVIRONMENT_TONE_MAPPINGS = ["aces", "agx", "neutral", "linear", "none"] as const
+export type EnvironmentToneMapping = typeof ENVIRONMENT_TONE_MAPPINGS[number]
+export interface SceneEnvironmentShadow { mapSize: 512 | 1024 | 2048 | 4096; bias: number; normalBias: number }
 
 export interface SceneEnvironment {
   kind: typeof ENVIRONMENT_KIND
@@ -37,6 +41,9 @@ export interface SceneEnvironment {
   hemisphereIntensity: number
   /** 色调映射曝光（`renderer.toneMappingExposure`）。 */
   exposure: number
+  toneMapping: EnvironmentToneMapping
+  /** 环境贴图旋转（XYZ 欧拉角，度）；Z 是场景世界竖轴，X/Y 可对齐 HDRI 源轴。 */
+  environmentRotationDeg: Vec3
   /** 背景：`environment`＝显示 HDRI 天空盒；`color`＝纯色背景。 */
   background: "environment" | "color"
   /**
@@ -46,6 +53,7 @@ export interface SceneEnvironment {
   backgroundColor?: string
   /** 阴影：由太阳（DirectionalLight）投射；关掉后渲染器不再做阴影贴图。 */
   shadows: boolean
+  shadow: SceneEnvironmentShadow
   sun: SceneEnvironmentSun
   dayNight: SceneEnvironmentDayNight
   /** 缺省表示用内置环境光（改造前的行为），而不是"没有环境"。 */
@@ -66,19 +74,24 @@ export const SCENE_ENVIRONMENT_DEFAULTS = {
   environmentIntensity: 0.7,
   hemisphereIntensity: 2.4,
   exposure: 1,
+  toneMapping: "aces",
+  environmentRotationDeg: [0, 0, 0],
   background: "color",
   shadows: false,
+  shadow: { mapSize: 512, bias: -0.0005, normalBias: 0 },
   sun: { azimuthDeg: 90, elevationDeg: 45, intensity: 3 },
   dayNight: { enabled: false, timeHours: 12, cycleSeconds: 60 },
 } as const satisfies Omit<SceneEnvironment, "hdri">
 
 export function defaultSceneEnvironment(overrides: Partial<SceneEnvironment> = {}): SceneEnvironment {
-  const { sun, dayNight, ...rest } = overrides
+  const { sun, dayNight, shadow, ...rest } = overrides
   return {
     ...SCENE_ENVIRONMENT_DEFAULTS,
     ...rest,
     sun: { ...SCENE_ENVIRONMENT_DEFAULTS.sun, ...sun },
     dayNight: { ...SCENE_ENVIRONMENT_DEFAULTS.dayNight, ...dayNight },
+    shadow: { ...SCENE_ENVIRONMENT_DEFAULTS.shadow, ...shadow },
+    environmentRotationDeg: [...(overrides.environmentRotationDeg ?? SCENE_ENVIRONMENT_DEFAULTS.environmentRotationDeg)],
   }
 }
 
@@ -122,12 +135,13 @@ export function parseEnvironmentComponent(value: unknown): EnvironmentParseResul
   const defaults = defaultSceneEnvironment()
   const number = (input: unknown, fallback: number, path: string, min: number, max: number): number => {
     const parsed = finite(input)
+    const renderControl = path.startsWith("shadow.") || path.startsWith("environmentRotationDeg[")
     if (parsed === undefined) {
-      if (input !== undefined) warnings.push(`ENVIRONMENT_FIELD_DEFAULTED: ${path}=${JSON.stringify(input)} 不是有限数值，用默认 ${fallback}`)
+      if (input !== undefined) warnings.push(renderControl ? `ENVIRONMENT_FIELD_DEFAULTED: ${path}=${JSON.stringify(input)} is not a finite number; using ${fallback}` : `ENVIRONMENT_FIELD_DEFAULTED: ${path}=${JSON.stringify(input)} 不是有限数值，用默认 ${fallback}`)
       return fallback
     }
     if (parsed < min || parsed > max) {
-      warnings.push(`ENVIRONMENT_FIELD_CLAMPED: ${path}=${parsed} 收敛到 [${min}, ${max}]`)
+      warnings.push(renderControl ? `ENVIRONMENT_FIELD_CLAMPED: ${path}=${parsed} clamped to [${min}, ${max}]` : `ENVIRONMENT_FIELD_CLAMPED: ${path}=${parsed} 收敛到 [${min}, ${max}]`)
       return clamp(parsed, min, max)
     }
     return parsed
@@ -149,6 +163,14 @@ export function parseEnvironmentComponent(value: unknown): EnvironmentParseResul
   if (raw.sun !== undefined && sun !== raw.sun) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: sun 不是对象，用默认值")
   const dayNight = raw.dayNight && typeof raw.dayNight === "object" && !Array.isArray(raw.dayNight) ? raw.dayNight as Record<string, unknown> : {}
   if (raw.dayNight !== undefined && dayNight !== raw.dayNight) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: dayNight 不是对象，用默认值")
+  const shadow = raw.shadow && typeof raw.shadow === "object" && !Array.isArray(raw.shadow) ? raw.shadow as Record<string, unknown> : {}
+  if (raw.shadow !== undefined && shadow !== raw.shadow) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: shadow must be an object; using defaults")
+  const toneMapping = ENVIRONMENT_TONE_MAPPINGS.includes(raw.toneMapping as EnvironmentToneMapping) ? raw.toneMapping as EnvironmentToneMapping : defaults.toneMapping
+  if (raw.toneMapping !== undefined && raw.toneMapping !== toneMapping) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: toneMapping is unsupported; using aces")
+  const mapSize = [512, 1024, 2048, 4096].includes(shadow.mapSize as number) ? shadow.mapSize as SceneEnvironmentShadow["mapSize"] : defaults.shadow.mapSize
+  if (shadow.mapSize !== undefined && shadow.mapSize !== mapSize) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: shadow.mapSize must be 512/1024/2048/4096; using 512")
+  const rotation = Array.isArray(raw.environmentRotationDeg) && raw.environmentRotationDeg.length === 3 ? raw.environmentRotationDeg : defaults.environmentRotationDeg
+  if (raw.environmentRotationDeg !== undefined && rotation !== raw.environmentRotationDeg) warnings.push("ENVIRONMENT_FIELD_DEFAULTED: environmentRotationDeg must be [x,y,z]; using [0,0,0]")
   const background = raw.background === undefined || raw.background === "color" || raw.background === "environment"
     ? raw.background as SceneEnvironment["background"] ?? defaults.background
     : (() => { warnings.push(`ENVIRONMENT_FIELD_DEFAULTED: background=${JSON.stringify(raw.background)} 不是 color/environment，用默认 ${defaults.background}`); return defaults.background })()
@@ -157,8 +179,11 @@ export function parseEnvironmentComponent(value: unknown): EnvironmentParseResul
     environmentIntensity: number(raw.environmentIntensity, defaults.environmentIntensity, "environmentIntensity", 0, ENVIRONMENT_LIMITS.intensity),
     hemisphereIntensity: number(raw.hemisphereIntensity, defaults.hemisphereIntensity, "hemisphereIntensity", 0, ENVIRONMENT_LIMITS.intensity),
     exposure: number(raw.exposure, defaults.exposure, "exposure", 0, ENVIRONMENT_LIMITS.exposure),
+    toneMapping,
+    environmentRotationDeg: rotation.map((value, index) => normalizeWrapped(number(value, 0, `environmentRotationDeg[${index}]`, -3600, 3600), 360)) as Vec3,
     background,
     shadows: boolean(raw.shadows, defaults.shadows, "shadows"),
+    shadow: { mapSize, bias: number(shadow.bias, defaults.shadow.bias, "shadow.bias", -0.01, 0.01), normalBias: number(shadow.normalBias, defaults.shadow.normalBias, "shadow.normalBias", 0, 1) },
     sun: {
       azimuthDeg: normalizeWrapped(number(sun.azimuthDeg, defaults.sun.azimuthDeg, "sun.azimuthDeg", -3600, 3600), 360),
       elevationDeg: number(sun.elevationDeg, defaults.sun.elevationDeg, "sun.elevationDeg", -90, 90),
@@ -256,10 +281,13 @@ export interface EnvironmentPatch {
   environmentIntensity?: number
   hemisphereIntensity?: number
   exposure?: number
+  toneMapping?: EnvironmentToneMapping
+  environmentRotationDeg?: Vec3
   background?: SceneEnvironment["background"]
   /** `null`／缺省表示"没有场景自带的背景色"（沿用查看器偏好），字符串必须是 `#rrggbb`。 */
   backgroundColor?: string | null
   shadows?: boolean
+  shadow?: Partial<SceneEnvironmentShadow>
   sun?: Partial<SceneEnvironmentSun>
   dayNight?: Partial<SceneEnvironmentDayNight>
   hdri?: SceneEnvironmentHdri | null
@@ -278,10 +306,13 @@ export function composeEnvironment(current: SceneEnvironment | undefined, patch:
     ...("environmentIntensity" in patch ? { environmentIntensity: patch.environmentIntensity } : {}),
     ...("hemisphereIntensity" in patch ? { hemisphereIntensity: patch.hemisphereIntensity } : {}),
     ...("exposure" in patch ? { exposure: patch.exposure } : {}),
+    ...("toneMapping" in patch ? { toneMapping: patch.toneMapping } : {}),
+    ...("environmentRotationDeg" in patch ? { environmentRotationDeg: patch.environmentRotationDeg } : {}),
     ...("background" in patch ? { background: patch.background } : {}),
     ...("shadows" in patch ? { shadows: patch.shadows } : {}),
     sun: { ...base.sun, ...patch.sun },
     dayNight: { ...base.dayNight, ...patch.dayNight },
+    shadow: { ...base.shadow, ...patch.shadow },
   }
   if ("backgroundColor" in patch) {
     if (patch.backgroundColor === null || patch.backgroundColor === undefined) delete merged.backgroundColor

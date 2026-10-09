@@ -25,6 +25,8 @@ import { SceneViewer } from "../src/index.ts"
 import { FrameProjection } from "../src/projection.ts"
 import { ENVIRONMENT_COMPONENT_KEY, ENVIRONMENT_KIND } from "../src/environment.ts"
 import type { Entity, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
+import { EntityMaterialOverride, parseMaterialOverride, MATERIAL_OVERRIDE_KIND } from "../src/material-override.ts"
+import { buildSceneLight } from "../src/scene-light.ts"
 
 /**
  * three 的 FileLoader 在 bun 里会构造 `ProgressEvent`（浏览器对象，Node 侧没有）。
@@ -230,6 +232,47 @@ describe("没有环境组件的场景：读数与改造前一致", () => {
 })
 
 describe("组件生效：值真的写到了渲染对象上", () => {
+  test("色调映射和 XYZ 环境方向写到原 renderer/Scene；阴影质量重建旧贴图并保实值",async()=>{
+    const harness=new BareViewer(),v=harness.viewer
+    const variants={aces:THREE.ACESFilmicToneMapping,agx:THREE.AgXToneMapping,neutral:THREE.NeutralToneMapping,linear:THREE.LinearToneMapping,none:THREE.NoToneMapping}
+    let revision=1
+    for(const [toneMapping,constant] of Object.entries(variants)){
+      await v.setScene(snapshot(revision++,carrier({kind:ENVIRONMENT_KIND,toneMapping,environmentRotationDeg:[90,0,75],shadows:true,shadow:{mapSize:2048,bias:-.002,normalBias:.02}})))
+      expect(v.renderer.toneMapping).toBe(constant);expect(harness.status.toneMapping).toBe(toneMapping as any)
+      expect(v.scene.environmentRotation.x).toBeCloseTo(Math.PI/2);expect(v.scene.environmentRotation.z).toBeCloseTo(75*Math.PI/180)
+      expect(v.scene.backgroundRotation.equals(v.scene.environmentRotation)).toBe(true)
+      expect(harness.status.environmentRotationDeg).toEqual([90,0,75])
+      expect(v.sun.shadow.mapSize.toArray()).toEqual([2048,2048]);expect(harness.status.shadow).toEqual({mapSize:2048,bias:-.002,normalBias:.02})
+    }
+    let disposed=0;v.sun.shadow.map={dispose:()=>disposed++}
+    await v.setScene(snapshot(revision++,carrier({kind:ENVIRONMENT_KIND,shadows:true,shadow:{mapSize:1024}})))
+    expect(disposed).toBe(1);expect(v.sun.shadow.map).toBeNull();expect(v.sun.shadow.mapSize.toArray()).toEqual([1024,1024])
+    await v.setScene(snapshot(revision++,plainEntity()))
+    expect(v.renderer.toneMapping).toBe(THREE.ACESFilmicToneMapping);expect(v.scene.environmentRotation.toArray().slice(0,3)).toEqual([0,0,0])
+  })
+
+  test("面积灯是有 LTC 的矩形光源，世界方向只应用一次；其它灯旧换算保留",async()=>{
+    const harness=new BareViewer(),entity=plainEntity();entity.entityId="lamp"
+    entity.transform={position:[1,2,3],quaternion:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2).toArray(),scale:[1,1,1]}
+    entity.components={light:{kind:"area",widthM:2,heightM:3,energy:600,direction:[-1,0,0],color:[.5,.6,.7]}}
+    await harness.viewer.setScene(snapshot(1,entity,carrier({kind:ENVIRONMENT_KIND,shadows:true})))
+    const group=harness.viewer.objects.get("lamp").group,area=group.children[0] as THREE.RectAreaLight
+    expect(area).toBeInstanceOf(THREE.RectAreaLight);expect(area.width).toBe(2);expect(area.height).toBe(3);expect(area.power).toBeCloseTo(600)
+    expect(area.castShadow).toBe(false);expect(area.color.toArray()).toEqual([.5,.6,.7])
+    expect((THREE.UniformsLib as any).LTC_FLOAT_1).toBeInstanceOf(THREE.DataTexture)
+    const d=new THREE.Vector3(0,0,-1).applyQuaternion(area.getWorldQuaternion(new THREE.Quaternion()))
+    expect(d.x).toBeCloseTo(-1);expect(d.y).toBeCloseTo(0);expect(d.z).toBeCloseTo(0)
+    expect(area.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([1,2,3])
+    harness.viewer.selected="lamp"
+    entity.components.light={...entity.components.light as Record<string,unknown>,energy:300,widthM:4}
+    await harness.viewer.setScene(snapshot(2,entity))
+    expect(harness.viewer.selected).toBe("lamp");expect(harness.viewer.objects.get("lamp").group).toBe(group)
+    expect((group.children[0] as THREE.RectAreaLight).power).toBeCloseTo(300);expect((group.children[0] as THREE.RectAreaLight).width).toBe(4)
+    expect((buildSceneLight({kind:"area",sizeM:4}) as THREE.RectAreaLight).width).toBe(4)
+    expect(buildSceneLight({kind:"sun",energy:10}).intensity).toBe(6)
+    expect(buildSceneLight({kind:"point",energy:500}).intensity).toBe(20)
+    expect(buildSceneLight({kind:"spot",energy:500}).intensity).toBe(20)
+  })
   test("曝光→renderer、IBL→scene.environmentIntensity、半球/太阳→两盏既有灯（不新开第二套灯）", async () => {
     const harness = new BareViewer()
     const lights = harness.viewer.scene.children.filter((child: THREE.Object3D) => child instanceof THREE.Light).length
@@ -626,5 +669,86 @@ describe("补丁经 Viewer 合成：界面上的当前值就是解析出来的�
     expect(patched.component.sun).toEqual({ azimuthDeg: 200, elevationDeg: 12, intensity: 6 })
     expect(patched.component.exposure).toBe(2)
     expect(harness.viewer.composeEnvironment({ exposure: 99 }).warnings[0]).toContain("ENVIRONMENT_FIELD_CLAMPED")
+  })
+})
+
+describe("Scene PBR 材质覆盖与资源所有权",()=>{
+  test("只克隆覆盖实体的材质；保纹理/UV，复原与删除释放克隆而不释放共享资源",async()=>{
+    const harness=new BareViewer(),v=harness.viewer,a=meshEntity(),b=structuredClone(a);b.entityId="other-instance"
+    const texture=new THREE.Texture(),normal=new THREE.Texture(),sourceMaterial=new THREE.MeshStandardMaterial({color:"#ffffff",roughness:.38,metalness:.1,map:texture,normalMap:normal})
+    sourceMaterial.normalScale.set(2,-3)
+    const geometry=new THREE.BoxGeometry(1,1,1),model=new THREE.Group();model.add(new THREE.Mesh(geometry,sourceMaterial))
+    let texturesDisposed=0,geometryDisposed=0,sourceDisposed=0,cloneDisposed=0
+    texture.addEventListener("dispose",()=>texturesDisposed++);normal.addEventListener("dispose",()=>texturesDisposed++);geometry.addEventListener("dispose",()=>geometryDisposed++);sourceMaterial.addEventListener("dispose",()=>sourceDisposed++)
+    const pending=v.setScene(snapshot(1,a,b));await until(()=>harness.reads.length===2,"同资源两个实体请求")
+    v.gltfs.set(glbRef.original.uri,Promise.resolve({scene:model,animations:[]}))
+    for(const read of harness.reads.splice(0))read.deliver(glbRef.original.uri)
+    await pending
+    const mesh=(id:string)=>{let found!:THREE.Mesh;v.objects.get(id).visual.traverse((child:THREE.Object3D)=>{if(child instanceof THREE.Mesh)found=child});return found}
+    const ma=mesh(a.entityId),mb=mesh(b.entityId),original=ma.material
+    expect(ma.material).toBe(sourceMaterial);expect(mb.material).toBe(sourceMaterial)
+    const reads=harness.readStarts,component=v.composeMaterial(a.entityId,{baseColor:"#66aaee",roughness:.75,metalness:.8,emissive:"#ffaa00",emissiveIntensity:3,opacity:.4,normalScale:.5}).component
+    const modified=structuredClone(a);modified.components.materialOverride=component
+    await v.setScene(snapshot(2,modified,b))
+    const copied=ma.material as THREE.MeshStandardMaterial;copied.addEventListener("dispose",()=>cloneDisposed++)
+    expect(copied).not.toBe(original);expect(mb.material).toBe(original);expect(harness.readStarts).toBe(reads)
+    expect(copied.map).toBe(texture);expect(copied.normalMap).toBe(normal);expect(copied.normalScale.toArray()).toEqual([1,-1.5])
+    expect(copied.roughness).toBe(.75);expect(copied.metalness).toBe(.8);expect(copied.emissiveIntensity).toBe(3);expect(copied.opacity).toBe(.4);expect(copied.transparent).toBe(true)
+    expect(copied.color.getHexString(THREE.SRGBColorSpace)).toBe("66aaee")
+    expect(sourceMaterial.roughness).toBe(.38);expect(sourceMaterial.metalness).toBe(.1);expect(sourceMaterial.opacity).toBe(1)
+    expect(ma.geometry).toBe(geometry);expect(ma.geometry.attributes.uv).toBe(geometry.attributes.uv)
+    const status=v.materialStatus(a.entityId)
+    expect(status.supported).toBe(1);expect(status.materials[0]).toMatchObject({baseColor:"#66aaee",roughness:.75,metalness:.8,opacity:.4,hasTextures:true,hasNormalMap:true,normalScale:[1,-1.5]})
+    expect(v.materialStatus(b.entityId).component).toBeUndefined();expect(v.materialStatus(b.entityId).materials[0].roughness).toBe(.38)
+    await v.setScene(snapshot(3,a,b))
+    expect(ma.material).toBe(original);expect(cloneDisposed).toBe(1)
+    modified.components.materialOverride={...component,textures:false}
+    await v.setScene(snapshot(4,modified,b))
+    const noTextures=ma.material as THREE.MeshStandardMaterial;noTextures.addEventListener("dispose",()=>cloneDisposed++)
+    expect(noTextures.map).toBeNull();expect(noTextures.normalMap).toBeNull();expect(mb.material).toBe(original)
+    await v.setScene(snapshot(5,b))
+    expect(cloneDisposed).toBe(2);expect(texturesDisposed).toBe(0);expect(geometryDisposed).toBe(0);expect(sourceDisposed).toBe(0)
+  })
+
+  test("空组件/非 PBR/无源法线不伪造作用，非法输入明示忽略",()=>{
+    const root=new THREE.Group(),pbr=new THREE.MeshStandardMaterial(),basic=new THREE.MeshBasicMaterial(),mesh=new THREE.Mesh(new THREE.BoxGeometry(),pbr)
+    root.add(mesh,new THREE.Mesh(new THREE.BoxGeometry(),basic));const owner=new EntityMaterialOverride()
+    owner.apply([root],{kind:MATERIAL_OVERRIDE_KIND});expect(mesh.material).toBe(pbr)
+    const parsed=parseMaterialOverride({kind:MATERIAL_OVERRIDE_KIND,roughness:4,opacity:"",baseColor:"red",normalScale:2})
+    expect(parsed.warnings).toHaveLength(3);expect(parsed.component?.roughness).toBe(1);expect(parsed.component?.opacity).toBeUndefined()
+    owner.apply([root],parsed.component);expect((mesh.material as THREE.MeshStandardMaterial).normalScale.toArray()).toEqual([1,1])
+    expect(owner.readings([root])).toMatchObject({supported:1,unsupported:1});expect(owner.readings([root]).materials[0].hasNormalMap).toBe(false)
+    owner.reset();expect(mesh.material).toBe(pbr)
+    const harness=new BareViewer(),entity=plainEntity();entity.components.materialOverride=parsed.component
+    root.userData.entityId=entity.entityId;root.userData.loaded=true
+    const loaded={group:root,visual:root,lodWarnings:[],signature:"test"}
+    harness.viewer.snapshot=snapshot(1,entity);harness.viewer.objects.set(entity.entityId,loaded)
+    harness.viewer.applyEntityMaterial(loaded)
+    expect(harness.viewer.materialStatus(entity.entityId).warnings.some((warning:string)=>warning.startsWith("MATERIAL_NORMAL_MAP_MISSING"))).toBe(true)
+    expect(harness.viewer.visualWarnings.get(entity.entityId).some((warning:string)=>warning.startsWith("MATERIAL_NORMAL_MAP_MISSING"))).toBe(true)
+    entity.components.materialOverride={kind:"invalid"};harness.viewer.snapshot=snapshot(2,entity);harness.viewer.applyEntityMaterial(loaded)
+    expect(harness.viewer.materialStatus(entity.entityId).declared).toBe(true)
+    delete entity.components.materialOverride;harness.viewer.snapshot=snapshot(3,entity);harness.viewer.applyEntityMaterial(loaded)
+    expect(harness.viewer.visualWarnings.has(entity.entityId)).toBe(false)
+  })
+
+  test("原 SceneStore CAS、历史、scene_save/open 持久化同一环境/材质组件",async()=>{
+    const {mkdtemp,rm}=await import("node:fs/promises"),{join}=await import("node:path"),{tmpdir}=await import("node:os")
+    const {SceneOperations}=await import("../../scene-kit/src/operations.ts"),root=await mkdtemp(join(tmpdir(),"render-controls-scene-"))
+    try{
+      const ops=new SceneOperations(join(root,"owner")),created=await ops.create({sceneId:"render-control-scene"})
+      const entity=plainEntity();entity.entityId="pbr-object";entity.components.materialOverride={kind:MATERIAL_OVERRIDE_KIND,roughness:.42,metalness:.75,textures:true}
+      const lighting=carrier({kind:ENVIRONMENT_KIND,toneMapping:"agx",environmentRotationDeg:[90,0,35],exposure:1,hemisphereIntensity:0,sun:{intensity:0},shadow:{mapSize:1024,bias:-.001}})
+      delete entity.parentId;delete lighting.parentId
+      const committed=await ops.scene.commit({sceneId:created.sceneId,expectedRevision:0,patch:[{op:"add",entity},{op:"add",entity:lighting}]})
+      await expect(ops.scene.commit({sceneId:created.sceneId,expectedRevision:0,patch:[]})).rejects.toThrow()
+      const path=join(root,"scene.json");await ops.save(created.sceneId,path)
+      const other=new SceneOperations(join(root,"reopened")),reopened=await other.open(path)
+      expect(reopened.entities.map((item:Entity)=>item.components)).toEqual(committed.entities.map((item:Entity)=>item.components))
+      const reset=structuredClone(entity.components);delete reset.materialOverride
+      const next=await ops.scene.commit({sceneId:created.sceneId,expectedRevision:committed.revision,patch:[{op:"update",entityId:entity.entityId,changes:{components:reset}}]})
+      expect(next.entities[0]!.components.materialOverride).toBeUndefined()
+      expect((await ops.scene.version(created.sceneId,committed.revision)).entities[0]!.components.materialOverride).toEqual(entity.components.materialOverride)
+    }finally{await rm(root,{recursive:true,force:true})}
   })
 })
