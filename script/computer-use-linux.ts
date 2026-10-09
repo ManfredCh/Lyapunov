@@ -5,7 +5,8 @@ import {mkdir,writeFile,rename,chmod,readFile,copyFile} from 'node:fs/promises'
 import {join} from 'node:path'
 import {gunzipSync} from 'node:zlib'
 import {PRODUCT_ROOT} from './profile.ts'
-export const COMPUTER_USE_LINUX_VERSION='0.7.13+local.atsbus.1'
+export const COMPUTER_USE_LINUX_VERSION='0.7.13'
+export const COMPUTER_USE_LINUX_LOCAL_VERSION='0.7.13+local.atsbus.1'
 export const COMPUTER_USE_LINUX_UPSTREAM_VERSION='0.7.13'
 export const COMPUTER_USE_LINUX_LOCAL_SHA256='9628d62a8290542b8c03bd77e9d2748ce7d71113d5b85f9c2b1a26dbf0ace53a'
 const LOCAL_ARCHIVE_SHA256='246dedb98e59b49b262df2cdf4c845222f2da3dc12adb0277ba9b80e9736c6f9'
@@ -19,11 +20,11 @@ export const computerUseLinuxAssets=[
 ] as const
 const sha=(data:Uint8Array|string)=>createHash('sha256').update(data).digest('hex')
 export function computerUseLinuxPaths(root=PRODUCT_ROOT,variant:'local'|'official'='local'){const directory=join(root,'.runtime/computer-use-linux');return {root:directory,bin:join(directory,'bin'),command:join(directory,variant==='official'?'official/computer-use-linux':'bin/computer-use-linux'),license:join(directory,'LICENSE'),provenance:join(directory,'provenance.json')}}
-/** 官方回退仅显式选择，不因修复件失败自动降级。 */
-export function computerUseLinuxVariant(env:NodeJS.ProcessEnv=process.env):'local'|'official'{const value=env.LYAPUNOV_COMPUTER_USE_LINUX_VARIANT??'local';if(value!=='local'&&value!=='official')throw Error('COMPUTER_USE_LINUX_VARIANT_INVALID: '+value);return value}
+/** 官方稳定版为默认；本地修补需显式选择，不自动切换。 */
+export function computerUseLinuxVariant(env:NodeJS.ProcessEnv=process.env):'local'|'official'{const value=env.LYAPUNOV_COMPUTER_USE_LINUX_VARIANT??'official';if(value!=='local'&&value!=='official')throw Error('COMPUTER_USE_LINUX_VARIANT_INVALID: '+value);return value}
 export function computerUseLinuxReady(root=PRODUCT_ROOT):boolean{
  const paths=computerUseLinuxPaths(root)
- try{const provenance=JSON.parse(readFileSync(paths.provenance,'utf8'));if(provenance.version!==COMPUTER_USE_LINUX_VERSION||provenance.source!==COMPUTER_USE_LINUX_SOURCE||provenance.license!=='MIT'||provenance.licenseSha256!==COMPUTER_USE_LINUX_LICENSE_SHA256||provenance.minimumGlibc!=='2.39')return false
+ try{const provenance=JSON.parse(readFileSync(paths.provenance,'utf8'));if(provenance.version!==COMPUTER_USE_LINUX_VERSION||provenance.source!==COMPUTER_USE_LINUX_SOURCE||provenance.license!=='MIT'||provenance.licenseSha256!==COMPUTER_USE_LINUX_LICENSE_SHA256||provenance.minimumGlibc!=='2.39'||provenance.activeDefault!=='official')return false
   if(sha(readFileSync(paths.license))!==COMPUTER_USE_LINUX_LICENSE_SHA256)return false
   accessSync(paths.command,constants.X_OK);if(sha(readFileSync(paths.command))!==COMPUTER_USE_LINUX_LOCAL_SHA256)return false
   if(sha(readFileSync(join(paths.root,'atspi-bus.patch')))!==PATCH_SHA256)return false
@@ -35,7 +36,7 @@ export async function ensureComputerUseLinux(options:{root?:string;env?:NodeJS.P
  const root=options.root??PRODUCT_ROOT,platform=options.platform??process.platform,arch=options.arch??process.arch,env=options.env??process.env
  if(platform!=='linux'||arch!=='x64')throw Error(`COMPUTER_USE_LINUX_PLATFORM_UNSUPPORTED: ${platform}/${arch}；本发行供给仅Linux x64。 / This product supplies only Linux x64.`)
  const paths=computerUseLinuxPaths(root)
- if(computerUseLinuxReady(root))return {...JSON.parse(readFileSync(paths.provenance,'utf8')),ready:true,command:paths.command}
+ if(computerUseLinuxReady(root))return {...JSON.parse(readFileSync(paths.provenance,'utf8')),ready:true,command:computerUseLinuxPaths(root,computerUseLinuxVariant(env)).command}
  await mkdir(paths.bin,{recursive:true});await mkdir(join(paths.root,'official'),{recursive:true})
  const archivePath=join(root,'distribution/native/computer-use-linux/computer-use-linux-0.7.13+local.atsbus.1-linux-x64.gz');if(!existsSync(archivePath))throw Error('COMPUTER_USE_LINUX_LOCAL_ARCHIVE_MISSING: '+archivePath)
  const localArchive=await readFile(archivePath)
@@ -61,8 +62,8 @@ export async function ensureComputerUseLinux(options:{root?:string;env?:NodeJS.P
  const license=join(root,'distribution/licenses/computer-use-linux-0.7.13.LICENSE'),text=await readFile(license)
  if(sha(text)!==COMPUTER_USE_LINUX_LICENSE_SHA256)throw Error('COMPUTER_USE_LINUX_LICENSE_CHECKSUM_FAILED: '+license)
  await copyFile(license,paths.license)
- await writeFile(paths.provenance,JSON.stringify({version:COMPUTER_USE_LINUX_VERSION,upstreamVersion:COMPUTER_USE_LINUX_UPSTREAM_VERSION,upstreamCommit:'4e567e6a7b866154353e571206dbfe323a7a9bbe',minimumGlibc:'2.39',variants:{local:{version:COMPUTER_USE_LINUX_VERSION,binarySha256:COMPUTER_USE_LINUX_LOCAL_SHA256},official:{version:COMPUTER_USE_LINUX_UPSTREAM_VERSION,binarySha256:computerUseLinuxAssets[0].sha256,selection:'LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=official'}},activeDefault:'local',officialFallback:'显式LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=official，不自动降级',localBinarySha256:COMPUTER_USE_LINUX_LOCAL_SHA256,localArchiveSha256:LOCAL_ARCHIVE_SHA256,patchSha256:PATCH_SHA256,sourceChanges:['src/atspi_tree.rs','src/x11_display.rs'],source:COMPUTER_USE_LINUX_SOURCE,license:'MIT',licenseSha256:COMPUTER_USE_LINUX_LICENSE_SHA256,target:'x86_64-unknown-linux-gnu',assets:computerUseLinuxAssets.map(asset=>({...asset,url:`${COMPUTER_USE_LINUX_SOURCE}/releases/download/v${COMPUTER_USE_LINUX_UPSTREAM_VERSION}/${asset.name}-x86_64-unknown-linux-gnu`,checksumSource:`${COMPUTER_USE_LINUX_SOURCE}/releases/download/v${COMPUTER_USE_LINUX_UPSTREAM_VERSION}/${asset.name}-x86_64-unknown-linux-gnu.sha256`}))},null,2)+'\n')
+ await writeFile(paths.provenance,JSON.stringify({version:COMPUTER_USE_LINUX_VERSION,upstreamVersion:COMPUTER_USE_LINUX_UPSTREAM_VERSION,upstreamCommit:'4e567e6a7b866154353e571206dbfe323a7a9bbe',minimumGlibc:'2.39',variants:{local:{version:COMPUTER_USE_LINUX_LOCAL_VERSION,selection:'LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local',binarySha256:COMPUTER_USE_LINUX_LOCAL_SHA256},official:{version:COMPUTER_USE_LINUX_UPSTREAM_VERSION,binarySha256:computerUseLinuxAssets[0].sha256,selection:'LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=official'}},activeDefault:'official',localRepairOption:'仅显式LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local；可明确AT_SPI_BUS_ADDRESS，不自动切换总线或派动作',localBinarySha256:COMPUTER_USE_LINUX_LOCAL_SHA256,localArchiveSha256:LOCAL_ARCHIVE_SHA256,patchSha256:PATCH_SHA256,sourceChanges:['src/atspi_tree.rs','src/x11_display.rs'],source:COMPUTER_USE_LINUX_SOURCE,license:'MIT',licenseSha256:COMPUTER_USE_LINUX_LICENSE_SHA256,target:'x86_64-unknown-linux-gnu',assets:computerUseLinuxAssets.map(asset=>({...asset,url:`${COMPUTER_USE_LINUX_SOURCE}/releases/download/v${COMPUTER_USE_LINUX_UPSTREAM_VERSION}/${asset.name}-x86_64-unknown-linux-gnu`,checksumSource:`${COMPUTER_USE_LINUX_SOURCE}/releases/download/v${COMPUTER_USE_LINUX_UPSTREAM_VERSION}/${asset.name}-x86_64-unknown-linux-gnu.sha256`}))},null,2)+'\n')
  if(!computerUseLinuxReady(root))throw Error('COMPUTER_USE_LINUX_SUPPLY_NOT_READY')
- return {...JSON.parse(readFileSync(paths.provenance,'utf8')),ready:true,command:paths.command}
+ return {...JSON.parse(readFileSync(paths.provenance,'utf8')),ready:true,command:computerUseLinuxPaths(root,computerUseLinuxVariant(env)).command}
 }
 if(import.meta.main)console.log(JSON.stringify(await ensureComputerUseLinux({offline:process.argv.includes('--offline')})))
