@@ -435,7 +435,7 @@ test('自然语言原生catalog工具复用实际版本探测的软件，不开U
  let spawned=0;ctx.provide('subprocess',{resolveExecutable:async()=>null,spawn:()=>{spawned++;throw Error('Unexpected acquisition')}} as never)
  try{
   applyExternalToolsHost(ctx)
-  expect(ctx.tools.schemas().some(v=>v.name==='external_tool_management')).toBe(true)
+  expect(ctx.tools.schemas().some(v=>v.name==='external_tool_management')).toBe(true);expect(JSON.stringify(ctx.tools.schemas().find(v=>v.name==='external_tool_management'))).toContain('unity-mcp')
   const result=await externalToolManagement(ctx,{action:'acquire',id:'blender'},String(id)) as any
   expect(result).toMatchObject({status:'existing-software',installationComplete:true,mcpComplete:false,software:{id:'blender',installed:true,version:'Blender test-version',location:binary}})
   expect(spawned).toBe(0);expect(ctx.jobs.list(id)).toHaveLength(0)
@@ -445,6 +445,7 @@ test('自然语言原生catalog工具复用实际版本探测的软件，不开U
   expect(receipt.job).toMatchObject({status:'completed',label:'Blender existing software check'});expect(receipt.installationComplete).toBe(false)
   expect(JSON.parse(receipt.output.map((v:any)=>v.text).join(''))).toMatchObject({action:'reuse-existing-software',installationComplete:true,location:binary,version:'Blender test-version'});expect(spawned).toBe(0)
   await expect(externalToolManagement(ctx,{action:'acquire',id:'invented'},String(id))).rejects.toThrow('EXTERNAL_ACQUISITION_UNSUPPORTED')
+  await expect(externalToolManagement(ctx,{action:'acquire',id:'unity-mcp'},String(id))).rejects.toThrow('EXTERNAL_POLICY_UNAVAILABLE')
   await expect(externalToolManagement(ctx,{action:'inspect'},'missing-session')).rejects.toThrow('SESSION_NOT_LIVE')
  }finally{if(old===undefined)delete process.env.BLENDER_EXECUTABLE;else process.env.BLENDER_EXECUTABLE=old}
 })

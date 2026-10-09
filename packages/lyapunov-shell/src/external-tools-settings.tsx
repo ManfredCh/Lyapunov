@@ -96,7 +96,7 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
      {bridge!==undefined&&<button disabled={!!busy} onClick={()=>edit(bridge)}>{tr('连接／配置 MCP','Connect / configure MCP')}</button>}
      {option.kind==='software'&&<button type='button' disabled={!!busy} onClick={()=>void perform(option.id,()=>acquire(option.id))}>{tr('官方下载／安装','Download / install from official source')}</button>}
      {option.kind==='software'&&option.source&&<a href={option.source} target='_blank' rel='noreferrer'>{tr('官方下载安装页面','Official download and installation page')}</a>}
-     {option.id==='blender-mcp'&&<button disabled={!!busy} onClick={()=>void perform(option.id,()=>acquire(option.id))}>{tr('下载／供给锁定桥接','Acquire locked bridge')}</button>}
+     {(option.id==='blender-mcp'||option.id==='unity-mcp')&&<button disabled={!!busy} onClick={()=>void perform(option.id,()=>acquire(option.id))}>{tr('下载／供给锁定桥接','Acquire locked bridge')}</button>}
      {option.id==='fastgs'&&<><button disabled={!!busy} onClick={()=>void perform('fastgs',()=>fastgs('doctor'))}>{tr('检查 FastGS','Inspect FastGS')}</button><button disabled={!!busy} onClick={()=>void perform('fastgs',()=>fastgs('download'))}>{tr('下载官方源码','Download official source')}</button><button disabled={!!busy} onClick={()=>void perform('fastgs',()=>fastgs('install'))}>{tr('安装隔离环境','Install isolated environment')}</button></>}
      <button disabled={!!busy} onClick={()=>void perform(option.id,async()=>{await start(option.id,close)})}>{tr('新会话助手安装','Install with assistant in a new chat')}</button>
     </div>
