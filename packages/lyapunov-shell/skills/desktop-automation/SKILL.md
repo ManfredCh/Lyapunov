@@ -5,13 +5,12 @@ description: Use computer-use for local desktop applications (windows/clicks/key
 
 # Desktop and Browser Automation Rules
 
-## computer-use (`cua_driver_native__*` tools)
+## 原生 ComputerUseLinux（使用当前发现的 `mcp__computer-use-linux__*` 工具）
 
-- Discover with `list_apps`/`list_windows`, then get a **fresh** target-window snapshot through get_window_state, including element_token/screenshot. Act using that snapshot's token or screenshot coordinates. A new snapshot invalidates old tokens; refresh before acting.
-- Choose target or legacy pid/window_id fields; do not mix them.
-- Prefer background delivery without taking focus. A rejection does not authorize a foreground retry.
-- Verify every action using fresh state. If uncertain, take another snapshot instead of claiming UI state from memory.
-- Read-only listing/snapshots always precede clicks/input. Tell the user before operating on another person's window content.
+- 先用 `get_app_state` 按实际 `pid`、`window_id` 或应用名读取新状态；用 `list_windows`／`focused_window` 核对目标。仅操作用户已授权的目标，优先最新 `element_index` 或唯一 `name`／`role` 语义选择器。
+- `click`、`set_value`、`press_key` 后读取新状态和应用实际结果；返回 `ok:true` 本身不证明点击、输入或提交生效。要求 Enter 时需实际按键／提交读回，`perform_action` 的语义 activate 只是另一种操作。
+- 用 `screenshot` 或带截图的 `get_app_state` 看真实目标。截图坐标先除以返回的 `scale`；窗口相对点击使用 `relative:true` 并带同一目标，勿把逻辑控件坐标当桌面像素。
+- 焦点拒绝时先核对当前窗口；可用原 `activate_window`／`screenshot` 正常恢复目标前台，再读 exact focus。系统 portal 需正常授权，首次提示及时处理；授权等待失败后读新状态再重试，勿绕权限或盲目重复输入，也勿仅凭 fallback 的 ydotool 错误猜测缺驱动。
 
 ## browser-use (`mcp__chrome-devtools-mcp__*` tools)
 
