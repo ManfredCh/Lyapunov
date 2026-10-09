@@ -21,6 +21,7 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
  const [busy,setBusy]=useState<string>(),[error,setError]=useState(''),[notice,setNotice]=useState(''),[state,setState]=useState<ExternalToolsState>()
  const [modelDirs,setModelDirs]=useState<Record<string,string>>({}),[log,setLog]=useState('')
  const [query,setQuery]=useState(''),[filter,setFilter]=useState<'all'|MarketplaceEntry['kind']>('all'),[availability,setAvailability]=useState<'all'|'available'|'attention'>('all'),[detail,setDetail]=useState<string>()
+ const [documentPending,setDocumentPending]=useState(false),[documentError,setDocumentError]=useState(''),documentInFlight=useRef(false)
  const inFlight=useRef(false),offsets=useRef<Record<string,number>>({})
  // Host既有中英公开句按当前界面投影，原始作业输出/诊断仍在日志保留。
  const displayDetail=(value:string|null|undefined)=>{if(!value)return value;const pair=value.split(' / ');return pair.length===2&&/[\u3400-\u9fff]/.test(pair[0]!)&&!/[\u3400-\u9fff]/.test(pair[1]!)?tr(pair[0]!,pair[1]!):value}
@@ -32,7 +33,12 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
   try{await operation()}catch(reason){setError(reason instanceof Error?reason.message:String(reason))}finally{inFlight.current=false;setBusy(undefined)}
  }
  useEffect(()=>{void perform('check',refresh)},[])
- const edit=(_name:string)=>{void perform('document',openDocument)}
+ // 系统编辑器可能持有opener进程直到窗口关闭；只锁文档重复打开，不占软件操作锁。
+ const performDocument=async()=>{
+  if(documentInFlight.current)return;documentInFlight.current=true;setDocumentPending(true);setDocumentError('')
+  try{await openDocument()}catch(reason){setDocumentError(reason instanceof Error?reason.message:String(reason))}finally{documentInFlight.current=false;setDocumentPending(false)}
+ }
+ const edit=(_name:string)=>{void performDocument()}
  const acquire=async(id:string)=>{const r=await request<{jobId:string}>('acquire',{id,localDir:modelDirs[id],sessionId:sessionId()});await refresh();setNotice(tr('下载／安装请求已提交，进度和结果见下方：','Download / installation request submitted; inspect its progress and result below: ')+r.jobId)}
  const fastgs=async(action:'download'|'install'|'doctor')=>{const r=await fetch('/api/lyapunov/fastgs-tool',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});if(!r.ok)throw Error(await r.text());const value=await r.json() as {tool?:{ready?:{source:boolean;environment:boolean;trainable:boolean}};install?:{running:boolean;result?:{detail?:string;message?:string}}};setNotice(tr('FastGS 源码／环境／可训练：','FastGS source / environment / trainable: ')+[value.tool?.ready?.source,value.tool?.ready?.environment,value.tool?.ready?.trainable].map(v=>v===true?tr('已核','checked'):tr('未就绪','not ready')).join(' / ')+(value.install?.running?' · '+tr('后台安装处理中，稍后检查真实结果。','Acquisition is running; inspect its actual result later.'):value.install?.result?.detail??value.install?.result?.message??''))}
  const readJob=async(jobId:string)=>{const r=await request<{output:{text:string}[];nextOffset:number}>(scoped('job?jobId='+encodeURIComponent(jobId)+'&offset='+(offsets.current[jobId]??0)));offsets.current[jobId]=r.nextOffset;setLog(old=>(old+r.output.map(v=>v.text).join('')).slice(-8000));await refresh()}
@@ -49,7 +55,8 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
  return <section aria-label={view==='downloads'?tr('可选下载软件包','Optional software downloads'):tr('软件与集成','Software and integrations')} style={{display:'grid',gap:14,padding:20}}>
   <h2 style={{margin:0}}>{view==='downloads'?tr('可选下载软件包','Optional software downloads'):tr('软件与集成','Software and integrations')}</h2>
   <p style={{margin:0,opacity:.75}}>{tr('直接检查已有软件、配置 MCP 和下载本地权重，无需先连接语言模型。软件、addon、MCP 握手和实际调用分别验收。','Inspect software, configure MCP and acquire local weights without a language model. Software, addons, MCP handshake and actual calls are separate checks.')}</p>
-  <div><button disabled={!!busy} onClick={()=>void perform('check',refresh)}>{tr('检查已有／刷新','Inspect existing / refresh')}</button> <button disabled={!!busy} onClick={()=>void perform('document',openDocument)}>{tr('打开原生 MCP 配置文档','Open native MCP configuration')}</button></div>
+  <div><button disabled={!!busy} onClick={()=>void perform('check',refresh)}>{tr('检查已有／刷新','Inspect existing / refresh')}</button> <button disabled={documentPending} onClick={()=>void performDocument()}>{tr('打开原生 MCP 配置文档','Open native MCP configuration')}</button></div>
+  {documentPending&&<p role='status'>{tr('原生文档打开请求仍在等待系统编辑器；软件操作可继续。','The native document opener is waiting for the system editor; software operations remain available.')}</p>}{documentError&&<p role='alert'>{displayDetail(documentError)}</p>}
   {error&&<p role='alert'>{displayDetail(error)}</p>}{notice&&<p role='status'>{notice}</p>}
   {view==='integrations'&&<><p style={{margin:0,opacity:.75}}>{tr('官方与内置插件保留在上方“插件列表”；这里提供软件下载、MCP 连接和技能。','Official and built-in plugins remain in the Plugin list tab above. Manage software downloads, MCP connections and skills here.')}</p>
   <div style={{display:'grid',gridTemplateColumns:'minmax(150px,200px) minmax(0,1fr)',gap:20}}>
@@ -113,8 +120,10 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
 export function applyExternalToolsSettings(ctx:Context):void {
  ctx.inject(['slots','locale','remote','remote.settings'],owner=>{
  const t=owner.locale.bind('lyapunov'),tr:Translate=(zh,en)=>t('open')==='Scene workbench'?en:zh
+ let openingDocument:Promise<void>|undefined
+ const openDocument=()=>openingDocument??=(async()=>{const r=await owner.remote.settings.openSettingsDocument();if(!r.ok)throw Error(r.error.message)})().finally(()=>{openingDocument=undefined})
  for(const [id,order,view,zh,en] of [['lyapunov-integrations',19,'integrations','软件与集成','Software and integrations'],['lyapunov-downloads',50,'downloads','可选下载软件包','Optional software downloads']] as const){
- owner.slots.inject('settings.section',()=>owner.slots.register({name:'settings.section',id,order,label:()=>tr(zh,en),inject:()=>({view,tr,close:()=>{closeTopModal(document)},start:(id:string,close:()=>void)=>startExternalInstallSession(owner,id,close),sessionId:()=>mainSessionId((owner.get('sessions') as unknown as ISessions).list.getSnapshot()),openDocument:async()=>{const r=await owner.remote.settings.openSettingsDocument();if(!r.ok)throw Error(r.error.message)}})},ExternalToolsSettings))
+ owner.slots.inject('settings.section',()=>owner.slots.register({name:'settings.section',id,order,label:()=>tr(zh,en),inject:()=>({view,tr,close:()=>{closeTopModal(document)},start:(id:string,close:()=>void)=>startExternalInstallSession(owner,id,close),sessionId:()=>mainSessionId((owner.get('sessions') as unknown as ISessions).list.getSnapshot()),openDocument})},ExternalToolsSettings))
  }
  })
 }
