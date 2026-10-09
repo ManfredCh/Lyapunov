@@ -10,6 +10,7 @@ import { XMLParser, XMLValidator } from "fast-xml-parser"
 import { Euler, Matrix4, Quaternion, Vector3 } from "three"
 import type { Entity, ResourceRef, Transform, Vec3 } from "../../lyapunov-contracts/src/types.ts"
 import { identityTransform } from "../../lyapunov-contracts/src/types.ts"
+import { isGaussianCameraFrame, parseGaussianCameraFramePlyHeader, scanPlyHeader, type GaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 
 export type AssetKind = "mesh" | "splat" | "robot" | "source"
 export interface FileStamp { path: string; size: number; mtimeMs: number; sha256?: string }
@@ -150,11 +151,19 @@ function glbMaterials(json: any): GlbMaterialFact[] {
   })
 }
 
-/** 资源视觉包围盒换算到实体根本地坐标（含源坐标转换）；无 aabb 元数据（robot/旧登记资源、无法解码的泼溅件）返回 undefined。 */
-export function assetBounds(parsed: ParsedAsset, source: ResourceRef["source"]): { min: Vec3; max: Vec3 } | undefined {
+/** 资源视觉包围盒换算到实体根本地坐标（含源坐标转换）；无 aabb 元数据（robot/旧登记资源、无法解码的泼溅件）返回 undefined。
+ *
+ *  `effectiveTransform` 是调用方（挂载）已经为这个资源算好的**权威**源坐标适配（含单位缩放与显式
+ *  `visualSourceTransform`）。给了它就用它，绝不与默认换算叠加；没给时才按实际 visual 同一规则推导：
+ *  已识别首相机 frame 的 splat 走 `gaussianSourceTransform`（v2 的 CV 约定用 Rx(−90)），其余沿用既有
+ *  `sourceTransform`。这样"画面朝向"（mount 写进 visual 的变换）与"包围盒/落地"永远是同一帧，不再出现
+ *  "方向对但模型高度错"。
+ */
+export function assetBounds(parsed: ParsedAsset, source: ResourceRef["source"], effectiveTransform?: Transform): { min: Vec3; max: Vec3 } | undefined {
   const aabb = parsed.metadata.aabb as { min: Vec3; max: Vec3 } | undefined
   if (!aabb) return undefined
-  const transform = sourceTransform(source)
+  const frame = parsed.metadata.gaussianCameraFrame
+  const transform = effectiveTransform ?? (parsed.kind === "splat" && isGaussianCameraFrame(frame) ? gaussianSourceTransform(source, frame) : sourceTransform(source))
   const matrix = new Matrix4().compose(new Vector3(...transform.position), new Quaternion(...transform.quaternion), new Vector3(...transform.scale))
   const min = new Vector3(Infinity, Infinity, Infinity), max = new Vector3(-Infinity, -Infinity, -Infinity)
   for (const x of [aabb.min[0], aabb.max[0]]) for (const y of [aabb.min[1], aabb.max[1]]) for (const z of [aabb.min[2], aabb.max[2]]) {
@@ -355,16 +364,27 @@ export async function parseAsset(path: string, override?: ResourceRef["source"],
     } else if (extension === ".ply") {
       const handle = await open(path, "r")
       let header: string
+      let frameBytes: Buffer
       try {
         const head = Buffer.alloc(65536)
         const { bytesRead } = await handle.read(head, 0, head.length, 0)
         header = head.subarray(0, bytesRead).toString("utf8")
+        frameBytes = head.subarray(0, bytesRead)
       } finally { await handle.close() }
       if (!header.startsWith("ply\n") && !header.startsWith("ply\r\n")) throw new Error("INVALID_PLY_HEADER")
       const count = header.match(/element vertex (\d+)/)?.[1]
       if (!count || !header.includes("end_header")) throw new Error("INVALID_PLY_HEADER")
-      metadata.vertexCount = Number(count)
-      metadata.gaussianProperties = /property float (?:f_dc_0|scale_0)/.test(header)
+      // 头事实只认 `end_header` 之前**真实声明**的 `property` 行：comment 里恰好提到
+      // `property float f_dc_0` 不算 Gaussian。vertexCount 只取安全正整数（重复/0/超大不写）。
+      const facts = scanPlyHeader(frameBytes)
+      if (facts) {
+        metadata.vertexCount = facts.vertexCount
+        metadata.gaussianProperties = facts.propertyLines.some(line => /^property float (?:f_dc_0|scale_0)$/.test(line))
+      }
+      // 生产侧写死的首相机坐标标记：只在已终止、完整 14-float binary Gaussian 头里精确识别**唯一一条**；
+      // 未知/冲突/同标记重复/正文欺骗一律不写字段，消费端因此沿用既有行为（不猜朝向）。
+      const frame = parseGaussianCameraFramePlyHeader(frameBytes)
+      if (frame) metadata.gaussianCameraFrame = frame
     }
     // 高斯泼溅（.spz/.splat/.ply）按生态惯例是 **Y-up**：本仓的成对导出判据也把它当轴事实
     // （resources.ts 的 Marble 成对 SPZ/GLB 分支显式给 Y-up 的 visualSourceTransform），而同名 .glb
@@ -464,6 +484,24 @@ export function sourceTransform(source: ResourceRef["source"]): Transform {
   const scale = source.metersPerUnit ?? (source.units === "m" ? 1 : NaN)
   if (!Number.isFinite(scale) || scale <= 0) throw new Error("SOURCE_UNIT_SCALE_REQUIRED")
   return { position: [0, 0, 0], quaternion: quaternion.toArray(), scale: [scale, scale, scale] }
+}
+
+/**
+ * 按已识别的首相机坐标标记装配源坐标适配（只给 splat 挂载/预览用）。
+ *
+ * 既有默认适配把 Y-up 源转世界 Z-up 是 `Rx(+90)`；它对 `v3`（OpenGL：X 右/Y 上/Z 后）正确，但对
+ * `v2`（OpenCV：X 右/Y 下/Z 前）会把真实 up=−Y 转成 −Z（画面直立倒置）。旧 CV 约定需要 `Rx(−90)`：
+ * `(x,y,z) → (x, z, −y)`，于是 up −Y→+Z、forward +Z→+Y，都是世界水平前方 + 上方向。
+ *
+ * `v2` 只在源声明就是 Y-up 时改写；调用方若已给别的 `upAxis`（显式 override），那是对文件坐标的明确
+ * 声明，按既有 `sourceTransform` 原样返回，不替它做主。无已识别 frame 时与 `sourceTransform` 逐字相同。
+ */
+export function gaussianSourceTransform(source: ResourceRef["source"], frame?: GaussianCameraFrame): Transform {
+  const transform = sourceTransform(source)
+  if (frame === "first-camera-c2w-v2" && source.upAxis === "Y") {
+    transform.quaternion = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2).toArray() as Transform["quaternion"]
+  }
+  return transform
 }
 
 export function glbEntities(ref: ResourceRef, parsed: ParsedAsset, rootId: string, name: string, pose = identityTransform()): Entity[] {
