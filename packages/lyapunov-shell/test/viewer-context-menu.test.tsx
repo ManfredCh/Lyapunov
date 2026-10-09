@@ -32,3 +32,27 @@ test('真实菜单DOM中英两个动作、键盘导航与Escape关闭，点击�
 
  }finally{await act(async()=>root.unmount());dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
 })
+
+
+test('发行客户端纯grammar叶经真实ClientModuleSystem加载，不依赖不存在的grammar模块表',async()=>{
+ const {nativeClientLeafPlugin}=await import('../../../script/terminal-build.ts')
+ const {ClientModuleSystem}=await import(new URL('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/modules/src/client/system.ts',import.meta.url).href)
+ const react=await import('react'),jsx=await import('react/jsx-runtime')
+ const entry=new URL('../src/viewer-context-menu.tsx',import.meta.url).pathname
+ const load=async(inline:boolean)=>{
+  const result=await Bun.build({entrypoints:[entry],target:'browser',format:'cjs',external:['@deepseek-ai/*','react','react/jsx-runtime'],plugins:inline?[nativeClientLeafPlugin()]:[],define:{'process.env.NODE_ENV':JSON.stringify('production')}})
+  if(!result.success)throw new AggregateError(result.logs,'真实Viewer引用客户端构建失败')
+  const text=await result.outputs[0]!.text(),target:any={mode:'queue',pendingQueue:[],load(registration:any){this.pendingQueue.push(registration)}}
+  const loader=new ClientModuleSystem({manifest:{rev:'fixture',modules:[],plugins:[]},staticModules:{react,'react/jsx-runtime':jsx},bootstrapModule:{id:'@deepseek-ai/dsh-client-modules',exports:{}},registrationTarget:target})
+  target.load({id:'@lyapunov/viewer-reference',factory:new Function('require','var module={exports:{}};var exports=module.exports;'+text+';return module.exports;')})
+  return {loader,mod:await loader.import('@lyapunov/viewer-reference')}
+ }
+ await expect(load(false)).rejects.toThrow('dsh-file-reference/grammar')
+ const {loader,mod}=await load(true);let stored:any
+ const reference=await mod.writeViewerReference('session-a',scene,'entity-a',async(action:string,input:any)=>action==='write'?(stored=input,{path:input.path,version:'v1'}):{...stored,version:'v1'})
+ expect(reference.ref).toMatch(/^@lyapunov-selection-.*\.json$/)
+ expect(loader.loadCache.get('@lyapunov/viewer-reference')!.edges.has('@deepseek-ai/dsh-file-reference/grammar')).toBe(false)
+ // 检查正常build-plugins产物；不能只让此局部fixture使用正确resolver而遗漏真正发行入口。
+ const {readFile}=await import('node:fs/promises'),built=await readFile(new URL('../dist/client.js',import.meta.url),'utf8')
+ expect(built).not.toMatch(/require\(["']@deepseek-ai\/dsh-file-reference\/grammar["']\)/)
+})

@@ -1,7 +1,7 @@
 import { mkdir,readdir,readFile,writeFile,copyFile,symlink } from "node:fs/promises"
 import { join,resolve } from "node:path"
 import { linkUpstream } from "./link-upstream.ts"
-import { remoteScopePlugin } from './terminal-build.ts'
+import { remoteScopePlugin,nativeClientLeafPlugin } from './terminal-build.ts'
 const root=resolve(import.meta.dirname,"..")
 // 链接归属变化必须**播报**：`linkUpstream()` 明确统计了新建/改指/清理三条计数，以前在唯一调用点被
 // 整个丢掉 —— 与 `script/runtime-patch.ts` 那次"返回值在唯一调用点被扔掉"同形（见
@@ -76,7 +76,7 @@ for(const name of packages){
 }
 for(const name of ["viewer","lyapunov-shell","lyapunov-workspace","lyapunov-session-undo","desktop"].filter(name=>!only.length||only.includes(name))){
   const dir=join(root,"packages",name),pkg=JSON.parse(await readFile(join(dir,"package.json"),"utf8"))
-  const build=await Bun.build({entrypoints:[join(dir,"src/client.tsx")],target:"browser",format:"cjs",plugins:[{name:"native-workspace-path",setup(builder){builder.onResolve({filter:/^@deepseek-ai\/dsh-util-workspace-path(?:\/.*)?$/},args=>({path:Bun.resolveSync(args.path,root),external:false}))}}],external:["@deepseek-ai/*","@lyapunov/viewer/client","react","react/jsx-runtime","react-dom"],minify:false,define:{"process.env.NODE_ENV":JSON.stringify("production")}})
+  const build=await Bun.build({entrypoints:[join(dir,"src/client.tsx")],target:"browser",format:"cjs",plugins:[nativeClientLeafPlugin()],external:["@deepseek-ai/*","@lyapunov/viewer/client","react","react/jsx-runtime","react-dom"],minify:false,define:{"process.env.NODE_ENV":JSON.stringify("production")}})
   if(!build.success)throw new AggregateError(build.logs,"客户端构建失败")
   const js=await build.outputs[0]!.text()
   await writeFile(join(dir,"dist/client.js"),`window.__ModuleLoader__.load({id:${JSON.stringify(pkg.name)},factory:(require)=>{var module={exports:{}};var exports=module.exports;\n${js}\nreturn module.exports;}});\n`)
