@@ -16,7 +16,7 @@ import { assessSplatDecoded, assessSplatDeclaration, assessSplatFailure, splatWa
 import { appendFrameSample, cachedSplatCenterBounds, frameSampleSummary, scanSplatCenterBounds, splatDataSource, splatPointCount,splatInitializationLod, SPLAT_INTERACTIVE_BUDGET, viewerWebglFacts,interactiveSplatBudget,type SplatInteractiveBudget,type SplatQuality } from "./splat-runtime.ts"
 import { retainedSplats, retainedSplatFootprint,restoreSplatData, retainSplatData, type SplatRetentionScope } from "./splat-retention.ts"
 import { assetFormatOf, pairDocumentAssets } from "./asset-locator.ts"
-import { axisSuspect } from "./source-axis.ts"
+import { axisSuspectForGltf } from "./source-axis.ts"
 import type { Entity, Frame, ResourceRef, SceneSnapshot, Transform, WorldHandle } from "../../lyapunov-contracts/src/types.ts"
 import { FrameProjection } from "./projection.ts"
 import { sceneEditTarget } from '../../lyapunov-contracts/src/scene-edit-target.ts'
@@ -1016,10 +1016,11 @@ export class SceneViewer {
     const url = await this.options.resolveResource(rep.uri, ref)
     if (rep.mimeType !== "model/gltf-binary") throw new Error(`VIEWER_FORMAT_UNSUPPORTED: ${rep.mimeType}`)
     const { object, gltf, node } = await this.loadGltfObject(url, visual)
-    // ENV-20：声明的 upAxis 与实测包围盒不一致时如实记一条（同一素材族里两种轴向约定并存会让预览侧倒）；
-    // 判据只看两件真事实（声明的 upAxis + 实测三轴尺寸），**不改渲染**，走既有缺件警告通道。
+    // 单网格来源保留原轴向怀疑诊断；多网格装配体的零件长宽没有独立上下语义。
+    // 按完整 glTF 资源判断，不能把展开后的单零件误认成独立道具。原source轴转换保持不变。
     {
-      // 逐网格量：整棵树会把"15 个道具摊在街上"的占地当成侧倒（误报），逐网格才对准"这个物件是不是躺着"。
+      let resourceMeshCount=0
+      gltf.scene.traverse(item=>{if(item instanceof THREE.Mesh&&item.geometry)resourceMeshCount++})
       const extents: Array<{ x: number; y: number; z: number }> = []
       object.traverse(item => {
         if (!(item instanceof THREE.Mesh) || !item.geometry) return
@@ -1029,7 +1030,7 @@ export class SceneViewer {
         const size = box.getSize(new THREE.Vector3()).multiply(item.scale)
         extents.push({ x: Math.abs(size.x), y: Math.abs(size.y), z: Math.abs(size.z) })
       })
-      const suspect = axisSuspect(ref.source?.upAxis, extents)
+      const suspect = axisSuspectForGltf(ref.source?.upAxis, extents, resourceMeshCount)
       if (suspect) loaded.lodWarnings.push(`${suspect.code}: ${suspect.detail}`)
     }
     if (node) loaded.baseNode = node

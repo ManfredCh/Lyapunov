@@ -52,3 +52,12 @@ export function axisSuspect(upAxis: string | undefined, meshes: readonly AxisExt
     detail: `资源声明 upAxis=${declared}，但 ${offenders}/${checked} 个网格的竖直方向在 ${actual}（样本实测 ${measured}）：画面里这些部件很可能被转成侧倒/躺平。来源轴向要按来源核（不能统一假定 +Y-up）；修法是在来源侧改正轴向，或给它显式 sourceTransform——Viewer 不替它猜（期望竖直方向 ${expected}）。`,
   }
 }
+
+/** glTF 的多网格资源可能是装配体：零件没有独立“站立方向”，不能用零件长宽推断整件轴向。
+ * 此处依据完整资源的 mesh 数，而不是某个已展开实体/克隆子节点的 mesh 数。
+ * 单网格来源沿用原可疑诊断；多网格未知，不改变 source 元数据或原坐标转换。
+ */
+export function axisSuspectForGltf(upAxis:string|undefined,meshes:readonly AxisExtents[],resourceMeshCount:number):AxisSuspect|null {
+  if(resourceMeshCount!==1)return null
+  return axisSuspect(upAxis,meshes)
+}

@@ -7,7 +7,7 @@
  *  · 15 个道具**整棵树**的占地是 29.94 × 7.86 × 68.73 —— 整棵树判会误报，所以判据按逐网格走。
  */
 import { describe, expect, test } from "bun:test"
-import { axisSuspect } from "../src/source-axis.ts"
+import { axisSuspect, axisSuspectForGltf } from "../src/source-axis.ts"
 
 describe("轴向怀疑判别（逐网格）", () => {
   test("声明 Y-up + 网格确实沿 Y 站着 ⇒ 不报", () => {
@@ -60,4 +60,16 @@ describe("轴向怀疑判别（逐网格）", () => {
   test("横向长条（z 大但 x 更大）不该被当成侧倒", () => {
     expect(axisSuspect("Y", [{ x: 100, y: 5, z: 20 }])).toBeNull()
   })
+})
+
+test("实际工作间GLB装配零件：脚垫/搁板不代表整件躺倒；展开单子实体仍按完整资源scope",()=>{
+  // workstation.glb: Khronos glTF Blender I/O v5.2.40，255 mesh；accessor原始尺寸。
+  // 完整源bounds 6.07×3.38×5.0m，Y范围[-.18,3.2]；Viewer实图地面水平、墙与桌架直立。
+  const feet=[{x:.13,y:.08,z:.13}],shelf=[{x:.7,y:.025,z:.74}]
+  expect(axisSuspect('Y',feet)?.code).toBe('VIEWER_SOURCE_AXIS_SUSPECT')
+  expect(axisSuspect('Y',shelf)?.code).toBe('VIEWER_SOURCE_AXIS_SUSPECT')
+  expect(axisSuspectForGltf('Y',feet,255)).toBeNull()
+  expect(axisSuspectForGltf('Y',shelf,255)).toBeNull()
+  expect(axisSuspectForGltf('Y',[...feet,...shelf],255)).toBeNull()
+  expect(axisSuspectForGltf('Y',[{x:.075,y:.075,z:.094}],1)?.code).toBe('VIEWER_SOURCE_AXIS_SUSPECT')
 })
