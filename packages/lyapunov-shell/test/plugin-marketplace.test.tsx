@@ -107,18 +107,18 @@ describe('插件市场原生读数的薄投影',()=>{
    expect(process.env.HOME).toBe(before)
   }finally{await rm(box,{recursive:true,force:true})}
  })
- test('唯一原生Plugins页注册，保持社区来源无新的Settings nav或plugin registry',()=>{
+ test('软件集成复用原生Settings根入口，不替换SDK插件列表或建立registry',()=>{
   const rows:any[]=[];const ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context
   applyExternalToolsSettings(ctx)
-  expect(rows[0]).toEqual({inject:'settings.plugins.tab'})
-  expect(rows[1]).toMatchObject({name:'settings.plugins.tab',id:'lyapunov-integrations',order:20})
+  expect(rows[0]).toEqual({inject:'settings.section'})
+  expect(rows[1]).toMatchObject({name:'settings.section',id:'lyapunov-integrations',order:19})
  })
 })
 
 test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；不显示secret值、不调用模型',async()=>{
  const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'}),saved=new Map<string,PropertyDescriptor|undefined>()
- const names=['window','document','navigator','HTMLElement','Event','MouseEvent','Node','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']
+ const names=['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']
  for(const name of names){saved.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{value:name==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[name],configurable:true,writable:true})}
  let current=state();const calls:any[]=[]
  globalThis.fetch=(async(input:any,init?:RequestInit)=>{calls.push({path:String(input),method:init?.method??'GET',body:init?.body});return Response.json(String(input).includes('/mcp')?{saved:true}:current)}) as typeof fetch
@@ -167,17 +167,17 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
 
 // 原SDK外壳和原inventory组件参加交互，不由产品重写官方列表。
 test('原插件列表仍默认且可打开集成；软件下载不藏details，正常按钮提交原acquire而非模型会话',async()=>{
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<!DOCTYPE html><div id="root"></div>',{url:'http://fixture.invalid'}),saved=new Map<string,PropertyDescriptor|undefined>()
- for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<!DOCTYPE html><div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
  // SDK与产品独立安装React；以既有Bun编译原组件并固定本测试同一React，不改SDK/共享依赖。
  const nativeDir=await mkdtemp(join(tmpdir(),'native-plugin-settings-ui-')),productRoot=fileURLToPath(new URL('../../../',import.meta.url)),sdkRoot=fileURLToPath(new URL('../../../.upstream/deepseek-harness-20260911-candidate/',import.meta.url))
- await writeFile(join(nativeDir,'entry.ts'),`export {PluginsSettingsSection} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugins/src/client/PluginsSettingsSection.tsx'))};\nexport {PluginInventorySettingsTab} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx'))};\n`)
+ await writeFile(join(nativeDir,'entry.ts'),`export {SettingsRoot} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-general/src/client/SettingsRoot.tsx'))};\nexport {PluginInventorySettingsTab} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx'))};\n`)
  await symlink(join(productRoot,'node_modules'),join(nativeDir,'node_modules'),'dir')
  const built=await Bun.build({entrypoints:[join(nativeDir,'entry.ts')],target:'bun',format:'esm',plugins:[{name:'test-single-react',setup(builder){builder.onResolve({filter:/^react(?:\/.*)?$/},args=>({path:Bun.resolveSync(args.path,productRoot),external:true}))}}]})
  if(!built.success)throw new AggregateError(built.logs,'原SDK插件设置组件测试编译失败')
  const javascript=built.outputs.find(row=>row.path.endsWith('.js'))!;await writeFile(join(nativeDir,'native-ui.mjs'),await javascript.text())
- const {PluginsSettingsSection,PluginInventorySettingsTab}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
- const entries:any[]=[{id:'all',order:10,label:'Plugin list'}],ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(_name:string,fn:()=>unknown)=>fn(),register:(entry:any)=>{entries.push({...entry,label:entry.label()});return()=>{}}}} as unknown as Context
+ const {SettingsRoot,PluginInventorySettingsTab}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
+ const entries:any[]=[{id:'plugins',order:15,label:'Plugin list'}],ctx={locale:{bind:()=>()=> 'Scene workbench'},get:()=>({list:{getSnapshot:()=>({byId:{}})}}),slots:{inject:(_name:string,fn:()=>unknown)=>fn(),register:(entry:any,component:any)=>{entries.push({...entry,label:entry.label(),component});return()=>{}}}} as unknown as Context
  applyExternalToolsSettings(ctx);const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0
  const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{applyExternalToolsHost}=await import('../src/external-tools-host.ts'),hostCtx=new Context(),routes=new Map<string,(r:Request)=>Promise<Response>>()
  hostCtx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await hostCtx.plugin((await import('@deepseek-ai/dsh-tools')).default)
@@ -193,17 +193,22 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
  const {createRoot}=await import('react-dom/client'),root=createRoot(document.getElementById('root')!),{act}=React
  const native=()=>React.createElement(PluginInventorySettingsTab,{t:(key:string)=>inventoryEn[key as keyof typeof inventoryEn]??key,list:async()=>({entries:[{entryId:'native-fixture',moduleName:'@fixture/native-existing',enabled:true,fiberPhase:'active',meta:{title:{en:'Native existing plugin',zh:'原有原生插件'}}}],agentPresets:[]}),presetName:(row:any)=>row.name??row.id,resolveText:(text:any)=>typeof text==='string'?text:text.en,useClientSync:(select:any)=>select({syncing:false,failures:[]}),retryClient:()=>{}} as any)
  try{
-  await act(async()=>{root.render(React.createElement(PluginsSettingsSection,{t:(key:string)=>sectionEn[key as keyof typeof sectionEn]??key,useTabs:(select:any)=>select(rows),renderSlot:(_name:string,_owner:unknown,options:{only:string})=>options.only==='all'?native():<ExternalToolsSettings tr={(_zh,en)=>en} start={async()=>{modelCalls++;throw Error('Unexpected model call')}} close={()=>{}} sessionId={()=>undefined} openDocument={async()=>{}}/>} as any));await new Promise(r=>setTimeout(r,0))})
-  const tabs=[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];expect(tabs.find(row=>row.textContent==='Plugin list')?.getAttribute('aria-selected')).toBe('true')
+  function NativeSettingsHarness(){
+   const [activeId,setActiveId]=React.useState('plugins')
+   return React.createElement(SettingsRoot,{wide:true,t:(key:string)=>key,useStore:(select:any)=>select({open:true,activeId}),actions:{open:()=>{},close:()=>{},select:setActiveId,openSection:setActiveId},useSections:(select:any)=>select(rows),useShortcuts:(select:any)=>select([]),useDesktopUpdate:(select:any)=>select({}),useConnectionState:(select:any)=>select('connected'),useOnboardingSteps:(select:any)=>select([]),useSessions:(select:any)=>select({phase:'ready',byId:{fixture:{retainedBy:{mainView:1},blank:false}}}),openDesktopUpdate:()=>{},reconnect:()=>{},renderSlot:(name:string,_owner:unknown,options?:{only:string;fallback?:unknown})=>{if(name==='settings.section'){if(options?.only==='plugins')return native();const entry=entries.find(row=>row.id===options?.only);return entry?React.createElement(entry.component,entry.inject()):null}if(name==='settings.header')return 'Settings';if(name==='settings.close')return 'Close';return options?.fallback??null}} as any)
+  }
+  await act(async()=>{root.render(React.createElement(NativeSettingsHarness));await new Promise(r=>setTimeout(r,0))})
+  const nav=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('nav button')].find(row=>row.textContent===text)!
+  expect(nav('Plugin list').getAttribute('aria-current')).toBe('true')
   await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click()})
   expect(document.body.textContent).toContain('Native existing plugin')
-  await act(async()=>{tabs.find(row=>row.textContent!=='Plugin list')!.click();await new Promise(r=>setTimeout(r,0))})
+  await act(async()=>{nav('Software and integrations').click();await new Promise(r=>setTimeout(r,0))})
   const software=document.querySelector<HTMLElement>('[aria-label="Software downloads and installation"]');expect(software).not.toBeNull();expect(software!.closest('details:not([open])')).toBeNull();expect(software!.textContent).toContain('Blender');expect(software!.textContent).toContain('Unity');expect(software!.textContent).toContain('SAM 3D Objects');expect(software!.textContent).toContain('FastGS')
   const blender=software!.querySelector<HTMLElement>('[data-tool-id="blender"]')!;expect(blender).not.toBeNull()
   await act(async()=>{[...blender.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(1)})
   expect(calls.find(row=>row.path.endsWith('/acquire'))?.body).toMatchObject({id:'blender'});expect(modelCalls).toBe(0);const job=hostCtx.jobs.list()[0]!,stateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{await hostCtx.jobs.wait(job.id,3000)});expect(calls.some(row=>row.path.includes('/job?'))).toBe(true);expect(calls.filter(row=>row.path.includes('/state'))).toHaveLength(stateReads);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain(String(job.id));expect(document.body.textContent).toContain('not installed automatically')
   await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Read actual output')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Fixture official page request accepted')
   openerExit=17;const unity=software!.querySelector<HTMLElement>('[data-tool-id="unity"]')!;await act(async()=>{[...unity.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(2)});const failed=hostCtx.jobs.list().find(row=>row.id!==job.id)!;await hostCtx.jobs.wait(failed.id,3000);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Official download page could not be opened (exit 17)');expect(document.body.textContent).not.toContain('官方下载页面未能打开');expect(modelCalls).toBe(0)
-  await act(async()=>{tabs.find(row=>row.textContent==='Plugin list')!.click()});expect(document.body.textContent).toContain('Native existing plugin');expect(tabs.find(row=>row.textContent==='Plugin list')?.getAttribute('aria-selected')).toBe('true')
+  await act(async()=>{nav('Plugin list').click();await new Promise(r=>setTimeout(r,0))});expect(nav('Plugin list').getAttribute('aria-current')).toBe('true');await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Native existing plugin')
  }finally{await act(async()=>root.unmount());removeController();await hostCtx.fiber.dispose();dom.window.close();await rm(nativeDir,{recursive:true,force:true});for(const[key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
 })

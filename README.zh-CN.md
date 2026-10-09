@@ -17,13 +17,10 @@
   ——陆游《冬夜读书示子聿》
 </p>
 
-**Linux x64 · 0.1.0α** · **Apache-2.0**
+**Linux x64** · **Apache-2.0**
 
 | 出版信息 | 内容 |
 | --- | --- |
-| 产品版本 | `0.1.0-alpha.6.2` |
-| 发行批次标识 | `0.1.0-alpha.6.2-r1` |
-| 文档版本日期 | 2026-10-07 |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | 出品方 | [杭州奇异宇宙人工智能有限公司](https://vorynel.com/?lang=zh) |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
@@ -37,13 +34,13 @@
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
 
-**发行通道：** Linux x64 Alpha。版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases/0.1.0-alpha.6.2.md)记录本 Alpha 的变化与已知范围。
+**Linux 安装：**版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases)记录产品变化与核验范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases/0.1.0-alpha.6.2.md)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases)
 
 <!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
-**推荐工作流：** 让Agent使用原生产品工具，或使用工作台控件；本Alpha暂不建议用CUA自动点击替代场景、机器人与仿真工具。
+**推荐工作流：** 让Agent使用原生产品工具，或使用工作台控件完成场景、机器人与仿真操作。
 
 ## 在 Linux 上安装
 
@@ -117,7 +114,7 @@ Peiri 是对话与工具编排使用的语言模型代称；Pontryagin 是后台
 - **世界场景生成**：可以用一句话向 Agent 请求世界场景生成，使用世界模型建立 3DGS 环境，并配合准备与其配准的 GLB 碰撞几何。当前服务器算力有限，供给时段与生成量有限；后续将根据需求评估提升速度与容量。
 - **几何与程序化脚本**：用Blender或参数化脚本建立尺寸明确的地面、墙、门洞与装配；保留可编辑源件和派生件。
 - **已有环境与Gaussian表示**：检查比例、轴、方向和依赖；Gaussian负责视觉，真实接触需要另行配准的物理几何。
-- **照片、多视角与图纸重建**：可选外部方法路线，依赖各自工具、数据与输出检查。本Alpha说明不签署外部服务连接或重建结果成功。
+- **照片、多视角与图纸重建**：可选外部方法路线，依赖各自工具、数据与输出检查。外部服务连接与重建结果需分别核验。
 - **编辑与物理派生**：编辑进入Scene版本，为static/environment派生碰撞并应用到当前world；有限表面厚度和预算会影响窄孔与通道。
 
 ### 物体方法
@@ -264,7 +261,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases/0.1.0-alpha.6.2.md)记录本 Alpha 的功能范围。账号和部署服务在独立仓库维护。
+开发账号、模型配置、源码启动、构建与检查见[开发说明](development/README.md)和[开发标准](docs/DEVELOPMENT_STANDARDS.md)。[发布说明](docs/releases)记录产品变化与功能范围。账号和部署服务在独立仓库维护。
 
 ## 许可与版权
 

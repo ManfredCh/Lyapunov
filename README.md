@@ -17,13 +17,10 @@
   — William Blake, <a href="https://poets.org/poem/auguries-innocence"><em>Auguries of Innocence</em></a>
 </p>
 
-**Linux x64 · 0.1.0α** · **Apache-2.0**
+**Linux x64** · **Apache-2.0**
 
 | Publication metadata | Value |
 | --- | --- |
-| Product version | `0.1.0-alpha.6.2` |
-| Release identifier | `0.1.0-alpha.6.2-r1` |
-| Documentation edition | 2026-10-07 |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
 | Produced by | [Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)](https://vorynel.com/?lang=en) |
 | Sponsored by | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
@@ -37,13 +34,13 @@ Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, pr
 
 Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “everything-is-a-plugin” architecture and uses Cordis's composition mechanism to integrate tools and capabilities. We thank the authors and contributors of DSH and Cordis; the Cordis design is described in [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512).
 
-**Release channel:** Linux x64 Alpha. The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases/0.1.0-alpha.6.2.md) describe this Alpha's changes and known limits.
+**Linux installation:** The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases) describe product changes and their verified scope.
 
-[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases/0.1.0-alpha.6.2.md)
+[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases)
 
 <!-- Workbench screenshot placeholder: add the correct image here when available. -->
 
-**Recommended workflow:** ask the agent to use native product tools, or use workbench controls. For this Alpha, avoid CUA click automation for scene, robot and simulation work.
+**Recommended workflow:** ask the agent to use native product tools, or use workbench controls for scene, robot and simulation operations.
 
 ## Install on Linux
 
@@ -117,7 +114,7 @@ The [capability matrix](docs/CAPABILITY_MATRIX.md) and [camera guide](docs/SCENE
 - **World scene generation:** ask the agent in a single sentence to generate a world scene as a 3DGS environment using a world model, and to help prepare GLB collision geometry aligned with it. Current server compute is limited, so availability windows and generation volume are limited; speed and capacity will be evaluated according to demand.
 - **Geometry and scripts:** construct measured floors, walls, openings and assemblies with Blender or parameterized scripts; retain editable sources and derived assets.
 - **Imported environments and Gaussian representations:** inspect scale, axes, orientation and dependencies. A Gaussian visual scene needs separately aligned physical geometry for contact.
-- **Photo, multi-view or drawing reconstruction:** an optional external-method route requiring its own tools, data and output checks. External service connectivity and reconstruction results are not accepted by this Alpha description.
+- **Photo, multi-view or drawing reconstruction:** an optional external-method route requiring its own tools, data and output checks. External service connectivity and reconstruction results require separate verification.
 - **Editing and physical derivation:** edits create Scene revisions; prepare static/environment collision geometry, apply it to the current world, and inspect the actual result. Finite surface thickness and budgets can affect narrow openings.
 
 ### Object methods
@@ -264,13 +261,13 @@ export HF_ENDPOINT=https://hf-mirror.com
 node script/bootstrap.mjs
 ```
 
-See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases/0.1.0-alpha.6.2.md) describe this Alpha’s feature scope. Account and deployment services are maintained separately from this client repository.
+See the [development guide](development/README.md) and [standards and checks](docs/DEVELOPMENT_STANDARDS.md) for developer account setup, model configuration, source startup, builds, and validation. The [release notes](docs/releases) document product changes and their scope. Account and deployment services are maintained separately from this client repository.
 
 The project-owned Lyapunov code is licensed under the [Apache License 2.0](LICENSE), copyright © 2026 Vorynel Co., Ltd. The completed project copyright and license declaration is in [NOTICE](NOTICE); the LICENSE appendix retains Apache's standard example for applying the license. Use, modification and redistribution follow Apache 2.0, without additional monthly-user or revenue thresholds. Existing published archives retain their original bytes and historical license notices; future packages will carry the updated LICENSE and NOTICE. The existing OpenCode MIT copyright and permission notice is retained in NOTICE. Individual packages, bundled DSH/Node/MuJoCo components, robot assets, model weights and external services retain their respective licenses.
 
 ## 中文快速说明
 
-Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机采集放在同一桌面工作台。当前发行通道为 Linux x64 Alpha；版本标识、下载内容和运行要求以[官网安装页](https://vorynel.com/lyapunov/)为准。
+Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机采集放在同一桌面工作台。安装版本标识、下载内容和运行要求以[官网安装页](https://vorynel.com/lyapunov/)为准。
 
 默认安装命令为 `curl -fsSL https://vorynel.com/lyapunov/install.sh | sh`，包含 MuJoCo 运行环境的准备与验证；Isaac Sim 与 Newton 可按需选择安装。安装成功并报告就绪后，由使用者单独启动 Lyapunov。首次启动可通过官网授权登录，使用官网模型服务需先注册账号并充值 Credits，登录后使用 Peiri／中央 Credits；也可显式进入 Guest，使用本地功能并自行配置 provider。游客不连接产品服务器，包括产品账户与计费后端，没有默认模型，也不使用 Peiri 或中央 Credits。机器人按“准备 → 初始化 → 就绪 → 显式执行”操作；相机可从绑定或保存视角返回主视图，WASD 只用于自由视角导航。
 

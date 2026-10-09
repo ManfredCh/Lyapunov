@@ -132,5 +132,5 @@ export function ExternalToolsSettings({tr,start,close,sessionId,openDocument}:Pr
 }
 export function applyExternalToolsSettings(ctx:Context):void {
  const t=ctx.locale.bind('lyapunov'),tr:Translate=(zh,en)=>t('open')==='Scene workbench'?en:zh
- ctx.slots.inject('settings.plugins.tab',()=>ctx.slots.register({name:'settings.plugins.tab',id:'lyapunov-integrations',order:20,label:()=>tr('软件与集成','Software and integrations'),inject:()=>({tr,close:()=>{closeTopModal(document)},start:(id:string,close:()=>void)=>startExternalInstallSession(ctx,id,close),sessionId:()=>mainSessionId((ctx.get('sessions') as unknown as ISessions).list.getSnapshot()),openDocument:async()=>{const r=await ctx.remote.settings.openSettingsDocument();if(!r.ok)throw Error(r.error.message)}})},ExternalToolsSettings))
+ ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'lyapunov-integrations',order:19,label:()=>tr('软件与集成','Software and integrations'),inject:()=>({tr,close:()=>{closeTopModal(document)},start:(id:string,close:()=>void)=>startExternalInstallSession(ctx,id,close),sessionId:()=>mainSessionId((ctx.get('sessions') as unknown as ISessions).list.getSnapshot()),openDocument:async()=>{const r=await ctx.remote.settings.openSettingsDocument();if(!r.ok)throw Error(r.error.message)}})},ExternalToolsSettings))
 }
