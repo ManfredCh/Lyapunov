@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "a3a2d8860d02268bec8fc09174efc8679ee28c82f0de7f047071723036931269": {
+    "87793ac4436b1f66cbf5656547e0dfb7c3a142ec246d19be96d14ba09bcaf894": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -65,6 +65,9 @@
         "packages/interaction/commands/tests/commands.spec.ts",
         "packages/llm/llm-pi-ai/src/adapter.ts",
         "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts",
+        "packages/llm/llm-pi-ai/src/stream.ts",
+        "packages/llm/llm-pi-ai/tests/adapter.spec.ts",
+        "packages/llm/llm-pi-ai/tests/convert.spec.ts",
         "packages/llm/llm-retry/src/index.ts",
         "packages/llm/llm-retry/tests/transport-recovery.spec.ts",
         "packages/llm/llm/src/index.ts",
@@ -73,10 +76,10 @@
         "pnpm-lock.yaml"
       ],
       "stageHashes": [
-        "d7dd6bf075e31e3b93b4c369536cbb2033fe9c0fbd1d20b8059b7112c9c9f1e6",
-        "17955d9da8e5fd246b1df7818081e5a4ff591e81e4d3b89c2f11999080bfe155"
+        "b6c4ee191233570b2f8cc6b11b415a134469aaa3eeea414f7d5d377d0029b743",
+        "be7b1723be53fd218dbb79204f747565c18ab0e62a8d9682ba355979e784fa08"
       ],
-      "finalHash": "17955d9da8e5fd246b1df7818081e5a4ff591e81e4d3b89c2f11999080bfe155",
+      "finalHash": "be7b1723be53fd218dbb79204f747565c18ab0e62a8d9682ba355979e784fa08",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -139,6 +142,9 @@
         "packages/interaction/commands/tests/commands.spec.ts": "017aa95c81b4ca9a4d85195c61c83524cf7728a38a324c1d60c94853cdec8511",
         "packages/llm/llm-pi-ai/src/adapter.ts": "43985883ceccd3a0dd1951544829d6a6b43acafb1fa9dd7f97f24d726d47ddad",
         "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts": "947e4ceddbfbccb6b2d6fec714a0dcd4c335a6200ed81a2ef047969eeec5909c",
+        "packages/llm/llm-pi-ai/src/stream.ts": "2bb99e3f28b024fa57a02f297d0773e4665efd0c267253c2ce390497c425913b",
+        "packages/llm/llm-pi-ai/tests/adapter.spec.ts": "bfa7b84300ba6b4ea1c5fb184390a5c1fe47fa929409db102c36fc7a515ce8e6",
+        "packages/llm/llm-pi-ai/tests/convert.spec.ts": "040723086023309a1b40e3176cf8d07bb714a1338bd54282a4660a35d001f9aa",
         "packages/llm/llm-retry/src/index.ts": "c171019d533945d9ebb61695b02a248814334ca4cfe96bcc756d5885468ca783",
         "packages/llm/llm-retry/tests/transport-recovery.spec.ts": "0715763359ec7fe718e38c8ca3d28e1991875d746e4848d5e42af11a45b050bd",
         "packages/llm/llm/src/index.ts": "2ea85d3ccef26d9b4b009546c7a4095112a0a324626643e6506531e1cdba42f4",

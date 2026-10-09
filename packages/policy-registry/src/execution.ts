@@ -94,6 +94,10 @@ export function wtwObservationFrame(adapter:PreparedAdapter,frame:Frame,entityId
   if(obs.length!==o.frameDimension||!obs.every(Number.isFinite))throw new Error(`POLICY_OBSERVATION_INVALID: 实得 ${obs.length} 维（期望 ${o.frameDimension}），非有限值 ${obs.filter((v:number)=>!Number.isFinite(v)).length} 个`)
   return obs
 }
+/** WTW deploy HistoryWrapper.reset() 交给首 policy 的是全零历史；step 后才把实测观测尾插。 */
+export function wtwInferenceHistory(observation:number[],historyFrames:number,history?:number[]):number[]{
+  return history===undefined?Array(historyFrames*observation.length).fill(0):[...history.slice(observation.length),...observation]
+}
 export interface PolicyExecutionInput extends PolicyMatchInput {worldId:string;expectedGeneration:number;durationS?:number;command?:number[];runId?:string}
 export async function executePolicy(config:{dataDirectory:string}&PolicyRuntimeConfig,input:PolicyExecutionInput,scene:{inspect(id:string):SceneSnapshot|Promise<SceneSnapshot>},sim:SimWorlds,signal:AbortSignal){
   const match=await matchPolicy(config,input,scene,sim)
@@ -126,7 +130,20 @@ export async function executePolicy(config:{dataDirectory:string}&PolicyRuntimeC
       checkCancelled(signal)
       if((await scene.inspect(input.sceneId)).revision!==match.sceneRevision)throw new Error('POLICY_SCENE_REVISION_CHANGED')
       if(frame.generation!==input.expectedGeneration||frame.sceneRevision!==match.sceneRevision)throw new Error('POLICY_WORLD_BINDING_CHANGED')
-      let observation:number[]
+      let observation:number[],wtwInferenceFrame:Record<string,unknown>|undefined
+      if(twoStage){
+        // 官方 deployment_runner: policy(reset 后的历史) → step(action)。不先用零动作推进物理。
+        const single=wtwObservationFrame(a,frame,input.entityId,command,[action,prevAction],initial.simTime)
+        const historyReset=wtwHistory===undefined
+        const inferenceInput=wtwInferenceHistory(single,custom.historyFrames,wtwHistory)
+        wtwHistory=inferenceInput;observation=historyReset?Array(custom.frameDimension).fill(0):single
+        wtwInferenceFrame={frameId:frame.frameId,stepIndex:frame.stepIndex,simTime:frame.simTime,historyReset,historyFrames:custom.historyFrames,frameDimension:custom.frameDimension}
+        prevAction=action
+        action=await cpu.request({method:'infer',observation:inferenceInput,actions:c.num_actions},signal);inferences++
+        const clipActions=c.clip_actions??Infinity
+        action=action.map((v:number)=>Math.max(-clipActions,Math.min(clipActions,v)))
+        targets=action.map((v:number,i:number)=>v*c.action_scale*((c.hip_action_indices??[]).includes(i)?c.hip_scale_reduction??1:1)+c.default_angles[i])
+      }
       if(a.inferenceFormat==='onnx'){
         observation=policyObservation(a,frame,input.entityId,command,action,initial.simTime,history)
         action=await cpu.request({method:'infer',observation,actions:c.num_actions},signal);inferences++
@@ -141,28 +158,12 @@ export async function executePolicy(config:{dataDirectory:string}&PolicyRuntimeC
       const e=frame.entities.find(e=>e.entityId===input.entityId)!
       peakJointDelta=Math.max(peakJointDelta,...e.joints!.positions.map((q,i)=>Math.abs(q-initialEntity.joints!.positions[i]!)))
       peakTranslationM=Math.max(peakTranslationM,Math.hypot(...e.transform.position.map((p,i)=>p-initialEntity.transform.position[i]!)))
-      if(twoStage){
-        // 每帧 70 维 → 30 帧滚动历史 = adaptation 的 2100 维输入。历史**前端补零**（R8）：与训练
-        // `history_wrapper.py:16,24`（zeros 初始化 + 每步 `cat(obs_history[:, num_obs:], obs)` 尾插一帧）
-        // 和 deploy（`deployment_runner.py` reset 后 `obs_history` 全零、逐帧填充）一致；R7 的"首帧铺满"已弃用。
-        const single=wtwObservationFrame(a,frame,input.entityId,command,[action,prevAction],initial.simTime)
-        const inferenceInput:number[]=wtwHistory===undefined?[...Array((custom.historyFrames-1)*custom.frameDimension).fill(0),...single]:[...wtwHistory.slice(custom.frameDimension),...single]
-        wtwHistory=inferenceInput;observation=single
-        prevAction=action
-        action=await cpu.request({method:'infer',observation:inferenceInput,actions:c.num_actions},signal);inferences++
-        // ③ 动作后处理（训练 `legged_robot.py:65-67`、deploy `lcm_agent.py step()`）：策略输出先 clip 到
-        // ±clip_actions，clip 后的值才写回 previousAction 槽位并参与缩放（无 deadzone；力矩限幅在派生 MJCF
-        // 的执行器 forcerange 上，见 prepare_wtw.py）。
-        const clipActions=c.clip_actions??Infinity
-        action=action.map((v:number)=>Math.max(-clipActions,Math.min(clipActions,v)))
-        // `legged_robot.py:919-920`：先乘 action_scale，再对髋关节（dof 序 [0,3,6,9]）乘 hip_scale_reduction。
-        targets=action.map((v:number,i:number)=>v*c.action_scale*((c.hip_action_indices??[]).includes(i)?c.hip_scale_reduction??1:1)+c.default_angles[i])
-      }else if(a.inferenceFormat!=='onnx'){
+      if(!twoStage&&a.inferenceFormat!=='onnx'){
         observation=policyObservation(a,frame,input.entityId,command,action,initial.simTime)
         action=await cpu.request({method:'infer',observation,actions:c.num_actions},signal);inferences++
         targets=a.adapter===G1_23_75_ID?g1Targets75(a,action):action.map((v:number,i:number)=>v*c.action_scale+c.default_angles[i])
       }
-      await trace.write(JSON.stringify({cycle,stepIndex:frame.stepIndex,simTime:frame.simTime,frame,observation:observation!,action,targets,receipt:{actionId:receipt.actionId,startStep:receipt.startStep,endStep:receipt.endStep,status:receipt.status}})+'\n')
+      await trace.write(JSON.stringify({cycle,stepIndex:frame.stepIndex,simTime:frame.simTime,frame,observation:observation!,action,targets,...(wtwInferenceFrame?{inferenceFrame:wtwInferenceFrame}:{}),receipt:{actionId:receipt.actionId,startStep:receipt.startStep,endStep:receipt.endStep,status:receipt.status}})+'\n')
     }
   }catch(caught){status=signal.aborted?'CANCELLED':'FAILED';error=String(caught)}
   finally{

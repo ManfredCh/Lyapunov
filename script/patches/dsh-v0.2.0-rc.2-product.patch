@@ -2344,6 +2344,145 @@ index 13c38fe258d6c607ac58e985c7b243d19e1463f3..625982b3b5f928ff4fbfcc0846f29b91
 +    },
 +  }
  }
+diff --git a/packages/llm/llm-pi-ai/src/stream.ts b/packages/llm/llm-pi-ai/src/stream.ts
+index b7292972d06a028d942476fd90598aff91095c16..3eca7318a66e5743dbc5814936644aa45e6d73a3 100644
+--- a/packages/llm/llm-pi-ai/src/stream.ts
++++ b/packages/llm/llm-pi-ai/src/stream.ts
+@@ -10,7 +10,7 @@
+ 
+ import { brandString } from '@deepseek-ai/dsh-brand'
+ import { CONTEXT_WINDOW_EXCEEDED_CODE, diagnosticFromProviderError, EMPTY_RESPONSE_CODE, isContextWindowExceededError, isQuotaExceededError, LlmError, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+-import type { FinishReason, StreamChunk, TokenUsage, ToolCallId } from '@deepseek-ai/dsh-llm'
++import type { FinishReason, LlmFailureDiagnostic, StreamChunk, TokenUsage, ToolCallId } from '@deepseek-ai/dsh-llm'
+ import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow'
+ import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
+ import { toPiReplayState } from './replay.ts'
+@@ -71,6 +71,12 @@ function classifyPiAiError(message: string): string {
+   return 'PI_AI_ERROR'
+ }
+ 
++/** 仅已验证的模型传输两类诊断覆盖泛化文字分类；不改变副作用或重试许可。 */
++function modelDiagnosticCode(fallback: string, diagnostic: LlmFailureDiagnostic | undefined): string {
++  return diagnostic?.domain === 'model' && (diagnostic.code === 'TIMEOUT' || diagnostic.code === 'TRANSPORT')
++    ? diagnostic.code : fallback
++}
++
+ /**
+  * Map a terminal pi-ai event to the harness finish reason.
+  * @param message - the assistant message carried by the `done` or `error` event.
+@@ -129,7 +135,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
+       const parsed = diagnosticFromProviderError(text)
+       if (parsed.invalid) return { kind: 'error', failure: { code: 'CENTRAL_DIAGNOSTIC_INVALID', message: '中央模型诊断无效；原请求结果待核，不重新提交。', diagnostic: { version: 1, domain: 'model', code: 'CENTRAL_DIAGNOSTIC_INVALID', stage: 'diagnostic_decode', fieldPath: null, retryable: false, effect: 'unknown', requestId: null } } }
+       return { kind: 'error', failure: { message: parsed.diagnostic ? '模型请求未完成；请根据公开阶段和原请求身份先核实结果。' : text,
+-        code: classifyPiAiError(text), ...parsed.diagnostic ? { diagnostic: parsed.diagnostic } : {} } }
++        code: modelDiagnosticCode(classifyPiAiError(text), parsed.diagnostic), ...parsed.diagnostic ? { diagnostic: parsed.diagnostic } : {} } }
+     }
+   }
+ }
+@@ -237,7 +243,8 @@ export async function* toStreamChunks(
+             code: 'CENTRAL_DIAGNOSTIC_INVALID', stage: 'diagnostic_decode', fieldPath: null, retryable: false,
+             effect: 'unknown' as const, requestId: null } : wire.diagnostic
+           if (diagnostic) reason = { ...originalReason, failure: { ...originalReason.failure,
+-            code: wire.invalid && originalReason.kind !== 'aborted' ? 'CENTRAL_DIAGNOSTIC_INVALID' : originalReason.failure.code,
++            code: originalReason.kind === 'aborted' ? originalReason.failure.code : wire.invalid ? 'CENTRAL_DIAGNOSTIC_INVALID'
++              : modelDiagnosticCode(originalReason.failure.code, diagnostic),
+             message: '模型请求未完成；请根据公开阶段和原请求身份先核实结果。', diagnostic } }
+         }
+         yield {
+diff --git a/packages/llm/llm-pi-ai/tests/adapter.spec.ts b/packages/llm/llm-pi-ai/tests/adapter.spec.ts
+index ba7bac9085598d939fab4bebda38487876fdd984..dd72ed354a4702f8c08522302f077c2b4ecc024b 100644
+--- a/packages/llm/llm-pi-ai/tests/adapter.spec.ts
++++ b/packages/llm/llm-pi-ai/tests/adapter.spec.ts
+@@ -1050,3 +1050,22 @@ it.each([
+   })
+   expect(await adapter.listModels('deepseek')).not.toHaveLength(0)
+ })
++
++
++describe('real HTTP/SSE central diagnostic routing', () => {
++  it.each(['TIMEOUT', 'TRANSPORT'])('retains validated model %s at the top-level failure through the real pi-ai parser', async code => {
++    const diagnostic = { version: 1, domain: 'model', code, stage: 'upstream_headers', fieldPath: null,
++      retryable: false, effect: 'reserved', requestId: 'fixture-headers-code' }
++    const server = await mockServer([{ events: [JSON.stringify({ error: { type: 'upstream_error', code,
++      message: 'Model attempt failed; the original request can continue once.', diagnostic } })] }])
++    const ctx = new Context()
++    try {
++      await ctx.plugin(LlmRuntime)
++      ctx.llm.registerAdapter(['central'], adapterOf({ central: { api: 'openai-completions', baseURL: server.url,
++        models: [{ id: 'fixture-model' }] } }))
++      const result = await assemble(ctx, { provider: 'central', model: 'fixture-model', messages: [] })
++      expect(result.finish).toMatchObject({ kind: 'error', failure: { code, diagnostic } })
++      expect(server.requests).toHaveLength(1)
++    } finally { await ctx.fiber.dispose() }
++  })
++})
+diff --git a/packages/llm/llm-pi-ai/tests/convert.spec.ts b/packages/llm/llm-pi-ai/tests/convert.spec.ts
+index c3b96495378c68bb3331d1be80cefdbca1da8521..032a9754cf4b2b8047727e6255cdadd166e62de7 100644
+--- a/packages/llm/llm-pi-ai/tests/convert.spec.ts
++++ b/packages/llm/llm-pi-ai/tests/convert.spec.ts
+@@ -1,7 +1,7 @@
+ import { describe, expect, it, vi } from 'vitest'
+ import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
+ import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+-import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage } from '@deepseek-ai/dsh-llm'
++import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage, parseLlmFailureDiagnostic } from '@deepseek-ai/dsh-llm'
+ import type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
+ import type { AssistantMessage, AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
+ import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages'
+@@ -1025,3 +1025,53 @@ describe('toStreamChunks defensive branches', () => {
+     expect(chunks[0]).toEqual({ type: 'tool-call-delta', index: 0, id: '', argumentsDelta: '{}' })
+   })
+ })
++
++
++describe('validated model wire diagnostic routing code', () => {
++  function diagnostic(domain: 'model' | 'search', code: string, effect: 'reserved' | 'unknown' = 'reserved') {
++    const value = parseLlmFailureDiagnostic({ version: 1, domain, code, stage: 'upstream_headers',
++      fieldPath: null, retryable: false, effect, requestId: 'fixture-typed-code' })
++    if (!value) throw new Error('fixture strict diagnostic invalid')
++    return value
++  }
++  const error = () => assistant({ stopReason: 'error', errorMessage: 'Model attempt failed; the original request can continue once.' })
++
++  it.each([['TIMEOUT', 'reserved'], ['TRANSPORT', 'reserved'], ['TIMEOUT', 'unknown']] as const)('routes valid model %s with %s effect instead of losing it to generic pi-ai wording', async (code, effect) => {
++    const d = diagnostic('model', code, effect)
++    const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error: error() }), undefined, undefined, undefined,
++      () => ({ invalid: false, diagnostic: d })))
++    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code, diagnostic: d } } })
++  })
++
++  it('keeps caller ABORTED above a valid model TIMEOUT wire diagnostic', async () => {
++    const abort = new AbortController(); abort.abort('user')
++    const d = diagnostic('model', 'TIMEOUT')
++    const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error: error() }), undefined, abort.signal, undefined,
++      () => ({ invalid: false, diagnostic: d })))
++    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', diagnostic: d } } })
++  })
++
++  it('keeps invalid diagnostic blocking above a stale valid TIMEOUT and preserves unknown effect', async () => {
++    const d = diagnostic('model', 'TIMEOUT')
++    const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error: error() }), undefined, undefined, undefined,
++      () => ({ invalid: true, diagnostic: d })))
++    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
++      code: 'CENTRAL_DIAGNOSTIC_INVALID', diagnostic: { code: 'CENTRAL_DIAGNOSTIC_INVALID', retryable: false, effect: 'unknown' },
++    } } })
++  })
++
++  it.each([['search', 'TIMEOUT'], ['model', 'AUTH']] as const)('does not upgrade %s diagnostic code %s into a model transport retry code', async (domain, code) => {
++    const d = diagnostic(domain, code, 'unknown')
++    const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error: error() }), undefined, undefined, undefined,
++      () => ({ invalid: false, diagnostic: d })))
++    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'PI_AI_ERROR', diagnostic: d } } })
++  })
++  it('also uses strict model TRANSPORT when pi-ai carries the parsed error as JSON text', () => {
++    const d = diagnostic('model', 'TRANSPORT', 'unknown')
++    const reason = mapStopReason(assistant({ stopReason: 'error', errorMessage: JSON.stringify({ error: {
++      message: 'Model attempt ended.', diagnostic: d,
++    } }) }))
++    expect(reason).toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT', diagnostic: d } })
++  })
++
++})
 diff --git a/packages/llm/llm-retry/src/index.ts b/packages/llm/llm-retry/src/index.ts
 index 87140d0167b0235b926bae96c04f882a6b5d7470..6e99f2b8fb3cf1d0c392c16c3f191fb04ce725c0 100644
 --- a/packages/llm/llm-retry/src/index.ts

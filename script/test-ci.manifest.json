@@ -1277,6 +1277,13 @@
       "reason": "本地集成（CCMM-09 按真实副作用复核）：产品 matchPolicy/execution 通路 + 仓内派生件 + node 协议同构桩（不 mock 产品函数）。不加载权重、不联网。"
     },
     {
+      "path": "packages/policy-registry/test/wtw-execution-order.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原WTW deploy reset/step历史契约的离线纯函数回归；不加载模型、物理SDK、网络或账户。"
+    },
+    {
       "path": "packages/policy-registry/test/wtw-identity-dispatch.test.ts",
       "declaredRunner": "bun:test",
       "markers": [
