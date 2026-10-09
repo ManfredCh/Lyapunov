@@ -122,6 +122,13 @@ export function sandboxRuntimeViolations(stage: string): string[] {
 
 /** 项目许可、原文件、内联消费方worker和运行产物都须进入同一个发行根。 */
 export const PRODUCT_RUNTIME_FILES = [
+  '.runtime/computer-use-linux/bin/computer-use-linux',
+  '.runtime/computer-use-linux/bin/computer-use-linux-cosmic',
+  '.runtime/computer-use-linux/bin/computer-use-linux-indicator',
+  '.runtime/computer-use-linux/LICENSE',
+  '.runtime/computer-use-linux/provenance.json',
+  '.runtime/computer-use-linux/official/computer-use-linux',
+  '.runtime/computer-use-linux/atspi-bus.patch',
   'LICENSE',
   'NOTICE',
   'runtime/electron/chrome-sandbox',

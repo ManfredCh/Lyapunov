@@ -13,6 +13,60 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const python=process.env.LYAPUNOV_MUJOCO_PYTHON??resolve(root,".runtime/sim-python/bin/python")
 const suite=existsSync(python)?describe:describe.skip
 suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
+ test('自动原面原生bit隔离只去静态对，保动态/祖先DOF/mocap/flex与作者mask；无空位不变',()=>{
+  const script=`import sys,numpy as np,mujoco as mj
+sys.path.insert(0,sys.argv[1])
+from static_triangle_surface import configure_derived_static_masks,configure_static_surface_islands,body_is_static,flex_is_static
+s=mj.MjSpec()
+b=s.worldbody.add_body(name='surface/body')
+b.add_geom(name='surface/box',type=mj.mjtGeom.mjGEOM_BOX,size=[.2,.2,.04],pos=[.7,0,-.04])
+for name in ('one','two'):
+ s.add_flex(name='surface/'+name,dim=2,radius=1e-9,vertbody=[b.name],vert=[-1,-1,0,1,-1,0,0,1,0],elem=[0,1,2],internal=False,selfcollide=0)
+a=s.worldbody.add_body(name='moving',pos=[0,0,.02]);a.add_freejoint()
+a.add_geom(name='moving/geom',type=mj.mjtGeom.mjGEOM_SPHERE,size=[.04,0,0],mass=1,contype=1,conaffinity=0)
+child=a.add_body(name='child');child.add_geom(name='child/geom',type=mj.mjtGeom.mjGEOM_SPHERE,size=[.02,0,0],pos=[4,4,0],mass=1)
+m=s.worldbody.add_body(name='mocap',pos=[.3,0,.02],mocap=True);m.add_geom(name='mocap/geom',type=mj.mjtGeom.mjGEOM_SPHERE,size=[.04,0,0])
+s.add_flex(name='moving/triangle',dim=2,radius=1e-9,vertbody=[a.name],vert=[-.1,.4,0,.1,.4,0,0,.5,0],elem=[0,1,2],internal=False,selfcollide=0)
+other=s.worldbody.add_body(name='author',pos=[4,0,0]);other.add_freejoint();other.add_geom(name='author/geom',type=mj.mjtGeom.mjGEOM_SPHERE,size=[.04,0,0],mass=1,contype=4,conaffinity=4)
+vertex_bodies=[]
+for i,xy in enumerate(((0,4),(.1,4),(0,4.1))):
+ v=s.worldbody.add_body(name='deform-vertex-'+str(i),pos=[*xy,.2]);v.add_freejoint()
+ v.add_geom(type=mj.mjtGeom.mjGEOM_SPHERE,size=[.01,0,0],mass=.1,contype=0,conaffinity=0);vertex_bodies.append(v.name)
+s.add_flex(name='deforming/triangle',dim=2,radius=1e-9,vertbody=vertex_bodies,vert=[0,0,0]*3,elem=[0,1,2],internal=False,selfcollide=0)
+
+model=s.compile()
+assert not body_is_static(model,model.body('child').id)and not body_is_static(model,model.body('mocap').id)
+assert not flex_is_static(model,mj.mj_name2id(model,mj.mjtObj.mjOBJ_FLEX,'moving/triangle'))
+deforming=mj.mj_name2id(model,mj.mjtObj.mjOBJ_FLEX,'deforming/triangle');assert not model.flex_rigid[deforming] and not flex_is_static(model,deforming)
+old_t=np.r_[model.geom_contype,model.flex_contype].copy();old_a=np.r_[model.geom_conaffinity,model.flex_conaffinity].copy()
+moving=[not body_is_static(model,int(b))for b in model.geom_bodyid]+[not flex_is_static(model,f)for f in range(model.nflex)]
+result=configure_derived_static_masks(model,['surface/']);assert result and result['staticGeoms']==1 and result['staticFlexes']==2
+new_t=np.r_[model.geom_contype,model.flex_contype];new_a=np.r_[model.geom_conaffinity,model.flex_conaffinity]
+for i in range(len(old_t)):
+ for j in range(i+1,len(old_t)):
+  if moving[i]or moving[j]:
+   assert bool((int(old_t[i])&int(old_a[j]))|(int(old_t[j])&int(old_a[i])))==bool((int(new_t[i])&int(new_a[j]))|(int(new_t[j])&int(new_a[i])))
+author=model.geom('author/geom').id;assert model.geom_contype[author]==4 and model.geom_conaffinity[author]==4
+assert model.flex_contype[deforming]==1 and model.flex_conaffinity[deforming]&result['reservedBit']
+assert model.geom_contype[model.geom('moving/geom').id]==1
+assert model.geom_conaffinity[model.geom('moving/geom').id]==result['reservedBit']
+assert not ((int(model.flex_contype[0])&int(model.flex_conaffinity[1]))|(int(model.flex_contype[1])&int(model.flex_conaffinity[0])))
+assert model.body_conaffinity[model.body('moving').id]&result['reservedBit']
+configure_static_surface_islands(model,['surface/'],[],lambda code,message:ValueError(message))
+data=mj.MjData(model);mj.mj_forward(model,data)
+expected=mj.mj_name2id(model,mj.mjtObj.mjOBJ_FLEX,'surface/one')
+assert any(expected in tuple(c.flex)and model.geom('moving/geom').id in tuple(c.geom)for c in data.contact[:data.ncon])
+assert any(expected in tuple(c.flex)and model.geom('mocap/geom').id in tuple(c.geom)for c in data.contact[:data.ncon])
+# 原件用尽31个可用位时不改任何mask，也不强行改作者通道。
+model=s.compile();model.geom_contype[author]=(1<<31)-1
+before=(model.geom_contype.copy(),model.geom_conaffinity.copy(),model.flex_contype.copy(),model.flex_conaffinity.copy())
+assert configure_derived_static_masks(model,['surface/'])is None
+for a,b in zip(before,(model.geom_contype,model.geom_conaffinity,model.flex_contype,model.flex_conaffinity)):assert np.array_equal(a,b)
+print('原生bit静态对过滤、动态接触、作者mask与无空位保留通过')`
+  const result=spawnSync(python,['-c',script,resolve(root,'packages/sim-mujoco/python')],{encoding:'utf8',timeout:15000})
+  assert.equal(result.status,0,result.stderr);assert.ok(result.stdout.includes('无空位保留通过'))
+ })
+
  test('无静态geom时两个不同实体rigid-flex同样兼容，mask互斥及单件不暗启；信息不冒缺碰撞',async()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'flex-pair-')),file=resolve(directory,'triangle.obj')
   writeFileSync(file,'v -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n')
@@ -22,7 +76,7 @@ suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
   let scene:SceneSnapshot={sceneId:'static-flex-pair',revision:1,coordinates:SCENE_COORDINATES,entities:[surface('one'),surface('two'),actor]}
   try{
    let handle=await provider.open(scene,{clock:'manual',startPaused:true,ground:false}),frame=await provider.observe(handle.worldId,{contacts:true})
-   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
+   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_PAIR_FILTER'))
    assert.ok(!handle.warnings?.some(w=>w.code==='ENTITY_SKIPPED_NO_COLLISION'))
    assert.equal(frame.worldPhysics!.collisionCoverage.status,'COMPLETE');assert.deepEqual(frame.worldPhysics!.collisionCoverage.physicalEntityIds,['actor','one','two']);assert.equal(frame.contacts!.length,0)
    await provider.close(handle.worldId)
@@ -31,7 +85,7 @@ suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
    handle=await provider.open({...scene,sceneId:'single-static-flex',entities:[surface('one'),actor]},{clock:'manual',ground:false});assert.ok(!handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'));await provider.close(handle.worldId)
   }finally{await provider.dispose();rmSync(directory,{recursive:true,force:true})}
  })
- test('Scene静态原三角zero-DOF兼容不改原件mask，保动态重力接触/停用且拒明确island启用',async()=>{
+ test('Scene自动静态原面只过滤静态对，保动态接触/停用；显式mask仍保island选择',async()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'static-island-')),file=resolve(directory,'triangle.obj')
   writeFileSync(file,'v -1 -1 -0.01\nv 1 -1 -0.01\nv 0 1 -0.01\nf 1 2 3\n')
   const provider=new MuJoCoProvider({pythonPath:python,workerPath:resolve(root,'packages/sim-mujoco/python/worker.py')})
@@ -40,10 +94,12 @@ suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
   const scene:SceneSnapshot={sceneId:'static-compat',revision:1,coordinates:SCENE_COORDINATES,entities:[surface,native()]}
   try{
    let handle=await provider.open(scene,{clock:'realtime',startPaused:true,ground:false,timestepS:.001})
-   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
+   assert.ok(handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_PAIR_FILTER'))
    let frame=await provider.observe(handle.worldId,{contacts:true,collisionTopology:{entityIds:['native'],includeGeometry:true}})
    assert.equal(frame.contacts!.length,0) // 实际zero-DOF静态重叠不是互动成功
-   assert.ok(frame.collisionTopology!.geoms.filter(g=>g.entityId==='native').every(g=>g.collisionMask?.contype===1&&g.collisionMask?.conaffinity===1))
+   const bit=(handle.warnings!.find(w=>w.code==='STATIC_TRIANGLE_PAIR_FILTER') as unknown as {reservedBit:number}).reservedBit;
+   assert.ok(frame.collisionTopology!.geoms.filter(g=>g.entityId==='native').every(g=>g.collisionMask?.contype===1&&(g.collisionMask!.conaffinity&~bit)===1))
+   assert.ok(frame.collisionTopology!.geoms.filter(g=>g.name.includes('original-plane')).every(g=>g.collisionMask?.conaffinity===1))
    await provider.setPaused(handle.worldId,false,handle.worldGeneration)
    const end=Date.now()+4000
    do{await new Promise(resolve=>setTimeout(resolve,100));frame=await provider.observe(handle.worldId,{contacts:true})}while(Date.now()<end&&!frame.contacts!.some(c=>c.geom1.includes('original-sphere')||c.geom2.includes('original-sphere')))
@@ -54,8 +110,9 @@ suite("真实 NDJSON worker 碰撞观察只读合同",()=>{
    assert.ok(!handle.warnings?.some(w=>w.code==='STATIC_TRIANGLE_ISLAND_COMPAT'))
    await provider.setPaused(handle.worldId,false,handle.worldGeneration);await new Promise(resolve=>setTimeout(resolve,500));frame=await provider.observe(handle.worldId,{contacts:true})
    assert.equal(frame.contacts!.length,0);await provider.close(handle.worldId)
+   const customSurface={...surface,components:{...surface.components,collision:{...surface.components.collision,contype:1,conaffinity:1}}};
    const explicit={...native(),components:{mujoco:{xml:'<mujoco><option><flag island="enable"/></option><worldbody><geom type="plane" size="0 0 .1"/></worldbody></mujoco>'}}}
-   await assert.rejects(provider.open({...scene,sceneId:'explicit-island',entities:[surface,explicit]},{clock:'manual',ground:false}),/明确启island/)
+   await assert.rejects(provider.open({...scene,sceneId:'explicit-island',entities:[customSurface,explicit]},{clock:'manual',ground:false}),/明确启island/)
   }finally{await provider.dispose();rmSync(directory,{recursive:true,force:true})}
  })
  test('静态原三角内部编号确定性重载、逐面位坐标及绕序不变，空/单顶点和小面也保真',()=>{

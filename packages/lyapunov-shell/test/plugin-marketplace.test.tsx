@@ -1,9 +1,9 @@
 import {describe,expect,test} from 'bun:test'
 import React from 'react'
 import {createRequire} from 'node:module'
-import {spawnSync} from 'node:child_process'
+import {spawnSync,spawn} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
-import {mkdtemp,mkdir,readFile,writeFile,chmod,rm} from 'node:fs/promises'
+import {mkdtemp,mkdir,readFile,writeFile,chmod,rm,symlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,dirname} from 'node:path'
 import {integrationAssociations,classifyMcpIntegration,marketplaceEntries,filterMarketplace} from '../src/plugin-marketplace.ts'
@@ -111,7 +111,7 @@ describe('插件市场原生读数的薄投影',()=>{
   const rows:any[]=[];const ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context
   applyExternalToolsSettings(ctx)
   expect(rows[0]).toEqual({inject:'settings.plugins.tab'})
-  expect(rows[1]).toMatchObject({name:'settings.plugins.tab',id:'lyapunov-integrations',order:0})
+  expect(rows[1]).toMatchObject({name:'settings.plugins.tab',id:'lyapunov-integrations',order:20})
  })
 })
 
@@ -148,5 +148,62 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
   await change(port,'9876');await act(async()=>button('Reuse and connect').click())
   expect(calls.filter(v=>v.method==='POST')).toHaveLength(2)
   expect(JSON.parse(calls.filter(v=>v.method==='POST')[1].body)).toMatchObject({serverName:'blender',transport:'stdio',command:'/product/bin/mcp-for-blender',blenderPort:9876,expectedRevision:null})
+  current={...current,mcp:[mcp('unity',{integration:'unity',command:'mcp-for-unity',unityStatusDirectory:'/public/unity-registry',unityDisableUpdateCheck:true})],associations:integrationAssociations([mcp('unity',{integration:'unity'})])}
+  await act(async()=>button('Inspect existing / refresh').click())
+  await act(async()=>button('MCP plugins').click())
+  const unityCard=document.querySelector('[data-tool-id="unity-mcp"]')!;await act(async()=>{[...unityCard.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Connect / configure MCP')!.click()})
+  const directory=[...document.querySelectorAll('label')].find(row=>row.textContent?.startsWith('Unity addon registry directory (absolute path)'))!.querySelector('input')!
+  expect(directory.value).toBe('');expect(directory.placeholder).toBe('/public/unity-registry')
+  await change(directory,'/public/selected-unity-registry');await act(async()=>{[...document.querySelectorAll('label')].find(row=>row.textContent?.includes('Disable additional update checks at startup'))!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click()})
+  await act(async()=>button('Save and connect').click())
+  const savedUnity=JSON.parse(calls.filter(v=>v.method==='POST').at(-1).body);expect(savedUnity).toMatchObject({serverName:'unity',transport:'stdio',unityStatusDirectory:'/public/selected-unity-registry',unityDisableUpdateCheck:false,expectedRevision:123});expect(savedUnity).not.toHaveProperty('env');expect(savedUnity).not.toHaveProperty('headers')
+  await act(async()=>{root.render(<ExternalToolsSettings tr={zh=>zh} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{}}/>);await new Promise(r=>setTimeout(r,0))})
+  await act(async()=>button('软件下载与安装').click())
+  expect(document.body.textContent).toContain('软件下载与安装');expect(document.body.textContent).toContain('Unity addon 登记目录（绝对路径）');expect(document.body.textContent).toContain('关闭启动时的额外更新检查')
+  const transport=[...document.querySelectorAll('select')].find(row=>row.value==='stdio')!;await change(transport,'streamable-http');expect(document.body.textContent).not.toContain('Unity addon 登记目录（绝对路径）')
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name)}}
+})
+
+
+// 原SDK外壳和原inventory组件参加交互，不由产品重写官方列表。
+test('原插件列表仍默认且可打开集成；软件下载不藏details，正常按钮提交原acquire而非模型会话',async()=>{
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<!DOCTYPE html><div id="root"></div>',{url:'http://fixture.invalid'}),saved=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
+ // SDK与产品独立安装React；以既有Bun编译原组件并固定本测试同一React，不改SDK/共享依赖。
+ const nativeDir=await mkdtemp(join(tmpdir(),'native-plugin-settings-ui-')),productRoot=fileURLToPath(new URL('../../../',import.meta.url)),sdkRoot=fileURLToPath(new URL('../../../.upstream/deepseek-harness-20260911-candidate/',import.meta.url))
+ await writeFile(join(nativeDir,'entry.ts'),`export {PluginsSettingsSection} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugins/src/client/PluginsSettingsSection.tsx'))};\nexport {PluginInventorySettingsTab} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx'))};\n`)
+ await symlink(join(productRoot,'node_modules'),join(nativeDir,'node_modules'),'dir')
+ const built=await Bun.build({entrypoints:[join(nativeDir,'entry.ts')],target:'bun',format:'esm',plugins:[{name:'test-single-react',setup(builder){builder.onResolve({filter:/^react(?:\/.*)?$/},args=>({path:Bun.resolveSync(args.path,productRoot),external:true}))}}]})
+ if(!built.success)throw new AggregateError(built.logs,'原SDK插件设置组件测试编译失败')
+ const javascript=built.outputs.find(row=>row.path.endsWith('.js'))!;await writeFile(join(nativeDir,'native-ui.mjs'),await javascript.text())
+ const {PluginsSettingsSection,PluginInventorySettingsTab}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
+ const entries:any[]=[{id:'all',order:10,label:'Plugin list'}],ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(_name:string,fn:()=>unknown)=>fn(),register:(entry:any)=>{entries.push({...entry,label:entry.label()});return()=>{}}}} as unknown as Context
+ applyExternalToolsSettings(ctx);const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0
+ const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{applyExternalToolsHost}=await import('../src/external-tools-host.ts'),hostCtx=new Context(),routes=new Map<string,(r:Request)=>Promise<Response>>()
+ hostCtx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await hostCtx.plugin((await import('@deepseek-ai/dsh-tools')).default)
+ await hostCtx.plugin(NativeJobs);const removeController=hostCtx.jobs.attachController('plugin-download-ui-fixture');const waitForJob=async(count:number)=>{for(let i=0;i<300&&hostCtx.jobs.list().length<count;i++)await new Promise(r=>setTimeout(r,10));if(hostCtx.jobs.list().length<count)throw Error('Native acquisition Job was not created')}
+ hostCtx.provide('connection',{fetch:{register:(entry:{path:string;fetch:(r:Request)=>Promise<Response>})=>{routes.set(entry.path,entry.fetch);return()=>routes.delete(entry.path)}}} as never)
+ // 系统URL opener替身实际启动本测试自有短进程，不打开浏览器；registered路由和原native Jobs是真实现。
+ hostCtx.provide('subprocess',{resolveExecutable:async()=>process.execPath,spawn:(spec:any)=>{
+  const child=spawn(process.execPath,['--no-env-file','-e',`console.log('Fixture official page request accepted');setTimeout(()=>process.exit(${openerExit}),${openerExit===0?1800:0})`],{stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',chunk=>{stdout+=chunk});child.stderr.on('data',chunk=>{stderr+=chunk});spec.signal.addEventListener('abort',()=>child.kill('SIGTERM'),{once:true})
+  return {done:new Promise(resolve=>child.once('exit',(exitCode,signal)=>resolve({exitCode,signal}))),collected:{stdout:{readFrom:(offset:number)=>({text:stdout.slice(offset),nextOffset:stdout.length})},stderr:{readFrom:(offset:number)=>({text:stderr.slice(offset),nextOffset:stderr.length})}}}
+ }} as never)
+ applyExternalToolsHost(hostCtx)
+ globalThis.fetch=(async(input:any,init?:RequestInit)=>{const path=String(input),body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({path,body});if(path.includes('/state'))return Response.json({...state(),installJobs:hostCtx.jobs.list().map(row=>({jobId:String(row.id),registryId:row.registryId??null,status:row.status,label:row.label,progress:row.progress??null,detail:row.detail??null}))});const handler=routes.get(path.split('?')[0]!);if(!handler)throw Error('REGISTERED_ROUTE_MISSING');return await handler(new Request('http://fixture.invalid'+path,init))}) as typeof fetch
+ const {createRoot}=await import('react-dom/client'),root=createRoot(document.getElementById('root')!),{act}=React
+ const native=()=>React.createElement(PluginInventorySettingsTab,{t:(key:string)=>inventoryEn[key as keyof typeof inventoryEn]??key,list:async()=>({entries:[{entryId:'native-fixture',moduleName:'@fixture/native-existing',enabled:true,fiberPhase:'active',meta:{title:{en:'Native existing plugin',zh:'原有原生插件'}}}],agentPresets:[]}),presetName:(row:any)=>row.name??row.id,resolveText:(text:any)=>typeof text==='string'?text:text.en,useClientSync:(select:any)=>select({syncing:false,failures:[]}),retryClient:()=>{}} as any)
+ try{
+  await act(async()=>{root.render(React.createElement(PluginsSettingsSection,{t:(key:string)=>sectionEn[key as keyof typeof sectionEn]??key,useTabs:(select:any)=>select(rows),renderSlot:(_name:string,_owner:unknown,options:{only:string})=>options.only==='all'?native():<ExternalToolsSettings tr={(_zh,en)=>en} start={async()=>{modelCalls++;throw Error('Unexpected model call')}} close={()=>{}} sessionId={()=>undefined} openDocument={async()=>{}}/>} as any));await new Promise(r=>setTimeout(r,0))})
+  const tabs=[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];expect(tabs.find(row=>row.textContent==='Plugin list')?.getAttribute('aria-selected')).toBe('true')
+  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click()})
+  expect(document.body.textContent).toContain('Native existing plugin')
+  await act(async()=>{tabs.find(row=>row.textContent!=='Plugin list')!.click();await new Promise(r=>setTimeout(r,0))})
+  const software=document.querySelector<HTMLElement>('[aria-label="Software downloads and installation"]');expect(software).not.toBeNull();expect(software!.closest('details:not([open])')).toBeNull();expect(software!.textContent).toContain('Blender');expect(software!.textContent).toContain('Unity');expect(software!.textContent).toContain('SAM 3D Objects');expect(software!.textContent).toContain('FastGS')
+  const blender=software!.querySelector<HTMLElement>('[data-tool-id="blender"]')!;expect(blender).not.toBeNull()
+  await act(async()=>{[...blender.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(1)})
+  expect(calls.find(row=>row.path.endsWith('/acquire'))?.body).toMatchObject({id:'blender'});expect(modelCalls).toBe(0);const job=hostCtx.jobs.list()[0]!,stateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{await hostCtx.jobs.wait(job.id,3000)});expect(calls.some(row=>row.path.includes('/job?'))).toBe(true);expect(calls.filter(row=>row.path.includes('/state'))).toHaveLength(stateReads);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain(String(job.id));expect(document.body.textContent).toContain('not installed automatically')
+  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Read actual output')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Fixture official page request accepted')
+  openerExit=17;const unity=software!.querySelector<HTMLElement>('[data-tool-id="unity"]')!;await act(async()=>{[...unity.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(2)});const failed=hostCtx.jobs.list().find(row=>row.id!==job.id)!;await hostCtx.jobs.wait(failed.id,3000);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Official download page could not be opened (exit 17)');expect(document.body.textContent).not.toContain('官方下载页面未能打开');expect(modelCalls).toBe(0)
+  await act(async()=>{tabs.find(row=>row.textContent==='Plugin list')!.click()});expect(document.body.textContent).toContain('Native existing plugin');expect(tabs.find(row=>row.textContent==='Plugin list')?.getAttribute('aria-selected')).toBe('true')
+ }finally{await act(async()=>root.unmount());removeController();await hostCtx.fiber.dispose();dom.window.close();await rm(nativeDir,{recursive:true,force:true});for(const[key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
 })

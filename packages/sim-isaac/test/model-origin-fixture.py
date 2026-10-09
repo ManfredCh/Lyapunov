@@ -105,4 +105,62 @@ missing=UsdGeom.Xform.Define(stage,'/World/deferred/articulation/missing');UsdPh
 try:authoring.capture_model_origin(stage,entry,model,native_worlds=source_snapshot['worldByPath']);raise AssertionError('uncaptured native root accepted')
 except SceneError as error:assert error.code=='ENTITY_ORIGIN_UNVERIFIED'
 rows.append({'case':'uncaptured-native-root-rejected','errorCode':'ENTITY_ORIGIN_UNVERIFIED'})
+# 实际 MuJoCo 编译与只读 FK 消费 home 及显式初值；不启动物理积分。
+import ast,tempfile
+sys.modules['robot_authoring']=authoring
+adapter_tree=ast.parse((source/'python/scene_adapter.py').read_text())
+names={'mjcf_metadata','_scalar_joint_types','enum_name','object_name'}
+metadata_nodes=[n for n in adapter_tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
+assert {n.name for n in metadata_nodes}==names
+metadata_ns={};exec(compile(ast.Module(body=metadata_nodes,type_ignores=[]),str(source/'python/scene_adapter.py'),'exec'),metadata_ns)
+with tempfile.TemporaryDirectory() as directory:
+    model_path=Path(directory)/'source.xml'
+    model_path.write_text('<mujoco><worldbody><body name="base"><geom size=".04" mass="1"/><body name="elbow"><joint name="hinge" axis="0 0 1"/><geom size=".04" mass="1"/><body name="tip" pos="1 0 0"><geom size=".04" mass="1"/></body></body></body></worldbody><keyframe><key name="home" qpos=".7"/></keyframe></mujoco>')
+    declared=model_path.read_bytes();metadata=metadata_ns['mjcf_metadata'](str(model_path),{'initialJointPositions':{'hinge':-.2}})
+    np.testing.assert_allclose(metadata['initialBodyPoses']['tip']['positionM'],[np.cos(-.2),np.sin(-.2),0],atol=1e-12)
+    assert metadata['joints']['hinge']['home']==-.2 and model_path.read_bytes()==declared
+rows.append({'case':'actual-source-home-FK','explicitHomeRad':-.2,'sourceBytesPreserved':True,'physicsSteps':0})
+
+# 跨机构安装用源 home 的 FK，不使用零关节 USD 链；当前根安装变换仍来自真实 stage。
+stage=Usd.Stage.CreateInMemory();model=matrix([1.2,-.4,.8],[0,0,1],31)
+container=UsdGeom.Xform.Define(stage,'/World/parent');container.AddTransformOp().Set(model)
+base=UsdGeom.Xform.Define(stage,'/World/parent/base');UsdPhysics.RigidBodyAPI.Apply(base.GetPrim())
+hand=UsdGeom.Xform.Define(stage,'/World/parent/hand');hand.AddTranslateOp().Set(Gf.Vec3d(1,0,0));UsdPhysics.RigidBodyAPI.Apply(hand.GetPrim())
+entry={'path':'/World/parent','metadata':{'bodies':{'base':{'parent':None},'hand':{'parent':'base'}},'rootBodies':[{'bodyName':'base'}],
+    'initialBodyPoses':{'base':{'positionM':[0,0,0],'quaternionXyzw':[0,0,0,1]},'hand':{'positionM':[0,1,0],'quaternionXyzw':[0,0,np.sqrt(.5),np.sqrt(.5)]}}}}
+actual=authoring.initialized_parent_body_world(stage,entry,hand.GetPrim(),'hand',SceneError)
+expected=matrix([0,1,0],[0,0,1],90)*model
+np.testing.assert_allclose(np.asarray(actual),np.asarray(expected),atol=1e-12)
+assert not np.allclose(np.asarray(actual),np.asarray(UsdGeom.XformCache().GetLocalToWorldTransform(hand.GetPrim())))
+rows.append({'case':'parent-source-home-FK','usesSourceHomeInsteadOfUsdZero':True,'actualWorldPositionM':state(actual)[0]})
+
+# 只替代 SDK 的 JointState schema 接口，USD/Gf 与 Drive API 仍是真库；不签 PhysX 动作。
+import pxr
+class StateApi:
+    def __init__(self,prim,axis):self.prim=prim;self.axis=axis
+    @classmethod
+    def Apply(cls,prim,axis):return cls(prim,axis)
+    def CreatePositionAttr(self):return self.prim.CreateAttribute('state:'+self.axis+':physics:position',__import__('pxr.Sdf',fromlist=['ValueTypeNames']).ValueTypeNames.Double)
+    def CreateVelocityAttr(self):return self.prim.CreateAttribute('state:'+self.axis+':physics:velocity',__import__('pxr.Sdf',fromlist=['ValueTypeNames']).ValueTypeNames.Double)
+pxr.PhysxSchema=types.SimpleNamespace(JointStateAPI=StateApi)
+stage=Usd.Stage.CreateInMemory();UsdGeom.Xform.Define(stage,'/World/arm')
+r=UsdPhysics.RevoluteJoint.Define(stage,'/World/arm/elbow');p=UsdPhysics.PrismaticJoint.Define(stage,'/World/arm/finger')
+dr=UsdPhysics.DriveAPI.Apply(r.GetPrim(),UsdPhysics.Tokens.angular);dr.CreateStiffnessAttr().Set(42);dr.CreateDampingAttr().Set(5)
+dp=UsdPhysics.DriveAPI.Apply(p.GetPrim(),UsdPhysics.Tokens.linear);dp.CreateStiffnessAttr().Set(12)
+entry={'path':'/World/arm','metadata':{'joints':{'elbow':{'type':'hinge','home':.6},'finger':{'type':'slide','home':.025}}}}
+authoring.author_source_joint_initial_state(stage,entry,SceneError)
+np.testing.assert_allclose(r.GetPrim().GetAttribute('state:angular:physics:position').Get(),np.degrees(.6),atol=1e-12)
+np.testing.assert_allclose(p.GetPrim().GetAttribute('state:linear:physics:position').Get(),.025,atol=1e-12)
+np.testing.assert_allclose(dr.GetTargetPositionAttr().Get(),np.degrees(.6),atol=1e-5)
+assert dr.GetStiffnessAttr().Get()==42 and dr.GetDampingAttr().Get()==5 and dp.GetStiffnessAttr().Get()==12
+rows.append({'case':'source-home-joint-state-before-warm','angularStateDeg':r.GetPrim().GetAttribute('state:angular:physics:position').Get(),'linearStateM':.025,'gainsPreserved':True})
+
+# 被动关节同样有源初态，但不能因此新增执行器或 drive。
+passive=UsdPhysics.RevoluteJoint.Define(stage,'/World/arm/passive')
+entry['metadata']['joints']['passive']={'type':'hinge','home':-.2}
+authoring.author_source_joint_initial_state(stage,entry,SceneError)
+assert not passive.GetPrim().HasAPI(UsdPhysics.DriveAPI,UsdPhysics.Tokens.angular)
+assert not passive.GetPrim().GetAttribute('drive:angular:physics:targetPosition').IsValid()
+rows.append({'case':'passive-state-does-not-create-drive','driveAdded':False})
+
 print(json.dumps({'status':'REAL_USD_ORIGIN_CONTRACT_PASS','scope':'Real USD/Gf contract; not Kit/PhysX/GUI','cases':rows}))

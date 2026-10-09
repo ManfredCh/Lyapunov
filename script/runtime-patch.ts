@@ -13,6 +13,8 @@ import {resolveSdkPython} from '../packages/lyapunov-product-bundle/src/sdk-pyth
 import {isMuJoCoGlBackend} from '../packages/sim-contract/src/mujoco-gl.ts'
 import {developerAgentDefaultModel, developerDefaultCatalog} from './developer-model.ts'
 import {ensurePluginModule} from './ensure-plugin.ts'
+import {ensureComputerUseLinux} from './computer-use-linux.ts'
+import {installedKnownMcpDefaults} from './known-mcp.ts'
 import {UNITY_SERVER_NAME,unityMcpPluginEntry} from './unity-mcp.ts'
 
 /** Public chooser location is captured in the parent before HOME is isolated; it grants no workspace access. */
@@ -241,7 +243,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   add("segment-sam3",{pythonPath:join(PRODUCT_ROOT,".runtime/conda/envs/sam3/bin/python"),checkpointPath:resolveSam3Checkpoint(),dataDirectory:join(providerData,"sam3")})
   if(input.surface==="web")plugins.push(
     {id:"lyapunov-desktop-lifecycle",name:join(PRODUCT_ROOT,"packages/desktop/dist/plugin.js")},
-    {id:"lyapunov-shell",name:"@lyapunov/shell",config:{recordingRoot,captureRoot,...(d?{catalogRoot:d.catalogRoot}:{}),...input.administrator?{administrator:input.administrator,modelBilling:input.modelBilling}:{}}},
+    {id:"lyapunov-shell",name:"@lyapunov/shell",config:{recordingRoot,captureRoot,knownMcpDefaults:installedKnownMcpDefaults(input.sdkEnvironment??process.env),...(d?{catalogRoot:d.catalogRoot}:{}),...input.administrator?{administrator:input.administrator,modelBilling:input.modelBilling}:{}}},
     {id:"lyapunov-workspace",name:"@lyapunov/workspace",config:{dataDirectory:outsideRoot("review-comments")}},
     {id:"lyapunov-pty",name:"@deepseek-ai/dsh-terminal"},
     {id:"lyapunov-terminal",name:"@deepseek-ai/dsh-terminal-bash",config:{shellDialect:process.platform==="win32"?"pwsh":"bash"}},
@@ -303,6 +305,7 @@ export async function runtimePatch(input:RuntimePatchInput&{dir:string}){
     const benchmarkProvider=(process.env.LYAPUNOV_BENCHMARK_PROVIDER??process.env.LYAUP_BENCHMARK_PROVIDER)?.trim().toLowerCase()||"libero"
     await ensurePluginModule(benchmarkProvider==="gymnasium"?"benchmark-gymnasium":"benchmark-libero")
   }
+  if(process.platform==='linux'&&process.arch==='x64'&&!(input.sdkEnvironment??process.env).COMPUTER_USE_LINUX_BIN?.trim())await ensureComputerUseLinux({env:input.sdkEnvironment??process.env})
   const plugins=runtimePluginInsert(input)
   let patch="- insert: "+JSON.stringify(plugins)+"\n"
   // 模型仍由登录/开发者后台装配；原生 Models 设置页沿用上游启用状态，Agent 预设选择保持关闭。

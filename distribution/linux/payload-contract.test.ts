@@ -328,6 +328,21 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
     }finally{rmSync(stage,{recursive:true,force:true})}
   })
 
+  test('产品ComputerUse修复与回退CLI、原补丁、MIT许可和出处必须真实进入载荷；缺件或空文件明确拒绝',()=>{
+    const {stage}=stageFixture()
+    try{
+      for(const file of PRODUCT_RUNTIME_FILES.filter(file=>file.startsWith('.runtime/computer-use-linux/'))){
+        const path=join(stage,file),original=readFileSync(path)
+        rmSync(path)
+        expect(productRuntimeViolations(stage,upstream).some(problem=>problem.includes(file))).toBe(true)
+        writeFileSync(path,'')
+        expect(productRuntimeViolations(stage,upstream).some(problem=>problem.includes(file))).toBe(true)
+        writeFileSync(path,original)
+      }
+      expect(productRuntimeViolations(stage,upstream)).toEqual([])
+    }finally{rmSync(stage,{recursive:true,force:true})}
+  })
+
   test('productRuntimeViolations在真实staging写RELEASE与归档之前运行',()=>{
     const check=packager.indexOf('const productProblems=productRuntimeViolations(stage,lock.directory)')
     expect(check).toBeGreaterThan(packager.indexOf('const buildEntries=['))

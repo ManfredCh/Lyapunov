@@ -343,8 +343,15 @@ def mjcf_metadata(source,cfg):
                        'stiffness':float(model.tendon_stiffness[i]),'damping':float(model.tendon_damping[i]),
                        'frictionLoss':float(model.tendon_frictionloss[i]),
                        'actuators':tendon_drivers}
+    # 跨实体固定安装的初始化 FK：只使用同一原件的 home/显式初值，不步进、不修改模型。
+    initial_data=mujoco.MjData(model);initial_data.qpos[:]=home
+    for j in range(model.njnt):
+        name=model.joint(j).name
+        if name in joints:initial_data.qpos[int(model.jnt_qposadr[j])]=joints[name]['home']
+    mujoco.mj_kinematics(model,initial_data)
+    initial_body_poses={model.body(i).name:{'positionM':initial_data.xpos[i].tolist(),'quaternionXyzw':[*initial_data.xquat[i,1:].tolist(),float(initial_data.xquat[i,0])]} for i in range(1,model.nbody) if model.body(i).name}
     from robot_authoring import source_base_metadata
-    return {'joints':joints,'actuators':actuators,'sites':sites,'cameras':cameras,'rootBodies':source_base_metadata(model),
+    return {'initialBodyPoses':initial_body_poses,'joints':joints,'actuators':actuators,'sites':sites,'cameras':cameras,'rootBodies':source_base_metadata(model),
             'freeBase':free_base,'geoms':geoms,'bodies':bodies,'sensors':sensors,'tendons':tendons,'parserVersion':mujoco.__version__,
             # 本次真正喂给 MuJoCo 的源路径：四足步态标定要**把同一份源**再交给 gait.py 的 calibrate()，
             # 不重新推导几何；没有这个字段就只能猜源在哪。

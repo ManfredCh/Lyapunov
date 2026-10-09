@@ -163,6 +163,70 @@ def body_has_dofs(model, body):
     return int(model.body_dofnum[int(model.body_weldid[body])]) > 0
 
 
+def body_is_static(model, body):
+    # 祖先关节和mocap根都能带动当前体；zero-DOF不能单凭叶节点判断。
+    while body:
+        if int(model.body_dofnum[body]) or int(model.body_mocapid[body]) >= 0:
+            return False
+        body = int(model.body_parentid[body])
+    return True
+
+
+def flex_is_static(model, fid):
+    if not model.flex_rigid[fid]:
+        return False
+    lo, count = int(model.flex_vertadr[fid]), int(model.flex_vertnum[fid])
+    return all(body_is_static(model, int(body)) for body in np.unique(model.flex_vertbodyid[lo:lo + count]))
+
+
+def configure_derived_static_masks(model, default_prefixes):
+    """自动静态原面不互撞；一个未用原生bit保原动态接触矩阵，不改原件几何。"""
+    if not default_prefixes:
+        return None
+    geoms, flexes, used, static_peers = [], [], 0, 0
+    for gid in range(model.ngeom):
+        ctype, affinity = int(model.geom_contype[gid]), int(model.geom_conaffinity[gid])
+        used |= (ctype | affinity) & 0xffffffff
+        static_peers += bool((ctype | affinity) & 1 and body_is_static(model, int(model.geom_bodyid[gid])))
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, gid) or ''
+        if ctype == affinity == 1 and body_is_static(model, int(model.geom_bodyid[gid])) and any(name.startswith(p) for p in default_prefixes):
+            geoms.append(gid)
+    for fid in range(model.nflex):
+        ctype, affinity = int(model.flex_contype[fid]), int(model.flex_conaffinity[fid])
+        used |= (ctype | affinity) & 0xffffffff
+        static_peers += bool((ctype | affinity) & 1 and flex_is_static(model, fid))
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_FLEX, fid) or ''
+        body = int(model.flex_vertbodyid[int(model.flex_vertadr[fid])])
+        if ctype == affinity == 1 and flex_is_static(model, fid) and any(name.startswith(p) for p in default_prefixes):
+            flexes.append(fid)
+    if not flexes or static_peers < 2:
+        return None
+    # 避免有符号int32最高位；原件占满可用位时继续原兼容路径，不覆盖自定义mask。
+    bit = next((1 << i for i in range(31) if not used & (1 << i)), None)
+    if bit is None:
+        return None
+    for gid in range(model.ngeom):
+        if not body_is_static(model, int(model.geom_bodyid[gid])) and (int(model.geom_contype[gid]) | int(model.geom_conaffinity[gid])) & 1:
+            model.geom_conaffinity[gid] = int(model.geom_conaffinity[gid]) | bit
+    for fid in range(model.nflex):
+        body = int(model.flex_vertbodyid[int(model.flex_vertadr[fid])])
+        if not flex_is_static(model, fid) and (int(model.flex_contype[fid]) | int(model.flex_conaffinity[fid])) & 1:
+            model.flex_conaffinity[fid] = int(model.flex_conaffinity[fid]) | bit
+    for gid in geoms:
+        model.geom_contype[gid], model.geom_conaffinity[gid] = bit, 0
+    for fid in flexes:
+        model.flex_contype[fid], model.flex_conaffinity[fid] = bit, 0
+    # Mu的bodyflex粗筛使用编译缓存，更新mask后同步对应body的geom聚合位。
+    for bid in range(model.nbody):
+        lo, count = int(model.body_geomadr[bid]), int(model.body_geomnum[bid])
+        ctype, affinity = 0, 0
+        for gid in range(lo, lo + count):
+            ctype |= int(model.geom_contype[gid]); affinity |= int(model.geom_conaffinity[gid])
+        model.body_contype[bid], model.body_conaffinity[bid] = ctype, affinity
+    return {'source':'derived-static-pair-filter','reservedBit':bit,'staticGeoms':len(geoms),
+            'staticFlexes':len(flexes),'geometryPreserved':True,'interactivePairsPreserved':True}
+
+
 def configure_static_surface_islands(model, derived_prefixes, explicit_choices, error):
     """仅Scene派生静态rigid-flex与zero-DOF静态形状相遇的3.13兼容路径，不改mask。"""
     geom_types, geom_affinities = 0, 0
@@ -208,10 +272,10 @@ def zero_dof_contact(model, contact):
     for side in (0, 1):
         geom, flex = int(contact.geom[side]), int(contact.flex[side])
         if geom >= 0:
-            if body_has_dofs(model, int(model.geom_bodyid[geom])):
+            if not body_is_static(model, int(model.geom_bodyid[geom])):
                 return False
         elif flex >= 0 and model.flex_rigid[flex]:
-            if body_has_dofs(model, int(model.flex_vertbodyid[int(model.flex_vertadr[flex])])):
+            if not flex_is_static(model, flex):
                 return False
         else:
             return False

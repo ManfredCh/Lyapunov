@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-plugin-manager'
 import {pluginEntryId} from '@deepseek-ai/dsh-host-plugin-inventory'
 import {SessionId} from '@deepseek-ai/dsh-session'
 import {JobId,type JobOutcome} from '@deepseek-ai/dsh-jobs'
+import {defineTool} from '@deepseek-ai/dsh-tools'
 import {writableRoots} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {Agent} from '@deepseek-ai/dsh-agent'
@@ -62,6 +63,7 @@ export function externalMcpConfig(input:ExternalMcpInput,root:string):Record<str
  if(typeof input.serverName!=='string'||!/^[A-Za-z0-9_-]{1,32}$/.test(input.serverName))throw Error('MCP_NAME_INVALID: 服务名需为 1–32 位字母、数字、下划线或连字符。 / Use a 1–32 character server namespace.')
  if(input.transport!=='stdio'&&input.transport!=='streamable-http'&&input.transport!=='sse')throw Error('MCP_TRANSPORT_INVALID: 请选择 stdio、streamable-http 或 sse。 / Select a supported transport.')
  const base={serverName:input.serverName,transport:input.transport,failOnStartupError:false,toolCallTimeoutMs:180000}
+ if((input.unityStatusDirectory!==undefined||input.unityDisableUpdateCheck!==undefined)&&(input.serverName!=='unity'||input.transport!=='stdio'))throw Error('UNITY_MCP_STDIO_REQUIRED: Unity 本地发现设置仅用于 stdio 服务。 / Unity discovery settings require its stdio server.')
  let config:Record<string,unknown>
  if(input.transport==='stdio'){
   if(typeof input.command!=='string'||!input.command.trim()||/[\r\n\0]/.test(input.command))throw Error('MCP_COMMAND_REQUIRED: 请填写可执行文件；参数单独填写。 / Supply the executable separately from arguments.')
@@ -70,6 +72,11 @@ export function externalMcpConfig(input:ExternalMcpInput,root:string):Record<str
   if(input.blenderPort!==undefined){
    if(input.serverName!=='blender'||!Number.isInteger(input.blenderPort)||input.blenderPort<1||input.blenderPort>65535)throw Error('BLENDER_PORT_INVALID: Blender addon 端口应为 1–65535。 / Supply a valid Blender addon port.')
    config.env={BLENDER_HOST:'127.0.0.1',BLENDER_PORT:String(input.blenderPort),DISABLE_TELEMETRY:'1'}
+  }
+  if(input.unityStatusDirectory!==undefined||input.unityDisableUpdateCheck!==undefined){
+   if(input.unityStatusDirectory!==undefined&&(!isAbsolute(input.unityStatusDirectory)||/[\r\n\0]/.test(input.unityStatusDirectory)))throw Error('UNITY_MCP_STATUS_DIRECTORY_REQUIRED: 请填写 Unity addon 登记目录的绝对路径。 / Supply the absolute Unity addon registry directory.')
+   if(input.unityDisableUpdateCheck!==undefined&&typeof input.unityDisableUpdateCheck!=='boolean')throw Error('UNITY_MCP_UPDATE_CHECK_INVALID: 更新检查设置需为布尔值。 / Update check setting must be boolean.')
+   config.env={...input.unityStatusDirectory===undefined?{}:{UNITY_MCP_STATUS_DIR:input.unityStatusDirectory},...input.unityDisableUpdateCheck===undefined?{}:{FASTMCP_CHECK_FOR_UPDATES:input.unityDisableUpdateCheck?'off':'stable'}}
   }
  }else{
   let u:URL;try{u=new URL(input.url??'')}catch{throw Error('MCP_URL_REQUIRED: 请填写 MCP HTTP 地址。 / Supply the MCP HTTP endpoint.')}
@@ -81,7 +88,7 @@ export function externalMcpConfig(input:ExternalMcpInput,root:string):Record<str
 }
 
 /** 新实例仍是同一个上游 mcp-client；使用官方 profile 原语原子追加、重载和失败回退。 */
-export async function saveExternalMcp(ctx:Context,input:ExternalMcpInput):Promise<void>{
+export async function saveExternalMcp(ctx:Context,input:ExternalMcpInput,ownedEnv?:Record<string,string>):Promise<void>{
  const editor=ctx.get('configEditor'),settings=ctx.get('settings'),profile=ctx.get('profileContext')
  if(!editor||!settings||!profile||!settings.writable)throw Error('MCP_CONFIG_READ_ONLY: 当前 Host 不允许写原生配置。 / The native profile is read-only.')
  const matches=editor.entries().filter(row=>row.options.name===MCP_PLUGIN&&object(row.options.config).serverName===input.serverName)
@@ -109,6 +116,7 @@ export async function saveExternalMcp(ctx:Context,input:ExternalMcpInput):Promis
   return
  }
  const next=externalMcpConfig(input,profile.cwd)
+ if(ownedEnv)next.env={...object(next.env),...ownedEnv}
  if(input.expectedRevision!==undefined&&input.expectedRevision!==null)throw Error('MCP_CONFIG_CONFLICT: 此服务已不存在，请刷新。 / Refresh the server list.')
  const id='lyapunov-external-mcp-'+input.serverName
  const run=async()=>withFileLock(join(profile.dir,'package.json'),async()=>{
@@ -136,6 +144,11 @@ export async function saveExternalMcp(ctx:Context,input:ExternalMcpInput):Promis
 async function version(command:string,args:string[]):Promise<string|null>{
  return await new Promise(resolveVersion=>execFile(command,args,{timeout:6000,maxBuffer:65536},(error,stdout)=>resolveVersion(error?null:stdout.trim().split('\n')[0]??null)))
 }
+/** 防止任意可执行文件的 --version 成功被当作指定软件。 */
+async function softwareVersion(command:string,id:'blender'|'unity'):Promise<string|null>{
+ const result=await version(command,id==='blender'?['--version']:['-version'])
+ return result&&(id==='blender'?/^Blender\s/i.test(result):/^(?:Unity\b|\d{4}\.\d)/i.test(result))?result:null
+}
 /** 只查看已经指定的模型路径，不扫描客户目录、不下载、不调用模型。 */
 export async function externalToolsState(ctx:Context,sessionId?:string,signal:AbortSignal=new AbortController().signal):Promise<ExternalToolsState>{
  const agent=sessionId?ctx.get('agents')?.get(SessionId(sessionId)):undefined
@@ -161,12 +174,13 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
   const detail=live?.status==='connected'?null:initial?.error!==undefined?'首次启动失败 / Initial startup failed: '+errorText(initial.error):live?'当前连接不可用；原生客户端管理重连。 / Connection unavailable; inspect native reconnection diagnostics.':'该配置尚无活动连接实例。 / No active native connection instance.'
   const command=typeof c.command==='string'?basename(c.command):null,integration=classifyMcpIntegration({serverName,command}),managed=nativeManaged.find(v=>String(v.entryId)===e.id)
   const portValue=object(c.env).BLENDER_PORT,port=integration==='blender'&&typeof portValue==='string'&&/^\d+$/.test(portValue)&&Number(portValue)>0&&Number(portValue)<=65535?Number(portValue):null
-  return {id:e.options.id,serverName,transport:String(c.transport??''),command,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:live?tools.filter(t=>t.startsWith('mcp__'+serverName+'__')):[],revision:externalMcpRevision(profile?.patchPath??'',e.options.id,e.options.config),detail,enabled:!e.disabled,currentScope:live!==undefined,owner:'Native profile / 原生 profile',configLocation,commandLocation:typeof c.command==='string'&&isAbsolute(c.command)?redactSecretsText(c.command):null,port,...integration?{integration}:{},modifiedAt:configModifiedAt,nativeEntryId:managed?String(managed.entryId):undefined,canToggle:managed!==undefined&&managed.readOnlyReason===undefined}
+  const unityEnv=object(c.env),unityStatusDirectory=serverName==='unity'&&c.transport==='stdio'&&typeof unityEnv.UNITY_MCP_STATUS_DIR==='string'&&isAbsolute(unityEnv.UNITY_MCP_STATUS_DIR)?redactSecretsText(unityEnv.UNITY_MCP_STATUS_DIR):undefined,unityDisableUpdateCheck=serverName==='unity'&&c.transport==='stdio'&&['off','stable','prerelease'].includes(String(unityEnv.FASTMCP_CHECK_FOR_UPDATES))?unityEnv.FASTMCP_CHECK_FOR_UPDATES==='off':undefined
+  return {id:e.options.id,serverName,transport:String(c.transport??''),command,url:publicUrl(c.url),argsCount:Array.isArray(c.args)?c.args.length:0,envNames:Object.keys(object(c.env)),headerNames:Object.keys(object(c.headers)),status:live?.status==='connected'?'connected' as const:live?'unavailable' as const:'configured' as const,tools:live?tools.filter(t=>t.startsWith('mcp__'+serverName+'__')):[],revision:externalMcpRevision(profile?.patchPath??'',e.options.id,e.options.config),detail,enabled:!e.disabled,currentScope:live!==undefined,owner:'Native profile / 原生 profile',configLocation,commandLocation:typeof c.command==='string'&&isAbsolute(c.command)?redactSecretsText(c.command):null,port,...integration?{integration}:{},modifiedAt:configModifiedAt,nativeEntryId:managed?String(managed.entryId):undefined,canToggle:managed!==undefined&&managed.readOnlyReason===undefined,...unityStatusDirectory===undefined?{}:{unityStatusDirectory},...unityDisableUpdateCheck===undefined?{}:{unityDisableUpdateCheck}}
  }))
  for(const live of servers)if(!mcp.some(v=>v.serverName===live.serverName&&v.currentScope===true))mcp.push({id:'',serverName:live.serverName,transport:'scope-owned',command:null,url:null,argsCount:0,envNames:[],headerNames:[],status:live.status==='connected'?'connected':'unavailable',tools:tools.filter(t=>t.startsWith('mcp__'+live.serverName+'__')),revision:null,detail:null,enabled:true,currentScope:true,owner:'Current native scope / 当前原生作用域',configLocation:null,...classifyMcpIntegration({serverName:live.serverName,command:null})?{integration:classifyMcpIntegration({serverName:live.serverName,command:null})}:{}})
  const candidates=await discoverIntegrations(ctx)
- const blenderPath=resolveBlenderExecutable(),blender=await version(blenderPath,['--version']),unity=process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()??candidates.find(v=>v.kind==='unity'&&basename(v.path)==='Unity')?.path
- const unityVersion=unity?await version(unity,['-version']):null
+ const blenderPath=resolveBlenderExecutable(),blender=await softwareVersion(blenderPath,'blender'),unity=process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()??candidates.find(v=>v.kind==='unity'&&basename(v.path)==='Unity')?.path
+ const unityVersion=unity?await softwareVersion(unity,'unity'):null
  const samEntry=entries.find(e=>String(e.options.name).includes('segment-sam3')),sam=object(samEntry?.options.config)
  const samPath=typeof sam.checkpointPath==='string'?sam.checkpointPath:process.env.LYAPUNOV_SAM3_CHECKPOINT
  const samPython=typeof sam.pythonPath==='string'?sam.pythonPath:process.env.LYAPUNOV_SAM3_PYTHON
@@ -199,6 +213,30 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
   }})
  }
  const entry=CREATIVE_TOOLS_CATALOG.find(v=>v.id===input.id)
+ if(entry?.kind==='software'){
+  const subprocess=ctx.get('subprocess');if(!subprocess)throw Error('SUBPROCESS_UNAVAILABLE')
+  // 设置页也先复用现有软件；原 subprocess 负责命令解析，探测不安装、不起编辑器。
+  const resolved=await subprocess.resolveExecutable(entry.id==='unity'?'Unity':'blender').catch(()=>null)
+  const executable=entry.id==='blender'?(process.env.BLENDER_EXECUTABLE?.trim()??(resolved?.startsWith('/snap/bin/')?resolveBlenderExecutable():resolved)):process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()??resolved??(await discoverIntegrations(ctx)).find(v=>v.kind==='unity'&&basename(v.path)==='Unity')?.path
+  const installedVersion=executable?await softwareVersion(executable,entry.id as 'blender'|'unity'):null
+  if(installedVersion)return jobs.start({kind:'external-install',label:entry.name+' existing software check',owner:agent?.id,run:job=>{job.append(JSON.stringify({action:'reuse-existing-software',installationComplete:true,location:executable,version:installedVersion})+'\n',{channel:'stdout'});return {cancel:()=>{},done:Promise.resolve({status:'completed' as const,detail:'已有软件版本检查通过，已复用；MCP 与实际操作需另行验证。 / Existing software version checked and reused; verify MCP and the requested operation separately.'})}}})
+  const plan=downloadPlan(entry.id)
+  const opener=await subprocess.resolveExecutable(plan.argv[0]!).catch(()=>null)
+  if(!opener)throw Error('OFFICIAL_INSTALLER_OPENER_MISSING: 无法打开官方下载页面，请使用条目中的官方链接。 / The system URL opener is unavailable; use the official link in this entry.')
+  return jobs.start({kind:'external-install',label:entry.name+' official installer page',owner:agent?.id,run:job=>{
+   const controller=new AbortController();job.append('Official download page: '+entry.source.url+'\n',{channel:'stdout'})
+   job.updateProgress('Opening the official download / installation page')
+   const child=subprocess.spawn({argv:[opener,...plan.argv.slice(1)],cwd:ctx.profileContext?.cwd??process.cwd(),env:plan.env,signal:controller.signal,graceMs:3000,stdio:{stdin:'ignore',stdout:{maxBytes:120000},stderr:{maxBytes:120000}}})
+   const done=(async():Promise<JobOutcome>=>{try{
+    const result=await child.done
+    for(const channel of ['stdout','stderr'] as const){const output=child.collected[channel]?.readFrom(0);if(output?.text)job.append(redactSecretsText(output.text),{channel,...output.lossy?{gapBefore:true as const}:{}})}
+    if(controller.signal.aborted)return {status:'killed',detail:'Opening cancelled; an already opened browser page is not closed.'}
+    if(result.exitCode!==0)return {status:'failed',detail:'官方下载页面未能打开（exit '+String(result.exitCode)+'）；请使用官方链接。 / Official download page could not be opened (exit '+String(result.exitCode)+'); use the official link.'}
+    return {status:'completed',result:JSON.stringify({sourceUrl:entry.source.url,action:'open-official-download',accepted:true}),detail:'官方安装页面已交给系统打开；完成安装后检查已有软件。 / Official installer page accepted by the system; software is not installed automatically. Inspect it after installation.'}
+   }catch(error){return {status:controller.signal.aborted?'killed':'failed',detail:errorText(error)}}})()
+   return {cancel:()=>controller.abort(),done}
+  }})
+ }
  if(!entry?.model)throw Error('EXTERNAL_ACQUISITION_UNSUPPORTED: 此项请使用已有官方安装入口。 / Use the existing official installer.')
  if(!input.localDir||!isAbsolute(input.localDir))throw Error('MODEL_DIRECTORY_REQUIRED: 请填写绝对下载目录。 / Supply an absolute download directory.')
  requireExternalWrite(ctx,agent,input.localDir)
@@ -248,7 +286,41 @@ export async function setExternalMcpEnabled(ctx:Context,input:{id:string;enabled
  return result
 }
 
-export function applyExternalToolsHost(ctx:Context):void{
+/** 自然语言与设置页共用原生读数/Jobs；返回已有可用软件或明确的人工安装阶段。 */
+export async function externalToolManagement(ctx:Context,input:{action:string;id?:string;localDir?:string;jobId?:string},sessionId:string,signal?:AbortSignal):Promise<unknown>{
+ const agent=ctx.get('agents')?.get(SessionId(sessionId));if(!agent)throw Error('SESSION_NOT_LIVE')
+ if(input.action==='status'){
+  if(!input.jobId)throw Error('EXTERNAL_JOB_ID_REQUIRED')
+  const view=ctx.jobs.get(JobId(input.jobId),agent.id)
+  if(view.kind!=='external-install'&&view.kind!=='fastgs-external')throw Error('EXTERNAL_JOB_KIND_REQUIRED')
+  const read=ctx.jobs.readAt(JobId(input.jobId),0,agent.id)
+  return {job:view,output:read.chunks.map(c=>({channel:c.channel,text:redactSecretsText(c.text)})),nextOffset:read.next,installationComplete:false,instruction:'Read the outcome and inspect the software again. A completed acquisition job alone does not prove installation or runtime readiness.'}
+ }
+ const state=await externalToolsState(ctx,sessionId,signal)
+ if(input.action==='inspect')return state
+ if(input.action!=='acquire')throw Error('EXTERNAL_ACTION_INVALID')
+ const entry=CREATIVE_TOOLS_CATALOG.find(v=>v.id===input.id)
+ if(!entry&&input.id!=='blender-mcp')throw Error('EXTERNAL_ACQUISITION_UNSUPPORTED')
+ const existing=entry?.kind==='software'?state.software.find(v=>v.id===entry.id&&v.installed===true):undefined
+ if(existing)return {status:'existing-software',software:existing,installationComplete:true,mcpComplete:false,instruction:'Reuse this existing executable. Its version probe passed. MCP/addon and the requested operation require their own native checks.'}
+ const jobId=await startExternalAcquisition(ctx,{id:input.id!,localDir:input.localDir,sessionId})
+ return {jobId,status:'acquisition-started',installationComplete:false,requiresManualInstaller:entry?.kind==='software',instruction:entry?.kind==='software'?'The native job opens the official platform installer. Continue normal installer/license interaction using the available native computer-use tools, then inspect the executable and verify the requested operation. Do not claim installation from opening a URL.':'Read the native Job outcome, then verify the package/runtime; downloaded files do not prove inference readiness.'}
+}
+
+/** 已有条目（含停用、自定义 namespace）始终优先；未知服务不自动加入。 */
+export async function associateInstalledKnownMcp(ctx:Context,defaults:readonly import('../../../script/known-mcp.ts').KnownMcpDefault[]):Promise<void>{
+ if(ctx.get('settings')?.writable!==true)return
+ for(const candidate of defaults){
+  const matches=(ctx.get('configEditor')?.entries()??[]).filter(e=>e.options.name===MCP_PLUGIN&&classifyMcpIntegration({serverName:String(object(e.options.config).serverName??''),command:typeof object(e.options.config).command==='string'?object(e.options.config).command as string:null})===candidate.kind)
+  if(matches.length)continue
+  await saveExternalMcp(ctx,{serverName:candidate.kind,transport:'stdio',command:candidate.command,args:candidate.args,expectedRevision:null,...candidate.kind==='blender'?{blenderPort:candidate.port}:{}},candidate.env)
+ }
+}
+export function applyExternalToolsHost(ctx:Context,defaults:readonly import('../../../script/known-mcp.ts').KnownMcpDefault[]=[]):void{
+ let association:Promise<void>|undefined
+ ctx.on('agent/created',async()=>{association??=associateInstalledKnownMcp(ctx,defaults).catch(error=>ctx.logger.warn('Known MCP association failed: '+errorText(error))).finally(()=>{association=undefined});await association})
+ ctx.tools.register(defineTool({name:'external_tool_management',description:'Inspect, acquire, and read native Jobs for the existing software/model catalog (Blender, Unity, SAM3, SAM3D, DA3) and pinned Blender MCP. For user requests to download/install Blender or Unity, inspect first and reuse an existing installed executable; acquire missing software through its official installer and continue normal installer/license interaction using available native tools. Report manual steps or missing tools explicitly. Never infer installation from an opened URL, Job completion, checkpoint files, or MCP configuration. All Hub acquisition uses hf-mirror.com with no official-endpoint fallback. FastGS has its existing fastgs_external tool.',parameters:{action:{type:'string',required:true,enum:['inspect','acquire','status']},id:{type:'string',enum:[...CREATIVE_TOOLS_CATALOG.map(v=>v.id),'blender-mcp']},localDir:{type:'string',description:'Absolute writable model directory, required for model acquisition.'},jobId:{type:'string',description:'Existing native acquisition Job identity for status.'}},output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>JSON.parse(JSON.stringify(await externalToolManagement(ctx,args as {action:string;id?:string;localDir?:string;jobId?:string},String(exec.agent!.id),exec.signal))) as never}))
+
  ctx.on('agent/created',async()=>{await associateKnownBlender(ctx).catch(error=>ctx.logger.warn('Existing Blender association failed: '+errorText(error)))})
  const register=(path:string,methods:readonly ('GET'|'POST')[],handler:(r:Request)=>Promise<Response>)=>ctx.effect(()=>ctx.connection.fetch.register({path:'/api/lyapunov/external-tools/'+path,methods,requestBody:'buffered',fetch:async r=>{try{return await handler(r)}catch(e){return Response.json({error:errorText(e)},{status:400})}}}))
  register('state',['GET'],async r=>Response.json(await externalToolsState(ctx,new URL(r.url).searchParams.get('sessionId')??undefined,r.signal),{headers:{'cache-control':'private, no-store'}}))

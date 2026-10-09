@@ -13,6 +13,7 @@ import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRunti
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
 import {checkedRuntimeManifest,checkedReleaseManifest,releaseManifestTsv,type LinuxReleaseManifest} from '../distribution/linux/release-manifest.ts'
 import {prepareLinuxNativeSystem,LINUX_NATIVE_LOADER_PACKAGES,verifyLinuxNativeLoaders} from './native-system.ts'
+import {ensureComputerUseLinux,computerUseLinuxPaths,computerUseLinuxReady,computerUseLinuxAssets} from './computer-use-linux.ts'
 
 const root=resolve(import.meta.dirname,'..')
 const {values}=parseArgs({options:{output:{type:'string',default:join(root,'.runtime/releases')},node:{type:'string',default:process.env.LYAPUNOV_PACKAGE_NODE??'node'},micromamba:{type:'string',default:join(root,'.runtime/bin/micromamba')},'check-source':{type:'boolean',default:false},root:{type:'string'},'release-id':{type:'string'},'mujoco-runtime-archive':{type:'string'},'mujoco-runtime-manifest':{type:'string'}}})
@@ -109,6 +110,10 @@ console.log(provenanceLine)
 const product=JSON.parse(await readFile(join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(join(root,'UPSTREAM_LOCK.json'),'utf8'))
 const upstream=resolve(root,lock.directory)
 const upstreamReal=await realpath(upstream)
+// 固定桌面MCP修复变体归产品运行根；新安装不依赖Codex缓存。
+const computerUseLinuxSupply=await ensureComputerUseLinux({root})
+const minimumGlibc=String(computerUseLinuxSupply.minimumGlibc)
+if(!/^\d+\.\d+$/.test(minimumGlibc))throw new Error('COMPUTER_USE_LINUX_MINIMUM_GLIBC_INVALID')
 async function fileSha256(path:string){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex')}
 if(Boolean(values['mujoco-runtime-archive'])!==Boolean(values['mujoco-runtime-manifest']))throw Error('MuJoCo runtime archive 与 manifest 必须同时指定')
 const runtimeInput=values['mujoco-runtime-manifest']?checkedRuntimeManifest(JSON.parse(await readFile(resolve(values['mujoco-runtime-manifest']),'utf8'))):null
@@ -265,6 +270,7 @@ stampDesktopAppVersion(stage,product.version)
 // 发行产物名（`lyapunov-dsh-<版本>-linux-x64`）、目录名与判定用的都是同一身份串，这里对齐。
 await writeFile(join(stage,'package.json'),JSON.stringify({name:'lyapunov-dsh',version:product.version,license:product.license,private:true,type:'module'},null,2)+'\n')
 await cp(join(root,'UPSTREAM_LOCK.json'),join(stage,'UPSTREAM_LOCK.json'))
+await cp(computerUseLinuxPaths(root).root,computerUseLinuxPaths(stage).root,{recursive:true})
 for(const file of ['LICENSE','NOTICE','README.md','README.zh-CN.md'])await cp(join(root,file),join(stage,file))
 await cp(join(upstream,'LICENSE'),join(stage,'DSH-LICENSE'))
 await mkdir(join(stage,lock.directory),{recursive:true})
@@ -373,6 +379,7 @@ if(entryProblems.length)throw new Error('发行载荷入口契约不成立：'+e
 // 在真实 staging 上逐件核验，漏复制时归档前直接失败。
 const sandboxProblems=sandboxRuntimeViolations(stage)
 if(sandboxProblems.length)throw new Error(sandboxProblems.join('；'))
+if(!computerUseLinuxReady(stage))throw new Error('COMPUTER_USE_LINUX_PAYLOAD_INVALID: 固定CLI、修复补丁、MIT许可或出处校验失败')
 const productProblems=productRuntimeViolations(stage,lock.directory)
 if(productProblems.length)throw new Error(productProblems.join('；'))
 const topLevelExecutables=topLevel.filter(row=>!row.directory&&row.executable).map(row=>row.name).sort()
@@ -399,18 +406,22 @@ sourceCommitMatchesPayload:provenanceAtStart.verdict==='CLEAN'&&!provenanceMoved
 worktreeProvenance:{scope:[...PAYLOAD_SCOPE],changed:provenanceAtWrite.changed?.length??null,payloadScoped:provenanceAtWrite.payloadRaw?.length??null,payloadChanged:provenanceAtWrite.payloadChanged?.length??null,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,startWorktree:provenanceAtStart.worktree,movedDuringPackaging:provenanceMoved,sample:(provenanceAtStart.payloadChanged??[]).slice(0,10),dirtyOverride:allowDirty?ALLOW_DIRTY_ENV:null},
 // 随包法律产物的来源与身份：从入库件、缓存、环境变量覆盖还是网络取到，sha256 一并入册，
 // 让"这份许可证是谁、从哪来"在产物里可查，而不是只有一句"包里有 LICENSE"。
-micromambaLicense:mambaLicenseRecord}
+micromambaLicense:mambaLicenseRecord,computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
 await writeFile(join(stage,'RELEASE.json'),JSON.stringify(release,null,2)+'\n')
 const symlinks:Array<{path:string;target:string}>=[]
 // 发行包只携带代码和许可证；用户凭据、运行时状态和模型权重必须在包外。
 // 这里在 staging 阶段 fail-closed，而不是只依赖归档后的人工扫描。
+// 仅产品固定CLI供给可进入.runtime；其它用户/运行数据仍拒绝。
+const computerUseLinuxDirectories=new Set(['.runtime','.runtime/computer-use-linux','.runtime/computer-use-linux/bin','.runtime/computer-use-linux/official'])
+const computerUseLinuxFiles=new Set([...computerUseLinuxAssets.map(asset=>'.runtime/computer-use-linux/bin/'+asset.name),'.runtime/computer-use-linux/LICENSE','.runtime/computer-use-linux/provenance.json','.runtime/computer-use-linux/official/computer-use-linux','.runtime/computer-use-linux/atspi-bus.patch'])
 const forbiddenName=/^(?:auth|credentials?|secrets?|session-secrets)\.(?:json|ya?ml|toml|env|db|sqlite)$/i
 const forbiddenExtension=/\.(?:pt|pth|ckpt|safetensors|onnx|gguf|npz|npy|engine|plan|pem|key|token)$/i
 async function verify(dir:string){for(const item of await readdir(dir,{withFileTypes:true})){const path=join(dir,item.name)
   const relPath=relative(stage,path)
+  if((relPath==='.runtime'||relPath.startsWith('.runtime/'))&&(item.isDirectory()?!computerUseLinuxDirectories.has(relPath):!computerUseLinuxFiles.has(relPath)))throw new Error('禁止把用户/运行数据加入发行包：'+relPath)
   if(item.isFile()&&(forbiddenName.test(item.name)||forbiddenExtension.test(item.name)))throw new Error(`发行包包含禁止的凭据/模型文件：${relPath}`)
   if(item.isSymbolicLink()){const target=await readlink(path),actual=await realpath(path),rel=relative(stage,actual);if(isAbsolute(target)||rel==='..'||rel.startsWith('../'))throw new Error('发行包链接越界：'+relative(stage,path));symlinks.push({path:relative(stage,path),target})}
-  else if(item.isDirectory()){if(item.name==='.runtime'||item.name==='session-secrets')throw new Error('禁止把用户/运行数据加入发行包');await verify(path)}
+  else if(item.isDirectory()){if((item.name==='.runtime'&&relPath!=='.runtime')||item.name==='session-secrets')throw new Error('禁止把用户/运行数据加入发行包');await verify(path)}
 }}
 await verify(stage)
 await writeFile(join(output,`package-${stamp}.json`),JSON.stringify({status:'BUILT_NOT_RUNTIME_VERIFIED',stage,packages:nodes.size,relativeSymlinks:symlinks.length,missingOptional,
@@ -429,7 +440,7 @@ const tar=spawnSync('tar',['-czf',pendingArchive,'-C',dirname(stage),name],{stdi
 if(tar.status!==0)throw new Error('tar 打包失败')
 await rename(pendingArchive,archive)
 if(runtimePublic)await cp(resolve(values['mujoco-runtime-archive']!),join(publicOutput,runtimePublic.archive.path))
-const downloadManifest:LinuxReleaseManifest=checkedReleaseManifest({schema:1,releaseId,version:product.version,platform:'linux-x64',minimumGlibc:'2.28',sourceCommit:sourceCommit!,archiveRoot:name,archive:{path:basename(archive),sha256:await fileSha256(archive),bytes:(await stat(archive)).size},mujoco:runtimePublic?{mode:'conda-pack',runtime:runtimePublic}:{mode:'install-provider'}})
+const downloadManifest:LinuxReleaseManifest=checkedReleaseManifest({schema:1,releaseId,version:product.version,platform:'linux-x64',minimumGlibc,sourceCommit:sourceCommit!,archiveRoot:name,archive:{path:basename(archive),sha256:await fileSha256(archive),bytes:(await stat(archive)).size},mujoco:runtimePublic?{mode:'conda-pack',runtime:runtimePublic}:{mode:'install-provider'}})
 for(const [extension,text] of [['json',JSON.stringify(downloadManifest,null,2)+'\n'],['tsv',releaseManifestTsv(downloadManifest)]])await writeFile(join(publicOutput,`linux-x64.${extension}`),text)
 await mkdir(join(output,'releases/latest'),{recursive:true})
 for(const extension of ['json','tsv'])await cp(join(publicOutput,`linux-x64.${extension}`),join(output,'releases/latest',`linux-x64.${extension}`))

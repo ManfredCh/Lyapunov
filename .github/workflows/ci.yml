@@ -69,6 +69,10 @@ jobs:
       - name: Bootstrap (upstream clone/patch/pnpm build + bun install + plugins build)
         run: node script/bootstrap.mjs
 
+      # 固定产品桌面MCP供给在离线行为测试前显式准备；测试不以用户Codex缓存为前提。
+      - name: Prepare pinned product Computer Use Linux runtime
+        run: bun --no-env-file script/computer-use-linux.ts
+
       - name: Build desktop
         run: bun run script/build-desktop.ts
 

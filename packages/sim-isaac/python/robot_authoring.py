@@ -129,6 +129,39 @@ def verify_native_origin(entry):
         raise SceneError('ENTITY_ORIGIN_UNVERIFIED', 'Imported root and native pose root differ for ' + entry['entity']['entityId'])
 
 
+def author_source_joint_initial_state(stage, entry, error):
+    """跨机构连接需在 PhysX 首次预热前有源关节初态和同一初始目标。"""
+    from pxr import PhysxSchema
+    import math
+    source=entry.get('metadata',{}).get('joints',{})
+    if not source:return
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(entry['path'])):
+        if not prim.IsA(UsdPhysics.Joint):continue
+        item=source.get(prim.GetName()) or next((value for name,value in source.items() if Tf.MakeValidIdentifier(name)==prim.GetName()),None)
+        if item is None:continue
+        axis=UsdPhysics.Tokens.angular if item['type']=='hinge' else UsdPhysics.Tokens.linear
+        home=math.degrees(item['home']) if item['type']=='hinge' else item['home']
+        joint_state=PhysxSchema.JointStateAPI.Apply(prim,axis)
+        joint_state.CreatePositionAttr().Set(home);joint_state.CreateVelocityAttr().Set(0.)
+        drive=UsdPhysics.DriveAPI(prim,axis)
+        if prim.HasAPI(UsdPhysics.DriveAPI,axis):
+            drive.CreateTargetPositionAttr().Set(home);drive.CreateTargetVelocityAttr().Set(0.)
+
+
+def initialized_parent_body_world(stage, entry, parent, body_name, error):
+    """父连杆的源初态 FK 复合当前真实根安装，不能用零关节的 USD 静态姿态。"""
+    metadata=entry.get('metadata',{});initial=metadata.get('initialBodyPoses',{})
+    if body_name not in initial:return UsdGeom.XformCache().GetLocalToWorldTransform(parent)
+    root_name=body_name
+    while metadata.get('bodies',{}).get(root_name,{}).get('parent'):
+        root_name=metadata['bodies'][root_name]['parent']
+    root_source=next((row for row in metadata.get('rootBodies',[]) if row['bodyName']==root_name and root_name in initial),None)
+    if root_source is None:raise error('ROBOT_BASE_INITIAL_POSE_UNAVAILABLE','源初态缺少真实根')
+    root=body_prim(stage,entry,root_source['bodyName'],error)
+    local=pose_matrix(initial[body_name])*pose_matrix(initial[root_source['bodyName']]).GetInverse()
+    return local*UsdGeom.XformCache().GetLocalToWorldTransform(root)
+
+
 def install_base_bindings(stage, scene, entities, error):
     declarations = {entity['entityId']: entity.get('components', {}).get('baseBinding') for entity in scene['entities']}
     done = set(); visiting = set()
@@ -158,7 +191,9 @@ def install_base_bindings(stage, scene, entities, error):
                 if parent_eid == eid or parent_eid not in entities: raise error('ROBOT_BASE_TARGET_MISSING', '绑定目标实体不存在')
                 install(parent_eid)
                 parent = body_prim(stage, entities[parent_eid], target.get('bodyName', ''), error, target=True)
-                parent_world = UsdGeom.XformCache().GetLocalToWorldTransform(parent)
+                author_source_joint_initial_state(stage, entities[parent_eid], error)
+                author_source_joint_initial_state(stage, entry, error)
+                parent_world = initialized_parent_body_world(stage, entities[parent_eid], parent, target['bodyName'], error)
                 world = pose_matrix(target) * parent_world
             else:
                 parent = None; world = pose_matrix(target)

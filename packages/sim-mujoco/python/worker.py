@@ -1063,7 +1063,7 @@ class World:
         frames = collision_frame_maps(scene, poses)
         maps = {}
         child_specs = []
-        static_triangle_counts, explicit_arena_sources, explicit_island_choices, derived_surface_prefixes = [], [], [], []
+        static_triangle_counts, explicit_arena_sources, explicit_island_choices, derived_surface_prefixes, default_surface_prefixes = [], [], [], [], []
         # 实体的真实装配 body（eid → (spec body, 该 body 在实体局部帧中的 pos/quat)），
         # 供 Scene 声明相机挂载：相机进的是父实体的真实 body，随物理 FK 一起动。
         spec_bodies = {}
@@ -1228,6 +1228,7 @@ class World:
                     native_surface = shape == 'mesh' and declared_static_surface(c, component.get('physicsBinding') or {}, rigid, eid, SimError)
                     if native_surface and c.get('source')=='asset-bake-surface':
                         derived_surface_prefixes.append(prefix)
+                        if 'contype' not in c and 'conaffinity' not in c:default_surface_prefixes.append(prefix)
                     # asset-bake 凸包产物（source=asset-bake-hull）：每个 part 一个网格资产，
                     # MuJoCo 对 mesh geom 按凸包碰撞。实体 scale 烘焙进网格顶点（不像原生
                     # articulation 那样拒绝 scale≠1）；声明质量在 parts 间均摊，刚体总质量
@@ -1381,7 +1382,10 @@ class World:
         if surface_arena:
             skipped.append({'code':'STATIC_TRIANGLE_ARENA','message':'Static triangle BVH uses a bounded work arena',**surface_arena})
         model = spec.compile()
-        from static_triangle_surface import configure_static_surface_islands
+        from static_triangle_surface import configure_static_surface_islands, configure_derived_static_masks
+        static_mask_filter = configure_derived_static_masks(model, default_surface_prefixes)
+        if static_mask_filter:
+            skipped.append({'code':'STATIC_TRIANGLE_PAIR_FILTER','message':'Automatic static triangle surfaces skip zero-DOF pairs and retain interactive collisions',**static_mask_filter})
         surface_islands = configure_static_surface_islands(model, derived_surface_prefixes, explicit_island_choices, SimError)
         if surface_islands:
             skipped.append({'code':'STATIC_TRIANGLE_ISLAND_COMPAT','message':'Mu3.13 static zero-DOF contacts use the non-island solver; interactive contacts exclude static-only pairs',**surface_islands})

@@ -1,7 +1,7 @@
 import {describe,expect,test,afterEach} from 'bun:test'
 import type {Context} from '@deepseek-ai/cordis'
 import {startExternalInstallSession,startExternalMcpRegistrationSession} from '../src/external-install-session.ts'
-import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState,setExternalMcpEnabled,associateKnownBlender} from '../src/external-tools-host.ts'
+import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState,setExternalMcpEnabled,associateKnownBlender,externalToolManagement,applyExternalToolsHost} from '../src/external-tools-host.ts'
 import {runBlenderMcpSupplyCommand,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 
 function fixture(ok=true,wait?:Promise<void>){
@@ -78,6 +78,18 @@ describe('游客可直接配置MCP与取得权重，不依赖模型安装会话'
  test('HTTP端点秘密不进入设置表单，非法URL/transport失败关闭',()=>{
   expect(externalMcpConfig({serverName:'unity',transport:'streamable-http',url:'http://localhost:8080/mcp'},'/workspace')).toMatchObject({url:'http://localhost:8080/mcp'})
   for(const url of ['file:///tmp/mcp','https://user:secret@example.org/mcp','https://example.org/mcp?token=private'])expect(()=>externalMcpConfig({serverName:'other',transport:'sse',url},'/workspace')).toThrow('MCP_URL_INVALID')
+ })
+ test('Unity本地登记目录与可选更新检查进入原生子进程env，保持账户HOME与代理不变',async()=>{
+  const original={serverName:'unity',transport:'stdio',command:'/tools/mcp-for-unity',args:['--transport','stdio'],env:{HOME:'/account/private',ALL_PROXY:'socks://127.0.0.1:7897',PRIVATE_TOKEN:'preserve-me'},toolCallTimeoutMs:999}
+  const profile={cwd:'/workspace',patchPath:'/owned-profile/cordis.patch.yml'},entry={options:{id:'native-unity',name:'@deepseek-ai/dsh-mcp-client',config:original}}
+  let next:any
+  const editor={entries:()=>[entry],edit:async(_entry:unknown,change:(raw:any)=>any)=>{next=change(original)}}
+  const ctx={get:(name:string)=>name==='profileContext'?profile:name==='configEditor'?editor:name==='settings'?{writable:true}:undefined} as unknown as Context
+  await saveExternalMcp(ctx,{serverName:'unity',transport:'stdio',unityStatusDirectory:'/home/user/.unity-mcp',unityDisableUpdateCheck:true,expectedRevision:externalMcpRevision(profile.patchPath,entry.options.id,original)})
+  expect(next).toEqual({...original,env:{...original.env,UNITY_MCP_STATUS_DIR:'/home/user/.unity-mcp',FASTMCP_CHECK_FOR_UPDATES:'off'}})
+  expect(original.env).not.toHaveProperty('UNITY_MCP_STATUS_DIR')
+  expect(()=>externalMcpConfig({serverName:'unity',transport:'stdio',command:'mcp',unityStatusDirectory:'.unity-mcp'},'/workspace')).toThrow('UNITY_MCP_STATUS_DIRECTORY_REQUIRED')
+  expect(()=>externalMcpConfig({serverName:'other',transport:'stdio',command:'mcp',unityDisableUpdateCheck:true},'/workspace')).toThrow('UNITY_MCP_STDIO_REQUIRED')
  })
  test('静态配置事务保留参数凭据超时，语义旧revision拒绝',async()=>{
   const profile={cwd:'/workspace',patchPath:'/owned-profile/cordis.patch.yml'}
@@ -386,4 +398,77 @@ describe('插件市场只委托原生启用与真实scope读数',()=>{
   for(const secret of ['super-private-arg','secret-body','super-secret','url-secret'])expect(output).not.toContain(secret)
   expect(row.url).toBe('https://example.test/mcp');expect(read.associations?.[0]).toMatchObject({status:'associated',serverName:'blender'})
  })
+})
+
+
+test('软件官方下载沿原native Jobs提交静态argv，成功只代表页面交付；失败和取消不假安装',async()=>{
+ const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{JobId}=await import('@deepseek-ai/dsh-jobs')
+ for(const mode of ['accepted','failed','cancelled'] as const){
+  const ctx=new NativeContext();await ctx.plugin(NativeJobs);const releaseController=ctx.jobs.attachController('official-download-fixture'),calls:any[]=[]
+  let finish!:(value:{exitCode:number|null;signal:null})=>void
+  ctx.provide('subprocess',{resolveExecutable:async(name:string)=>'/fixture/'+name,spawn:(spec:any)=>{calls.push(spec);const done=new Promise<{exitCode:number|null;signal:null}>(resolve=>{finish=resolve});spec.signal.addEventListener('abort',()=>finish({exitCode:130,signal:null}),{once:true});return {done,collected:{}}}} as never)
+  try{
+   const id=JobId(await startExternalAcquisition(ctx,{id:'blender'}));expect(calls).toHaveLength(1)
+   expect(calls[0].argv.at(-1)).toBe('https://www.blender.org/download/');expect(calls[0].argv[0]).toStartWith('/fixture/');expect(calls[0]).not.toHaveProperty('shell')
+   expect(ctx.jobs.get(id).kind).toBe('external-install')
+   if(mode==='cancelled')ctx.jobs.kill(id,undefined,'Explicit fixture cancellation');else finish({exitCode:mode==='accepted'?0:19,signal:null})
+   const result=await ctx.jobs.wait(id,3000)
+   expect(result.status).toBe(mode==='accepted'?'completed':mode==='failed'?'failed':'killed')
+   const output=ctx.jobs.readAt(id,0).chunks.map(row=>row.text).join(' ')
+   expect(output).toContain('https://www.blender.org/download/');expect(output).not.toContain('Software installed')
+   if(mode==='accepted')expect(result.detail).toContain('not installed automatically')
+   if(mode==='failed')expect(result.detail).toContain('19')
+  }finally{releaseController();await ctx.fiber.dispose()}
+ }
+})
+
+
+test('自然语言原生catalog工具复用实际版本探测的软件，不开URL、不重复下载；Job读回不能假安装',async()=>{
+ const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{SessionId}=await import('@deepseek-ai/dsh-session')
+ const home=await mkdtemp(join(tmpdir(),'lyapunov-external-native-'));ownedHomes.push(home)
+ const binary=join(home,'blender');await writeFile(binary,'#!/bin/sh\nprintf "Blender test-version\\n"\n',{mode:0o755})
+ const old=process.env.BLENDER_EXECUTABLE;process.env.BLENDER_EXECUTABLE=binary
+ const ctx=new NativeContext();ownedContexts.push(ctx)
+ ctx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await ctx.plugin(ToolRuntime);await ctx.plugin(NativeJobs)
+ const id=SessionId('native-catalog-session'),agent={id,ctx};ctx.jobs.attachController('native-catalog-fixture');ctx.provide('agents',{get:(value:unknown)=>String(value)===String(id)?agent:undefined} as never)
+ ctx.provide('connection',{fetch:{register:()=>()=>{}}} as never)
+ let spawned=0;ctx.provide('subprocess',{resolveExecutable:async()=>null,spawn:()=>{spawned++;throw Error('Unexpected acquisition')}} as never)
+ try{
+  applyExternalToolsHost(ctx)
+  expect(ctx.tools.schemas().some(v=>v.name==='external_tool_management')).toBe(true)
+  const result=await externalToolManagement(ctx,{action:'acquire',id:'blender'},String(id)) as any
+  expect(result).toMatchObject({status:'existing-software',installationComplete:true,mcpComplete:false,software:{id:'blender',installed:true,version:'Blender test-version',location:binary}})
+  expect(spawned).toBe(0);expect(ctx.jobs.list(id)).toHaveLength(0)
+  const jobId=await startExternalAcquisition(ctx,{id:'blender',sessionId:String(id)})
+  await ctx.jobs.wait((await import('@deepseek-ai/dsh-jobs')).JobId(jobId),3000,id)
+  const receipt=await externalToolManagement(ctx,{action:'status',jobId},String(id)) as any
+  expect(receipt.job).toMatchObject({status:'completed',label:'Blender existing software check'});expect(receipt.installationComplete).toBe(false)
+  expect(JSON.parse(receipt.output.map((v:any)=>v.text).join(''))).toMatchObject({action:'reuse-existing-software',installationComplete:true,location:binary,version:'Blender test-version'});expect(spawned).toBe(0)
+  await expect(externalToolManagement(ctx,{action:'acquire',id:'invented'},String(id))).rejects.toThrow('EXTERNAL_ACQUISITION_UNSUPPORTED')
+  await expect(externalToolManagement(ctx,{action:'inspect'},'missing-session')).rejects.toThrow('SESSION_NOT_LIVE')
+ }finally{if(old===undefined)delete process.env.BLENDER_EXECUTABLE;else process.env.BLENDER_EXECUTABLE=old}
+})
+
+test('默认known MCP保用户namespace和停用条目，不重新配置或启用',async()=>{
+ const {associateInstalledKnownMcp}=await import('../src/external-tools-host.ts')
+ const rows=[{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-desktop',command:'/user/bin/computer-use-linux'}}},{disabled:true,options:{name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'my-blender',command:'/user/bin/mcp-for-blender'}}}]
+ const ctx={get:(name:string)=>name==='settings'?{writable:true}:name==='configEditor'?{entries:()=>rows}:undefined} as unknown as Context
+ await associateInstalledKnownMcp(ctx,[{kind:'computer-use-linux',command:'/new/computer-use-linux',args:['mcp'],env:{HOME:'/real-user'}},{kind:'blender',command:'/new/mcp-for-blender',args:[],env:{},port:9876}])
+ expect(rows.map(row=>row.options.config.serverName)).toEqual(['my-desktop','my-blender']);expect(rows.every(row=>row.disabled)).toBe(true)
+})
+
+test('已装计算机MCP通过真实原生profile事务追加桌面env，重复关联幂等',async()=>{
+ const {associateInstalledKnownMcp}=await import('../src/external-tools-host.ts')
+ const h=await preferencesFixture()
+ h.ctx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never)
+ await h.ctx.plugin(ToolRuntime)
+ const defaults=[{kind:'computer-use-linux' as const,command:'/missing-test-only/computer-use-linux',args:['mcp'],env:{HOME:'/real-desktop-user',DISPLAY:':7',XDG_STATE_HOME:'/real-desktop-user/.local/state'}}]
+ await associateInstalledKnownMcp(h.ctx,defaults)
+ const before=await readFile(h.profile.patchPath,'utf8')
+ expect(before).not.toContain('mcp__')
+ expect(before).toContain('computer-use-linux')
+ expect(before).toContain('/real-desktop-user')
+ expect(before).toContain('DISPLAY')
+ await associateInstalledKnownMcp(h.ctx,defaults)
+ expect(await readFile(h.profile.patchPath,'utf8')).toBe(before)
 })

@@ -3,8 +3,8 @@
 | 出版信息 | 标记 |
 | --- | --- |
 | 应用发布名称 | 0.1.0α · Linux x64 |
-| 技术版本 / releaseId | `0.1.0-alpha.4` |
-| 文档日期 | 2026-10-03 |
+| 技术版本 / releaseId | `0.1.0-alpha.7` |
+| 文档日期 | 2026-10-09 |
 | 作者团队 | Vorynel Co., Ltd. |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | 版权 | © 2026 Vorynel Co., Ltd. |
@@ -12,7 +12,7 @@
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
 
-本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.4`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.4.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.7`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.7.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
 ## 默认安装
 
@@ -33,6 +33,10 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```sh
 "$HOME/.local/bin/lyapunov"
 ```
+
+Alpha7 默认桌面自动化供给使用固定 `0.7.13+local.atsbus.1` 修复版，并保留显式官方回退；本版支持 Ubuntu 24.04 或更新版本；该固定二进制与 indicator 要求 glibc 2.39 或更新版本，安装器按发行清单提前检查。
+
+Alpha7 supports Ubuntu 24.04 or newer with glibc 2.39 or newer. The default desktop automation runtime is the pinned `0.7.13+local.atsbus.1` variant. The installer checks the release manifest before activation and preserves the previous installation when the host is incompatible. The explicit official fallback uses the same minimum glibc requirement.
 
 需要 Linux `x86_64`、glibc、图形会话、Electron 所需共享库和可用的渲染后端。安装脚本使用系统的 `curl`、`sha256sum`、`tar`、`mktemp`、`getconf` 及常规 shell 工具；应用自带 Node.js 和 Electron，默认 MuJoCo 伴随包自带 Python。无需预先安装系统 Conda、Python、Bun 或配置模型 Key。版本目录使用随包 Node、固定 DSH 及其依赖，MuJoCo 只使用该版本的独立 `.runtime/sim-python`；默认安装不改系统 Python、不依赖 PATH 中的 dsh／python，也不复用宿主开发 venv。用户会话、凭据和数据继续使用产品的稳定数据根。运行时目录与依赖的私有归属、Host 的权限与 bwrap、Chromium 的桌面沙盒各有自己的检查，目录隔离本身不代替内核沙盒验证。
 

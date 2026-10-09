@@ -738,3 +738,36 @@ test('实际web补丁禁首用自动默认工程，只保存chooser公共起点�
     expect(patches.some(row=>typeof row.config==='object'&&row.config!==null&&('cwd'in row.config||'permissionMode'in row.config))).toBe(false)
   }finally{if(savedUndo===undefined)delete process.env.LYAPUNOV_SESSION_UNDO;else process.env.LYAPUNOV_SESSION_UNDO=savedUndo;await rm(box,{recursive:true,force:true})}
 })
+
+test('已装known MCP贡献原生owner，计算机服务捕获父桌面目录且不带模型秘密', async()=>{
+ const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
+ const box=await mkdtemp(join(tmpdir(),'known-mcp-'))
+ try{
+  const launcher=join(box,'.codex/plugins/cache/computer-use-linux/computer-use-linux/0.7.13/bin/computer-use-linux')
+  await mkdir(join(launcher,'..'),{recursive:true});await writeFile(launcher,'#!/bin/sh\nexit 0\n',{mode:0o755})
+  const env={HOME:box,DISPLAY:':8',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus',DEEPSEEK_API_KEY:'must-not-copy'}
+  const rows=installedKnownMcpDefaults(env,'linux')
+  expect(rows.find(row=>row.kind==='computer-use-linux')).toMatchObject({command:join(root,'.runtime/computer-use-linux/bin/computer-use-linux'),args:['mcp'],env:{HOME:box,DISPLAY:':8',XDG_STATE_HOME:join(box,'.local/state')}})
+  expect(JSON.stringify(rows)).not.toContain('must-not-copy')
+  expect(installedKnownMcpDefaults(env,'darwin').some(row=>row.kind==='computer-use-linux')).toBe(false)
+  const shell=runtimePluginInsert({mode:'developer',surface:'web',sceneRoot:box,engine:'none',sdkEnvironment:env}).find(row=>row.id==='lyapunov-shell')!
+  expect(shell.config?.knownMcpDefaults).toEqual(rows)
+ }finally{await rm(box,{recursive:true,force:true})}
+})
+
+
+test('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checksum且明确缺件',async()=>{
+ const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
+ const {ensureComputerUseLinux,computerUseLinuxReady,computerUseLinuxPaths}=await import('./computer-use-linux.ts')
+ const box=await mkdtemp(join(tmpdir(),'known-mcp-fresh-'))
+ try{
+  const env={HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus'}
+  expect(installedKnownMcpDefaults(env,'linux').find(row=>row.kind==='computer-use-linux')).toMatchObject({command:computerUseLinuxPaths().command,env:{HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi'}})
+  expect(computerUseLinuxReady()).toBe(true)
+  expect(installedKnownMcpDefaults({...env,LYAPUNOV_COMPUTER_USE_LINUX_VARIANT:'official'},'linux').find(row=>row.kind==='computer-use-linux')?.command).toBe(computerUseLinuxPaths(undefined,'official').command)
+  expect(()=>installedKnownMcpDefaults({...env,LYAPUNOV_COMPUTER_USE_LINUX_VARIANT:'unknown'},'linux')).toThrow('COMPUTER_USE_LINUX_VARIANT_INVALID')
+  expect(JSON.parse(await readFile(computerUseLinuxPaths().provenance,'utf8'))).toMatchObject({version:'0.7.13+local.atsbus.1',license:'MIT',assets:expect.arrayContaining([expect.objectContaining({name:'computer-use-linux',sha256:'c0f90d7249dfedfdb19a49fd4460799ae0a7d8f00e6a76bfea73cb4df36c170e'})])})
+  await expect(ensureComputerUseLinux({root:box,env,offline:true})).rejects.toThrow('COMPUTER_USE_LINUX_LOCAL_ARCHIVE_MISSING')
+  await expect(ensureComputerUseLinux({root:box,platform:'darwin'})).rejects.toThrow('COMPUTER_USE_LINUX_PLATFORM_UNSUPPORTED')
+ }finally{await rm(box,{recursive:true,force:true})}
+})
