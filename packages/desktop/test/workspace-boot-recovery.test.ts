@@ -98,3 +98,21 @@ test('第二次正常启动仅聚焦既有窗口中当前可见页，不新建�
  action!();await tick()
  expect(calls).toEqual(['show-window','focus-window','workspace-page'])
 })
+
+test('窗口真实重新激活后恢复可见工作台键盘焦点；隐藏或已卸载页不参与',()=>{
+ const start=desktopMain.indexOf('  created.on("focus",')
+ const end=desktopMain.indexOf('\n',start)
+ expect(start).toBeGreaterThanOrEqual(0)
+ const code=desktopMain.slice(start,end)
+ let current:()=>void=()=>{}
+ let focuses=0
+ const workspace={webContents:{isDestroyed:()=>false,focus:()=>{focuses++}}}
+ const bind=new Function('created','viewAttached','workspaceView',code)
+ const created={on:(name:string,callback:()=>void)=>{expect(name).toBe('focus');current=callback}}
+ bind(created,true,workspace)
+ expect(focuses).toBe(0)
+ current();expect(focuses).toBe(1)
+ bind(created,false,workspace);current()
+ bind(created,true,{webContents:{...workspace.webContents,isDestroyed:()=>true}});current()
+ expect(focuses).toBe(1)
+})

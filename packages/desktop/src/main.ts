@@ -146,6 +146,8 @@ async function ensureWindow(){
   win=created;configure(created);state.manage(created)
   created.on("close",event=>{if(exits.approved)return;event.preventDefault();void exits.request("window")})
   created.on("resize",fitWorkspaceView)
+  // Electron 在窗口重新激活时先聚焦自带账户页；把键盘交还当前可见工作台。
+  created.on("focus",()=>{if(viewAttached&&workspaceView&&!workspaceView.webContents.isDestroyed())workspaceView.webContents.focus()})
   if(process.platform==="win32"){created.on("query-session-end",()=>void exits.request("system"));created.on("session-end",()=>void exits.request("system"))}
   created.on("closed",()=>{if(win===created)win=undefined})
   return created
