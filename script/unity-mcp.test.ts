@@ -50,18 +50,25 @@ function thrownBy(run: () => unknown): string {
   check('unconfigured_does_not_load', result.config === undefined && result.entry === undefined && unityRows.length === 0 && blenderRows.length === 1,
     `清空 ${UNITY_MCP_ENV_NAMES.length} 个 Unity 变量后：unityMcpConfig()=undefined、装配表 ${result.rows.length} 行里 unity 行=0、同表 ${MCP_CLIENT_PLUGIN} 实例=1（Blender 行，未被牵连=${String(blenderRows.length === 1)}）`)
 
-  // 配置 Unity MCP 只动两处：多一条连接器行，scene-kit 行多出 unity 开关（同一份配置既接连接又开 unity_scene_* 工具）。
+  // 显式 Unity 使用连接器和 scene-kit 开关，并从已安装默认列表移除 Unity，避免重复连接。
   const withoutUnity = result.withUnity.filter(row => row.id !== 'lyapunov-unity-mcp')
   const sceneKitConfig = (rows: typeof result.rows) => rows.find(row => row.id === 'lyapunov-scene-kit')?.config as Record<string, unknown> | undefined
   const { unity: unitySwitch, ...sceneKitRest } = sceneKitConfig(withoutUnity) ?? {}
-  const restored = withoutUnity.map(row => row.id === 'lyapunov-scene-kit' ? { ...row, config: sceneKitRest } : row)
+  const shellConfig = (rows: typeof result.rows) => rows.find(row => row.id === 'lyapunov-shell')?.config as { knownMcpDefaults?: Array<{ kind: string }> } | undefined
+  const baselineDefaults = shellConfig(result.rows)?.knownMcpDefaults ?? []
+  const explicitDefaults = shellConfig(result.withUnity)?.knownMcpDefaults ?? []
+  const defaultUnityRemoved = explicitDefaults.every(row => row.kind !== 'unity')
+    && JSON.stringify(explicitDefaults) === JSON.stringify(baselineDefaults.filter(row => row.kind !== 'unity'))
+  const restored = withoutUnity.map(row => row.id === 'lyapunov-scene-kit' ? { ...row, config: sceneKitRest }
+    : row.id === 'lyapunov-shell' ? { ...row, config: { ...row.config as Record<string, unknown>, knownMcpDefaults: baselineDefaults } } : row)
   check('configured_adds_exactly_one_row',
     result.withUnity.length === result.rows.length + 1
     && JSON.stringify(withoutUnity.map(row => row.id)) === JSON.stringify(result.rows.map(row => row.id))
     && JSON.stringify(unitySwitch) === JSON.stringify({ serverName: 'unity' })
     && JSON.stringify(sceneKitRest) === JSON.stringify(sceneKitConfig(result.rows))
+    && defaultUnityRemoved
     && JSON.stringify(restored) === JSON.stringify(result.rows),
-    `同一输入：未配置 ${result.rows.length} 行 → 配置 stdio 后 ${result.withUnity.length} 行（只多 lyapunov-unity-mcp 一行）；scene-kit 行同时拿到 unity={serverName:'unity'}（这一处之外与基线逐字相同=${String(JSON.stringify(sceneKitRest) === JSON.stringify(sceneKitConfig(result.rows)))}）；连接器行与 scene-kit 的 unity 开关都还原后与基线逐字相同=${String(JSON.stringify(restored) === JSON.stringify(result.rows))}`)
+    `同一输入：未配置 ${result.rows.length} 行 → 配置 stdio 后 ${result.withUnity.length} 行（只多 lyapunov-unity-mcp 一行）；scene-kit 行同时拿到 unity={serverName:'unity'}（这一处之外与基线逐字相同=${String(JSON.stringify(sceneKitRest) === JSON.stringify(sceneKitConfig(result.rows)))}）；默认 Unity 已移除且其他默认项原样保留=${String(defaultUnityRemoved)}；连接器、scene-kit 开关及默认 Unity 唯一差异还原后与基线逐字相同=${String(JSON.stringify(restored) === JSON.stringify(result.rows))}`)
 }
 
 // ── 2. 装配行形状：字段对、并**被上游真实 schema 接受** ────────────────────────
