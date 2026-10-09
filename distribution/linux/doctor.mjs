@@ -57,6 +57,12 @@ else{
     desktop={status:missingLibraries.length?'BLOCKED':'AVAILABLE',...(missingLibraries.length?{code:'DESKTOP_LIBRARIES_MISSING'}:{}),electron:manifest.electron,binary:desktopBinary,missingSystemLibraries:missingLibraries}
   }
 }
+// Git is a mandatory workspace runtime tool; a ready desktop/physics probe cannot hide its absence.
+if(!devCheckout){
+ const git=spawnSync('git',['--version'],{encoding:'utf8',timeout:10000}),available=!git.error&&git.status===0&&/^git version \d/.test(String(git.stdout).trim())
+ desktop.runtimeTools={git:{status:available?'AVAILABLE':'BLOCKED',...(available?{version:String(git.stdout).trim()}:{code:'RUNTIME_GIT_UNAVAILABLE',message:'缺少可用 Git 运行工具，请重跑正常安装命令并核对 PATH。 / Git is unavailable; rerun the normal installer and check PATH.'})}}
+ if(!available&&desktop.status==='AVAILABLE'){desktop.status='BLOCKED';desktop.code='RUNTIME_GIT_UNAVAILABLE';desktop.message=desktop.runtimeTools.git.message}
+}
 if(!devCheckout&&desktop.status==='AVAILABLE'){const sandbox=inspectSandbox(root);desktop.sandbox=sandbox;if(sandbox.status!=='AVAILABLE'){desktop.status='BLOCKED';desktop.code=sandbox.code;desktop.message=sandbox.message;desktop.install=sandbox.setupCommand}}
 const providersOk=Object.values(providers).every(value=>value.status==='AVAILABLE')
 const result={status:providersOk&&(devCheckout||desktop.status==='AVAILABLE')?'AVAILABLE':'BLOCKED',node:{version:process.version,executable:process.execPath},desktop,providers,scope:'依赖检查；不代表引擎真实运动、模型推理或正式账户登录成功。'}

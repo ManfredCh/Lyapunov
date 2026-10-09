@@ -66,7 +66,7 @@ function fixture(){
   }
   function withoutDfPath(){
     rmSync(join(storageBin,'df'))
-    for(const command of ['curl','sha256sum','tar','mktemp','getconf','tee','uname','mkdir','cat','rm','rmdir','wc','tr','mv','cp','dirname','readlink','ln','gzip']){
+    for(const command of ['curl','sha256sum','tar','mktemp','getconf','tee','uname','mkdir','cat','rm','rmdir','wc','tr','mv','cp','dirname','readlink','ln','gzip','sed','chmod','git']){
       const executable=Bun.which(command);if(!executable)throw Error(`fixture command missing: ${command}`)
       symlinkSync(executable,join(storageBin,command))
     }
@@ -86,17 +86,18 @@ function fixture(){
     // with public QA words; no password or real sudo is involved.
     put(join(sudoBin,'sudo'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(sudoLog)}\nif [ -t 0 ];then printf '%s' true > ${quote(sudoTty)};else exit 97;fi\n[ "$1" = -p ] || exit 95;shift 2\nprintf '%s' '[sudo] QA authorization: ' > /dev/tty\nIFS= read -r answer < /dev/tty\nif [ "$answer" = qa-retry ];then printf '%s\\n' 'Sorry, try again.' > /dev/tty;printf '%s' '[sudo] QA authorization: ' > /dev/tty;IFS= read -r answer < /dev/tty;fi\n${deny?"printf '%s\\n' 'sudo: QA authorization denied' >&2;exit 41":"[ \"$answer\" = qa-approve ] || exit 42;[ \"$1\" = -- ] || exit 96;shift;exec \"$@\""}\n`,true)
   }
-  function fakeDependencies(options:{legacy?:boolean;deny?:boolean;updateFails?:boolean;installFails?:boolean;changed?:boolean;unknown?:boolean;packageMissing?:boolean}={}){
+  function fakeDependencies(options:{legacy?:boolean;deny?:boolean;updateFails?:boolean;installFails?:boolean;changed?:boolean;unknown?:boolean;packageMissing?:boolean;runtimeGit?:boolean;gitRemainsMissing?:boolean}={}){
     const state=join(root,'dependency-installed'),auth=join(root,'dependency-auth'),aptLog=join(root,'apt.args')
+    const gitInstall=options.runtimeGit&&!options.gitRemainsMissing?`printf %s ${quote("#!/bin/sh\nprintf '%s\\n' 'git version 2.53.0-fixture'\n")} > ${quote(join(sudoBin,'git'))}; chmod 755 ${quote(join(sudoBin,'git'))};`:''
     put(join(sudoBin,'ldd'),`#!/bin/sh\nprintf '%s\\n' "$@" >> ${quote(join(root,'ldd.args'))}\n${options.changed?"printf '%s\\n' 'libasound.so.2 => not found'":options.unknown?"printf '%s\\n' 'libunknown-fixture.so.1 => not found'":"printf '%s\\n' 'libgtk-3.so.0 => not found' 'libasound.so.2 => not found' 'libnss3.so => not found'"}\n`,true)
-    put(join(sudoBin,'apt-cache'),`#!/bin/sh\n[ "$1" = policy ] || exit 96\ncase "$2" in ${options.legacy?'libgtk-3-0|libasound2|libnss3':'libgtk-3-0t64|libasound2t64|libnss3'}) printf '%s\\n' '  Candidate: ${options.packageMissing?'(none)':'1.0-qa'}';; *) printf '%s\\n' '  Candidate: (none)';; esac\n`,true)
-    put(join(sudoBin,'apt-get'),`#!/bin/sh\nprintf '%s\\n' CALL "$@" >> ${quote(aptLog)}\ncase " $* " in *' update '*) ${options.updateFails?'exit 51':'exit 0'};; *' install '*) ${options.installFails?'exit 52':`: > ${quote(state)};exit 0`};; *) exit 53;; esac\n`,true)
+    put(join(sudoBin,'apt-cache'),`#!/bin/sh\n[ "$1" = policy ] || exit 96\ncase "$2" in ${options.runtimeGit?'git|':''}${options.legacy?'libgtk-3-0|libasound2|libnss3':'libgtk-3-0t64|libasound2t64|libnss3'}) printf '%s\\n' '  Candidate: ${options.packageMissing?'(none)':'1.0-qa'}';; *) printf '%s\\n' '  Candidate: (none)';; esac\n`,true)
+    put(join(sudoBin,'apt-get'),`#!/bin/sh\nprintf '%s\\n' CALL "$@" >> ${quote(aptLog)}\ncase " $* " in *' update '*) ${options.updateFails?'exit 51':'exit 0'};; *' install '*) ${options.installFails?'exit 52':`${gitInstall} : > ${quote(state)};exit 0`};; *) exit 53;; esac\n`,true)
     put(join(sudoBin,'sudo'),`#!/bin/sh\nprintf '%s\\n' CALL "$@" >> ${quote(sudoLog)}\n[ -t 0 ] || exit 97\n[ "$1" = -p ] || exit 95;shift 2\nif [ ! -f ${quote(auth)} ];then printf '%s' '[sudo] QA dependency authorization: ' > /dev/tty;IFS= read -r answer < /dev/tty;${options.deny?'exit 41':'[ "$answer" = qa-approve ] || exit 42'}; : > ${quote(auth)};fi\n[ "$1" = -- ] || exit 96;shift;exec "$@"\n`,true)
     return {aptLog}
   }
-  async function runPty(input='qa-approve\n'){
+  async function runPty(input='qa-approve\n',pathTail=process.env.PATH??''){
     const cmd=`cat ${quote(join(source,'install.sh'))} | /bin/sh -s -- --prefix ${quote(prefix)} --bin-dir ${quote(bin)}`
-    const child=Bun.spawn(['script','--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+':'+process.env.PATH},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn([Bun.which('script')!,'--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+(pathTail?':'+pathTail:'')},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
     child.stdin.write(input);child.stdin.end()
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
@@ -119,6 +120,35 @@ function fixture(){
   return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,fakeSpace,withoutDfPath,fakeCurlFailure,dfLog,curlLog,files,ranges,requests,manifests,port:server.port,stop:()=>server.stop(true)}
 }
 describe('公开 POSIX 用户安装入口',()=>{
+  test('无系统Git的普通PTY安装自动准备固定git包并真实重验；准备后仍不可用保current',async()=>{
+    for(const gitRemainsMissing of [false,true]){
+      const f=fixture()
+      try{
+        f.candidate('git-required');const bare=f.withoutDfPath();rmSync(join(bare,'git'));f.fakeSpace();const apt=f.fakeDependencies({runtimeGit:true,gitRemainsMissing})
+        const old=join(f.prefix,'versions/old-git-safe');mkdirSync(old,{recursive:true});symlinkSync('versions/old-git-safe',join(f.prefix,'current'))
+        const result=await f.runPty('qa-approve\n','')
+        expect(readFileSync(apt.aptLog,'utf8')).toContain('git')
+        expect(readFileSync(apt.aptLog,'utf8')).toContain('--no-remove')
+        if(gitRemainsMissing){expect(result.status).toBe(2);expect(result.out).toContain('RUNTIME_GIT_UNAVAILABLE_AFTER_PREPARATION');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/old-git-safe')}
+        else{expect(result.status,result.out+result.err).toBe(0);expect(readlinkSync(join(f.prefix,'current'))).toContain('git-required');expect(readFileSync(join(f.prefix,'versions/git-required/doctor.args'),'utf8')).toContain('doctor mujoco --managed-sdk')}
+      }finally{f.stop()}
+    }
+  })
+  test('实际doctor在无Git时阻断，版本探测通过才报告工具可用，不以桌面或Mu结果冒充',()=>{
+    const root=mkdtempSync(join(tmpdir(),'lya-doctor-git-'));directories.push(root)
+    const commands=join(root,'commands');mkdirSync(commands)
+    put(join(root,'RELEASE.json'),JSON.stringify({product:'Lyapunov',version:'0.1.0',platform:'linux-x64'}))
+    put(join(root,'runtime/electron/lyapunov-desktop'),'#!/bin/sh\nexit 0\n',true)
+    put(join(commands,'ldd'),'#!/bin/sh\nexit 0\n',true)
+    put(join(root,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),'export function resolveSdkPython(){return {python:"/not-used",source:"package-default"}}\n')
+    const doctor=join(root,'distribution/linux/doctor.mjs');mkdirSync(dirname(doctor),{recursive:true});copyFileSync(join(source,'doctor.mjs'),doctor);copyFileSync(join(source,'sandbox.mjs'),join(dirname(doctor),'sandbox.mjs'))
+    const probe=()=>spawnSync(node,[doctor,'desktop'],{encoding:'utf8',env:{...process.env,PATH:commands}})
+    let result=probe(),report=JSON.parse(result.stdout)
+    expect(result.status).toBe(2);expect(report.desktop.code).toBe('RUNTIME_GIT_UNAVAILABLE');expect(report.desktop.runtimeTools.git.status).toBe('BLOCKED')
+    put(join(commands,'git'),'#!/bin/sh\nprintf "%s\\n" "git version 2.53.0-fixture"\n',true)
+    result=probe();report=JSON.parse(result.stdout);expect(report.desktop.runtimeTools.git).toMatchObject({status:'AVAILABLE',version:'git version 2.53.0-fixture'});expect(report.desktop.code).not.toBe('RUNTIME_GIT_UNAVAILABLE')
+  })
+
   test('默认Mu配套 archive、managed doctor/native physics、单入口和空格路径完整通过，重跑不移动runtime',async()=>{
     const f=fixture();try{f.candidate('a08-one');let result=await f.run();expect(result.status,result.err).toBe(0)
       expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/a08-one')

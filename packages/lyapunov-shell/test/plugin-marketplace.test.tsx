@@ -108,7 +108,7 @@ describe('插件市场原生读数的薄投影',()=>{
   }finally{await rm(box,{recursive:true,force:true})}
  })
  test('软件集成复用原生Settings根入口，不替换SDK插件列表或建立registry',()=>{
-  const rows:any[]=[];const ctx={locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context
+  const rows:any[]=[];const ctx={inject:(deps:string[],fn:(ctx:Context)=>void)=>{expect(deps).toEqual(['slots','locale','remote','remote.settings']);fn(ctx)},locale:{bind:()=>()=> 'Scene workbench'},slots:{inject:(name:string,cb:()=>unknown)=>{rows.push({inject:name});return cb()},register:(spec:unknown)=>{rows.push(spec);return ()=>{}}}} as unknown as Context
   applyExternalToolsSettings(ctx)
   expect(rows[0]).toEqual({inject:'settings.section'})
   expect(rows[1]).toMatchObject({name:'settings.section',id:'lyapunov-integrations',order:19})
@@ -177,8 +177,14 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
  if(!built.success)throw new AggregateError(built.logs,'原SDK插件设置组件测试编译失败')
  const javascript=built.outputs.find(row=>row.path.endsWith('.js'))!;await writeFile(join(nativeDir,'native-ui.mjs'),await javascript.text())
  const {SettingsRoot,PluginInventorySettingsTab}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
- const entries:any[]=[{id:'plugins',order:15,label:'Plugin list'}],ctx={locale:{bind:()=>()=> 'Scene workbench'},get:()=>({list:{getSnapshot:()=>({byId:{}})}}),slots:{inject:(_name:string,fn:()=>unknown)=>fn(),register:(entry:any,component:any)=>{entries.push({...entry,label:entry.label(),component});return()=>{}}}} as unknown as Context
- applyExternalToolsSettings(ctx);const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0
+ const entries:any[]=[{id:'plugins',order:15,label:'Plugin list'}],clientCtx=new Context();let documentCalls=0,documentFailure=false
+ const remoteSettings={openSettingsDocument:async()=>{documentCalls++;return documentFailure?{ok:false,error:{message:'Native configuration document open failed'}}:{ok:true}}}
+ clientCtx.provide('locale',{bind:()=>()=> 'Scene workbench'} as never)
+ clientCtx.provide('slots',{inject:(_name:string,fn:()=>unknown)=>fn(),register:(entry:any,component:any)=>{entries.push({...entry,label:entry.label(),component});return()=>{}}} as never)
+ clientCtx.provide('sessions',{list:{getSnapshot:()=>({byId:{}})}} as never)
+ clientCtx.provide('remote',{settings:remoteSettings} as never);clientCtx.provide('remote.settings',remoteSettings as never)
+ await clientCtx.plugin({name:'product-settings-native-context-fixture',inject:['slots','locale','sessions'],apply:applyExternalToolsSettings});await new Promise(r=>setTimeout(r,0))
+ const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0
  const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{applyExternalToolsHost}=await import('../src/external-tools-host.ts'),hostCtx=new Context(),routes=new Map<string,(r:Request)=>Promise<Response>>()
  hostCtx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await hostCtx.plugin((await import('@deepseek-ai/dsh-tools')).default)
  await hostCtx.plugin(NativeJobs);const removeController=hostCtx.jobs.attachController('plugin-download-ui-fixture');const waitForJob=async(count:number)=>{for(let i=0;i<300&&hostCtx.jobs.list().length<count;i++)await new Promise(r=>setTimeout(r,10));if(hostCtx.jobs.list().length<count)throw Error('Native acquisition Job was not created')}
@@ -204,11 +210,14 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
   expect(document.body.textContent).toContain('Native existing plugin')
   await act(async()=>{nav('Software and integrations').click();await new Promise(r=>setTimeout(r,0))})
   const software=document.querySelector<HTMLElement>('[aria-label="Software downloads and installation"]');expect(software).not.toBeNull();expect(software!.closest('details:not([open])')).toBeNull();expect(software!.textContent).toContain('Blender');expect(software!.textContent).toContain('Unity');expect(software!.textContent).toContain('SAM 3D Objects');expect(software!.textContent).toContain('FastGS')
+  const openDocumentButton=[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Open native MCP configuration')!
+  await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(1);expect(document.body.textContent).not.toContain('without inject')
+  documentFailure=true;await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(2);expect(document.body.textContent).toContain('Native configuration document open failed');documentFailure=false
   const blender=software!.querySelector<HTMLElement>('[data-tool-id="blender"]')!;expect(blender).not.toBeNull()
   await act(async()=>{[...blender.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(1)})
   expect(calls.find(row=>row.path.endsWith('/acquire'))?.body).toMatchObject({id:'blender'});expect(modelCalls).toBe(0);const job=hostCtx.jobs.list()[0]!,stateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{await hostCtx.jobs.wait(job.id,3000)});expect(calls.some(row=>row.path.includes('/job?'))).toBe(true);expect(calls.filter(row=>row.path.includes('/state'))).toHaveLength(stateReads);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain(String(job.id));expect(document.body.textContent).toContain('not installed automatically')
   await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Read actual output')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Fixture official page request accepted')
   openerExit=17;const unity=software!.querySelector<HTMLElement>('[data-tool-id="unity"]')!;await act(async()=>{[...unity.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(2)});const failed=hostCtx.jobs.list().find(row=>row.id!==job.id)!;await hostCtx.jobs.wait(failed.id,3000);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Official download page could not be opened (exit 17)');expect(document.body.textContent).not.toContain('官方下载页面未能打开');expect(modelCalls).toBe(0)
   await act(async()=>{nav('Plugin list').click();await new Promise(r=>setTimeout(r,0))});expect(nav('Plugin list').getAttribute('aria-current')).toBe('true');await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Native existing plugin')
- }finally{await act(async()=>root.unmount());removeController();await hostCtx.fiber.dispose();dom.window.close();await rm(nativeDir,{recursive:true,force:true});for(const[key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
+ }finally{await act(async()=>root.unmount());removeController();await hostCtx.fiber.dispose();await clientCtx.fiber.dispose();dom.window.close();await rm(nativeDir,{recursive:true,force:true});for(const[key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
 })

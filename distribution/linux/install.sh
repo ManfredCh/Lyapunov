@@ -382,6 +382,31 @@ DEPENDENCY_GROUPS
   # gate below can authorize it; a remaining library failure stays blocked.
   if run_doctor; then desktop_doctor_ready=true; else log "Desktop dependency preparation finished; checking the normal doctor remedy. Details: $doctor_log"; fi
 }
+# Git is used by normal workspace operations before the first model request.
+# Prepare it through the same bounded OS authorization lane, never SDK edits.
+require_runtime_git() {
+  git_ready() {
+    "$product/runtime/node/bin/node" -e 'const cp=require("node:child_process"),r=cp.spawnSync("git",["--version"],{encoding:"utf8",timeout:10000});process.exit(!r.error&&r.status===0&&/^git version \d/.test(String(r.stdout).trim())?0:2)' >/dev/null 2>&1
+  }
+  if git_ready; then return 0; fi
+  stage=runtime-git
+  log 'Preparing the required Git runtime tool. / 准备必需的 Git 运行工具。'
+  "$product/runtime/node/bin/node" -e 'const f=require("node:fs"),os=f.readFileSync("/etc/os-release","utf8"),id=/^ID=(?:"([a-z0-9_-]+)"|([a-z0-9_-]+))\s*$/m.exec(os);process.exit(["ubuntu","debian"].includes(id?.[1]??id?.[2])?0:2)' || fail 'RUNTIME_GIT_OS_UNSUPPORTED: install Git through your OS package manager and rerun the installer. / 请通过系统包管理器安装 Git 后重跑安装命令。'
+  ( : </dev/tty ) 2>/dev/null || fail 'RUNTIME_GIT_TERMINAL_REQUIRED: rerun in a normal interactive terminal for OS authorization. / 请在普通交互终端重跑并完成系统授权。'
+  for tool in sudo apt-get apt-cache; do command -v "$tool" >/dev/null 2>&1 || fail "RUNTIME_GIT_COMMAND_MISSING: $tool"; done
+  git_log="$product/.install/runtime-git.log"
+  if sudo -p 'Lyapunov Git runtime authorization, password for %u: ' -- apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update < /dev/tty > "$git_log" 2>&1; then :; else
+    fail "RUNTIME_GIT_UPDATE_FAILED: OS authorization or metadata download failed. / 系统授权或软件包元数据下载失败。 Details: $git_log"
+  fi
+  git_candidate=$(LC_ALL=C apt-cache policy git 2>/dev/null | sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p')
+  case "$git_candidate" in ''|'(none)') fail "RUNTIME_GIT_PACKAGE_UNAVAILABLE: git. Details: $git_log" ;; esac
+  if sudo -p 'Lyapunov Git runtime authorization, password for %u: ' -- apt-get -o Acquire::Retries=3 install --yes --no-install-recommends --no-upgrade --no-remove git < /dev/tty >> "$git_log" 2>&1; then :; else
+    fail "RUNTIME_GIT_INSTALL_FAILED: Git was not installed. / Git 未安装成功。 Details: $git_log"
+  fi
+  git_ready || fail "RUNTIME_GIT_UNAVAILABLE_AFTER_PREPARATION: check the normal terminal PATH and rerun. / 请检查普通终端 PATH 后重跑。 Details: $git_log"
+  stage=doctor
+}
+require_runtime_git
 if run_doctor; then :; else
   prepare_desktop_libraries
   if [ "$desktop_doctor_ready" = true ]; then :; else
