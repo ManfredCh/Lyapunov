@@ -155,7 +155,7 @@ async function showAccount(){
   detachWorkspaceView()
   const target=await ensureWindow()
   if(target.webContents.getURL()!==accountURL)await target.loadFile(renderer)
-  target.show();target.focus()
+  target.show();target.focus();target.webContents.focus()
 }
 async function openWorkspace(account?:Parameters<typeof startWebHost>[0]["account"],signal?:AbortSignal,requestedMode:"formal"|"developer"|"guest"=mode){
   await owner.switch(async()=>{
@@ -172,7 +172,8 @@ async function openWorkspace(account?:Parameters<typeof startWebHost>[0]["accoun
     let disposing=false
     const dispose=async()=>{disposing=true;await started.stop();if(host===started){host=undefined;disposeWorkspaceView()}}
     const abort=()=>{void dispose()};signal?.addEventListener("abort",abort,{once:true})
-    try{signal?.throwIfAborted();await contents.loadURL(started.url);signal?.throwIfAborted()}catch(error){await dispose();throw error}
+    // 异步装载只交接当前已聚焦窗口的可见页；不从其它应用夺取焦点。
+    try{signal?.throwIfAborted();await contents.loadURL(started.url);signal?.throwIfAborted();if(viewAttached&&workspaceView?.webContents===contents&&target.isFocused())contents.focus()}catch(error){await dispose();throw error}
     void started.exited.then(async()=>{
       if(disposing||quitting||host!==started)return
       recovering=true
@@ -256,7 +257,7 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
     if(next!==previous){for(const contents of [win?.webContents,workspaceView?.webContents])if(contents&&!contents.isDestroyed())contents.send("lyapunov:locale-changed",next);syncWindowTitle();syncApplicationMenu()}
   })
   handle("login",()=>{void requireController().login()});handle("cancel-login",()=>requireController().cancelLogin());handle("logout",()=>requireController().logout());handle("restore",()=>requireController().restore());handle("switch-account",async()=>{await requireController().logout();void requireController().login()});handle("refresh",()=>requireController().refresh());handle("commerce",()=>requireController().commerce());handle("create-order",(plan,provider)=>{if(typeof plan!=="string"||!['alipay','wechat'].includes(provider))throw new Error("无效订单参数");return requireController().createOrder(plan,provider)})
-  handle("workspace",async()=>{if(host){const target=await ensureWindow();attachWorkspaceView();target.show();target.focus()}else throw new Error("工作台未启动")})
+  handle("workspace",async()=>{if(host){const target=await ensureWindow();attachWorkspaceView();target.show();target.focus();workspaceView?.webContents.focus()}else throw new Error("工作台未启动")})
   handle("show-account",()=>showAccount())
   handle('return-to-login',async()=>{await requireController().returnToLogin();await showAccount()})
   handle('retry-workspace',async()=>{
@@ -271,7 +272,7 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
   handle("install-update",async()=>{if(!app.isPackaged||!readRuntimeEnv(process.env,"updateUrl"))throw new Error("更新源未配置");if(!downloaded){await autoUpdater.downloadUpdate();downloaded=true}await exits.request("update")})
   // macOS 菜单位于系统顶栏；Linux／Windows 不再占用窗口内一行，快捷键由本窗口保留。
   syncApplicationMenu()
-  app.on("second-instance",()=>{void ensureWindow().then(target=>{target.show();target.focus()})})
+  app.on("second-instance",()=>{void ensureWindow().then(target=>{target.show();target.focus();(viewAttached?workspaceView?.webContents:target.webContents)?.focus()})})
   app.on("activate",()=>{if(!win){if(mode==="formal")void (async()=>{await showAccount();await controller!.restore()})();else void openWorkspace()}})
   app.on("window-all-closed",()=>{if(process.platform!=="darwin"&&!recovering)app.quit()})
   app.on("before-quit",event=>{if(exits.approved)return;event.preventDefault();void exits.request("app")})
