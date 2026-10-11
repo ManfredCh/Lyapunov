@@ -2069,7 +2069,8 @@
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "sim-newton「支持面真相」用例（DEV-008／W5 反查，2026-09-27 收口批补全实测）：把 `CAPABILITIES.supported` 里 **12 个声明为 true 的键逐个配上另一条路径的真机读数**（不是第二份自报），并对三处被真机推翻的 README/worker 注释措辞加守卫；另有一条完整性断言（`supported` 里出现本文件没有真机读数的键 ⇒ 红）。**2026-09-27 收口批复跑实测 8 pass / 0 fail / 45 expect**（本机 `.runtime/newton-env/bin/python` 在盘 ⇒ 引擎面真跑了，**无 skip**；文件头自述：引擎面缺环境即整体 skip、文档面只读文件不 skip）。"
+      "reason": "sim-newton「支持面真相」用例（DEV-008／W5 反查，2026-09-27 收口批补全实测）：把 `CAPABILITIES.supported` 里 **12 个声明为 true 的键逐个配上另一条路径的真机读数**（不是第二份自报），并对三处被真机推翻的 README/worker 注释措辞加守卫；另有一条完整性断言（`supported` 里出现本文件没有真机读数的键 ⇒ 红）。**2026-09-27 收口批复跑实测 8 pass / 0 fail / 45 expect**（本机 `.runtime/newton-env/bin/python` 在盘 ⇒ 引擎面真跑了，**无 skip**；文件头自述：引擎面缺环境即整体 skip、文档面只读文件不 skip）。 2026-10-12：per-entry 超时：保原六CPUcase加原生MPM与相机真实组合；本文件 timeoutMs=300000。此前默认 120000ms 在真实 CPU 组合进度中被 SIGKILL，失败回执保留；只放宽本条等待上限，断言、include 分类与全局 120000ms 保持，超时仍记失败。",
+      "timeoutMs": 300000
     },
     {
       "path": "packages/sim-newton/test/warp-cache-dir.test.ts",
