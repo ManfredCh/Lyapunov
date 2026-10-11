@@ -7,8 +7,11 @@
  *
  * 事件表按真机日志的形状构造（不是伪造 id：只保留判定用得到的 type/seq）。
  */
-import { describe, expect, test } from 'bun:test'
-import { stableHistoryBoundary } from '../src/controller.ts'
+import { describe, expect, spyOn, test } from 'bun:test'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+import { SessionUndoController, stableHistoryBoundary } from '../src/controller.ts'
 
 type Event = { type: string; seq: number }
 const events = (...pairs: [number, string][]): Event[] => pairs.map(([seq, type]) => ({ seq, type }))
@@ -56,4 +59,27 @@ describe('stableHistoryBoundary：把撤销目标退到原生接受的位置', (
     stableHistoryBoundary(liveFailureTail, 200)
     expect(JSON.stringify(liveFailureTail)).toBe(snapshot)
   })
+})
+
+test('preStep捕获取消且未形成before时，turnStopping不重开捕获或发布ready/checkpoint', async () => {
+  const abort = new AbortController(), recorded: SessionEvent[] = []
+  let captures = 0, flushes = 0
+  const session = { snapshotEvents: () => recorded,
+    append(type: string, data: unknown) { const event = { type, seq: recorded.length, time: Date.now(), data } as SessionEvent; recorded.push(event); return event } }
+  const agent = { id: 'owned-cancelled-session', session } as unknown as Agent
+  const ctx = { sessions: { async flush() { flushes++ } } } as unknown as Context
+  const controller = new SessionUndoController(ctx, { dataRoot: '/unused-controller-fixture' })
+  const store = { async captureReported(onPreparing: () => Promise<void>, signal: AbortSignal) {
+    captures++; await onPreparing(); abort.abort(new Error('owned pre-step cancelled')); signal.throwIfAborted()
+  } }
+  const storage = spyOn(controller as any, 'storage').mockResolvedValue({ cwd: '/owned', mode: 'git', store })
+  try {
+    await expect(controller.beforeStep(agent, 1, 1, [{ source: { kind: 'user' } }] as UserMessage[], abort.signal)).rejects.toThrow('owned pre-step cancelled')
+    await controller.turnStopping(agent, abort.signal)
+    expect(captures).toBe(1)
+    expect(storage).toHaveBeenCalledTimes(1)
+    expect(flushes).toBe(1)
+    expect(recorded.map(event => event.type)).toEqual(['worktree/capture'])
+    expect((recorded[0]!.data as { phase: string }).phase).toBe('preparing')
+  } finally { storage.mockRestore() }
 })

@@ -6,11 +6,11 @@
 
 本地终端和远端终端支持 `:undo`、`:redo` 和 `:undo_status`；斜杠形式进入相同原生 Commands。撤销后的文字及附件恢复为待确认草稿，只有用户再次发送才进入模型。未发送草稿仍是当前客户端状态。非 Git 目录只提供会话历史撤销，结果通过 `files.mode=not-git` 明示没有 Git 文件恢复；Git 旧输入缺少快照时拒绝承诺完整撤销。
 
-`openWorktreeSnapshots({ cwd, storageRoot, excludedRoots? })` 仅支持真实 Git 工作树；非 Git 目录返回 `{ supported: false, reason: 'NOT_GIT_WORKTREE' }`，不会创建快照目录或假报成功。`storageRoot` 必须是该工作树专用的 DSH 私有目录，不能位于用户 Git 元数据目录。私有 Git 对象库及每次独立索引位于其中，组件不修改用户 `.git/index`、HEAD 或提交。私有目录位于工作树内时自动排除。`excludedRoots` 只由可信产品装配登记明确的绝对运行目录，打开 store 时按同一规范路径规则解析；不得包含 Git 根或当前工作目录。正式装配排除 `private/config`、`private/data`、`private/cache`、`private/state`、`private/tmp`、`dsh` 与 `worktree-history`。捕获、差集、恢复及旧 journal 应用共用排除判据，其他同名目录、`private` 根的普通项目文件与用户 worlds/assets/robots/captures/recordings 保持覆盖。这样 Git 根内临时索引正常删除不会成为用户快照的读取失败。
+`openWorktreeSnapshots({ cwd, storageRoot, excludedRoots?, signal? })` 仅支持真实 Git 工作树；非 Git 目录返回 `{ supported: false, reason: 'NOT_GIT_WORKTREE' }`，不会创建快照目录或假报成功。`storageRoot` 必须是该工作树专用的 DSH 私有目录，不能位于用户 Git 元数据目录。私有 Git 对象库及每次独立索引位于其中，组件不修改用户 `.git/index`、HEAD 或提交。私有目录位于工作树内时自动排除。`excludedRoots` 只由可信产品装配登记明确的绝对运行目录，打开 store 时按同一规范路径规则解析；不得包含 Git 根或当前工作目录。正式装配排除 `private/config`、`private/data`、`private/cache`、`private/state`、`private/tmp`、`dsh` 与 `worktree-history`。捕获、差集、恢复及旧 journal 应用共用排除判据，其他同名目录、`private` 根的普通项目文件与用户 worlds/assets/robots/captures/recordings 在所选工作区内保持覆盖。这样 Git 根内临时索引正常删除不会成为用户快照的读取失败。
 
-会话从 Git 子目录启动时，也按该 Git 工作树完整的变化路径恢复，包括工具实际修改的同仓库其他目录文件；不静默丢弃这些路径。
+会话从 Git 子目录启动时，规范化的所选 `cwd` 就是捕获与恢复作用域。源 Git 从此目录列举文件，父目录与兄弟目录的内容不进入本会话文件撤销；根目录工作区仍覆盖整个 Git 工作树。快照引用保留原 Git 顶层 `worktree` 身份与私有对象库，旧快照的差集和旧 journal 恢复也限制在当前作用域内。工作区根和所选子目录的 `.lyapunov/sessions/**` 都属于会话运行态，继续排除。
 
-`capture()` 按当前 Git 忽略规则捕获整个工作树，返回可持久化的 `{ version: 1, worktree, tree }`。`tree` 是私有 Git 对象树；持久引用依赖该私有对象库，不能只保存引用后删除库。文本保持原字节，二进制、文件增删、可执行位和符号链接都由 Git 条目保存；空目录不是 Git 快照对象。`diff(before, after)` 返回精确变化叶路径，重命名表现为删除与新增。所有 Git 调用使用 argv，路径流使用 NUL 分隔。
+`capture(signal?)` 按当前 Git 忽略规则捕获所选作用域，返回可持久化的 `{ version: 1, worktree, tree }`。`captureReported(onPreparing?, signal?)` 额外返回本次统计。标准 `AbortSignal` 传递到捕获中的 Git 子进程与文件读取；中途取消先等待自有 Git 退出再清理索引与操作锁，不发布成功缓存、ready 或 before checkpoint。准备阶段尚无 before checkpoint 时，turnStopping 不再重开捕获；按 cwd 共享的 store 初始化不继承单个会话信号。`tree` 是私有 Git 对象树；持久引用依赖该私有对象库，不能只保存引用后删除库。文本保持原字节，二进制、文件增删、可执行位和符号链接都由 Git 条目保存；空目录不是 Git 快照对象。`diff(before, after)` 返回精确变化叶路径，重命名表现为删除与新增。所有 Git 调用使用 argv，路径流使用 NUL 分隔。
 
 `beginRestore({ operationId, sessionId, target, paths })` 只恢复 `paths`，通常传入 `diff` 的结果。它先保存当前相关文件与必要目录元数据，将文件事务 journal 持久化，再应用目标。目录/文件互换若会删除不在指定路径集中的文件，将在修改前拒绝。恢复失败尝试回滚；若回滚也失败，原文件对象和 journal 保留并抛出错误，不能把该操作算作成功。
 

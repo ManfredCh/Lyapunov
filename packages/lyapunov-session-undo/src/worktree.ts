@@ -7,7 +7,7 @@ import { canonicalTargetPath, SESSION_PRIVATE_PARENT } from '../../lyapunov-cont
 export interface SnapshotRef { version: 1; worktree: string; tree: string }
 export interface CaptureReport {
   version: 1
-  /** 没有可用增量状态、必须读取整棵工作树的基线快照。 */
+  /** 没有可用增量状态、必须读取所选作用域的基线快照。 */
   full: boolean
   /** 本次快照包含的叶路径数。 */
   files: number
@@ -68,14 +68,23 @@ const absent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as Node
  */
 const isSessionRuntime = (path: string): boolean => path === SESSION_PRIVATE_PARENT || path.startsWith(SESSION_PRIVATE_PARENT + '/')
 
-async function git(cwd: string, args: string[], input?: Buffer, extraEnv: Record<string, string> = {}, accepted = [0]): Promise<Buffer> {
+async function git(cwd: string, args: string[], input?: Buffer, extraEnv: Record<string, string> = {}, accepted = [0], signal?: AbortSignal): Promise<Buffer> {
+  signal?.throwIfAborted()
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')))
   return new Promise((done, fail) => {
-    const child = spawn('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, env: { ...env, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, env: { ...env, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'], signal })
     const output: Buffer[] = [], errors: Buffer[] = []
+    let failure: Error | undefined
     child.stdout.on('data', chunk => output.push(chunk)); child.stderr.on('data', chunk => errors.push(chunk))
-    child.once('error', fail); child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') fail(error) })
-    child.once('close', code => accepted.includes(code ?? -1) ? done(Buffer.concat(output)) : fail(new Error('Git 快照命令失败：' + args[0] + '\n' + Buffer.concat(errors).toString())))
+    // 标准signal终止自有Git后仍等close，操作锁不能先于子进程释放。
+    child.once('error', error => { failure = error })
+    child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') { failure = error; child.kill() } })
+    child.once('close', code => {
+      if (signal?.aborted) fail(signal.reason)
+      else if (failure) fail(failure)
+      else if (accepted.includes(code ?? -1)) done(Buffer.concat(output))
+      else fail(new Error('Git 快照命令失败：' + args[0] + '\n' + Buffer.concat(errors).toString()))
+    })
     child.stdin.end(input)
   })
 }
@@ -83,22 +92,28 @@ const nulPaths = (paths: readonly string[]) => Buffer.from(paths.length ? paths.
 const splitNul = (data: Buffer) => data.toString().split('\0').filter(Boolean)
 
 async function syncDirectory(path: string): Promise<void> { const file = await open(path, 'r'); try { await file.sync() } finally { await file.close() } }
-async function atomicJson(path: string, value: unknown): Promise<void> {
+async function atomicJson(path: string, value: unknown, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   const temporary = path + '.' + randomUUID() + '.tmp', file = await open(temporary, 'wx', 0o600)
-  try { await file.writeFile(JSON.stringify(value) + '\n'); await file.sync() } finally { await file.close() }
-  await rename(temporary, path); await syncDirectory(dirname(path))
+  try {
+    try { await file.writeFile(JSON.stringify(value) + '\n', { signal }); await file.sync() } finally { await file.close() }
+    signal?.throwIfAborted()
+    await rename(temporary, path); await syncDirectory(dirname(path))
+  } finally { await unlink(temporary).catch(error => { if (!absent(error)) throw error }) }
 }
 
 /** 仅打开真实 Git 工作树；storageRoot 是这个工作树专用的 DSH 私有目录。 */
-export async function openWorktreeSnapshots(options: { cwd: string; storageRoot: string; excludedRoots?: readonly string[] }): Promise<
+export async function openWorktreeSnapshots(options: { cwd: string; storageRoot: string; excludedRoots?: readonly string[]; signal?: AbortSignal }): Promise<
   { supported: false; reason: 'NOT_GIT_WORKTREE' } | { supported: true; store: WorktreeSnapshots }
 > {
+  const signal = options.signal
+  signal?.throwIfAborted()
   const cwd = await realpath(options.cwd)
-  const inside = await git(cwd, ['rev-parse', '--is-inside-work-tree'], undefined, {}, [0, 128])
+  const inside = await git(cwd, ['rev-parse', '--is-inside-work-tree'], undefined, {}, [0, 128], signal)
   if (inside.toString().trim() !== 'true') return { supported: false, reason: 'NOT_GIT_WORKTREE' }
-  const worktree = await realpath((await git(cwd, ['rev-parse', '--show-toplevel'])).toString().replace(/\n$/, ''))
-  const sourceGit = await realpath((await git(cwd, ['rev-parse', '--absolute-git-dir'])).toString().replace(/\n$/, ''))
-  const sourceCommon = await realpath((await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).toString().replace(/\n$/, ''))
+  const worktree = await realpath((await git(cwd, ['rev-parse', '--show-toplevel'], undefined, {}, [0], signal)).toString().replace(/\n$/, ''))
+  const sourceGit = await realpath((await git(cwd, ['rev-parse', '--absolute-git-dir'], undefined, {}, [0], signal)).toString().replace(/\n$/, ''))
+  const sourceCommon = await realpath((await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'], undefined, {}, [0], signal)).toString().replace(/\n$/, ''))
   // 装配方仅登记明确的非用户运行目录；不存在的末端使用产品共用的规范路径规则。
   const excludedRoots = [...new Set((options.excludedRoots ?? []).map(root => {
     if (!isAbsolute(root)) throw new Error('排除运行目录必须是绝对路径')
@@ -108,11 +123,12 @@ export async function openWorktreeSnapshots(options: { cwd: string; storageRoot:
   }))]
   const requested = resolve(options.storageRoot)
   if (requested === worktree || isWithin(sourceGit, requested) || isWithin(sourceCommon, requested)) throw new Error('快照目录不能是工作树本身或用户 Git 目录')
+  signal?.throwIfAborted()
   await mkdir(requested, { recursive: true, mode: 0o700 })
   const storageRoot = await realpath(requested)
   if (storageRoot === worktree || isWithin(sourceGit, storageRoot) || isWithin(sourceCommon, storageRoot)) throw new Error('快照目录不能指向工作树本身或用户 Git 目录')
-  const store = new WorktreeSnapshots(worktree, storageRoot, excludedRoots)
-  await store.initialize()
+  const store = new WorktreeSnapshots(worktree, storageRoot, excludedRoots, cwd)
+  await store.initialize(signal)
   return { supported: true, store }
 }
 
@@ -122,26 +138,33 @@ export class WorktreeSnapshots {
   private readonly journals: string
   readonly worktree: string
   readonly storageRoot: string
-  constructor(worktree: string, storageRoot: string, private readonly excludedRoots: readonly string[] = []) {
+  constructor(worktree: string, storageRoot: string, private readonly excludedRoots: readonly string[] = [], readonly scope = worktree) {
     this.worktree = worktree; this.storageRoot = storageRoot
+    if (!isWithin(worktree, scope)) throw new Error('所选快照目录必须位于原Git工作树内 / Snapshot scope must be inside its original Git worktree')
     this.objects = join(storageRoot, 'git'); this.journals = join(storageRoot, 'journals')
   }
   /** 产品运行目录与会话私有目录不属于用户文件撤销域。 */
   private excludes(path: string): boolean {
-    return isSessionRuntime(path) || this.excludedRoots.some(root => isWithin(root, join(this.worktree, path)))
+    const target = join(this.worktree, path), scoped = relative(this.scope, target).split(sep).join('/')
+    return !isWithin(this.scope, target) || isSessionRuntime(path) || isSessionRuntime(scoped) || this.excludedRoots.some(root => isWithin(root, target))
   }
-  async initialize(): Promise<void> {
+  async initialize(signal?: AbortSignal): Promise<void> {
     await this.exclusive(async () => {
       const identity = join(this.storageRoot, 'worktree.json')
-      try { if (JSON.parse(await readFile(identity, 'utf8')).worktree !== this.worktree) throw new Error('快照目录属于另一个工作树') }
-      catch (error) { if (!absent(error)) throw error; await atomicJson(identity, { version: 1, worktree: this.worktree }) }
+      try { if (JSON.parse(await readFile(identity, { encoding: 'utf8', signal })).worktree !== this.worktree) throw new Error('快照目录属于另一个工作树') }
+      catch (error) { if (!absent(error)) throw error; await atomicJson(identity, { version: 1, worktree: this.worktree }, signal) }
       await mkdir(this.journals, { recursive: true, mode: 0o700 })
-      try { await lstat(join(this.objects, 'HEAD')) } catch (error) { if (!absent(error)) throw error; await git(this.storageRoot, ['init', '--bare', this.objects]) }
-    })
+      signal?.throwIfAborted()
+      try { await lstat(join(this.objects, 'HEAD')) } catch (error) { if (!absent(error)) throw error; await git(this.storageRoot, ['init', '--bare', this.objects], undefined, {}, [0], signal) }
+    }, signal)
   }
-  private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
+  private async exclusive<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
     const previous = queues.get(this.storageRoot) ?? Promise.resolve()
+    let started = false
     const pending = previous.catch(() => {}).then(async () => {
+      started = true
+      signal?.throwIfAborted()
       const path = join(this.storageRoot, 'operation.lock')
       try { await symlink(String(process.pid), path) }
       catch (error) {
@@ -153,14 +176,23 @@ export class WorktreeSnapshots {
         if (alive) throw new Error('WORKTREE_BUSY: 另一个进程正在操作快照')
         await unlink(path); await symlink(String(process.pid), path)
       }
-      try { return await operation() }
+      try { signal?.throwIfAborted(); return await operation() }
       finally { await unlink(path) }
     })
     queues.set(this.storageRoot, pending)
-    try { return await pending } finally { if (queues.get(this.storageRoot) === pending) queues.delete(this.storageRoot) }
+    const cleanup = () => { if (queues.get(this.storageRoot) === pending) queues.delete(this.storageRoot) }
+    void pending.then(cleanup, cleanup)
+    if (!signal) return pending
+    return new Promise<T>((done, fail) => {
+      // 排队取消无需等别人完成；已经开始的操作由原signal结束并清理自身资源。
+      const abort = () => { if (!started) fail(signal.reason) }
+      signal.addEventListener('abort', abort, { once: true })
+      void pending.then(done, fail).finally(() => signal.removeEventListener('abort', abort))
+      if (signal.aborted) abort()
+    })
   }
-  private privateGit(args: string[], input?: Buffer, env?: Record<string, string>, accepted?: number[]): Promise<Buffer> {
-    return git(this.worktree, ['--git-dir=' + this.objects, '--work-tree=' + this.worktree, ...args], input, env, accepted)
+  private privateGit(args: string[], input?: Buffer, env?: Record<string, string>, accepted?: number[], signal?: AbortSignal): Promise<Buffer> {
+    return git(this.worktree, ['--git-dir=' + this.objects, '--work-tree=' + this.worktree, ...args], input, env, accepted, signal)
   }
   private checkedPath(path: string): string {
     if (!path || isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..' || part === '.git') || path.includes('\0')) throw new Error('无效的快照相对路径：' + path)
@@ -198,24 +230,27 @@ export class WorktreeSnapshots {
       return this.ref((await this.privateGit(['write-tree'], undefined, env)).toString().trim())
     } finally { await unlink(index).catch(error => { if (!absent(error)) throw error }) }
   }
-  /** 捕获整个工作树的 Git 可见文件；遵循忽略规则，不修改用户索引或 HEAD。 */
-  async capture(): Promise<SnapshotRef> { return (await this.captureReported()).ref }
-  /** 与capture同一实现；额外返回本次增量统计，并在需要整树基线读取前通知调用方。 */
-  captureReported(onPreparing?: () => Promise<void>): Promise<CaptureResult> {
+  /** 捕获所选cwd的 Git 可见文件；引用仍保留原Git顶层身份，不修改用户索引或HEAD。 */
+  async capture(signal?: AbortSignal): Promise<SnapshotRef> { return (await this.captureReported(undefined, signal)).ref }
+  /** 与capture同一实现；额外返回本次增量统计，并在需要作用域基线读取前通知调用方。 */
+  captureReported(onPreparing?: () => Promise<void>, signal?: AbortSignal): Promise<CaptureResult> {
     return this.exclusive(async () => {
       const started = process.hrtime.bigint()
       const observedAtNs = BigInt(Date.now()) * 1000000n
-      const previous = await this.captureState()
+      const previous = await this.captureState(signal)
       if (!previous) await onPreparing?.()
+      signal?.throwIfAborted()
       // 尾随斜杠是git对“不递归的未跟踪目录”（如嵌套仓库）的整体标记，不是可快照叶路径；其内容git也不会逐个列出。
       // 忽略规则已由--exclude-standard施加在未跟踪文件上，且忽略规则从不作用于已跟踪文件；
       // 曾用check-ignore --no-index复核会误删已跟踪的*.log等文件，并让每步空转约0.5秒。
-      const candidates = [...new Set(splitNul(await git(this.worktree, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])))].filter(path => !path.endsWith('/') && !path.split('/').includes('.git') && !isWithin(this.storageRoot, join(this.worktree, path)) && !this.excludes(path))
+      // 源Git先在选定cwd列举；--full-name保留原顶层相对路径，以兼容旧SnapshotRef/tree/journal。
+      const candidates = [...new Set(splitNul(await git(this.scope, ['ls-files', '--cached', '--others', '--exclude-standard', '--full-name', '-z', '--', '.'], undefined, {}, [0], signal)))].filter(path => !path.endsWith('/') && !path.split('/').includes('.git') && !isWithin(this.storageRoot, join(this.worktree, path)) && !this.excludes(path))
       const directories = new Map<string, boolean>(), entries = new Map<string, CaptureEntry>(), unhashed = new Map<string, { mode: Entry['mode']; size: string; mtimeNs: string; ctimeNs: string; ino: string; link: boolean }>()
       let reused = 0, bytesRead = 0
       for (const path of candidates) {
+        signal?.throwIfAborted()
         this.checkedPath(path)
-        const info = await this.captureInfo(path, directories)
+        const info = await this.captureInfo(path, directories, signal)
         if (!info || info.isDirectory()) continue
         if (!info.isFile() && !info.isSymbolicLink()) throw new Error('快照不支持特殊文件：' + path)
         const mode: Entry['mode'] = info.isSymbolicLink() ? '120000' : info.mode & 0o111n ? '100755' : '100644'
@@ -227,40 +262,42 @@ export class WorktreeSnapshots {
       }
       if (unhashed.size) {
         for (const file of unhashed.values()) bytesRead += Number(file.size)
-        for (const [path, oid] of await this.hashEntries(unhashed)) {
+        for (const [path, oid] of await this.hashEntries(unhashed, signal)) {
           const file = unhashed.get(path)!
           entries.set(path, { mode: file.mode, oid, size: file.size, mtimeNs: file.mtimeNs, ctimeNs: file.ctimeNs, ino: file.ino })
         }
       }
       const untouched = previous !== undefined && unhashed.size === 0 && entries.size === Object.keys(previous.entries).length
+      signal?.throwIfAborted()
       let tree = previous ? previous.tree : ''
       if (!untouched) {
         const index = join(this.storageRoot, 'index-' + randomUUID()), lines = [...entries].map(([path, entry]) => entry.mode + ' ' + entry.oid + '\t' + path)
         const env = { GIT_INDEX_FILE: index }
         try {
-          await this.privateGit(['read-tree', '--empty'], undefined, env)
-          if (lines.length) await this.privateGit(['update-index', '-z', '--index-info'], nulPaths(lines), env)
-          tree = (await this.privateGit(['write-tree'], undefined, env)).toString().trim()
+          await this.privateGit(['read-tree', '--empty'], undefined, env, [0], signal)
+          if (lines.length) await this.privateGit(['update-index', '-z', '--index-info'], nulPaths(lines), env, [0], signal)
+          tree = (await this.privateGit(['write-tree'], undefined, env, [0], signal)).toString().trim()
         } finally { await unlink(index).catch(error => { if (!absent(error)) throw error }) }
-        await atomicJson(join(this.storageRoot, 'capture.json'), { version: 1, observedAtNs: observedAtNs.toString(), tree, entries: Object.fromEntries(entries) } satisfies CaptureState)
+        await atomicJson(join(this.storageRoot, 'capture.json'), { version: 1, observedAtNs: observedAtNs.toString(), tree, entries: Object.fromEntries(entries) } satisfies CaptureState, signal)
       }
       return { ref: this.ref(tree), report: { version: 1, full: previous === undefined, files: entries.size, hashed: unhashed.size, reused, bytesRead, ms: Number(process.hrtime.bigint() - started) / 1e6 } }
-    })
+    }, signal)
   }
   /** 增量状态只记录“上次捕捉观察到什么”，不是历史事实；缺失或对象已不在时退化为整树重读。 */
-  private async captureState(): Promise<CaptureState | undefined> {
+  private async captureState(signal?: AbortSignal): Promise<CaptureState | undefined> {
     let state: CaptureState
-    try { state = JSON.parse(await readFile(join(this.storageRoot, 'capture.json'), 'utf8')) as CaptureState }
+    try { state = JSON.parse(await readFile(join(this.storageRoot, 'capture.json'), { encoding: 'utf8', signal })) as CaptureState }
     catch (error) { if (absent(error) || error instanceof SyntaxError) return undefined; throw error }
     if (state?.version !== 1 || !/^[a-f0-9]{40,64}$/.test(state.tree ?? '') || typeof state.observedAtNs !== 'string' || typeof state.entries !== 'object' || state.entries === null) return undefined
-    const kind = await this.privateGit(['cat-file', '-t', state.tree], undefined, {}, [0, 128]).then(output => output.toString().trim(), () => '')
+    const kind = await this.privateGit(['cat-file', '-t', state.tree], undefined, {}, [0, 128], signal).then(output => output.toString().trim(), () => { signal?.throwIfAborted(); return '' })
     return kind === 'tree' ? state : undefined
   }
   /** 祖先目录检查在同一次捕捉内记忆；叶节点额外取纳秒时间戳作为增量指纹。 */
-  private async captureInfo(path: string, directories: Map<string, boolean>) {
+  private async captureInfo(path: string, directories: Map<string, boolean>, signal?: AbortSignal) {
     const parts = path.split('/')
     let ancestor = ''
     for (let i = 0; i < parts.length - 1; i++) {
+      signal?.throwIfAborted()
       ancestor = i === 0 ? parts[0]! : ancestor + '/' + parts[i]!
       let directory = directories.get(ancestor)
       if (directory === undefined) {
@@ -270,24 +307,26 @@ export class WorktreeSnapshots {
       }
       if (!directory) return undefined
     }
-    try { return await lstat(join(this.worktree, path), { bigint: true }) } catch (error) { if (absent(error)) return undefined; throw error }
+    signal?.throwIfAborted()
+    try { const info = await lstat(join(this.worktree, path), { bigint: true }); signal?.throwIfAborted(); return info } catch (error) { if (absent(error)) return undefined; throw error }
   }
   /** 单进程批量写入对象，保持与treeFor相同的原始字节语义；换行、符号链接与双引号开头的路径退回逐文件。
       --stdin-paths 逐行读取裸路径：换行会截断一行，而以双引号开头的一行会被 git 按 C 引用语法解释
       （只有开引号会 fatal: line is badly quoted 让整次快照失败，两端引号会被去引号后读到同名普通文件）。 */
-  private async hashEntries(files: ReadonlyMap<string, { link: boolean }>): Promise<Map<string, string>> {
+  private async hashEntries(files: ReadonlyMap<string, { link: boolean }>, signal?: AbortSignal): Promise<Map<string, string>> {
     const result = new Map<string, string>(), bulkSafe = (path: string, file: { link: boolean }) => !file.link && !path.includes('\n') && !path.startsWith('"'), bulk = [...files].filter(([path, file]) => bulkSafe(path, file)).map(([path]) => path)
     if (bulk.length) {
       // 私有库对象只被本组件cat-file读取；等级0不为本地快照付压缩代价，首快照吞吐提高约5倍。
-      const output = await this.privateGit(['-c', 'core.looseCompression=0', 'hash-object', '-w', '--stdin-paths', '--no-filters'], Buffer.from(bulk.join('\n') + '\n'))
+      const output = await this.privateGit(['-c', 'core.looseCompression=0', 'hash-object', '-w', '--stdin-paths', '--no-filters'], Buffer.from(bulk.join('\n') + '\n'), undefined, [0], signal)
       const oids = output.toString().split('\n').filter(Boolean)
       if (oids.length !== bulk.length) throw new Error('Git 快照命令失败：hash-object --stdin-paths 返回数量不一致')
       bulk.forEach((path, index) => result.set(path, oids[index]!.trim()))
     }
     for (const [path, file] of files) {
+      signal?.throwIfAborted()
       if (bulkSafe(path, file)) continue
-      const bytes = file.link ? Buffer.from(await readlink(join(this.worktree, path))) : await readFile(join(this.worktree, path))
-      result.set(path, (await this.privateGit(['-c', 'core.looseCompression=0', 'hash-object', '-w', '--stdin'], bytes)).toString().trim())
+      const bytes = file.link ? Buffer.from(await readlink(join(this.worktree, path))) : await readFile(join(this.worktree, path), { signal })
+      result.set(path, (await this.privateGit(['-c', 'core.looseCompression=0', 'hash-object', '-w', '--stdin'], bytes, undefined, [0], signal)).toString().trim())
     }
     return result
   }
@@ -375,7 +414,7 @@ export class WorktreeSnapshots {
     const directories = new Set(restoredDirectories.map(row => this.checkedPath(row.path)))
     for (const path of [...desired.keys(), ...directories]) {
       let parent = dirname(path)
-      while (parent !== '.') { directories.add(parent); parent = dirname(parent) }
+      while (parent !== '.') { if (!this.excludes(parent)) directories.add(parent); parent = dirname(parent) }
     }
     const removeLeaves = new Set<string>(), removeDirectories = new Set<string>()
     const visitRemoval = async (path: string): Promise<void> => {
@@ -429,6 +468,6 @@ export class WorktreeSnapshots {
       } finally { await unlink(temporary).catch(error => { if (!absent(error)) throw error }) }
     }
     for (const row of restoredDirectories) if ((await this.info(row.path))?.isDirectory()) await chmod(join(this.worktree, row.path), row.mode)
-    await syncDirectory(this.worktree)
+    await syncDirectory(this.scope)
   }
 }

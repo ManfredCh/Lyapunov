@@ -17,7 +17,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -344,4 +344,135 @@ process.exit(result.status ?? 1)
     await expect(openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: [dirname(root)] })).rejects.toThrow('不能包含工作树或当前工作目录')
     await expect(openWorktreeSnapshots({ cwd: root, storageRoot, excludedRoots: ['relative/private/tmp'] })).rejects.toThrow('必须是绝对路径')
   }, 30_000)
+})
+
+describe('所选cwd作用域与原生捕获取消', () => {
+  /** 只在自有夹具延迟hash调用；其余命令仍由实际系统Git执行并保留stdin。 */
+  function controlledHash(base: string) {
+    const realGit = Bun.which('git')
+    if (!realGit) throw new Error('真实Git不可用')
+    const bin = path(base, 'controlled-git'), gate = path(base, 'hold-hash'), started = path(base, 'hash-started'), ended = path(base, 'hash-ended'), trace = path(base, 'git-trace.jsonl')
+    mkdirSync(bin)
+    const script = `#!${process.execPath}\nimport {spawnSync} from 'node:child_process'\nimport {appendFileSync,existsSync,writeFileSync} from 'node:fs'\nconst args=process.argv.slice(2)\nif(args.includes('ls-files'))appendFileSync(${JSON.stringify(trace)},JSON.stringify({cwd:process.cwd(),args})+'\\n')\nconst input=args.includes('--stdin-paths')?Buffer.from(await Bun.stdin.arrayBuffer()):undefined\nif(input!==undefined&&existsSync(${JSON.stringify(gate)})){\n process.on('SIGTERM',()=>{writeFileSync(${JSON.stringify(ended)},'terminated');process.exit(143)})\n writeFileSync(${JSON.stringify(started)},String(process.pid))\n await new Promise(resolve=>setTimeout(resolve,60000))\n}\nconst result=spawnSync(${JSON.stringify(realGit)},args,{input,stdio:input===undefined?'inherit':['pipe','inherit','inherit']})\nif(result.error)throw result.error\nprocess.exit(result.status??1)\n`
+    writeFileSync(path(bin, 'git'), script); chmodSync(path(bin, 'git'), 0o755)
+    return { bin, gate, started, ended, trace }
+  }
+
+  test('子cwd先在源Git内限域；父/兄弟不捕获或还原，子目录五类变更与重做保持', async () => {
+    const { root, storageRoot } = await fixture(), child = path(root, 'selected[1]'), sibling = path(root, 'sibling')
+    mkdirSync(child); mkdirSync(sibling)
+    writeFileSync(path(root, 'parent.txt'), 'parent-before'); writeFileSync(path(sibling, 'owned.txt'), 'sibling-before')
+    writeFileSync(path(child, 'edit.txt'), 'edit-before'); writeFileSync(path(child, 'remove.txt'), 'remove-before')
+    writeFileSync(path(child, 'binary.bin'), Buffer.from([0, 1, 255]))
+    const runtime = path(child, '.lyapunov/sessions/other')
+    mkdirSync(runtime, { recursive: true }); writeFileSync(path(runtime, 'state'), 'runtime-before')
+    git(root, ['add', 'parent.txt', 'selected[1]/edit.txt'])
+    const indexBefore = read(root, '.git/index')
+    const opened = await openWorktreeSnapshots({ cwd: child, storageRoot })
+    if (!opened.supported) throw new Error('子目录夹具不是Git工作树')
+    const store = opened.store, wrapper = controlledHash(dirname(storageRoot)), previousPath = process.env.PATH
+    let before: Awaited<ReturnType<typeof store.captureReported>>
+    try {
+      process.env.PATH = wrapper.bin + ':' + previousPath
+      before = await store.captureReported()
+    } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath }
+    expect(before.ref.worktree).toBe(root)
+    expect(before.report.files).toBe(3)
+    const enumeration = JSON.parse(readFileSync(wrapper.trace, 'utf8').trim())
+    expect(enumeration.cwd).toBe(child)
+    expect(enumeration.args.slice(-2)).toEqual(['--', '.'])
+    expect(enumeration.args).toContain('--full-name')
+    writeFileSync(path(root, 'parent.txt'), 'parent-after'); writeFileSync(path(sibling, 'owned.txt'), 'sibling-after')
+    writeFileSync(path(child, 'edit.txt'), 'edit-after'); unlinkSync(path(child, 'remove.txt'))
+    writeFileSync(path(child, 'binary.bin'), Buffer.from([0, 254, 2])); writeFileSync(path(child, 'new.txt'), 'new-after')
+    writeFileSync(path(runtime, 'state'), 'runtime-after')
+    const after = await store.capture(), changed = await store.diff(before.ref, after)
+    expect(changed).toEqual(['selected[1]/binary.bin', 'selected[1]/edit.txt', 'selected[1]/new.txt', 'selected[1]/remove.txt'])
+    const undo = await store.beginRestore({ operationId: 'scoped-undo', sessionId: 'scope-test', target: before.ref,
+      paths: [...changed, 'parent.txt', 'sibling/owned.txt', 'selected[1]/.lyapunov/sessions/other/state'] })
+    await undo.commit()
+    expect(read(child, 'edit.txt').toString()).toBe('edit-before')
+    expect(read(child, 'remove.txt').toString()).toBe('remove-before')
+    expect(existsSync(path(child, 'new.txt'))).toBe(false)
+    expect(read(child, 'binary.bin').equals(Buffer.from([0, 1, 255]))).toBe(true)
+    expect(read(root, 'parent.txt').toString()).toBe('parent-after')
+    expect(read(sibling, 'owned.txt').toString()).toBe('sibling-after')
+    expect(read(runtime, 'state').toString()).toBe('runtime-after')
+    const redo = await store.beginRestore({ operationId: 'scoped-redo', sessionId: 'scope-test', target: after, paths: changed })
+    await redo.commit()
+    expect(read(child, 'edit.txt').toString()).toBe('edit-after')
+    expect(existsSync(path(child, 'remove.txt'))).toBe(false)
+    expect(read(child, 'new.txt').toString()).toBe('new-after')
+    expect(read(child, 'binary.bin').equals(Buffer.from([0, 254, 2]))).toBe(true)
+    expect(read(root, '.git/index').equals(indexBefore)).toBe(true)
+  }, 30_000)
+
+  test('旧父仓SnapshotRef与journal保留身份，冷恢复只还原当前子cwd', async () => {
+    const { root, store: old, storageRoot } = await fixture(), child = path(root, 'child')
+    mkdirSync(child)
+    writeFileSync(path(root, 'parent.txt'), 'parent-v1'); writeFileSync(path(child, 'user.txt'), 'user-v1')
+    const before = await old.capture()
+    writeFileSync(path(root, 'parent.txt'), 'parent-v2'); writeFileSync(path(child, 'user.txt'), 'user-v2')
+    const after = await old.capture()
+    await old.beginRestore({ operationId: 'legacy-parent', sessionId: 'scope-test', target: before, paths: ['parent.txt', 'child/user.txt'] })
+    writeFileSync(path(root, 'parent.txt'), 'parent-live')
+    const opened = await openWorktreeSnapshots({ cwd: child, storageRoot })
+    if (!opened.supported) throw new Error('子目录夹具不是Git工作树')
+    expect(await opened.store.diff(before, after)).toEqual(['child/user.txt'])
+    expect(await opened.store.recover(async () => false)).toEqual([{ operationId: 'legacy-parent', sessionId: 'scope-test', outcome: 'rolled-back' }])
+    expect(read(root, 'parent.txt').toString()).toBe('parent-live')
+    expect(read(child, 'user.txt').toString()).toBe('user-v2')
+    expect((await opened.store.captureReported()).report.files).toBe(1)
+  })
+
+  test('真实hash等待中取消：自有Git退出、锁释放、上次成功cache不变并可重试', async () => {
+    const { root, store, storageRoot } = await fixture()
+    writeFileSync(path(root, 'user.txt'), 'before')
+    const before = await store.capture(), cache = readFileSync(path(storageRoot, 'capture.json'))
+    writeFileSync(path(root, 'user.txt'), 'changed-after')
+    const wrapper = controlledHash(dirname(storageRoot)), previousPath = process.env.PATH, abort = new AbortController()
+    writeFileSync(wrapper.gate, 'hold')
+    let operation: ReturnType<typeof store.captureReported> | undefined
+    try {
+      process.env.PATH = wrapper.bin + ':' + previousPath
+      operation = store.captureReported(undefined, abort.signal)
+      // 先监听拒绝，避免中途取消被测试运行器误判为未处理拒绝。
+      void operation.catch(() => {})
+      const deadline = Date.now() + 5_000
+      while (!existsSync(wrapper.started) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5))
+      expect(existsSync(wrapper.started)).toBe(true)
+      const pid = Number(readFileSync(wrapper.started, 'utf8')), stoppedAt = performance.now()
+      abort.abort(new Error('owned capture cancelled'))
+      await expect(operation).rejects.toThrow('owned capture cancelled')
+      expect(performance.now() - stoppedAt).toBeLessThan(2_000)
+      expect(readFileSync(wrapper.ended, 'utf8')).toBe('terminated')
+      expect(() => process.kill(pid, 0)).toThrow()
+      expect(existsSync(path(storageRoot, 'operation.lock'))).toBe(false)
+      expect(readFileSync(path(storageRoot, 'capture.json')).equals(cache)).toBe(true)
+      expect(readdirSync(storageRoot).filter(name => name.startsWith('index-') || name.endsWith('.tmp'))).toEqual([])
+    } finally {
+      abort.abort(new Error('fixture cleanup')); await operation?.catch(() => {})
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath
+    }
+    const after = await store.capture()
+    expect(await store.diff(before, after)).toEqual(['user.txt'])
+  }, 15_000)
+
+  test('排队捕获取消不阻断前一个操作，也不取得新锁或发布cache', async () => {
+    const { root, store, storageRoot } = await fixture()
+    writeFileSync(path(root, 'user.txt'), 'owned')
+    let release!: () => void, entered!: () => void
+    const active = new Promise<void>(resolve => { entered = resolve })
+    const hold = new Promise<void>(resolve => { release = resolve })
+    const first = store.captureReported(async () => { entered(); await hold })
+    await active
+    const abort = new AbortController(), queued = store.capture(abort.signal)
+    void queued.catch(() => {})
+    try {
+      abort.abort(new Error('queued cancelled'))
+      await expect(queued).rejects.toThrow('queued cancelled')
+      expect(existsSync(path(storageRoot, 'capture.json'))).toBe(false)
+    } finally { release(); await first }
+    expect((await store.captureReported()).report.files).toBe(1)
+  })
 })

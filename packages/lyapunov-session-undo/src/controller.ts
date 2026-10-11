@@ -66,13 +66,15 @@ export class SessionUndoController {
       throw error
     }
   }
-  private async storage(agent: Agent): Promise<StoreState> {
+  private async storage(agent: Agent, signal?: AbortSignal): Promise<StoreState> {
+    signal?.throwIfAborted()
     const cwd = await realpath(agent.session.header.cwd ?? process.cwd())
     let pending = this.stores.get(cwd)
     if (!pending) {
       pending = (async () => {
         if (this.config.snapshots === false) return { cwd, mode: 'disabled' as const }
         const key = createHash('sha256').update(cwd).digest('hex')
+        // 初始化Promise由同cwd的会话共用，不能继承首个会话的取消信号。
         const opened = await openWorktreeSnapshots({ cwd, storageRoot: join(this.config.dataRoot, key), excludedRoots: this.config.excludedRoots })
         if (!opened.supported) return { cwd, mode: 'not-git' as const }
         await opened.store.recover((operationId, sessionId) => this.persisted(operationId, sessionId))
@@ -81,7 +83,9 @@ export class SessionUndoController {
       this.stores.set(cwd, pending)
       pending.catch(() => { if (this.stores.get(cwd) === pending) this.stores.delete(cwd) })
     }
-    return pending
+    const state = await pending
+    signal?.throwIfAborted()
+    return state
   }
   private assertHealthy(agent: Agent, state?: StoreState): void {
     if (this.blocked.has(agent.id) || (state?.store && this.blockedWorktrees.has(state.store.worktree))) throw new Error('HISTORY_RECOVERY_REQUIRED: 文件/会话提交尚未确认，请关闭并重开该Host完成恢复。')
@@ -114,13 +118,15 @@ export class SessionUndoController {
     const before = this.pendingBefore(agent)
     let snapshot: SnapshotRef | null = null
     if (state.store) {
-      // 只有需要整树读取的基线快照才提示，避免每步的增量捕捉刷屏。
+      // 只有需要读取所选作用域的基线快照才提示，避免每步的增量捕捉刷屏。
       let announced = false
       const result = await state.store.captureReported(async () => {
+        signal?.throwIfAborted()
         announced = true
         agent.session.append('worktree/capture', { version: 1, phase: 'preparing', full: true }, { ignorable: true })
         await this.ctx.sessions.flush(agent.session)
-      })
+      }, signal)
+      signal?.throwIfAborted()
       snapshot = result.ref
       if (announced) {
         const report = result.report
@@ -141,7 +147,7 @@ export class SessionUndoController {
   /** 必须在原生awaited pre-step中等待此方法；随后模型与工具才可进入执行。 */
   async beforeStep(agent: Agent, turn: number, step: number, messages: readonly UserMessage[], signal: AbortSignal): Promise<void> {
     this.assertHealthy(agent); signal.throwIfAborted()
-    const state = await this.storage(agent)
+    const state = await this.storage(agent, signal)
     this.assertHealthy(agent, state)
     const snapshot = await this.finishPending(agent, state, signal)
     signal.throwIfAborted()
@@ -149,8 +155,10 @@ export class SessionUndoController {
     await this.ctx.sessions.flush(agent.session)
   }
   async turnStopping(agent: Agent, signal: AbortSignal): Promise<void> {
+    // 尚未发布before的准备取消无需再拍一次基线；显式undo/redo仍捕获当前文件状态。
+    if (!this.pendingBefore(agent).length) return
     this.assertHealthy(agent)
-    const state = await this.storage(agent)
+    const state = await this.storage(agent, signal)
     this.assertHealthy(agent, state)
     await this.finishPending(agent, state, signal)
   }
@@ -167,7 +175,7 @@ export class SessionUndoController {
       await agent.whenIdle(); signal.throwIfAborted()
       return agent.runMaintenance(async maintenance => {
         const operationSignal = AbortSignal.any([signal, maintenance])
-        const state = await this.storage(agent)
+        const state = await this.storage(agent, operationSignal)
         this.assertHealthy(agent, state)
         const current = await this.finishPending(agent, state, operationSignal)
         operationSignal.throwIfAborted()
