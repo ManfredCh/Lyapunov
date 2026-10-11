@@ -153,7 +153,12 @@ describe("scene_replace_resource 的 Tool 接线（真实 ToolRegistry）", () =
     const dynamic=await snapshot("physics")
     expect(entityOf(dynamic,"object").components.rigidBody?.type).toBe("dynamic")
     expect(entityOf(dynamic,ground.entityId)).toEqual(ground)
-    expect(failureOf(await callTool("scene_physics_update",{sceneId:"physics",entityId:"object",expectedRevision:3,type:"fixed"})).error.message).toContain("type")
+    const invalidType={sceneId:"physics",entityId:"object",expectedRevision:dynamic.revision,type:"fixed"}
+    // oneOf 可以汇总诊断；非法输入仍须在两个真实注册表中拒绝，且整个场景零写入。
+    expect(failureOf(await callTool("scene_physics_update",invalidType)).error.info?.code).toBe("INVALID_ARGS")
+    expect(await snapshot("physics")).toEqual(dynamic)
+    await expect(bridge("scene_physics_update",invalidType)).rejects.toMatchObject({code:"INVALID_ARGS"})
+    expect(await snapshot("physics")).toEqual(dynamic)
     expect(entityOf(await snapshot("physics"),ground.entityId)).toEqual(ground)
   })
   test("正例：纯视觉 GLB 组整体换版；原始副本、位姿/父子/用户组件与无关实体都不变", async () => {
