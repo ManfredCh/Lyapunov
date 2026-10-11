@@ -482,7 +482,7 @@ ROBOT_CAPABILITY_KINDS = ['thrust', 'vehicle', 'joint', 'gripper', 'lift', 'cont
 ACTION_UNSUPPORTED_CODE = 'ACTION_UNSUPPORTED'
 
 # 需要 worldId 的方法（其余方法名一律 UNKNOWN_METHOD，不让「未知方法」被世界查询掩盖）。
-WORLD_METHODS = {'sync', 'observe', 'describe', 'handle', 'stop', 'receipt', 'execute', 'assist',
+WORLD_METHODS = {'sync', 'observe', 'set_paused', 'describe', 'handle', 'stop', 'receipt', 'execute', 'assist',
                  'capture', 'capture_multi', 'capture_publish', 'camera_list', 'camera_adjust',
                  'camera_project_annotation', 'camera_dataset_export', 'close'}
 
@@ -526,7 +526,7 @@ CAPABILITIES = {
         '支持 MJCF/URDF 原生源、地面及 Scene collision 的 box/shapes、sphere、cylinder、capsule、静态 plane 与 OBJ parts；没有原生源也没有碰撞的实体按纯视觉跳过并带 ENTITY_SKIPPED_NO_NATIVE_SOURCE。',
         'Scene 环境/静态 OBJ 使用真实三角面，不合成整件凸包；动态 OBJ 仅接受明确凸件策略。组合盒保留逐件尺寸与空区，缺尺寸不造默认盒。',
         'Scene 碰撞支持完整父链线性映射烘焙到 OBJ；原生形状仅接受保持其形状的变换，剪切与球/胶囊非均匀缩放明确拒绝。动态体须有正 massKg；逐体关闭重力、SDF、补丁绑定与 topology 观测尚未接入。',
-        'manual 只由已接受动作推进；control 精确执行 stepCount 步。MPM 水例使用 realtime / Manual clock advances accepted robot actions only; MPM water uses realtime.',
+        '首步前暂停与后续暂停保留同一原生状态；继续后 manual 只由已接受动作推进，control 精确执行 stepCount 步。MPM 水例使用 realtime / Pause preserves native state; resumed manual clock advances accepted actions only; MPM water uses realtime.',
         'joints.positions/velocities 用 Newton eval_ik 从 body_q/body_qd 反解；自由根的速度按 Newton 自身的约定 (v_com_world, omega_world) 报告，字段名与 MuJoCo 的自由根速度约定（世界线速度 + 本地角速度）不同，见 README。',
         'STOP 保持实测关节参考，不清零刚体速度；XPBD 接触力为原生冲量/dt近似值。MPM 水例不执行机器人动作 / STOP holds measured references; XPBD forces are native approximations; MPM has no robot action channel.',
         '原生 SensorTiledCamera 消费当前 Newton 形状与粒子，采集需显式命名相机，不默认自由机位；RGB与轴向米制深度同物理步 / Named cameras use native pixels and axial metric depth from the same physical step.',
@@ -579,6 +579,9 @@ class World:
         self.clock = options.get('clock', 'realtime')
         if self.clock not in ('realtime', 'manual'):
             raise SimError('INVALID_ARGUMENT', 'clock 必须为 realtime 或 manual')
+        self.paused = options.get('startPaused', False)
+        if not isinstance(self.paused, bool):
+            raise SimError('INVALID_ARGUMENT', 'startPaused 必须为 boolean / startPaused must be boolean')
         self.dt = positive(options.get('timestepS', 1.0 / 500.0), 'timestepS')
         self.factor = positive(options.get('realtimeFactor', 1), 'realtimeFactor')
         self.frame_hz = positive(options.get('frameRateHz', 30), 'frameRateHz')
@@ -632,7 +635,8 @@ class World:
             'engineVersion': NEWTON_VERSION,
             'worldGeneration': self.generation,
             'appliedSceneRevision': self.applied_revision,
-            'status': self.status,
+            'status': self.run_status(),
+            'supportsPause': True,
             'clock': self.clock,
             'timestepS': float(self.dt),
             # 接触几何沿用原生 shape label；地面来源另见 worldPhysics。
@@ -661,6 +665,24 @@ class World:
         if self.status not in ('ready', 'running') or self.model is None:
             reason = (': ' + self.status_reason) if self.status_reason else ''
             raise SimError('WORLD_UNAVAILABLE', '世界未同步或已关闭: ' + self.status + reason)
+
+    def run_status(self):
+        if self.status not in ('ready', 'running'):
+            return self.status
+        if self.paused:
+            return 'paused'
+        return 'running' if self.active or (self.clock == 'realtime' and self.step_index > 0) else 'ready'
+
+    def set_paused(self, paused, generation):
+        self.require_ready()
+        if not isinstance(paused, bool):
+            raise SimError('INVALID_ARGUMENT', 'paused 必须为 boolean / paused must be boolean')
+        if type(generation) is not int or generation != self.generation:
+            raise SimError('STALE_GENERATION', '暂停目标世界代次已变化 / Pause target generation has changed')
+        self.paused = paused
+        # 不补跑暂停期间的墙钟时间；同一模型、状态和动作窗口从当前物理步继续。
+        self.next_tick = time.monotonic()
+        return self.handle()
 
     def camera(self):
         self.require_ready()
@@ -1052,6 +1074,7 @@ class World:
         frame['assistAdvanceCount'] = 0
         frame['device'] = self.device
         frame['worldPhysics']=self.world_physics()
+        frame['worldStatus'] = self.run_status()
         if selection.get('contacts') or selection.get('penetrations'):
             frame.update(self.contact_observation())
         return frame
@@ -1315,7 +1338,7 @@ class World:
                 'stepIndex': self.step_index, 'simTime': float(self.sim_time),
                 'frameId': f'{self.id}:{self.generation}:{self.step_index}', 'entities': entities,
                 'executionMode': 'physical-contact', 'assistAdvanceCount': 0, 'device': self.device,
-                'worldPhysics': self.world_physics()}
+                'worldPhysics': self.world_physics(), 'worldStatus': self.run_status()}
 
     def contact_observation(self):
         # 碰撞点属于本步原生碰撞流形；距离按当前积分状态求值，不以 shape 包围盒估算。
@@ -1506,6 +1529,8 @@ class World:
 
     # -- 物理 ---------------------------------------------------------------
     def tick(self):
+        if self.paused:
+            return
         if self.status not in ('ready', 'running'):
             return
         if self.clock == 'manual' and not self.active:
@@ -1644,7 +1669,7 @@ def main():
     while running:
         batch = []
         # 只有在真的有 realtime 世界需要推进时才自旋；否则阻塞等请求。
-        if not any(w.status in ('ready', 'running') and (w.clock == 'realtime' or w.active) for w in worlds.values()):
+        if not any(not w.paused and w.status in ('ready', 'running') and (w.clock == 'realtime' or w.active) for w in worlds.values()):
             batch.append(requests.get())
         while not requests.empty():
             batch.append(requests.get_nowait())
@@ -1691,6 +1716,8 @@ def main():
                         result = world.sync(args['snapshot'], (args.get('options') or {}).get('forceRebuild', False))
                     elif method == 'observe':
                         result = world.observe(args.get('selection'))
+                    elif method == 'set_paused':
+                        result = world.set_paused(args.get('paused'), args.get('expectedGeneration'))
                     elif method == 'describe':
                         result = world.describe(args['entityId'])
                     elif method == 'handle':
@@ -1731,7 +1758,7 @@ def main():
                 emit({'id': rid, 'error': {'code': getattr(exc, 'code', 'ENGINE_ERROR'), 'message': str(exc)}})
         now = time.monotonic()
         for world in list(worlds.values()):
-            if now >= world.next_tick and world.status in ('ready', 'running') and (world.clock != 'manual' or world.active):
+            if not world.paused and now >= world.next_tick and world.status in ('ready', 'running') and (world.clock != 'manual' or world.active):
                 try:
                     world.tick()
                     world.next_tick = (time.monotonic() if world.clock == 'manual' else max(world.next_tick + world.dt / world.factor, now - .05))

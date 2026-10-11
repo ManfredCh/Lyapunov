@@ -1,8 +1,6 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
-import { SimError, type WorldOptions } from '../../sim-contract/src/index.ts'
-import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 export interface NewtonConfig {
   pythonPath?: string
   workerPath?: string
@@ -33,10 +31,6 @@ export interface NewtonConfig {
  * MuJoCo 3.13.0 冲突，因此走独立解释器 .runtime/newton-env。
  */
 export class NewtonProvider extends ProcessSimProvider {
-  override async open(snapshot: SceneSnapshot, options: WorldOptions = {}, signal?: AbortSignal) {
-    if (options.startPaused === true) throw new SimError('CLOCK_CONTROL_UNSUPPORTED', 'Newton 当前切片没有暂停/继续物理钟接口，不能自动进入控制器准备；可明确选择被动仿真')
-    return super.open(snapshot, options, signal)
-  }
   constructor(config: NewtonConfig = {}) {
     const here = dirname(fileURLToPath(import.meta.url))
     super({

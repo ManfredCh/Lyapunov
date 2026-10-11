@@ -433,10 +433,12 @@ describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子
       // JSON 序列化再重开同一声明；产品 Scene 保存入口由 E06 独立验收。
       const saved = JSON.parse(JSON.stringify(source))
       const opened = await session.send('mpm-open', 'open', { snapshot: saved,
-        options: { worldId: 'w-mpm-frozen', clock: 'manual', device: 'cpu', ground: false, timestepS: .005 } })
+        options: { worldId: 'w-mpm-frozen', clock: 'manual', device: 'cpu', ground: false, timestepS: .005, startPaused: true } })
       expect(opened.error).toBeUndefined()
       expect(opened.result.solver).toBe('implicit-mpm')
       expect(opened.result.device).toBe('cpu')
+      expect(opened.result.status).toBe('paused')
+      expect(opened.result.supportsPause).toBe(true)
       expect(opened.result.capabilities.supported).toMatchObject({ liquidParticles: true, execute: false, contacts: false, manualClockAdvance: false })
       expect(opened.result.capabilities.supported.sceneCollisionCompilation).toBe(true)
       expect(opened.result.worldPhysics.gravityWorldMps2.slice(0, 2)).toEqual([0, 0])
@@ -444,6 +446,7 @@ describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子
       expect(opened.result.worldPhysics.collisionCoverage.physicalEntityIds).toEqual(['tank', 'water'])
       expect(opened.result.warnings.some((w: any) => w.code === 'MPM_MANUAL_CLOCK_FROZEN')).toBe(true)
       const initial = (await session.send('mpm-initial', 'observe', { worldId: 'w-mpm-frozen' })).result
+      expect(initial.worldStatus).toBe('paused')
       const water = initial.entities.find((e: any) => e.entityId === 'water')
       const geometry = water.dynamicGeometry[0]
       const material = water.sensors.nativePhysics
@@ -510,9 +513,18 @@ describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子
         transform: { position: [0, 0, .6], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
         components: { camera: { fovYDeg: 60 } } })
       const realtime = await session.send('mpm-realtime', 'open', { snapshot: sceneContainer,
-        options: { worldId: 'w-mpm-real', clock: 'realtime', device: 'cpu', ground: false, timestepS: .005 } })
+        options: { worldId: 'w-mpm-real', clock: 'realtime', device: 'cpu', ground: false, timestepS: .005, startPaused: true } })
       expect(realtime.error).toBeUndefined()
+      expect(realtime.result.status).toBe('paused')
       expect(realtime.result.worldPhysics.collisionCoverage.physicalEntityIds).toEqual(['tank', 'water'])
+      const preparedFrame = (await session.send('mpm-prepared-frame', 'observe', { worldId: 'w-mpm-real' })).result
+      expect(preparedFrame.stepIndex).toBe(0)
+      expect(preparedFrame.simTime).toBe(0)
+      await sleep(20)
+      expect((await session.send('mpm-prepared-held', 'observe', { worldId: 'w-mpm-real' })).result.frameId).toBe(preparedFrame.frameId)
+      const continued = await session.send('mpm-continue', 'set_paused', { worldId: 'w-mpm-real', paused: false, expectedGeneration: 1 })
+      expect(continued.result.worldGeneration).toBe(1)
+      expect(continued.result.clock).toBe('realtime')
       let advanced: any = null
       const deadline = Date.now() + 120_000
       let attempt = 0
@@ -535,6 +547,10 @@ describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子
       expect(moved.nativeName).toBe(geometry.nativeName)
       expect(session.events.some(e => e.event === 'frame' && e.frame.worldId === 'w-mpm-real'
         && e.frame.entities.some((item: any) => item.entityId === 'water' && item.dynamicGeometry?.[0]?.positionsM.length === 81))).toBe(true)
+      expect((await session.send('mpm-pause-again', 'set_paused', { worldId: 'w-mpm-real', paused: true, expectedGeneration: 1 })).result.status).toBe('paused')
+      const frozenFrame = (await session.send('mpm-frozen-frame', 'observe', { worldId: 'w-mpm-real' })).result
+      await sleep(20)
+      expect((await session.send('mpm-still-frozen', 'observe', { worldId: 'w-mpm-real' })).result.frameId).toBe(frozenFrame.frameId)
       const cameras = await session.send('mpm-camera-list', 'camera_list', { worldId: 'w-mpm-real' })
       expect(cameras.error).toBeUndefined()
       expect(cameras.result.cameras.find((c: any) => c.cameraName === 'fluid-view/fluid-view')?.available).toBe(true)
@@ -545,6 +561,8 @@ describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子
       expect(image.error).toBeUndefined()
       expect(image.result.source).toBe('newton-sensor-tiled-camera')
       expect(image.result.observation.frameId).toBe(image.result.frameId)
+      expect(image.result.observation.worldStatus).toBe('paused')
+      expect(image.result.stepIndex).toBe(frozenFrame.stepIndex)
       expect(image.result.observation.entities.find((e: any) => e.entityId === 'water').dynamicGeometry[0].positionsM).toHaveLength(81)
       expect(image.result.observation.contacts).toBeUndefined()
       const depth = readFileSync(fileURLToPath(image.result.depth.uri))

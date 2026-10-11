@@ -467,4 +467,90 @@ describe.skipIf(!available)('Newton 源位置控制、停止与接触（真实 C
     }
     await provider.close(handle.worldId)
   }, 600_000)
+
+  test('产品 startPaused 首步门真实通过：首帧0、继续下落、再次暂停、重建与旧代次拒绝', async () => {
+    const prepared = snapshot('paused-free-body')
+    prepared.entities[0]!.components.mujoco = { xml: '<mujoco model="paused-ball"><worldbody><camera name="overview" pos="0 0 2" fovy="60"/><body name="ball" pos="0 0 .5"><freejoint/><geom name="surface" type="sphere" size=".05" mass="1"/></body></worldbody></mujoco>' }
+    const handle = await provider.open(prepared, { worldId: 'w-paused-free', clock: 'realtime',
+      timestepS: .002, ground: false, startPaused: true })
+    try {
+      expect(handle.status).toBe('paused')
+      expect(handle.supportsPause).toBe(true)
+      expect(handle.clock).toBe('realtime')
+      const first = await provider.observe(handle.worldId)
+      expect(first.stepIndex).toBe(0)
+      expect(first.simTime).toBe(0)
+      expect(first.worldStatus).toBe('paused')
+      await wait(30)
+      const held = await provider.observe(handle.worldId)
+      expect(held.stepIndex).toBe(0)
+      expect(held.entities).toEqual(first.entities)
+      const image = await provider.capture(handle.worldId, { cameraName: 'overview', width: 32, height: 24,
+        outputDir: join(cacheRoot!, 'paused-free-capture') }) as any
+      expect(image.stepIndex).toBe(0)
+      expect(image.observation.worldStatus).toBe('paused')
+      expect(image.observation.frameId).toBe(first.frameId)
+      expect((await provider.observe(handle.worldId)).stepIndex).toBe(0)
+      const resumed = await provider.setPaused(handle.worldId, false, handle.worldGeneration)
+      expect(resumed.worldId).toBe(handle.worldId)
+      expect(resumed.worldGeneration).toBe(handle.worldGeneration)
+      expect(resumed.clock).toBe('realtime')
+      let progressed = await provider.observe(handle.worldId)
+      const deadline = Date.now() + 30_000
+      while (progressed.stepIndex < 20 && Date.now() < deadline) {
+        await wait(5)
+        progressed = await provider.observe(handle.worldId)
+      }
+      expect(progressed.stepIndex).toBeGreaterThanOrEqual(20)
+      expect(progressed.worldStatus).toBe('running')
+      expect(progressed.entities[0]!.transform.position[2]).toBeLessThan(first.entities[0]!.transform.position[2] - .003)
+      expect((await provider.setPaused(handle.worldId, true, handle.worldGeneration)).status).toBe('paused')
+      const frozen = await provider.observe(handle.worldId)
+      await wait(30)
+      expect((await provider.observe(handle.worldId)).frameId).toBe(frozen.frameId)
+      const rebuilt = await provider.sync(handle.worldId, { ...prepared, revision: 2 }, { forceRebuild: true })
+      expect(rebuilt.status).toBe('paused')
+      expect(rebuilt.worldGeneration).toBe(handle.worldGeneration + 1)
+      const reset = await provider.observe(handle.worldId)
+      expect(reset.worldStatus).toBe('paused')
+      expect(reset.stepIndex).toBe(0)
+      expect(reset.simTime).toBe(0)
+      await expect(provider.setPaused(handle.worldId, false, handle.worldGeneration)).rejects.toMatchObject({ code: 'STALE_GENERATION' })
+      await wait(20)
+      expect((await provider.observe(handle.worldId)).stepIndex).toBe(0)
+      expect((await provider.listWorlds()).find(w => w.worldId === handle.worldId)!.status).toBe('paused')
+    } finally { await provider.close(handle.worldId) }
+  }, 600_000)
+
+  test('manual 暂停不驱动已接受动作，stop无推进；继续后仍由明确control推进整数步', async () => {
+    const handle = await provider.open(snapshot('paused-manual-arm'), { worldId: 'w-paused-manual',
+      clock: 'manual', timestepS: .002, startPaused: true })
+    try {
+      const jointNames = (await provider.describe(handle.worldId, 'arm-a')).controlledJointNames.slice(0, 1)
+      const pending = provider.execute(handle.worldId, { actionId: 'paused-stop', expectedGeneration: 1,
+        kind: 'control', entityId: 'arm-a', jointNames, positions: [.2], stepCount: 5 })
+      await wait(20)
+      expect((await provider.receipt(handle.worldId, 'paused-stop')).status).toBe('accepted')
+      expect((await provider.observe(handle.worldId)).stepIndex).toBe(0)
+      const stopped = await provider.stop(handle.worldId, { actionId: 'paused-stop', expectedGeneration: 1 })
+      expect(stopped.stepIndex).toBe(0)
+      const cancelled = await pending
+      expect(cancelled.status).toBe('cancelled')
+      expect((cancelled.effect!.motions as any[])[0].appliedSteps).toBe(0)
+      expect(cancelled.finalState!.worldStatus).toBe('paused')
+      await provider.setPaused(handle.worldId, false, handle.worldGeneration)
+      await wait(20)
+      expect((await provider.observe(handle.worldId)).stepIndex).toBe(0)
+      const five = await provider.execute(handle.worldId, { actionId: 'unpaused-five', expectedGeneration: 1,
+        kind: 'control', entityId: 'arm-a', jointNames, positions: [.2], stepCount: 5 })
+      expect(five.status).toBe('completed')
+      expect(five.endStep! - five.startStep! + 1).toBe(5)
+      await provider.setPaused(handle.worldId, true, handle.worldGeneration)
+      expect((await provider.stop(handle.worldId)).stepIndex).toBe(5)
+      await wait(20)
+      const frozen = await provider.observe(handle.worldId)
+      expect(frozen.stepIndex).toBe(5)
+      expect(frozen.worldStatus).toBe('paused')
+    } finally { await provider.close(handle.worldId) }
+  }, 600_000)
 })

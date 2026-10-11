@@ -27,7 +27,8 @@
 | `camera_adjust` / `camera_project_annotation` / `camera_dataset_export` | ❌ | 临时相机覆盖、标注与数据集导出继续返回 UNSUPPORTED_CAPABILITY |
 | `assist`（附着/辅助写回） | ❌ | 返回 `UNSUPPORTED_CAPABILITY` |
 | `collisionPatches`（splat 场景碰撞编译） | ❌ | 传入即 `UNSUPPORTED_CAPABILITY`；本包**不含** sim-mujoco 的 splat 碰撞编译器 |
-| manual 时钟 | ✅，按动作推进 | 有已接受动作才推进；空闲或停止后冻结。未来 startStep 会推进到排程开始，未开始动作的 appliedSteps=0 |
+| 首步前暂停 / 暂停继续 | ✅ | startPaused:true 在首步前暂停；WorldHandle.supportsPause=true，status/Frame.worldStatus 如实给 paused。set_paused 校验代次，只改变同世界暂停状态，不重建；继续后不补跑暂停期间墙钟时间 |
+| manual 时钟 | ✅，按动作推进 | 继续后且有已接受动作才推进；空闲或停止后冻结。未来 startStep 会推进到排程开始，未开始动作的 appliedSteps=0 |
 | `stop` | ✅ | 已开始动作取消并把参考保持在当前实测位置，不清零刚体速度；未开始动作不写控制。回执记录 appliedSteps、lastAppliedPositions、holdReference；停止不代表瞬时静止 |
 | `receipt` | ✅ | accepted/running/completed/cancelled/failed 终态与真实 finalState。重建成功先取消旧动作；失败保留旧世界及动作；旧代次 stop 不触碰新模型 |
 
@@ -60,7 +61,7 @@ SDK 解释器解析）说明的是"这个引擎能被装配"，**不是**"装配
 
 `dimensions` 是三个正整数，`spacingM` 是格点间距，单粒子质量为 `densityKgM3 × spacingM³`，原生半径为间距的一半。`youngModulusPa` 与 `poissonRatio` 对应原生 `model.mpm.young_modulus/poisson_ratio`；在水例里用于 MPM 压缩响应。水例沿用同 pin `example_mpm_water_dam_break.py` 的零摩擦、零偏应力屈服强度、tensile_yield_ratio=1 与粘度参数，不将 E/nu 表述为液体实体的杨氏弹性。
 
-该切片使用原生 dense grid，原生水例的 P0 应变基、pic 碰撞基、Q1 速度基。`voxelSizeM` 控制求解网格；没有另设物理循环。`clock:"realtime"` 真推进，manual 模式明确告警并冻结（未接通该模式的动作推进入口）。动态自由/关节刚体作为容器时明确拒绝，不静默冻结机器人或假称双向耦合。
+该切片使用原生 dense grid，原生水例的 P0 应变基、pic 碰撞基、Q1 速度基。`voxelSizeM` 控制求解网格；没有另设物理循环。`clock:"realtime"` 在明确继续后真推进；startPaused 与后续暂停使用同一原生状态，采集不推进时间。manual 模式明确告警并冻结（未接通该模式的动作推进入口）。动态自由/关节刚体作为容器时明确拒绝，不静默冻结机器人或假称双向耦合。
 
 `Frame.entities[].dynamicGeometry` 的 particles 项直接来自当前原生 `state.particle_q`，positionsM 是扁平 xyz 世界坐标，radiusM 来自原生粒子半径，nativeName 在重建前后稳定。同一 Frame 的 world/generation/revision/step/simTime 标明数据归属。`sensors.nativePhysics` 从原生模型/求解器回读粒子数、网格、材料和初始格点质量对应的静止密度；不从请求原文回显材料假装已应用。
 
@@ -174,7 +175,7 @@ mujoco-warp 3.12.0 + warp-lang 1.17.0 + numpy 2.5.3），默认路径由 `Newton
   `sensors.bodyLinearVelocityMps/bodyAngularVelocityRadps` 与 MuJoCo `cvel` 口径一致，可直接对照。
 - **求解器默认 `SolverXPBD(iterations=4)`**：实测 `SolverSemiImplicit` 在 `packages/sim-mujoco/fixtures/arm.xml`
   上会发散成 NaN；需要时用 `LYAPUNOV_NEWTON_SOLVER=semi` 显式启用，`handle.solver` 如实回读。
-- **不驱动任何执行器**：导入的 MJCF 执行器目标保持模型初值（与 MuJoCo 里 `ctrl=0` 的语义一致）。
+- **受限源位置驱动**：joint / trajectory / control 只接通已核验的单自由度、gear=1、无激活动态、单一位置 PD，保留源增益与 joint/ctrlrange；其余执行器按前述边界拒绝。暂停时可受理动作，但不写目标或推进物理，继续后才执行；stop 可取消并保持实测参考。
 - **MJCF 根的摆放**：实体 MJCF 用 `xform = Scene 世界位姿` 导入，与 MJCF 自身内部姿态**复合**
   （`add_mjcf` 的默认语义，与 sim-mujoco 的 `spec.attach` 一致）；实体 `scale != [1,1,1]` 明确拒绝。
 - **单一地面来源**：未编辑的默认模板 Collider 让位给实测同位置的原生静态 plane；`groundSources` 记录真实来源，不叠不可管理的隐式地面。无限 plane 由 `add_shape_plane(width=0,length=0)` 表达；有限用户 plane 仍保留明确的宽/长。
