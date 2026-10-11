@@ -103,11 +103,33 @@ async function rejectionWithin(run: Promise<unknown>, ms: number): Promise<SimEr
 }
 
 describe.skipIf(PYTHON === undefined)('ProcessSimProvider 启动/退出生命周期', () => {
-  test('Newton不支持初始暂停，在实际launch入口前拒绝且不派生worker',async()=>{
-    let launched=false
-    const provider=new NewtonProvider({pythonPath:PYTHON!,workerPath:WORKER,launch:async()=>{launched=true;throw Error('不应启动worker')}})
-    try {await expect(provider.open(scene(),{startPaused:true})).rejects.toMatchObject({code:'CLOCK_CONTROL_UNSUPPORTED'});expect(launched).toBe(false)}
-    finally {await provider.dispose()}
+  test('Newton初始暂停经过实际launch与共享transport，由worker确认后交付暂停世界', async () => {
+    let launches = 0
+    const { provider, marker } = providerFor({ initialPauseSupport: true }, {}, config => new NewtonProvider({
+      pythonPath: config.pythonPath, workerPath: config.workerPath,
+      launch: async ({ pythonPath, workerPath, env }) => {
+        launches++
+        expect(pythonPath).toBe(PYTHON)
+        expect(workerPath).toBe(WORKER)
+        return {
+          argv: [pythonPath, '-u', workerPath], env: { ...env, ...config.env },
+          facts: { sessionId: 'newton-initial-pause', mode: 'danger-full-access', workspaceRoot: base, writableRoot: base, runtimeRoot: base },
+        }
+      },
+    }))
+    try {
+      const prepared = await provider.open(scene(), { worldId: 'newton-preparing', clock: 'realtime', startPaused: true })
+      expect(launches).toBe(1)
+      expect(provider.pid).toBeGreaterThan(0)
+      expect(markerText(marker).split('request open').length - 1).toBe(1)
+      expect(prepared.worldId).toBe('newton-preparing')
+      expect(prepared.status).toBe('paused')
+      expect(prepared.supportsPause).toBe(true)
+      expect(prepared.clock).toBe('realtime')
+      const frame = await provider.observe(prepared.worldId)
+      expect(frame.stepIndex).toBe(0)
+      expect(frame.simTime).toBe(0)
+    } finally { await provider.dispose() }
   })
   test('原子初始暂停由worker回执确认，明确继续保留同world/代次/时钟', async () => {
     const { provider } = providerFor({ initialPauseSupport: true })
