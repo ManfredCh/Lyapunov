@@ -22,6 +22,7 @@ import {physicalizationBudgets,validatePhysicalizationBudgets,type Physicalizati
 import { PortableArchive, copyPortableProjectFiles } from './portable.ts' 
 import {planPhysicsBinding,physicsBindingFacts,validatePhysicsBindingType,type PhysicsBindInput} from './physics-binding.ts'
 import {physicsOwner,planPhysicsUpdate,sameDerivedPhysics,preservePhysicsControls,type PhysicsUpdateInput} from './physics-state.ts'
+import {nativePhysicsCommit} from './native-physics.ts'
 import { SceneConflict, SceneStore, validateSnapshot } from "./store.ts"
 
 /** 资源引用的替换/去重身份：resourceId@version（同一版本的其它位置由 SceneStore 与 ResourceLibrary 核对）。 */
@@ -763,12 +764,21 @@ export class SceneOperations {
   async updatePhysics(input:PhysicsUpdateInput){
     const scene=await this.scene.snapshot(input.sceneId)
     if(scene.revision!==input.expectedRevision)throw new SceneConflict(input.sceneId,input.expectedRevision,scene.revision)
-    const owner=physicsOwner(scene,input.entityId),ref=owner.resources.length===1?owner.resources[0]:undefined
-    const record=ref?await this.resources.get(ref.resourceId,ref.version):undefined
-    const plan=planPhysicsUpdate(scene,input,record?.componentDefaults?.rigidBody)
+    const owner=physicsOwner(scene,input.entityId)
+    let plan:ReturnType<typeof planPhysicsUpdate>
+    if(input.native!==undefined){
+      if([input.type,input.massKg,input.gravityEnabled,input.collisionEnabled].some(value=>value!==undefined))throw new Error('NATIVE_PARAMETER_INVALID: native 与刚体字段互斥 / native and rigid-body fields are mutually exclusive')
+      const compiled=nativePhysicsCommit(input.sceneId,input.expectedRevision,owner,input.native,input.native.parameters)
+      const components=compiled.patch[0]!.changes.components,changed=!isDeepStrictEqual(components,owner.components)
+      plan={patch:changed?compiled.patch:[],entity:{...owner,components},changed}
+    }else{
+      const ref=owner.resources.length===1?owner.resources[0]:undefined
+      const record=ref?await this.resources.get(ref.resourceId,ref.version):undefined
+      plan=planPhysicsUpdate(scene,input,record?.componentDefaults?.rigidBody)
+    }
     const snapshot=plan.changed?await this.scene.commit({sceneId:input.sceneId,expectedRevision:input.expectedRevision,patch:plan.patch}):await this.scene.snapshot(input.sceneId)
     if(!plan.changed&&snapshot.revision!==input.expectedRevision)throw new SceneConflict(input.sceneId,input.expectedRevision,snapshot.revision)
-    return {status:plan.changed?'UPDATED':'UNCHANGED',snapshot,entityId:plan.entity.entityId,changed:plan.changed,physics:{rigidBody:plan.entity.components.rigidBody,collision:plan.entity.components.collision},worldNeedsSync:plan.changed}
+    return {status:plan.changed?'UPDATED':'UNCHANGED',snapshot,entityId:plan.entity.entityId,changed:plan.changed,physics:{...(plan.entity.components.rigidBody===undefined?{}:{rigidBody:plan.entity.components.rigidBody}),...(plan.entity.components.collision===undefined?{}:{collision:plan.entity.components.collision})},...(input.native?{native:structuredClone(input.native)}:{}),worldNeedsSync:plan.changed}
   }
   /**
    * 挂载按 resourceId 保留资源默认组件（例如车辆 controller），实例的显式 components

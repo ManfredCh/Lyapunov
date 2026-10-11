@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react"
 import type { Entity, EntityObservation, SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { NumberField, type Translate } from "./entity-editor.tsx"
 import type { CameraExitBridge } from "./camera-authoring.ts"
+import { nativePhysicsCommit, flexKeys, cableKeys, mpmKeys, isaacKeys, pbdKeys, type NativePhysicsEditTarget } from "../../scene-kit/src/native-physics.ts"
+export { nativePhysicsCommit } from "../../scene-kit/src/native-physics.ts"
 
-type NativeKind = "flex" | "cable" | "deformable" | "pbd" | "mpm"
-export interface NativePhysicsTarget {
-  key: string; engine: "mujoco" | "isaac" | "newton"; kind: NativeKind; nativeName: string
-  parameters: Record<string, number>; measured: Record<string, number>; dimensions?: number[]
+export interface NativePhysicsTarget extends NativePhysicsEditTarget {
+  key: string; parameters: Record<string, number>; measured: Record<string, number>
 }
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const rows = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.map(record) : []
@@ -15,19 +15,6 @@ const numbers = (value: unknown, keys: readonly string[]): Record<string, number
   for (const key of keys) if (typeof input[key] === "number" && Number.isFinite(input[key])) result[key] = input[key] as number
   return result
 }
-const flexKeys = ["youngPa", "poisson", "rayleighDamping"] as const
-const cableKeys = ["bendPa", "twistPa"] as const
-const mpmKeys = ["densityKgM3", "viscosityPaS", "youngModulusPa", "poissonRatio", "spacingM", "voxelSizeM"] as const
-// Isaac 输入名只映射当前 worker 实际消费的原生 schema 属性。
-const isaacKeys: Record<string, string> = {
-  youngsModulusPa: "omniphysics:youngsModulus", poissonsRatio: "omniphysics:poissonsRatio",
-  densityKgM3: "omniphysics:density", dynamicFriction: "omniphysics:dynamicFriction",
-}
-const pbdKeys: Record<string, string> = {
-  densityKgM3: "physxPBDMaterial:density", viscosity: "physxPBDMaterial:viscosity",
-  surfaceTension: "physxPBDMaterial:surfaceTension", cohesion: "physxPBDMaterial:cohesion", friction: "physxPBDMaterial:friction",
-}
-
 /** 仅解析三后端已确认的材料读回和原生组件；没有回读时不凭引擎名编造材料。 */
 export function nativePhysicsTargets(entity: Entity, observation?: EntityObservation): NativePhysicsTarget[] {
   const result: NativePhysicsTarget[] = [], physics = record(observation?.sensors?.nativePhysics)
@@ -59,26 +46,6 @@ export function nativePhysicsTargets(entity: Entity, observation?: EntityObserva
     result.push({ key: "newton:mpm:water", engine: "newton", kind: "mpm", nativeName: "water", measured, parameters: { ...measured, ...numbers(mpm, mpmKeys) }, ...(Array.isArray(mpm.dimensions) ? { dimensions: mpm.dimensions as number[] } : {}) })
   }
   return result
-}
-
-/** 草稿保留原组件，按观察到的 revision 走既有 Scene CAS；编译与真实读回由原 sim_sync/observe 完成。 */
-export function nativePhysicsCommit(sceneId: string, expectedRevision: number, entity: Entity, target: NativePhysicsTarget, parameters: Record<string, number>, dimensions = target.dimensions): SceneCommit {
-  const allowed = target.kind === "flex" ? flexKeys : target.kind === "cable" ? cableKeys : target.kind === "mpm" ? mpmKeys : Object.keys(target.kind === "pbd" ? pbdKeys : isaacKeys)
-  for (const [key, value] of Object.entries(parameters)) {
-    if (!(allowed as readonly string[]).includes(key) || !Number.isFinite(value)) throw new Error(`NATIVE_PARAMETER_INVALID: ${key}`)
-    if ((key === "poisson" || key === "poissonsRatio" || key === "poissonRatio") ? value <= -1 || value >= 0.5 : value < 0 || ((key.endsWith("Pa") || key.endsWith("KgM3") || key.endsWith("M")) && value === 0)) throw new Error(`NATIVE_PARAMETER_INVALID: ${key}`)
-  }
-  const components = structuredClone(entity.components), component = record(components[target.engine])
-  if (target.kind === "mpm") {
-    if (dimensions && (dimensions.length !== 3 || dimensions.some(value => !Number.isInteger(value) || value <= 0))) throw new Error("NATIVE_PARAMETER_INVALID: dimensions")
-    component.mpm = { ...record(component.mpm), ...parameters, ...(dimensions ? { dimensions: [...dimensions] } : {}) }
-  } else {
-    const container = target.kind === "flex" ? "flexMaterials" : target.kind === "cable" ? "cableMaterials" : "materialOverrides"
-    const configured = record(component[container])
-    component[container] = { ...configured, [target.nativeName]: { ...record(configured[target.nativeName]), ...parameters } }
-  }
-  components[target.engine] = component
-  return { sceneId, expectedRevision, patch: [{ op: "update", entityId: entity.entityId, changes: { components } }] }
 }
 
 function fieldLabel(key: string, tr: Translate): string {

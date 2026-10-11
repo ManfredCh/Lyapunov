@@ -200,7 +200,8 @@ describe("原生材料产品入口与真实读回的边界",()=>{
  const entity=(components:Entity["components"]):Entity=>({entityId:"native",name:"Native",resources:[],transform:identityTransform(),components})
  const observation=(nativePhysics:unknown):EntityObservation=>({entityId:"native",transform:identityTransform(),sensors:{nativePhysics}})
  test("MuJoCo参数使用真实nativeName；CAS保存保留原件和其它组件，缺回读不显示实测数",()=>{
-  const source=entity({mujoco:{sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:40000}}},sensor:{camera:"kept"}})
+  const opaque={visual:{robot:{document:{bodies:Array.from({length:150},(_,i)=>({name:`body${i}`}))}}},custom:{values:Array.from({length:140},(_,i)=>i)}}
+  const source=entity({...opaque,mujoco:{sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:40000}}},sensor:{camera:"kept"}})
   const readback=observation({flex:[{nativeName:"soft",youngPa:20000,poisson:.3,rayleighDamping:.02}],cable:[]})
   const target=nativePhysicsTargets(source,readback)[0]!
   expect(target.parameters.youngPa).toBe(40000)
@@ -210,6 +211,7 @@ describe("原生材料产品入口与真实读回的边界",()=>{
   const changes=(request.patch[0] as {changes:{components:Entity["components"]}}).changes.components
   expect(changes.mujoco).toEqual({sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:50000,poisson:.35,rayleighDamping:.03}}})
   expect(changes.sensor).toEqual({camera:"kept"})
+  expect(changes.visual).toEqual(opaque.visual);expect(changes.custom).toEqual(opaque.custom)
   expect(source.components.mujoco).toEqual({sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:40000}}})
   const offline=markup(<NativePhysicsPanel sceneId="scene" revision={7} entity={source} readOnly={false} tr={tr} commit={async()=>{throw new Error("渲染不提交")}}/>)
   expect(offline).toContain("杨氏模量 Pa")

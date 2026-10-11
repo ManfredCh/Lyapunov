@@ -1,9 +1,11 @@
 import { isDeepStrictEqual } from "node:util"
 import type { Entity, SceneSnapshot, ScenePatch } from "../../lyapunov-contracts/src/types.ts"
+import type { NativePhysicsUpdate } from "./native-physics.ts"
 
 export interface PhysicsUpdateInput {
   sceneId: string; entityId: string; expectedRevision: number
   type?: "static" | "dynamic"; massKg?: number; gravityEnabled?: boolean; collisionEnabled?: boolean
+  native?: NativePhysicsUpdate
 }
 /** 选中 glTF 叶时操作其真实物理祖先；未声明物理的实体不猜默认刚体。 */
 export function physicsOwner(scene: SceneSnapshot, entityId: string): Entity {

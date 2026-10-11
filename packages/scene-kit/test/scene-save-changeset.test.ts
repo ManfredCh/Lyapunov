@@ -15,7 +15,6 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { SceneOperations } from "../src/operations.ts"
 import { sceneSaveParameters } from "../src/tool-schema.ts"
-import { nativePhysicsCommit, nativePhysicsTargets } from "../../lyapunov-shell/src/native-physics-panel.tsx"
 
 let base: string, dataRoot: string, operations: SceneOperations
 
@@ -141,7 +140,7 @@ describe("scene_save 的增量导出（变更集）", () => {
   })
 })
 
-describe("原生源与材料经同一scene_edit保存重开", () => {
+describe("原生源与材料经原physics操作保存重开", () => {
   test("flex、cable、独立USD与MPM声明随便携工程搬家，原件字节不变且不保存瞬态帧", async () => {
     // 这里只验证真实文件/SceneStore/ResourceLibrary闭环；原生求解由各引擎的硬件测试独立验收。
     const sceneId = "native-roundtrip"
@@ -161,8 +160,7 @@ describe("原生源与材料经同一scene_edit保存重开", () => {
       if (example.entityId === "soft") {
         // 修复前 mount 用 {sourcePath} 覆盖整个mujoco键，这里真实复现材料声明丢失。
         expect(entity.components.mujoco).toMatchObject(example.components.mujoco!)
-        const target = nativePhysicsTargets(entity)[0]!
-        await operations.scene.commit(nativePhysicsCommit(sceneId, mounted.snapshot!.revision, entity, target, { youngPa: 40000, poisson: .35, rayleighDamping: .03 }))
+        await operations.updatePhysics({sceneId,entityId:entity.entityId,expectedRevision:mounted.snapshot!.revision,native:{engine:"mujoco",kind:"flex",nativeName:"soft",parameters:{youngPa:40000,poisson:.35,rayleighDamping:.03}}})
       }
       expect(await readFile(path, "utf8")).toBe(example.bytes)
     }

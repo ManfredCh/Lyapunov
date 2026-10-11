@@ -27,6 +27,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as scenePlugin from "../src/plugin.ts"
+import { sceneEditParameters } from "../src/tool-schema.ts"
 
 const SCENE_ID = "lane384-scene"
 const signal = new AbortController().signal
@@ -258,5 +259,51 @@ describe("L384 命令面与工具面同一条入参校验（scene-kit invoke）"
       if (!("kind" in receipt)) throw new Error(`/${name} 不该抛错：${JSON.stringify(receipt)}`)
       expect(receipt.kind).toBe("success")
     }
+  })
+
+  test("模型从摘要安全修改原生参数，真工具CAS保全未返回的文档和大数组",async()=>{
+    const first=await sceneWithEntity(SCENE_ID,"flex")
+    const components={mujoco:{sourcePath:"/native/flex.xml",flexMaterials:{block:{youngPa:20000,poisson:.3,rayleighDamping:.001}}},visual:{robot:{document:{nativeBodies:Array.from({length:150},(_,i)=>({name:`b${i}`}))}}},custom:{values:Array.from({length:140},(_,i)=>i),label:"保留用户组件"}}
+    await bridge("scene_edit",{sceneId:SCENE_ID,expectedRevision:first,patch:[{op:"update",entityId:"flex",changes:{components}}]})
+    const inspected=await callTool("scene_inspect",{sceneId:SCENE_ID})
+    const summary=JSON.parse(textOf(inspected)),flex=summary.entities.find((entity:{entityId:string})=>entity.entityId==="flex")
+    expect(summary.kind).toBe("scene-summary");expect(flex.components).toBeUndefined()
+    expect(flex.componentSummary.visual.robot.document.omitted).toBe("source-document")
+    expect(flex.componentSummary.custom.values).toEqual({omitted:"large-array",itemCount:140})
+    const native={engine:"mujoco",kind:"flex",nativeName:"block",parameters:{youngPa:40000}}
+    const updated=await callTool("scene_physics_update",{sceneId:SCENE_ID,entityId:"flex",expectedRevision:summary.revision,native})
+    if(updated.isError)throw new Error(toolErrorText(updated))
+    expect(updated.isError).toBe(false)
+    const visible=JSON.parse(textOf(updated))
+    expect(visible.status).toBe("UPDATED");expect(visible.native).toEqual(native);expect(visible.worldNeedsSync).toBe(true)
+    expect(visible.snapshot.kind).toBe("scene-summary")
+    const full=await bridge("scene_inspect",{sceneId:SCENE_ID})
+    if(!("kind" in full))throw new Error("读取完整持久层失败")
+    const stored=JSON.parse(full.text),entity=stored.entities.find((row:{entityId:string})=>row.entityId==="flex")
+    expect(entity.components).toEqual({...components,mujoco:{...components.mujoco,flexMaterials:{block:{youngPa:40000,poisson:.3,rayleighDamping:.001}}}})
+    const unchanged=await bridge("scene_physics_update",{sceneId:SCENE_ID,entityId:"flex",expectedRevision:stored.revision,native})
+    expect("kind" in unchanged&&JSON.parse(unchanged.text).status).toBe("UNCHANGED")
+    const other=ctx.sessions.create(SessionId("native-isolated"),{meta:{cwd:join(base,"workspace")}})
+    const foreign=await ctx.tools.execute({callId:ToolCallId("native-foreign"),name:"scene_physics_update",arguments:{input:{sceneId:SCENE_ID,entityId:"flex",expectedRevision:stored.revision,native}},signal,agent:{id:other.id,session:other} as Agent})
+    expect(foreign.isError).toBe(true);expect(await revisionOf(SCENE_ID)).toBe(stored.revision)
+    const description=JSON.stringify(sceneEditParameters)
+    expect(description).toContain("scene_physics_update.native");expect(description).toContain("robot_state");expect(description).not.toContain("sim_observe")
+  })
+
+  test("原生分支封闭且与刚体字段互斥，Tool和Command拒绝同形",async()=>{
+    const revision=await sceneWithEntity(SCENE_ID,"flex")
+    const identity={sceneId:SCENE_ID,entityId:"flex",expectedRevision:revision}
+    const native={engine:"mujoco",kind:"flex",nativeName:"block",parameters:{youngPa:40000}}
+    for(const input of [
+      {...identity,native,type:"static"},
+      {...identity,native:{...native,parameters:{youngPa:40000,viscosity:1}}},
+      {...identity,native:{...native,engine:"isaac"}},
+      {...identity,native:{...native,dimensions:[1,2,3]}},
+    ]){
+      const tool=await callTool("scene_physics_update",input)
+      expect(tool.isError).toBe(true)
+      expect(thrownMessage(await bridge("scene_physics_update",input))).toBe(toolErrorText(tool))
+    }
+    expect(await revisionOf(SCENE_ID)).toBe(revision)
   })
 })
