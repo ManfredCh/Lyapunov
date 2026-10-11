@@ -23,6 +23,8 @@
   captureError:   '文本'：落盘类请求回 worker 侧拒绝（对应真实 worker 被自己的沙箱拒绝的那一面，
                   Host 不得代写、也不得把它变成"成功"）
   closeDelayMs:   回复 close / shutdown 前的等待（模拟慢关闭）
+  failOnce:       {'stop': {'code': 'STOP_FAILED', 'message': '...'}} —— 指定请求第一次回协议错误，
+                  世界保持原样；后续同方法正常执行，用于关闭失败后真实重试的回归
   ignoreShutdown: true 时不回复 shutdown、也不理会 stdin EOF（模拟真的卡死的 worker：
                   卡在 carb 初始化里的进程既不会回复请求，也不会因为 stdin 关闭而退出）
   ignoreSigterm:  true 时忽略 SIGTERM（用来把「迟到 ready」的窗口撑到 SIGKILL 之前）
@@ -138,6 +140,7 @@ def main():
     world = None
     worlds = []  # 这个 worker 上真实建出来的世界（一个 worker 可以复用多个 world）
     prepared = {}  # 可选初始暂停协议场景；默认旧夹具不变，不模拟真实物理。
+    failed_once = set()
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -147,6 +150,11 @@ def main():
         method = request.get('method')
         args = request.get('args', {})
         marker(f'request {method}')
+        error = (plan.get('failOnce') or {}).get(method)
+        if error and method not in failed_once:
+            failed_once.add(method)
+            emit({'id': request['id'], 'error': error})
+            continue
         crash = plan.get('exitOnRequest')
         if crash and method == crash.get('method'):
             marker(f'exit-on-request {method}')

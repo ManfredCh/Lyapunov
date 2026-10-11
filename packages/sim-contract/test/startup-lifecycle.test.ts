@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { ProcessSimProvider, type ProcessSimConfig } from '../src/python-transport.ts'
 import { SimError } from '../src/index.ts'
-import type { Frame, SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
+import type { Frame, SceneSnapshot, WorldHandle } from '../../lyapunov-contracts/src/types.ts'
 import { NewtonProvider } from '../../sim-newton/src/provider.ts'
 
 const WORKER = new URL('./fixtures/fake-worker.py', import.meta.url).pathname
@@ -589,6 +589,118 @@ describe.skipIf(PYTHON === undefined)('取消清场可达性：普通轮询 / �
     expect(third.worldId).toBe('tertiary')
     expect((await provider.observe('primary') as Frame & { stillAlive: boolean }).stillAlive).toBe(true)
     await provider.dispose()
+  }, 20_000)
+})
+
+type CloseState = {
+  closing: Map<string, Promise<void>>
+  worlds: Set<string>
+  handles: Map<string, WorldHandle>
+  latest: Map<string, Frame>
+  listeners: Map<string, Set<(frame: Frame) => void>>
+  generations: Map<string, number>
+  revisions: Map<string, number>
+}
+const closeStateOf = (provider: ProcessSimProvider) => provider as unknown as CloseState
+
+describe.skipIf(PYTHON === undefined)('关闭失败可重试与世界归属（Issue #1）', () => {
+  for (const method of ['stop', 'close']) {
+    test(`${method} 第一次失败：并发共用关闭尝试、失败保留世界与帧、重试成功后才清理`, async () => {
+      const expected = { code: `FAKE_${method.toUpperCase()}_FAILED`, message: `测试注入：${method} 第一次失败` }
+      const { provider, marker } = providerFor({ ready: 'ok', framesAfterOpen: 1, failOnce: { [method]: expected } })
+      const state = closeStateOf(provider)
+      try {
+        const handle = await provider.open(scene(), { worldId: 'retry-world' })
+        const worldId = handle.worldId
+        await until(() => state.latest.has(worldId), '关闭前确实收到过世界帧')
+        const frame = state.latest.get(worldId)
+        const seen: Frame[] = []
+        provider.subscribeFrames(worldId, value => seen.push(value))
+        const listeners = state.listeners.get(worldId)
+        const first = provider.close(worldId)
+        expect(provider.close(worldId)).toBe(first)
+        expect((await failureOf(provider.execute(worldId, {} as never))).code).toBe('WORLD_CLOSING')
+        expect(await failureOf(first)).toMatchObject(expected)
+        expect(state.closing.has(worldId)).toBe(false)
+        // 关闭失败不能摘除世界或断开帧订阅；仍可显式操作同一世界。
+        expect(state.worlds.has(worldId)).toBe(true)
+        expect(state.handles.get(worldId)).toBe(handle)
+        expect(state.generations.get(worldId)).toBe(handle.worldGeneration)
+        expect(state.revisions.get(worldId)).toBe(handle.appliedSceneRevision)
+        expect(state.latest.get(worldId)).toBe(frame)
+        expect(state.listeners.get(worldId)).toBe(listeners)
+        const replay: Frame[] = []
+        provider.subscribeFrames(worldId, value => replay.push(value))
+        expect(replay).toEqual([frame!])
+        // 使用已取消的动作验证入口已解除 WORLD_CLOSING，且不向夹具虚构物理执行。
+        expect((await failureOf(provider.execute(worldId, {} as never, AbortSignal.abort()))).code).toBe('CANCELLED')
+        expect((await provider.observe(worldId) as Frame & { stillAlive: boolean }).stillAlive).toBe(true)
+        const synced = await provider.sync(worldId, scene())
+        expect(synced.worldId).toBe(worldId)
+        expect(markerText(marker).split('request close').length - 1).toBe(method === 'stop' ? 0 : 1)
+
+        const retry = provider.close(worldId)
+        expect(retry).not.toBe(first)
+        expect(provider.close(worldId)).toBe(retry)
+        await retry
+        expect(state.closing.has(worldId)).toBe(false)
+        expect(state.worlds.has(worldId)).toBe(false)
+        for (const values of [state.handles, state.latest, state.listeners, state.generations, state.revisions]) expect(values.has(worldId)).toBe(false)
+        expect(await provider.listWorlds()).toEqual([])
+        expect(markerText(marker).split('request stop').length - 1).toBe(2)
+        expect(markerText(marker).split('request close').length - 1).toBe(method === 'stop' ? 1 : 2)
+        // close 只清世界，不抹去既有动作终态。
+        expect(provider.terminalResults(worldId).map(receipt => receipt.actionId)).toContain('fake-action')
+      } finally { await provider.dispose() }
+    }, 20_000)
+  }
+
+  test('旧关闭等待 sync 时 worker 退出：迟到失败不删除新尝试，也不向新 worker 发送 stop/close', async () => {
+    let pauseNext = false
+    let entered!: () => void
+    let release!: () => void
+    const paused = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    class PausedSyncProvider extends ProcessSimProvider {
+      protected override async syncArgsExtras() {
+        if (pauseNext) { pauseNext = false; entered(); await gate }
+        return undefined
+      }
+    }
+    const { provider, marker } = providerFor({ ready: 'ok' }, {}, config => new PausedSyncProvider(config))
+    const state = closeStateOf(provider)
+    try {
+      const worldId = 'replaced-close'
+      await provider.open(scene('old-worker'), { worldId })
+      const oldPid = provider.pid!
+      pauseNext = true
+      const oldSync = failureOf(provider.sync(worldId, { ...scene(), revision: 1 }))
+      await paused
+      const oldClose = failureOf(provider.close(worldId))
+      // close 已读取本次 sync 队列，之后让旧 worker 真实退出。
+      await Promise.resolve()
+      process.kill(oldPid, 'SIGKILL')
+      await until(() => !state.worlds.has(worldId), '旧 worker 退出已清除它的世界句柄')
+      writeScenario({ ready: 'ok', framesAfterOpen: 1, closeDelayMs: 800 })
+      const fresh = await provider.open(scene('new-worker'), { worldId })
+      expect(provider.pid).not.toBe(oldPid)
+      await until(() => state.latest.has(worldId), '新 worker 的帧已进入当前世界')
+      const newFrame = state.latest.get(worldId)
+      const newClose = provider.close(worldId)
+      await until(() => provider.lifecyclePhases().some(phase => phase.name === 'world-close-request'), '新关闭已经到新 worker，但尚未回复')
+      release()
+      expect((await oldSync).code).toBe('PROVIDER_REPLACED')
+      expect((await oldClose).code).toBe('PROVIDER_REPLACED')
+      expect(state.closing.get(worldId)).toBe(newClose)
+      expect(state.worlds.has(worldId)).toBe(true)
+      expect(state.handles.get(worldId)).toBe(fresh)
+      expect(state.latest.get(worldId)).toBe(newFrame)
+      expect(markerText(marker).split('request stop').length - 1).toBe(1)
+      expect(markerText(marker).split('request close').length - 1).toBe(1)
+      await newClose
+      expect(state.closing.has(worldId)).toBe(false)
+      expect(state.worlds.has(worldId)).toBe(false)
+    } finally { release(); await provider.dispose() }
   }, 20_000)
 })
 

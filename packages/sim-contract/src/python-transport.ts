@@ -656,6 +656,8 @@ export class ProcessSimProvider implements SimWorlds {
   protected syncHandleExtras(handle: WorldHandle, _worldId: string, _snapshot: SceneSnapshot): WorldHandle {
     return handle
   }
+  /** 只在当前关闭尝试成功后清理提供方的世界缓存；失败或旧尝试不得触碰。 */
+  protected clearClosedWorldExtras(_worldId: string): void {}
   async sync(worldId: string, snapshot: SceneSnapshot, options: { forceRebuild?: boolean } = {}): Promise<WorldHandle> {
     if (this.closed) throw new SimError('PROVIDER_CLOSED', 'Provider 已释放')
     // sync 是**物理世界**的同步：Agent 模式互切（readonly/write/full）本身不拦它、不结束 worker。worker
@@ -770,14 +772,22 @@ export class ProcessSimProvider implements SimWorlds {
     if (this.closed) return Promise.reject(new SimError('PROVIDER_CLOSED', 'Provider 已释放'))
     const existing = this.closing.get(worldId)
     if (existing) return existing
+    const worker = this.process
     const closing = Promise.resolve().then(async () => {
       const pending = this.syncQueues.get(worldId)
       if (pending) await pending
-      await this.stop(worldId, {})
-      await this.request('close', { worldId })
+      // 等待旧 sync 期间可能已显式恢复 worker；本次关闭只能作用于原来的进程。
+      if (this.process !== worker) throw new SimError('PROVIDER_REPLACED', `${this.config.engineName} worker 已更换`)
+      await this.stop(worldId, {}, worker)
+      await this.request('close', { worldId }, worker)
+      if (this.closing.get(worldId) !== closing) return
       this.worlds.delete(worldId); this.latest.delete(worldId); this.listeners.delete(worldId); this.generations.delete(worldId); this.revisions.delete(worldId); this.handles.delete(worldId)
+      this.clearClosedWorldExtras(worldId)
     })
     this.closing.set(worldId, closing)
+    // 成败都只结束本次在途尝试；失败保留世界状态，后续 close 才能真正重试。
+    const settled = () => { if (this.closing.get(worldId) === closing) this.closing.delete(worldId) }
+    void closing.then(settled, settled)
     return closing
   }
   assist(worldId: string, options: { mode: 'attach' | 'release'; expectedGeneration: number; objectId: string; robotId?: string; anchorBody?: string }) { return this.request<Record<string, unknown>>('assist', { worldId, options }) }

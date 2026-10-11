@@ -95,8 +95,8 @@ export class MuJoCoProvider extends ProcessSimProvider {
     }
     return { ...handle, warnings: merged }
   }
-  override async close(worldId: string): Promise<void> {
-    try { await super.close(worldId) } finally { this.collisionWorlds.delete(worldId) }
+  protected override clearClosedWorldExtras(worldId: string): void {
+    this.collisionWorlds.delete(worldId)
   }
   override async dispose(): Promise<void> {
     this.collisionWorlds.clear()

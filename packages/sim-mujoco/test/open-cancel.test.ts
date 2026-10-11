@@ -205,4 +205,61 @@ describe.skipIf(PYTHON === undefined)('MuJoCoProvider open 取消与碰撞缓存
     expect((await provider.listWorlds()).map(handle => handle.worldId)).toEqual(['primary'])
     await provider.dispose()
   }, 20_000)
+
+  for (const method of ['stop', 'close']) {
+    test(`${method} 失败保留碰撞缓存且可重试：MuJoCo 并发关闭沿用同一 Promise`, async () => {
+      const expected = { code: `FAKE_${method.toUpperCase()}_FAILED`, message: `测试注入：${method} 失败` }
+      const { provider, marker, state } = providerFor({ ready: 'ok', failOnce: { [method]: expected } }, 0)
+      try {
+        const handle = await provider.open(scene(), { worldId: 'retry-collision' })
+        const cache = cacheOf(provider)
+        const entry = cache.get(handle.worldId)
+        expect(entry).toBeDefined()
+        const closing = provider.close(handle.worldId)
+        expect(provider.close(handle.worldId)).toBe(closing)
+        expect(await failureOf(closing)).toMatchObject(expected)
+        expect(cache.get(handle.worldId)).toBe(entry)
+        expect(await stillAlive(provider, handle.worldId)).toBe(true)
+        await provider.sync(handle.worldId, scene())
+        expect(state.builds).toBe(1)
+        expect(cache.get(handle.worldId)?.key).toBe(entry!.key)
+        const retry = provider.close(handle.worldId)
+        expect(retry).not.toBe(closing)
+        expect(provider.close(handle.worldId)).toBe(retry)
+        await retry
+        expect(cache.has(handle.worldId)).toBe(false)
+        expect(await provider.listWorlds()).toEqual([])
+        expect(markerText(marker).split('request stop').length - 1).toBe(2)
+        expect(markerText(marker).split('request close').length - 1).toBe(method === 'stop' ? 1 : 2)
+      } finally { await provider.dispose() }
+    }, 20_000)
+  }
+
+  test('关闭等候已排队 sync：成功后连同该 sync 新写入的碰撞缓存一起清理', async () => {
+    const { provider } = providerFor({ ready: 'ok' }, 0)
+    let release!: () => void
+    try {
+      const worldId = 'pending-sync-close'
+      await provider.open(scene(), { worldId })
+      const cache = cacheOf(provider)
+      const before = cache.get(worldId)
+      let entered!: () => void
+      const started = new Promise<void>(resolve => { entered = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      const target = provider as unknown as { collisionBuilder: { plan: () => unknown; build: () => Promise<unknown> } }
+      target.collisionBuilder = {
+        plan: () => ({ plan: { entity: { entityId: 'splat', name: 'splat' }, binding: {}, sourceToTarget: new Float32Array(16), sourceKey: 'new-compile-key', revision: 1 }, warnings: [] }),
+        build: async () => { entered(); await gate; return { compilation: { patches: [] }, warnings: [] } },
+      }
+      const syncing = provider.sync(worldId, { ...scene(), revision: 1 })
+      await started
+      const closing = provider.close(worldId)
+      expect(cache.get(worldId)).toBe(before)
+      release()
+      await syncing
+      await closing
+      expect(cache.has(worldId)).toBe(false)
+      expect(await provider.listWorlds()).toEqual([])
+    } finally { release?.(); await provider.dispose() }
+  }, 20_000)
 })
