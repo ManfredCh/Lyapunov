@@ -24,6 +24,7 @@ import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-fra
 import { gaussianFirstCameraPose } from "./gaussian-first-camera.ts"
 import type { Entity, Frame, ResourceRef, SceneSnapshot, Transform, WorldHandle } from "../../lyapunov-contracts/src/types.ts"
 import { FrameProjection } from "./projection.ts"
+import { DynamicGeometryVisual } from "./dynamic-geometry.ts"
 import { sceneEditTarget } from '../../lyapunov-contracts/src/scene-edit-target.ts'
 import {RobotAnchorLayer,type RobotAnchorSelection} from "./robot-anchor-layer.ts"
 import {
@@ -266,6 +267,7 @@ export interface LodCaptureFace {
 interface Loaded {
   group: THREE.Group; signature: string; documentWorldMatrix?: THREE.Matrix4
   robot?: RobotVisual; splat?: SplatMesh; collision?: THREE.Object3D
+  dynamicGeometry?: DynamicGeometryVisual
   /** 初始化中的 mesh 也归当前 Loaded；取消仅停止本地后处理，Spark 的质量 WASM 仍须等返回再释放。 */
   pendingSplat?: { mesh?: SplatMesh; controller: AbortController; cancel(): void }
   splatRetentionKey?: string
@@ -697,6 +699,7 @@ export class SceneViewer {
   async setScene(snapshot: SceneSnapshot): Promise<void> {
     if (this.disposed) throw new Error("VIEWER_DISPOSED")
     if (this.snapshot?.sceneId === snapshot.sceneId && snapshot.revision < this.snapshot.revision) return
+    if (this.snapshot?.sceneId !== snapshot.sceneId || this.snapshot?.revision !== snapshot.revision) for (const loaded of this.objects.values()) this.clearDynamicGeometry(loaded)
     if (this.snapshot?.sceneId !== snapshot.sceneId) {
       // 不让相同 entityId 的新场景复用旧场景尚未结束的泼溅初始化。
       for (const [id, loaded] of this.objects) if (loaded.pendingSplat || loaded.pending && loaded.planVisual?.kind === "splat") {
@@ -1220,7 +1223,7 @@ export class SceneViewer {
     const position = camera.getWorldPosition(this.lodCamera)
     for (const [entityId, loaded] of this.objects) {
       const lod = loaded.lod
-      if (!lod) continue
+      if (!lod || loaded.dynamicGeometry) continue
       this.lodProbe.copy(lod.anchorLocal).applyMatrix4(loaded.group.matrixWorld)
       const distance = position.distanceTo(this.lodProbe)
       const wanted = options.settle === true ? rawLodLevel(lod.plan, distance) : selectLodLevel(lod.plan, distance, lod.current)
@@ -1251,7 +1254,7 @@ export class SceneViewer {
   /** 把显示对象换成指定级别；基础级别缺对象（基础读取失败时）返回 false，保持当前级别不回退。 */
   private applyLodLevel(entityId: string, loaded: Loaded, level: number): boolean {
     const lod = loaded.lod
-    if (!lod) return false
+    if (!lod || loaded.dynamicGeometry) return false
     const object = level === LOD_BASE ? loaded.baseVisual : lod.levels.get(level)
     if (!object) return false
     if (loaded.visual !== object) {
@@ -1638,7 +1641,7 @@ export class SceneViewer {
   }
 
   private materialRoots(loaded: Loaded): THREE.Object3D[] {
-    return [...new Set([loaded.baseVisual, loaded.visual, ...loaded.lod?.levels.values() ?? []].filter((root): root is THREE.Object3D => Boolean(root)))]
+    return [...new Set([loaded.baseVisual, loaded.visual, loaded.dynamicGeometry?.root, ...loaded.lod?.levels.values() ?? []].filter((root): root is THREE.Object3D => Boolean(root)))]
   }
 
   private applyEntityMaterial(loaded: Loaded): void {
@@ -1663,7 +1666,7 @@ export class SceneViewer {
   materialStatus(entityId: string): MaterialStatus {
     const entity = this.snapshot?.entities.find(item => item.entityId === entityId)
     const parsed = parseMaterialOverride(entity?.components[MATERIAL_OVERRIDE_KEY]), loaded = this.objects.get(entityId)
-    const roots = loaded?.visual ? [loaded.visual] : []
+    const roots = [loaded?.visual, loaded?.dynamicGeometry?.root].filter((root): root is THREE.Object3D => Boolean(root?.visible))
     const reading = (loaded?.materialOverride ?? new EntityMaterialOverride()).readings(roots)
     const warnings = [...parsed.warnings], declared = entity?.components[MATERIAL_OVERRIDE_KEY] !== undefined
     if (parsed.component && (roots.length || loaded?.group.userData.loaded) && !reading.supported) warnings.push("MATERIAL_PBR_UNSUPPORTED: The entity has no overridable PBR mesh materials; values were not applied")
@@ -1820,9 +1823,10 @@ export class SceneViewer {
     this.projection.setWorld(world)
     this.syncRobotAnchors()
     this.syncCollisionTopology()
-    if ((!world || changed) && this.snapshot) for (const entity of this.snapshot.entities) {
+    if ((!world || changed || unavailable) && this.snapshot) for (const entity of this.snapshot.entities) {
       const loaded = this.objects.get(entity.entityId)
       if (!loaded) continue
+      this.clearDynamicGeometry(loaded)
       applyTransform(loaded.group, entity.transform)
       loaded.robot?.resetPose()
     }
@@ -1854,6 +1858,15 @@ export class SceneViewer {
   }
   private applyFrame(frame: Frame): void {
     applyWorldPoses(this.objects, this.scene, frame)
+    for (const entity of frame.entities) {
+      const loaded = this.objects.get(entity.entityId)
+      if (!loaded) continue
+      if (!entity.dynamicGeometry?.length) { this.clearDynamicGeometry(loaded); continue }
+      loaded.dynamicGeometry ??= new DynamicGeometryVisual(loaded.group, () => loaded.materialOverride?.reset())
+      loaded.dynamicGeometry.update(entity.dynamicGeometry, loaded.visual, loaded.robot?.bodyNode)
+      this.applyEntityMaterial(loaded)
+      this.applyDisplay(loaded)
+    }
     this.displayedFrame=frame
     this.syncRobotAnchors();this.robotAnchorLayer!.receive(frame)
     if (frame.cameras && this.cameraRigFrameId !== frame.frameId) {
@@ -1865,6 +1878,11 @@ export class SceneViewer {
       })
       this.setCameraRigs(specs)
     }
+  }
+  private clearDynamicGeometry(loaded: Loaded): void {
+    if (!loaded.dynamicGeometry) return
+    loaded.dynamicGeometry.dispose(); loaded.dynamicGeometry = undefined
+    this.applyEntityMaterial(loaded)
   }
   select(entityId: string | undefined): void {
     if(this.cameraRigGizmoKey!==undefined){if(entityId===this.selected)return;this.exitCameraMode({restoreView:false})}
@@ -3005,11 +3023,13 @@ export class SceneViewer {
       loadingErrors: Object.fromEntries(this.loadingErrors), droppedFrames: this.projection.droppedFrames,
       framing: this.lastFraming ? { ...this.lastFraming, center: this.lastFraming.center.toArray() } : undefined,
       resources: this.resourceReport, lod: this.lodReport,
+      dynamicGeometry: [...this.objects].flatMap(([entityId, loaded]) => loaded.dynamicGeometry ? [{ entityId, nativeNames: loaded.dynamicGeometry.nativeNames, unmatchedBodyNames: loaded.dynamicGeometry.unmatchedBodyNames }] : []),
     }
   }
   private release(loaded: Loaded): void {
     // 这个 Loaded 连同它的缺件警告一起离开画面：实体被移除、换资源、销毁都在这里清，警告不会挂在同一个 entityId 上。
     this.visualWarnings.delete(loaded.group.userData.entityId)
+    loaded.dynamicGeometry?.dispose(); loaded.dynamicGeometry = undefined
     loaded.pendingSplat?.cancel()
     this.splatRuntime?.delete(loaded.group.userData.entityId)
     if (this.options?.splatRetentionScope && loaded.splatRetentionKey && loaded.group.userData.loaded && loaded.splat) {

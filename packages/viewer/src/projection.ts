@@ -14,7 +14,7 @@ export class FrameProjection {
     this.scene = scene ? { sceneId: scene.sceneId, revision: scene.revision } : undefined
   }
   setWorld(world: WorldHandle | undefined): void {
-    if (this.world?.worldId !== world?.worldId || this.world?.worldGeneration !== world?.worldGeneration || this.world?.appliedSceneRevision !== world?.appliedSceneRevision) {
+    if (this.world?.worldId !== world?.worldId || this.world?.worldGeneration !== world?.worldGeneration || this.world?.appliedSceneRevision !== world?.appliedSceneRevision || world?.status === "closed") {
       this.clear()
     }
     this.world = world ? structuredClone(world) : undefined

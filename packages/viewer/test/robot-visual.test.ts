@@ -23,6 +23,9 @@ import * as THREE from "three"
 
 import { robotVisual } from "../../scene-kit/src/formats.ts"
 import { buildRobotVisual, type RobotVisual } from "../src/robot.ts"
+import { SceneViewer } from "../src/index.ts"
+import { FrameProjection } from "../src/projection.ts"
+import { identityTransform, SCENE_COORDINATES, type EntityObservation, type Frame, type WorldHandle } from "../../lyapunov-contracts/src/types.ts"
 
 class ProgressEventShim extends Event {
   lengthComputable = false
@@ -198,5 +201,106 @@ describe("没有内容不能静默报就绪", () => {
     const visual = await buildRobotVisual({ format: "mjcf", baseUri: "file:///robot/", document: { worldbody: { body: { name: "b", geom: { type: "mesh", mesh: "missing" } } } } } as any, () => { throw new Error("不该去取网格") })
     expect(visual.warnings.some(text => text.startsWith("MESH_ASSET_MISSING: missing"))).toBe(true)
     expect(visual.warnings.some(text => text.startsWith("ROBOT_VISUAL_EMPTY"))).toBe(false)   // 容器建出来了：缺件 ≠ 没内容
+  })
+})
+
+describe("原生动态几何消费同一帧与生命周期", () => {
+  const handle: WorldHandle = { worldId: "native-world", sceneId: "native-scene", engineId: "mujoco", engineVersion: "test", worldGeneration: 1, appliedSceneRevision: 1, status: "ready" }
+  const observed = (entityId: string, dynamicGeometry?: EntityObservation["dynamicGeometry"]): EntityObservation => ({ entityId, transform: identityTransform(), dynamicGeometry })
+  const frame = (stepIndex: number, entities: EntityObservation[], generation = 1): Frame => ({ worldId: handle.worldId, generation, sceneRevision: 1, stepIndex, simTime: stepIndex * .01, frameId: `native-${generation}-${stepIndex}`, entities })
+  function bare(ids: string[]) {
+    // 与既有环境/相机 Viewer 测试相同：调用产品真方法；这个进程不创建 WebGL 或宣称像素验收。
+    const viewer = Object.create(SceneViewer.prototype) as any
+    Object.assign(viewer, { scene: new THREE.Scene(), objects: new Map(), projection: new FrameProjection(), display: { wireframe: false }, visualWarnings: new Map(), syncRobotAnchors: () => {}, syncCollisionTopology: () => {}, setCameraRigs: () => {}, trackAnimation: () => {}, robotAnchorLayer: { receive: () => {} }, snapshot: { sceneId: handle.sceneId, revision: 1, coordinates: SCENE_COORDINATES, entities: [] } })
+    for (const entityId of ids) {
+      const group = new THREE.Group(), visual = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial())
+      group.userData.entityId = entityId; group.add(visual); viewer.scene.add(group)
+      viewer.objects.set(entityId, { group, visual, signature: entityId, lodWarnings: [] })
+      viewer.snapshot.entities.push({ entityId, name: entityId, transform: identityTransform(), resources: [], components: {} })
+    }
+    viewer.projection.setScene(viewer.snapshot)
+    viewer.setWorld(handle)
+    return viewer
+  }
+
+  test("父节点平移旋转缩放不重复作用于世界米制网格；旧代次/旧步数不能覆盖显示", () => {
+    const viewer = bare(["soft"]), loaded = viewer.objects.get("soft")
+    const parent = new THREE.Group(); parent.position.set(4, -3, 2); parent.rotation.z = .7; parent.scale.set(2, 3, 4)
+    viewer.scene.add(parent); parent.add(loaded.group)
+    const source = observed("soft", [{ nativeName: "flex", kind: "mesh", positionsM: [10, 20, 30, 11, 20, 30, 10, 21, 30], indices: [0, 1, 2] }])
+    source.transform.position = [10, 20, 30]
+    expect(viewer.pushFrame(frame(1, [source]))).toBe(true)
+    viewer.applyFrame(viewer.projection.consume())
+    expect(viewer.pushFrame(frame(0, [source]))).toBe(false)
+    expect(viewer.pushFrame(frame(2, [source], 2))).toBe(false)
+    viewer.snapshot.revision = 2; viewer.projection.setScene(viewer.snapshot)
+    expect(viewer.pushFrame(frame(2, [source]))).toBe(false)
+    viewer.snapshot.revision = 1; viewer.projection.setScene(viewer.snapshot)
+    viewer.scene.updateMatrixWorld(true)
+    const mesh = loaded.dynamicGeometry.root.children[0] as THREE.Mesh
+    const worldVertex = new THREE.Vector3().fromBufferAttribute(mesh.geometry.getAttribute("position"), 0).applyMatrix4(mesh.matrixWorld)
+    expect(worldVertex.distanceTo(new THREE.Vector3(10, 20, 30))).toBeLessThan(1e-8)
+    expect(loaded.visual.visible).toBe(false)
+    viewer.setWorld({ ...handle, status: "closed" })
+    expect(loaded.dynamicGeometry).toBeUndefined()
+    expect(loaded.visual.visible).toBe(true)
+    expect(viewer.projection.current()).toBeUndefined()
+  })
+
+  test("粒子复用一个显示对象；选择性帧只清出现且没有动态几何的实体，换代释放真实几何", () => {
+    const viewer = bare(["soft", "water"])
+    viewer.applyFrame(frame(1, [observed("soft", [{ nativeName: "flex", kind: "mesh", positionsM: [0, 0, 1, 1, 0, 1, 0, 1, 1], indices: [0, 1, 2] }]), observed("water", [{ nativeName: "water", kind: "particles", positionsM: [0, 0, 1, .1, 0, 1], radiusM: .02 }])]))
+    const water = viewer.objects.get("water"), particles = water.dynamicGeometry.root.children[0] as THREE.Points
+    expect(particles).toBeInstanceOf(THREE.Points)
+    expect(particles.geometry.getAttribute("position").count).toBe(2)
+    viewer.applyFrame(frame(2, [observed("water", [{ nativeName: "water", kind: "particles", positionsM: [0, 0, .9, .1, 0, .8], radiusM: .03 }])]))
+    expect(water.dynamicGeometry.root.children[0]).toBe(particles)
+    expect(particles.geometry.getAttribute("position").getZ(1)).toBeCloseTo(.8)
+    viewer.applyFrame(frame(3, [observed("soft")]))
+    expect(viewer.objects.get("soft").dynamicGeometry).toBeUndefined()
+    expect(viewer.objects.get("soft").visual.visible).toBe(true)
+    expect(water.dynamicGeometry.root.children[0]).toBe(particles)
+    let released = 0; particles.geometry.addEventListener("dispose", () => released++)
+    viewer.setWorld({ ...handle, worldGeneration: 2 })
+    expect(released).toBe(1)
+    expect(water.dynamicGeometry).toBeUndefined()
+    expect(water.visual.visible).toBe(true)
+  })
+
+  test("缆线仅替换原生身份绑定的静态body，保留同源障碍；未展开节点有精确缺项", async () => {
+    const viewer = bare(["cable"]), loaded = viewer.objects.get("cable")
+    const robot = await buildRobotVisual({ format: "mjcf", baseUri: "file:///native/", document: { worldbody: { body: [
+      { name: "wireB_first", geom: { type: "capsule", size: ".01", fromto: "0 0 1 1 0 1" } },
+      { name: "obstacle", geom: { type: "box", size: ".1 .1 .1" } },
+    ] } } } as any, () => { throw new Error("本用例无外部网格") })
+    loaded.visual.removeFromParent(); loaded.group.add(robot.root); loaded.robot = robot; loaded.visual = robot.root
+    viewer.applyFrame(frame(1, [observed("cable", [{ nativeName: "compositewire", kind: "lines", positionsM: [0, 0, 1, 1, 0, .7], indices: [0, 1], radiusM: .01, nativeBodyNames: ["wireB_first", "not-expanded"] }])]))
+    expect(robot.root.visible).toBe(true)
+    expect(robot.bodyNode("wireB_first")!.visible).toBe(false)
+    expect(robot.bodyNode("obstacle")!.visible).toBe(true)
+    expect(loaded.dynamicGeometry.unmatchedBodyNames).toEqual(["not-expanded"])
+    expect(loaded.dynamicGeometry.root.children[0]).toBeInstanceOf(THREE.InstancedMesh)
+    viewer.applyFrame(frame(2, [observed("cable", [])]))
+    expect(robot.bodyNode("wireB_first")!.visible).toBe(true)
+    expect(robot.bodyNode("obstacle")!.visible).toBe(true)
+  })
+
+  test("原生动态网格沿已发布PBR owner应用材质，换代恢复静态且克隆只释放一次", () => {
+    const viewer = bare(["soft"]), loaded = viewer.objects.get("soft")
+    viewer.snapshot.entities[0].components.materialOverride = {kind:"visual/material-override",roughness:.17,baseColor:"#ee4422"}
+    viewer.applyFrame(frame(1, [observed("soft", [{nativeName:"flex",kind:"mesh",positionsM:[0,0,1,1,0,1,0,1,1],indices:[0,1,2]}])]))
+    const mesh=loaded.dynamicGeometry.root.children[0] as THREE.Mesh
+    const material=mesh.material as THREE.MeshStandardMaterial
+    expect(material.roughness).toBe(.17)
+    expect(material.color.getHexString()).toBe("ee4422")
+    expect(viewer.materialStatus("soft").materials[0].roughness).toBe(.17)
+    let clonesReleased=0;material.addEventListener("dispose",()=>clonesReleased++)
+    viewer.applyFrame(frame(2, [observed("soft", [{nativeName:"flex",kind:"mesh",positionsM:[0,0,.8,1,0,1,0,1,1],indices:[0,1,2]}])]))
+    expect(mesh.material).toBe(material)
+    expect(clonesReleased).toBe(0)
+    viewer.setWorld({...handle,worldGeneration:2})
+    expect(clonesReleased).toBe(1)
+    expect(loaded.dynamicGeometry).toBeUndefined()
+    expect(loaded.visual.visible).toBe(true)
   })
 })
