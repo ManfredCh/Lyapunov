@@ -109,7 +109,7 @@ describe.skipIf(PYTHON === undefined)('ProcessSimProvider 启动/退出生命周
       pythonPath: config.pythonPath, workerPath: config.workerPath,
       launch: async ({ pythonPath, workerPath, env }) => {
         launches++
-        expect(pythonPath).toBe(PYTHON)
+        expect(pythonPath).toBe(PYTHON!)
         expect(workerPath).toBe(WORKER)
         return {
           argv: [pythonPath, '-u', workerPath], env: { ...env, ...config.env },
