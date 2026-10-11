@@ -744,6 +744,125 @@ def collision_mesh(uri,where,triangle_mesh=False):
     if triangle_mesh and any(count!=3 for count in counts):raise SceneError('COLLISION_MESH_INVALID',where+' 明确triangle_mesh要求真实三角面；不猜凹多边形的三角划分')
     return {'shape':'mesh','points':points,'faceCounts':counts,'faceIndices':indices}
 
+# 仅映射当前原生 schema 的材料字段；不把刚体接触参数解释成弹性模量。
+NATIVE_MATERIAL_FIELDS={
+    'OmniPhysicsDeformableMaterialAPI':{
+        'youngsModulusPa':'omniphysics:youngsModulus','poissonsRatio':'omniphysics:poissonsRatio',
+        'densityKgM3':'omniphysics:density','dynamicFriction':'omniphysics:dynamicFriction'},
+    'PhysxPBDMaterialAPI':{
+        'densityKgM3':'physxPBDMaterial:density','viscosity':'physxPBDMaterial:viscosity',
+        'surfaceTension':'physxPBDMaterial:surfaceTension','cohesion':'physxPBDMaterial:cohesion',
+        'friction':'physxPBDMaterial:friction'},
+}
+
+def native_material_value(key,value):
+    if isinstance(value,bool)or not isinstance(value,(int,float))or not math.isfinite(value):
+        raise SceneError('INVALID_ARGUMENT','原生材料参数必须有限 / Native material parameter must be finite: '+key)
+    if key=='poissonsRatio':valid=0<=float(value)<.5
+    elif key in ('youngsModulusPa','densityKgM3'):valid=value>0
+    else:valid=value>=0
+    if not valid:raise SceneError('INVALID_ARGUMENT','原生材料参数超出范围 / Native material parameter out of range: '+key)
+    return float(value)
+
+def apply_native_material_overrides(stage,root_path,overrides):
+    if overrides is None:return
+    if not isinstance(overrides,dict):raise SceneError('INVALID_ARGUMENT','materialOverrides 必须为相对材料路径映射 / Expected relative material path mapping')
+    for relative,values in overrides.items():
+        if not isinstance(relative,str)or not relative or relative.startswith('/')or any(part in ('','..','.')for part in relative.split('/')):
+            raise SceneError('INVALID_ARGUMENT','材料路径必须位于源 defaultPrim 内 / Material path must be relative to source defaultPrim')
+        target=Sdf.Path(relative)
+        if not target.IsPrimPath():raise SceneError('INVALID_ARGUMENT','材料路径必须指向 prim / Material path must identify a prim: '+relative)
+        prim=stage.GetPrimAtPath(Sdf.Path(root_path).AppendPath(target))
+        if not prim or not prim.IsA(UsdShade.Material):raise SceneError('INVALID_ARGUMENT','找不到原生材料 / Native material not found: '+relative)
+        fields={key:attribute for schema,mapping in NATIVE_MATERIAL_FIELDS.items()if prim.HasAPI(schema)for key,attribute in mapping.items()}
+        if not fields:raise SceneError('UNSUPPORTED_CAPABILITY','材料没有原生弹性体或 PBD schema / Material has no native deformable or PBD schema: '+relative)
+        if not isinstance(values,dict):raise SceneError('INVALID_ARGUMENT','材料参数必须为对象 / Material parameters must be an object: '+relative)
+        for key,value in values.items():
+            if key not in fields:raise SceneError('UNSUPPORTED_CAPABILITY','该原生材料不支持字段 / Unsupported native material field: '+relative+'.'+key)
+            prim.GetAttribute(fields[key]).Set(native_material_value(key,value))
+
+def native_geometry_prims(prim):
+    result=[]
+    for child in Usd.PrimRange(prim):
+        if child.HasAPI('OmniPhysicsVolumeDeformableSimAPI')or child.HasAPI('OmniPhysicsSurfaceDeformableSimAPI'):
+            result.append({'path':str(child.GetPath()),'kind':'mesh'})
+        elif child.HasAPI(PhysxSchema.PhysxParticleSetAPI):
+            if not child.IsA(UsdGeom.Points):
+                raise SceneError('UNSUPPORTED_CAPABILITY','粒子动态读回当前要求 UsdGeom.Points / Particle readback currently requires UsdGeom.Points: '+str(child.GetPath()))
+            result.append({'path':str(child.GetPath()),'kind':'particles'})
+    return result
+
+def require_native_gpu(geometry,device):
+    if geometry and not device.startswith('cuda:'):
+        raise SceneError('UNSUPPORTED_CAPABILITY','Isaac 原生可变形体与 PBD 粒子液体需要 CUDA GPU；请配置 physicsDevice=cuda:0 / Native deformables and PBD particle fluids require a CUDA GPU')
+
+def mesh_triangles(counts,indices):
+    result=[];offset=0
+    for count in counts:
+        count=int(count)
+        if count<3 or offset+count>len(indices):raise SceneError('ENGINE_ERROR','原生网格拓扑无效 / Invalid native mesh topology')
+        for corner in range(1,count-1):result.extend([int(indices[offset]),int(indices[offset+corner]),int(indices[offset+corner+1])])
+        offset+=count
+    if offset!=len(indices):raise SceneError('ENGINE_ERROR','原生网格拓扑长度不符 / Native mesh topology length mismatch')
+    return result
+
+def native_material_readback(stage,root_path):
+    materials=[]
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(root_path)):
+        for schema,fields in NATIVE_MATERIAL_FIELDS.items():
+            if prim.HasAPI(schema):
+                materials.append({'nativeName':str(prim.GetPath().MakeRelativePath(Sdf.Path(root_path))),'schema':schema,
+                                  'parameters':{attr:prim.GetAttribute(attr).Get()for attr in fields.values()}})
+    return materials
+
+def observe_native_geometry(stage,root_path,geometry):
+    cache=UsdGeom.XformCache();output=[];objects=[]
+    for record in geometry:
+        prim=stage.GetPrimAtPath(record['path']);points=UsdGeom.PointBased(prim).GetPointsAttr().Get()
+        if points is None:raise SceneError('ENGINE_ERROR','原生节点未写回 / Native point readback unavailable: '+record['path'])
+        world=cache.GetLocalToWorldTransform(prim)
+        positions=[float(v)for point in points for v in world.Transform(Gf.Vec3d(*point))]
+        if not all(math.isfinite(v)for v in positions):raise SceneError('ENGINE_ERROR','原生节点含非有限值 / Non-finite native point state')
+        native_name=str(prim.GetPath().MakeRelativePath(Sdf.Path(root_path)))
+        item={'nativeName':native_name,'kind':record['kind'],'positionsM':positions}
+        facts={'nativeName':native_name,'pointCount':len(points),'collisionEnabled':prim.HasAPI(UsdPhysics.CollisionAPI)}
+        binding_prim=prim
+        if record['kind']=='mesh':
+            if prim.IsA(UsdGeom.TetMesh):
+                mesh=UsdGeom.TetMesh(prim);surface=mesh.GetSurfaceFaceVertexIndicesAttr().Get()
+                if not surface:surface=UsdGeom.TetMesh.ComputeSurfaceFaces(mesh,Usd.TimeCode.Default())
+                item['indices']=[int(v)for face in surface for v in face]
+                facts['schema']='OmniPhysicsVolumeDeformableSimAPI'
+            else:
+                mesh=UsdGeom.Mesh(prim);item['indices']=mesh_triangles(mesh.GetFaceVertexCountsAttr().Get(),mesh.GetFaceVertexIndicesAttr().Get())
+                facts['schema']='OmniPhysicsSurfaceDeformableSimAPI'
+        else:
+            particles=PhysxSchema.PhysxParticleSetAPI(prim)
+            facts['fluid']=bool(particles.GetFluidAttr().Get());facts['schema']='PhysxParticleSetAPI'
+            targets=PhysxSchema.PhysxParticleAPI(prim).GetParticleSystemRel().GetTargets()
+            if not targets:raise SceneError('ENGINE_ERROR','粒子缺少原生 system / Native particle system missing: '+record['path'])
+            binding_prim=stage.GetPrimAtPath(targets[0]);system=PhysxSchema.PhysxParticleSystem(binding_prim)
+            radius=system.GetFluidRestOffsetAttr().Get()if facts['fluid']else system.GetSolidRestOffsetAttr().Get()
+            if radius is None or radius<=0:
+                widths=UsdGeom.Points(prim).GetWidthsAttr().Get()
+                if not widths or any(abs(float(w)-float(widths[0]))>1e-8 for w in widths):
+                    raise SceneError('UNSUPPORTED_CAPABILITY','粒子必须声明统一半径或 restOffset / Particles require a uniform radius or explicit restOffset')
+                radius=float(widths[0])*.5
+            item['radiusM']=float(radius)
+            # 一个 scalar radius 只能保真表达均匀缩放后的粒子；不把椭球假装为等半径球。
+            axes=[Gf.Vec3d(*(float(world[i][j])for j in range(3)))for i in range(3)]
+            scales=[axis.GetLength()for axis in axes]
+            if min(scales)<=0 or max(scales)-min(scales)>1e-6*max(scales)or any(abs(Gf.Dot(axes[i],axes[j]))>1e-6*scales[i]*scales[j]for i in range(3)for j in range(i+1,3)):
+                raise SceneError('UNSUPPORTED_CAPABILITY','粒子动态显示要求非零均匀缩放且无剪切 / Particle readback requires nonzero uniform scale without shear')
+            item['radiusM']*=scales[0]
+            facts['particleSystem']=str(targets[0].MakeRelativePath(Sdf.Path(root_path)))
+            facts['nonParticleCollisionEnabled']=bool(system.GetNonParticleCollisionEnabledAttr().Get())
+            facts['collisionEnabled']=facts['nonParticleCollisionEnabled']
+        material,_=UsdShade.MaterialBindingAPI(binding_prim).ComputeBoundMaterial('physics')
+        if material:facts['material']=str(material.GetPath().MakeRelativePath(Sdf.Path(root_path)))
+        output.append(item);objects.append(facts)
+    return output,objects
+
 class SceneAdapter:
     def __init__(self,cache_root):
         self.cache_root=Path(cache_root).resolve();self.cache_root.mkdir(parents=True,exist_ok=True);self.converted={}
@@ -759,7 +878,10 @@ class SceneAdapter:
             visual=visual_source(entity,self.cache_root)
             return visual,cfg,{'visualOnly':bool(visual)}
         if not Path(source).exists():raise SceneError('RESOURCE_MISSING',source)
-        if source.endswith(('.usd','.usda','.usdc')):return source,cfg,{}
+        if source.endswith(('.usd','.usda','.usdc')):
+            native_stage=Usd.Stage.Open(source,Usd.Stage.LoadNone)
+            if not native_stage:raise SceneError('IMPORT_FAILED','无法打开原生 USD / Cannot open native USD: '+source)
+            return source,cfg,{'nativeSourceCoordinates':{'metersPerUnit':UsdGeom.GetStageMetersPerUnit(native_stage),'kilogramsPerUnit':UsdPhysics.GetStageKilogramsPerUnit(native_stage),'upAxis':str(UsdGeom.GetStageUpAxis(native_stage))}}
         key=(source,Path(source).stat().st_mtime_ns,json.dumps(cfg,sort_keys=True),declared_resources(entity))
         if key in self.converted:return self.converted[key]
         output=self.cache_root/'imports'/str(uuid.uuid4());output.mkdir(parents=True)
@@ -850,6 +972,14 @@ class SceneAdapter:
                 for collider_path in (collision_record or {}).get('colliderPaths',[path+'/geometry']):
                     UsdGeom.Imageable(stage.GetPrimAtPath(collider_path)).CreatePurposeAttr(UsdGeom.Tokens.guide)
             prim=stage.GetPrimAtPath(path)
+            apply_native_material_overrides(stage,path,cfg.get('materialOverrides'))
+            native_geometry=native_geometry_prims(prim)
+            if native_geometry and metadata.get('nativeSourceCoordinates')!={'metersPerUnit':1.,'kilogramsPerUnit':1.,'upAxis':'Z'}:
+                raise SceneError('UNSUPPORTED_CAPABILITY','原生非刚体 USD 需要米/千克/Z-up 源坐标；请在源资产中规范化 / Native non-rigid USD requires meter/kilogram/Z-up source coordinates')
+            require_native_gpu(native_geometry,options.get('physicsDevice','cpu'))
+            if native_geometry:
+                _,native_objects=observe_native_geometry(stage,path,native_geometry)
+                metadata['nativeParticleCollision']=any(obj.get('schema')=='PhysxParticleSetAPI'and obj['collisionEnabled']for obj in native_objects)
             roots=[p for p in Usd.PrimRange(prim) if p.HasAPI(UsdPhysics.ArticulationRootAPI)]
             for articulation_root in roots:PhysxSchema.PhysxArticulationAPI.Apply(articulation_root)
             # PhysX 只为「含关节的链接树」注册真实 articulation。但 Isaac 6.0.1 的 MJCF 导入器会给
@@ -887,6 +1017,7 @@ class SceneAdapter:
                          'collisionNames':native_collision_names,
                          'siteStatus':site_status,'siteNames':site_names,'sitePrims':site_prims,
                          'cameras':cameras,
+                         'nativeGeometry':native_geometry,
                          # Scene 声明碰撞实际落成的东西（collider 路径、材质与质量来源）；没有声明
                          # 碰撞的实体（走导入源碰撞）这里为 None，不假装有 Scene 侧消费记录。
                          'collision':collision_record}

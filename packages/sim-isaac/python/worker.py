@@ -99,12 +99,12 @@ try:
         from isaacsim.core.experimental.objects import Camera as UsdCamera
 except Exception as exc:
     fail_startup('ISAAC_EXTENSION_UNAVAILABLE',str(exc),'extensions-load',causeType=type(exc).__name__)
-from scene_adapter import SceneAdapter,SceneError,quat_to_matrix,signatures,wrench_mapping,camera_mount_bodies,poses
+from scene_adapter import SceneAdapter,SceneError,quat_to_matrix,signatures,wrench_mapping,camera_mount_bodies,poses,observe_native_geometry,native_material_readback
 emit({'event':'phase','phase':'physx-initialize'})
 try:
     if SM.get_active_physics_engine() != "physx" and not SM.switch_physics_engine("physx"):
         fail_startup('ISAAC_PHYSX_UNAVAILABLE','Isaac PhysX后端未启用','physx-initialize')
-    from omni.physx.bindings._physx import ContactEventType
+    from omni.physx.bindings._physx import ContactEventType,ErrorEvent
 except Exception as exc:
     fail_startup('ISAAC_PHYSX_UNAVAILABLE',str(exc),'physx-initialize',causeType=type(exc).__name__)
 
@@ -189,6 +189,16 @@ def gait_probe_targets(legs,time_s,forward,turn,frequency,stride,lift):
 def empty_frame(world):
     return {'worldId':world.id,'generation':world.generation,'sceneRevision':world.revision,'stepIndex':world.index,'simTime':world.sim_time,'frameId':f'{world.id}:{world.generation}:{world.index}','assistAdvanceCount':world.assist_advances,'entities':[]}
 
+def native_capabilities(device):
+    cuda=device.startswith('cuda:')
+    reason='UNSUPPORTED_CAPABILITY: 原生可变形体/PBD 液体需要 physicsDevice=cuda:0 / Native deformables and PBD fluids require a CUDA GPU'
+    return {'engine':'isaac','supported':{'staticTriangleMesh':True,'nativeUsd':True,'observe.dynamicGeometry':True,'deformable':cuda,'fluid':cuda},
+            'unsupported':{'dynamicTriangleMesh':'UNSUPPORTED_CAPABILITY','cable':'UNSUPPORTED_CAPABILITY: 本轮未接入原生实体缆线 / Native cable is not integrated',
+                           **({}if cuda else{'deformable':reason,'fluid':reason})},
+            'notes':['明确static/environment+triangle_mesh绑定使用原生none三角面；真实接触以本世界Frame为准，默认mesh仍凸包',
+                     '可变形体使用原生 OmniPhysicsVolumeDeformableSimAPI 或 OmniPhysicsSurfaceDeformableSimAPI；液体使用 PhysxParticleSetAPI + fluid=true + UsdGeom.Points / Native USD schemas are required',
+                     '支持表表示代码入口及设备配置条件；实际物理验收须另有步进、形变和碰撞证据 / Interface support and device configuration do not establish physical validation']}
+
 # ISAAC-19／D4：GLB 视觉导入回执的既有通道前缀（`glb_visual.report_import` 用标准 warnings 发出同一份 JSON）。
 GLB_IMPORT_WARNING_PREFIX='[lyapunov] GLB 视觉导入: '
 
@@ -245,7 +255,15 @@ class World:
         self.dt=positive(options.get('timestepS',.002),'timestepS');self.factor=positive(options.get('realtimeFactor',1),'realtimeFactor');self.frame_hz=positive(options.get('frameRateHz',30),'frameRateHz');self.last_frame=0.;self.next_tick=time.monotonic()
         self.adapter=SceneAdapter(os.environ['LYAPUNOV_ISAAC_CACHE']);self.timeline=omni.timeline.get_timeline_interface()
         self.stage_id=0;self.sleep_query=True;self.import_warnings=[];self.glb_imports=[]
+        self.native_error_subscription=None;self.native_failure=None
         self.sync(scene)
+    def native_error_event(self,event):
+        # 原生 GPU 失败不能变成 ready + 永远不动的节点。只在含非刚体的 world 订阅原生错误。
+        if self.native_failure is None and int(event.type)in tuple(int(value)for value in ErrorEvent.__members__.values()):
+            self.native_failure=str(event.payload.get('errorString','PhysX native error'))
+    def assert_native_physics(self):
+        if self.native_failure:
+            raise SceneError('ENGINE_ERROR','原生 PhysX 求解失败 / Native PhysX simulation failed: '+self.native_failure)
     def ground_geom_names(self):
         """接触标签口径的地面名：worker 自带地面盒（/World/ground/geometry）与源声明地面 geom
         （floor/ground 字面约定，如官方 h1/scene.xml、bhl_scene.xml 的 floor）的 `<eid>/<geom名>`。
@@ -278,7 +296,8 @@ class World:
             for eid,entry in self.entities.items():
                 root=self.stage.GetPrimAtPath(entry['path'])
                 colliders=[p for p in Usd.PrimRange(root,Usd.TraverseInstanceProxies())if p.HasAPI(UsdPhysics.CollisionAPI)and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()]
-                if colliders:physical.append(eid);names[eid]=[str(p.GetPath())for p in colliders]
+                if colliders or entry.get('metadata',{}).get('nativeParticleCollision'):
+                    physical.append(eid);names[eid]=[str(p.GetPath())for p in colliders]or[record['path']for record in entry.get('nativeGeometry',[])if record['kind']=='particles']
                 if entry.get('metadata',{}).get('standardGroundReplaced'):ignored.append(eid)
                 for name in entry.get('metadata',{}).get('verifiedNativeGroundNames',[]):
                     if colliders:native_planes.append({'source':'native-plane','entityId':eid,'geomNames':[eid+'/'+name]})
@@ -291,6 +310,7 @@ class World:
     def handle(self):
         result={'worldId':self.id,'sceneId':self.scene['sceneId'],'engineId':'isaac','engineVersion':state['sdkVersion'],'worldGeneration':self.generation,'appliedSceneRevision':self.revision,'status':self.run_status(),'clock':self.clock,'timestepS':self.dt,'groundGeomNames':self.ground_geom_names(),'supportsPause':True}
         if self.status in ('ready','running'):result['worldPhysics']=self.world_physics()
+        result['capabilities']=native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'))
         # 本次 populate 真实发生的 GLB 导入回执（无丢弃项时不出现该键，不产生噪音）。
         warnings_out=list(self.import_warnings)
         # ISAAC-10：纯视觉实体（无原生源、只有 GLB 视觉；USD 层 collider 为 purpose=guide、非物理）此前在
@@ -333,6 +353,8 @@ class World:
                 prim=self.stage.GetPrimAtPath(e['path'])
                 native=sum(1 for descendant in Usd.PrimRange(prim,Usd.TraverseInstanceProxies())if descendant.HasAPI(UsdPhysics.CollisionAPI))
                 if native:source='native-source'
+                elif metadata.get('nativeParticleCollision'):
+                    source='native-source';reason='原生 PBD 粒子系统已启用 nonParticleCollisionEnabled / Native PBD system has non-particle collision enabled'
                 elif patch_ignored:
                     # 3DGS 的典型形态：有配准 binding、没有可信几何 → 没有任何 collider，而 patches
                     # 通道又被忽略。这正是 ISAAC-09 要求"单独处理缺几何、明确报错"的那一种。
@@ -382,7 +404,7 @@ class World:
         signature=signatures(scene)
         if not force and signature==self.signature and self.status in ('ready','running'):
             self.scene=copy.deepcopy(scene);self.revision=scene['revision'];return self.handle()
-        self.stop({});self.control_owners.clear();self.status='unsynced';self.assisted.clear();self.contact_subscription=None
+        self.stop({});self.control_owners.clear();self.status='unsynced';self.assisted.clear();self.contact_subscription=None;self.native_error_subscription=None;self.native_failure=None
         self.timeline.stop();self.timeline.commit();self.timeline.set_auto_update(False);self.timeline.commit()
         self.entities={};self.contacts={};gc.collect()
         try:
@@ -390,7 +412,7 @@ class World:
             # catch_warnings 会截住打印，随后按原位置重发一次，保留 worker stderr/日志的既有可见性。
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter('always')
-                self.stage,self.entities=self.adapter.populate(scene,self.options)
+                self.stage,self.entities=self.adapter.populate(scene,{**self.options,'physicsDevice':os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')})
             self.import_warnings=glb_import_warnings(caught)
             self.glb_imports=glb_import_reports(self.import_warnings)
             for entry in caught:warnings.warn_explicit(entry.message,entry.category,entry.filename,entry.lineno)
@@ -416,6 +438,9 @@ class World:
             initial_usd_poses={eid:snapshot_model_origin(self.stage,e,poses(scene)[eid])['worldByPath'] for eid,e in self.entities.items()} if cpu_native else {}
             self.stage_id=UsdUtils.StageCache.Get().GetId(self.stage).ToLongInt()
             device=os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')
+            has_native=any(e.get('nativeGeometry')for e in self.entities.values())
+            if has_native:
+                self.native_error_subscription=omni.physx.get_physx_interface().get_error_event_stream().create_subscription_to_push(self.native_error_event)
             SM.setup_simulation(dt=self.dt,device=device)
             # SimulationManager.set_device在CUDA路径把/physics/suppressReadback置True(见其源码
             # set_device)，实测该设置会让GPU运行的接触报告整场收不到：接触缓冲不再回读，回调、
@@ -425,7 +450,12 @@ class World:
             # 运行回执由开发环境单独保存；发布包只保留 worker 实现。
             if device!='cpu':carb.settings.get_settings().set_bool('/physics/suppressReadback',False)
             SM.enable_fabric(rendering)
+            if has_native:
+                # 同一 SM.step 的原生节点/粒子写回供 Frame 使用；RTX 仍保留 Fabric，不另起物理时钟。
+                for key in ('/physics/updateToUsd','/physics/updateParticlesToUsd','/physics/updateVelocitiesToUsd'):
+                    carb.settings.get_settings().set_bool(key,True)
             self.timeline.set_auto_update(False);self.timeline.play();self.timeline.commit();SM.initialize_physics()
+            self.assert_native_physics()
             if cpu_native:
                 for eid,e in self.entities.items():
                     source_origin=e.pop('modelOriginBeforePhysics')
@@ -970,7 +1000,7 @@ class World:
             joints.append(item)
         return {**base,'joints':joints,'controlledJointNames':e['controlled']}
     def observe(self,selection=None):
-        self.ready();selection=selection or {};frame=empty_frame(self)
+        self.ready();self.assert_native_physics();selection=selection or {};frame=empty_frame(self)
         from robot_authoring import model_world_matrix
         # Fabric同步是RTX观察/渲染的按需边界，不应把每个0.002s物理步变成GPU/CPU全场同步。
         # PhysX仍由唯一SM.step推进；读取命名site前刷新一次官方Fabric接口即可。
@@ -1004,6 +1034,9 @@ class World:
                         gravity=bool(array(e['pose'].get_enabled_gravities()).reshape(-1).any())
                 item['physics']={'source':'isaac-compiled','dynamic':dynamic,'massKg':mass_kg,'gravityEnabled':gravity,
                                  'collisionEnabled':any(enabled),'colliderCount':len(collider_prims),'bodyName':e['path']}
+            native_objects=[]
+            if e.get('nativeGeometry'):
+                item['dynamicGeometry'],native_objects=observe_native_geometry(self.stage,e['path'],e['nativeGeometry'])
             motion=None
             if e['articulation'] is not None:
                 with use_backend('tensor',raise_on_fallback=True):positions=scalar_list(e['articulation'].get_dof_positions());joint_velocity=scalar_list(e['articulation'].get_dof_velocities())
@@ -1020,6 +1053,11 @@ class World:
             e['lastObserveSimTime']=self.sim_time
             if selection.get('sensors',True):
                 item['sensors']={'bodyLinearVelocityMps':velocity[:3],'bodyAngularVelocityRadps':velocity[3:],'asleep':asleep}
+                if e.get('nativeGeometry'):
+                    item['sensors']['nativePhysics']={'engine':'isaac','source':'physx-usd-readback',
+                        'requestedDevice':os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'),
+                        'physicsScenes':[{'gpuDynamics':s.get_enabled_gpu_dynamics(),'broadphase':s.get_broadphase_type()}for s in SM.get_physics_scenes()],
+                        'objects':native_objects,'materials':native_material_readback(self.stage,e['path'])}
                 if motion is not None:item['sensors']['motionState']=motion
                 free_base=e['metadata'].get('freeBase',{})
                 if free_base.get('present') and not e['config'].get('fixBase'):
@@ -1553,7 +1591,7 @@ class World:
             # 真实辅助推进计数只随一次真实写回递增；attach/release 调用本身不在计数点内。
             self.assist_advances+=1
         # 唯一推进点；Timeline自动更新被关闭，Viewer/渲染不会推进physics。
-        SM.step(steps=1,update_fabric=False);self.index+=1;self.sim_time+=self.dt
+        SM.step(steps=1,update_fabric=False);self.assert_native_physics();self.index+=1;self.sim_time+=self.dt
         for aid,action in list(self.actions.items()):
             complete=self.index>=action['endStep'] if 'endStep'in action else action['startTime']is not None and self.sim_time-action['startTime']+1e-12>=max(m['_end']for m in action['motions'])
             if complete:self.finish(aid,'completed')
@@ -2250,7 +2288,7 @@ class World:
             raise SceneError(error.code,error.message)
 
     def close(self):
-        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.contact_subscription=None;self.timeline.stop();self.timeline.commit();self.entities={};gc.collect();self.status='closed'
+        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.contact_subscription=None;self.native_error_subscription=None;self.timeline.stop();self.timeline.commit();self.entities={};gc.collect();self.status='closed'
 
 requests=queue.Queue()
 def reader():
@@ -2259,7 +2297,7 @@ def reader():
         except Exception as error:emit({'event':'protocol-error','message':str(error)})
     requests.put({'id':'eof','method':'shutdown','args':{}})
 threading.Thread(target=reader,daemon=True).start();world=None;running=True
-emit({'event':'ready','engine':'isaac','version':state['sdkVersion'],'pid':os.getpid(),'capabilities':{'engine':'isaac','supported':{'staticTriangleMesh':True},'unsupported':{'dynamicTriangleMesh':'UNSUPPORTED_CAPABILITY'},'notes':['明确static/environment+triangle_mesh绑定使用原生none三角面；真实接触以本世界Frame为准，默认mesh仍凸包']}})
+emit({'event':'ready','engine':'isaac','version':state['sdkVersion'],'pid':os.getpid(),'capabilities':native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'))})
 while running and omni.kit.app.get_app().is_running():
     while not requests.empty():
         request=requests.get();args=request.get('args',{});method=request['method']

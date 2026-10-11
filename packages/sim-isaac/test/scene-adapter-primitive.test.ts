@@ -689,3 +689,100 @@ for (const probe of probes) {
     })
   })
 }
+
+/** 原生非刚体接线的离线回归：执行真源码，既不启动 Kit，也不声称物理通过。 */
+const NATIVE_PROBE = `
+import ast, json, math, sys
+from types import SimpleNamespace
+tree=ast.parse(open(sys.argv[1],encoding='utf-8').read())
+wanted={'SceneError','native_material_value','apply_native_material_overrides','require_native_gpu','mesh_triangles','signatures'}
+nodes=[n for n in tree.body if isinstance(n,(ast.ClassDef,ast.FunctionDef))and n.name in wanted]
+nodes.extend(n for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='NATIVE_MATERIAL_FIELDS'for t in n.targets))
+assert {n.name for n in nodes if hasattr(n,'name')}==wanted
+class Path(str):
+    def IsPrimPath(self):return '.'not in self
+    def AppendPath(self,other):return Path(self+'/'+other)
+class Attr:
+    def __init__(self):self.value=None
+    def Set(self,value):self.value=value
+class Prim:
+    def __init__(self,schema):self.schema=schema;self.attrs={}
+    def HasAPI(self,schema):return schema==self.schema
+    def IsA(self,kind):return True
+    def GetAttribute(self,name):return self.attrs.setdefault(name,Attr())
+elastic=Prim('OmniPhysicsDeformableMaterialAPI');water=Prim('PhysxPBDMaterialAPI');rigid=Prim('PhysicsMaterialAPI')
+prims={'/entity/Materials/Elastic':elastic,'/entity/Materials/Water':water,'/entity/Materials/Rigid':rigid}
+stage=SimpleNamespace(GetPrimAtPath=lambda path:prims.get(str(path)))
+ns={'math':math,'json':json,'Sdf':SimpleNamespace(Path=Path),'UsdShade':SimpleNamespace(Material=object())}
+exec(compile(ast.Module(body=nodes,type_ignores=[]),sys.argv[1],'exec'),ns)
+def call(name,*args):
+    try:return {'value':ns[name](*args)}
+    except ns['SceneError']as error:return {'code':error.code,'message':str(error)}
+native=[{'path':'/entity/Body','kind':'mesh'}]
+report={'cpu':call('require_native_gpu',native,'cpu'),'cuda':call('require_native_gpu',native,'cuda:0'),
+        'rigidCpu':call('require_native_gpu',[],'cpu'),
+        'validMaterial':call('apply_native_material_overrides',stage,'/entity',{'Materials/Elastic':{'youngsModulusPa':12000,'poissonsRatio':.3,'densityKgM3':900},'Materials/Water':{'viscosity':.02}}),
+        'rigidMaterial':call('apply_native_material_overrides',stage,'/entity',{'Materials/Rigid':{'youngsModulusPa':1}}),
+        'unsupportedField':call('apply_native_material_overrides',stage,'/entity',{'Materials/Water':{'youngsModulusPa':1}}),
+        'outside':call('apply_native_material_overrides',stage,'/entity',{'../Other':{'viscosity':1}}),
+        'absolute':call('apply_native_material_overrides',stage,'/entity',{'/Other':{'viscosity':1}}),
+        'missingMaterial':call('apply_native_material_overrides',stage,'/entity',{'Missing':{'viscosity':1}}),
+        'invalidMaterial':[call('native_material_value',key,value)for key,value in [('youngsModulusPa',0),('densityKgM3',-1),('poissonsRatio',.5),('poissonsRatio',-.01),('viscosity',-1),('viscosity',True),('viscosity',float('nan'))]],
+        'triangles':call('mesh_triangles',[3,4],[0,1,2,2,3,4,5]),'badTopology':call('mesh_triangles',[4],[0,1,2]),
+        'elasticAttrs':{k:v.value for k,v in elastic.attrs.items()},'waterAttrs':{k:v.value for k,v in water.attrs.items()}}
+scene={'entities':[{'entityId':'elastic','transform':{},'components':{'isaac':{'sourcePath':'native.usda','materialOverrides':{'Materials/Elastic':{'youngsModulusPa':1000}}}}}]}
+signature=ns['signatures'](scene);scene['entities'][0]['components']['isaac']['materialOverrides']['Materials/Elastic']['youngsModulusPa']=2000
+report['overrideRebuilds']=signature!=ns['signatures'](scene)
+worker=ast.parse(open(sys.argv[2],encoding='utf-8').read())
+methods={'native_error_event','assert_native_physics'}
+body=[n for c in worker.body if isinstance(c,ast.ClassDef)and c.name=='World'for n in c.body if isinstance(n,ast.FunctionDef)and n.name in methods]
+body.extend(n for n in worker.body if isinstance(n,ast.FunctionDef)and n.name=='native_capabilities')
+assert {n.name for n in body}==methods|{'native_capabilities'}
+ns['ErrorEvent']=SimpleNamespace(__members__={'PHYSX_ERROR':1,'PHYSX_CUDA_ERROR':2})
+exec(compile(ast.Module(body=body,type_ignores=[]),sys.argv[2],'exec'),ns)
+owner=SimpleNamespace(native_failure=None)
+ns['native_error_event'](owner,SimpleNamespace(type=2,payload={'errorString':'failed to allocate memory 67108864 bytes'}))
+ns['native_error_event'](owner,SimpleNamespace(type=1,payload={'errorString':'Scene state is corrupted'}))
+report['nativeError']=call('assert_native_physics',owner)
+report['cpuCapabilities']=ns['native_capabilities']('cpu');report['cudaCapabilities']=ns['native_capabilities']('cuda:0')
+print(json.dumps(report,allow_nan=False))
+`
+
+describe('Isaac 原生材料与非刚体设备条件', () => {
+  const python = process.env.TESTCI_PYTHON ?? process.env.LYAPUNOV_PYTHON ?? '/usr/bin/python3'
+  const run = spawnSync(python, ['-c', NATIVE_PROBE, SOURCE, resolve(HERE, '..', 'python', 'worker.py')], { encoding: 'utf8' })
+  if (run.status !== 0) throw new Error(`原生非刚体离线回归失败 exit=${run.status}: ${run.stderr}`)
+  const native = JSON.parse(run.stdout)
+
+  test('CPU 明确拒绝非刚体，原普通刚体与 CUDA 入口不被误拒绝', () => {
+    expect(native.cpu.code).toBe('UNSUPPORTED_CAPABILITY')
+    expect(native.cpu.message).toContain('CUDA GPU')
+    expect(native.rigidCpu.code).toBeUndefined()
+    expect(native.cuda.code).toBeUndefined()
+    expect(native.cpuCapabilities.supported.deformable).toBe(false)
+    expect(native.cpuCapabilities.supported.fluid).toBe(false)
+    expect(native.cpuCapabilities.unsupported.fluid).toContain('CUDA GPU')
+    expect(native.cudaCapabilities.supported.fluid).toBe(true)
+  })
+
+  test('材料只写对应原生 schema，并使 scene_edit 后签名变化触发重建', () => {
+    expect(native.validMaterial.code).toBeUndefined()
+    expect(native.elasticAttrs).toEqual({ 'omniphysics:youngsModulus': 12000, 'omniphysics:poissonsRatio': .3, 'omniphysics:density': 900 })
+    expect(native.waterAttrs).toEqual({ 'physxPBDMaterial:viscosity': .02 })
+    expect(native.overrideRebuilds).toBe(true)
+    expect(native.rigidMaterial.code).toBe('UNSUPPORTED_CAPABILITY')
+    expect(native.unsupportedField.code).toBe('UNSUPPORTED_CAPABILITY')
+    for (const outcome of [native.outside, native.absolute, native.missingMaterial, ...native.invalidMaterial]) expect(outcome.code).toBe('INVALID_ARGUMENT')
+  })
+
+  test('真实表面拓扑转三角，损坏拓扑和 GPU 错误不会冒充可用状态', () => {
+    expect(native.triangles.value).toEqual([0, 1, 2, 2, 3, 4, 2, 4, 5])
+    expect(native.badTopology.code).toBe('ENGINE_ERROR')
+    expect(native.nativeError.code).toBe('ENGINE_ERROR')
+    expect(native.nativeError.message).toContain('failed to allocate memory 67108864 bytes')
+    const worker = readFileSync(resolve(HERE, '..', 'python', 'worker.py'), 'utf8')
+    expect(worker).toContain('create_subscription_to_push(self.native_error_event)')
+    expect(worker).toContain('SM.initialize_physics()\n            self.assert_native_physics()')
+    expect(worker).toContain('SM.step(steps=1,update_fabric=False);self.assert_native_physics()')
+  })
+})

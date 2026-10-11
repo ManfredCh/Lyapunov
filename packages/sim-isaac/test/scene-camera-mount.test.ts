@@ -23,7 +23,8 @@ exec(compile(ast.fix_missing_locations(ast.Module(body=nodes,type_ignores=[])),'
 rows=[]
 with tempfile.TemporaryDirectory(prefix='a08-source-floor-')as directory:
  for label,geom,position,rotation,enabled,expected in [
-  ('source-world-plane','<geom name="support" type="plane" size="3 3 .1"/>',[0,0,0],0,True,['support']),
+  ('source-world-plane','<geom name="support" type="plane" size="3 3 .1"/>',[0,0,0],0,True,['/World/robot/native/support','support']),
+  ('source-plane-cube-proxy','<geom name="support" type="plane" size="3 3 .1"/>',[0,0,0],0,True,[]),
   ('named-floor-box','<geom name="floor" type="box" size="3 3 .1"/>',[0,0,0],0,True,[]),
   ('vertical-source-plane','<geom name="floor" type="plane" quat=".7071067811865476 .7071067811865476 0 0" size="3 3 .1"/>',[0,0,0],0,True,[]),
   ('lifted-source-plane','<geom name="floor" type="plane" pos="0 0 .2" size="3 3 .1"/>',[0,0,0],0,True,[]),
@@ -37,9 +38,13 @@ with tempfile.TemporaryDirectory(prefix='a08-source-floor-')as directory:
   stage=Usd.Stage.CreateInMemory();mount=UsdGeom.Xform.Define(stage,'/World/robot')
   mount.AddTranslateOp().Set(Gf.Vec3d(*position));mount.AddRotateXOp().Set(rotation)
   for name,definition in metadata['geoms'].items():
-   path='/World/robot/native/'+name;cube=UsdGeom.Cube.Define(stage,path)
-   UsdPhysics.CollisionAPI.Apply(cube.GetPrim()).CreateCollisionEnabledAttr(enabled);definition['nativePaths']=[path]
-  actual=ns['verified_native_ground_names'](stage,{'path':'/World/robot','metadata':metadata})
+   path='/World/robot/native/'+name
+   # 正例使用真实原生 Plane，局部位置/朝向来自编译结果；Cube 代理负例仍须被拒绝。
+   native=(UsdGeom.Plane if definition['geomKind']=='mjGEOM_PLANE'and label!='source-plane-cube-proxy'else UsdGeom.Cube).Define(stage,path)
+   native.AddTranslateOp().Set(Gf.Vec3d(*definition['positionM']))
+   q=definition['quaternionWxyz'];native.AddOrientOp().Set(Gf.Quatf(float(q[0]),Gf.Vec3f(*q[1:])))
+   UsdPhysics.CollisionAPI.Apply(native.GetPrim()).CreateCollisionEnabledAttr(enabled);definition['nativePaths']=[path]
+  actual=ns['verified_native_ground_names'](stage,{'path':'/World/robot','metadata':metadata,'nativePhysicsSource':True})
   assert actual==expected,(label,actual,expected)
   rows.append({'case':label,'names':actual,'source':metadata['geoms']})
 from world_physics import replaceable_standard_ground
@@ -164,7 +169,7 @@ describe('R015 Isaac 原生 USD 相机装配与同帧标定（CPU）',()=>{
     expect(existsSync(PY),'阻断：真实pxr/MuJoCo解释器不存在：'+PY).toBe(true)
     const child=spawnSync(PY,['-c',FLOOR_PROBE,resolve(HERE,'..')],{encoding:'utf8',timeout:30000})
     expect(child.status,child.stderr+child.stdout).toBe(0)
-    const result=JSON.parse(child.stdout.trim());expect(result.cases).toHaveLength(8);expect(result.editedTemplateKept).toBe(true)
+    const result=JSON.parse(child.stdout.trim());expect(result.cases).toHaveLength(9);expect(result.editedTemplateKept).toBe(true)
     expect(result.cases[0].source.support).toMatchObject({geomKind:'mjGEOM_PLANE',sourceBodyId:0,quaternionWxyz:[1,0,0,0]})
   })
   function report(){
