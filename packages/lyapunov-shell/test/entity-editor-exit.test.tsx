@@ -229,7 +229,7 @@ test('原生材料稿复用原退出协调器：取消不保存，确认才沿Sc
  const f=await fixture(false,true)
  try{
   await f.edit('4000');expect((await f.participants.summary()).dirtyDrafts).toBe(1);expect(f.writes).toHaveLength(0)
-  const cancelled=new ExitCoordinator({summary:()=>f.participants.summary(),confirm:async()=>false,flush:()=>f.participants.flush(),stop:async()=>{},close:async()=>{},exit:()=>{throw Error('不能退出')}})
+  const cancelled=new ExitCoordinator({summary:()=>f.participants.summary(),confirm:async()=>false,flush:()=>f.participants.flush(),stop:async()=>{},close:async()=>{},exit:()=>{throw Error('不能退出')},failed:async()=> 'return'})
   await f.React.act(async()=>{expect(await cancelled.request('window')).toMatchObject({decision:'cancelled'})})
   expect(f.name().value).toBe('4000');expect(f.writes).toHaveLength(0);expect((await f.participants.summary()).dirtyDrafts).toBe(1)
   const e=exits(f)
