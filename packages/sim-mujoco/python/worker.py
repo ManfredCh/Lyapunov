@@ -27,6 +27,7 @@ try:
     import numpy as np
     from triangle_surface import validate_exact_triangle_surfaces
     import gait
+    import native_deformable
 except ImportError as exc:
     print(json.dumps({'event': 'fatal', 'error': {'code': 'PROVIDER_UNAVAILABLE', 'message': str(exc)}}), flush=True)
     sys.exit(2)
@@ -1081,6 +1082,20 @@ class World:
                 else:
                     assets = {name: Path(path_from_uri(path)).read_bytes() for name, path in cfg.get('assets', {}).items()}
                     child = mj.MjSpec.from_string(cfg['xml'], assets=assets)
+                native_physics = native_deformable.apply_material_overrides(child, cfg, SimError)
+                native_flexes = native_deformable.flex_declarations(child)
+                # MuJoCo 3.13 的有限元弹性必须走原生 discrete 积分器；implicitfast
+                # 对 young>0 的 flex 会明确拒绝编译。其他世界维持原先的 integrator。
+                if any(flex['young'] > 0 for flex in native_flexes):
+                    native_physics['integrator'] = {'source': enum_name(mj.mjtIntegrator, child.option.integrator),
+                                                    'reason': 'FLEX_ELASTICITY_REQUIRES_DISCRETE'}
+                    spec.option.integrator = mj.mjtIntegrator.mjINT_DISCRETE
+                    if child.option.integrator != mj.mjtIntegrator.mjINT_DISCRETE:
+                        skipped.append({'code': 'MUJOCO_FLEX_INTEGRATOR', 'entityId': eid,
+                                        'message': '实体 ' + eid + ' 的原生 flex 弹性需要 MuJoCo 3.13 discrete 积分器；源积分器 '
+                                                   + enum_name(mj.mjtIntegrator, child.option.integrator)
+                                                   + '，本世界实际使用 mjINT_DISCRETE（源原件未改写）。 / Native flex elasticity requires '
+                                                   'the discrete integrator; this world uses mjINT_DISCRETE without rewriting the source.'})
                 explicit_arena_sources.append((eid, child.memory, child.nstack, child.njmax, child.nconmax))
                 from static_triangle_surface import authored_island_selection
                 if any(entity.get('components',{}).get('collision',{}).get('meshTopology')=='static-triangles' for entity in scene['entities']):
@@ -1152,6 +1167,7 @@ class World:
                 binding = component.get('baseBinding') or {}
                 target = binding.get('target') or {}
                 rigid_target = binding.get('mode') == 'fixed' and isinstance(target.get('entityId'), str) and target['entityId'] != eid
+                flex_world = None
                 if rigid_target:
                     # 原生刚性装配：把本实体根直接挂到目标实体真实 body 的 frame 下（无关节 ⇒ 真正刚性），
                     # 相对位姿取 baseBinding.target。不用 equality weld 软约束。实体前缀/命名/相机/FK 全部保留。
@@ -1161,6 +1177,8 @@ class World:
                     frame = target_body.add_frame()
                     child_specs.append(child)
                     spec.attach(child, prefix=prefix, frame=frame)
+                    if native_flexes:
+                        native_deformable.restore_attached_flexes(spec, native_flexes, prefix, target_body.name)
                     root = spec.body(prefix + cfg['rootBody']) if cfg.get('rootBody') else None
                     if root is None:
                         root = next((body for body in spec.bodies if body.name.startswith(prefix)), None)
@@ -1174,20 +1192,24 @@ class World:
                 else:
                     mount = spec.worldbody.add_body(name=prefix + 'root', pos=p, quat=q) if not cfg.get('rootBody') and not segment_bodies else None
                     frame = spec.worldbody.add_frame(pos=p, quat=q) if mount is None else mount.add_frame()
+                    # 仅补原生 flex 源 world pin 的安装根；保留 RC2 的 baseBinding 分支及真实 world frame。
+                    flex_world = spec.worldbody.add_body(name=prefix + 'world', pos=p, quat=q) if native_flexes else None
                     child_specs.append(child)
                     spec.attach(child, prefix=prefix, frame=frame)
+                    if native_flexes:
+                        native_deformable.restore_attached_flexes(spec, native_flexes, prefix, flex_world.name)
                     root = spec.body(prefix + cfg['rootBody']) if cfg.get('rootBody') else None
                     if root is None:
-                        root = mount if mount is not None else next((body for body in spec.bodies if body.name.startswith(prefix)), None)
+                        root = flex_world if flex_world is not None else mount if mount is not None else next((body for body in spec.bodies if body.name.startswith(prefix)), None)
                     if root is not None:
                         # root.pos/quat 是相对实体 frame 的局部安装位姿（attach 后仍原样保留），
                         # 父 body 的世界位姿 = 实体 frame 位姿 ∘ 该局部位姿；安装根本身就在实体 frame 上，
                         # 它的局部安装位姿是恒等（与 collision 分支一致）。
-                        local = (np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])) if mount is not None else (np.asarray(root.pos, dtype=float), np.asarray(root.quat, dtype=float))
+                        local = (np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])) if root in (mount, flex_world) else (np.asarray(root.pos, dtype=float), np.asarray(root.quat, dtype=float))
                         spec_bodies[eid] = (root, local[0], local[1])
                 source_path = cfg.get('sourcePath') or cfg.get('modelPath')
                 source_sha = hashlib.sha256(Path(path_from_uri(source_path)).read_bytes()).hexdigest() if source_path else None
-                maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': cfg.get('rootBody'), 'controller': copy.deepcopy(component.get('controller', {})), 'initialJoints': initial_joints, 'initialActuators': initial_actuators, 'sourceSha256': source_sha, 'sourceBase': source_base_state, 'nativeCameraSources': native_camera_sources, 'nativeCameraRefusals': native_camera_refusals}
+                maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': cfg.get('rootBody') or ('world' if flex_world is not None else None), 'controller': copy.deepcopy(component.get('controller', {})), 'initialJoints': initial_joints, 'initialActuators': initial_actuators, 'sourceSha256': source_sha, 'sourceBase': source_base_state, 'nativeCameraSources': native_camera_sources, 'nativeCameraRefusals': native_camera_refusals, 'nativePhysics': native_physics}
             elif component.get('collision'):
                 c = component['collision']
                 shape = c.get('shape', c.get('type', 'box'))
@@ -1478,6 +1500,7 @@ class World:
             info['tendons'] = tendons
             info['tendonByActuator'] = {t['actuator']: t for t in tendons}
             info['sites'] = {model.site(i).name[len(prefix):]: i for i in range(model.nsite) if model.site(i).name and model.site(i).name.startswith(prefix)}
+            native_deformable.bind_geometry(model, info)
             info['heldTargets'] = {}
             for name, value in info.get('initialJoints', {}).items():
                 if name in joints:
@@ -2096,8 +2119,13 @@ class World:
                 if info['tendons']:
                     # 肌腱坐标直接读引擎自身缓存 data.ten_length/ten_velocity，不用关节角重算代替。
                     item['tendons'] = {'names': [t['name'] for t in info['tendons']], 'lengths': [float(self.data.ten_length[t['id']]) for t in info['tendons']], 'velocities': [float(self.data.ten_velocity[t['id']]) for t in info['tendons']]}
+                geometry = native_deformable.observe_geometry(self.model, self.data, info)
+                if geometry:
+                    item['dynamicGeometry'] = geometry
                 if selection.get('sensors', True):
                     sensors = {'bodyLinearVelocityMps': self.data.cvel[b, 3:].tolist(), 'bodyAngularVelocityRadps': self.data.cvel[b, :3].tolist()}
+                    if info.get('nativePhysics', {}).get('flex') or info.get('nativePhysics', {}).get('cable'):
+                        sensors['nativePhysics'] = copy.deepcopy(info['nativePhysics'])
                     from robot_authoring import authoring_observation
                     authoring_observation(self, info, sensors)
                     if info['freeJoints']:
@@ -2168,7 +2196,8 @@ class World:
                 geom1, geom2 = int(contact.geom1), int(contact.geom2)
                 side1, side2 = contact_side(self.model, contact, 0), contact_side(self.model, contact, 1)
                 name1, name2 = side1[2], side2[2]
-                contacts.append({'geom1': name1, 'geom2': name2, 'distanceM': float(contact.dist), 'forceN': f[:3].tolist(), 'sourceStep': self.step_index, 'persistent': False})
+                contacts.append({'geom1': name1, 'geom2': name2, 'distanceM': float(contact.dist), 'forceN': f[:3].tolist(), 'sourceStep': self.step_index, 'persistent': False,
+                                 'positionM': contact.pos.tolist(), 'normal': contact.frame[:3].tolist()})
                 if contact.dist < 0:
                     # 穿透（负 dist）按 geom 对聚合取最小 dist：逐帧接触列表只罗列现象，
                     # 聚合后的穿透对才是调用方纠正初始穿模所需的异常信号。

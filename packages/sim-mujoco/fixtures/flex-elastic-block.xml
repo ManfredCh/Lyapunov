@@ -1,0 +1,11 @@
+<mujoco model="native-elastic-block">
+  <worldbody>
+    <flexcomp name="block" type="grid" count="3 3 3" spacing=".05 .05 .05"
+              dim="3" mass=".3" radius=".002" pos="0 0 .15">
+      <contact selfcollide="none"/>
+      <edge equality="false" damping=".05"/>
+      <elasticity young="2000" poisson=".3" damping=".001"/>
+      <pin gridrange="0 0 0 0 2 2"/>
+    </flexcomp>
+  </worldbody>
+</mujoco>

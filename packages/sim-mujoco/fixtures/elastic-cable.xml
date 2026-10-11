@@ -1,0 +1,16 @@
+<mujoco model="native-elastic-cable">
+  <extension>
+    <plugin plugin="mujoco.elasticity.cable"/>
+  </extension>
+  <worldbody>
+    <composite prefix="wire" type="cable" curve="s" count="13 1 1"
+               size=".6" offset="0 0 .35" initial="none">
+      <plugin plugin="mujoco.elasticity.cable">
+        <config key="twist" value="1e6"/>
+        <config key="bend" value="1e6"/>
+      </plugin>
+      <joint kind="main" damping=".02"/>
+      <geom type="capsule" size=".01" density="1000" rgba=".8 .3 .1 1"/>
+    </composite>
+  </worldbody>
+</mujoco>
