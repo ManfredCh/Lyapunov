@@ -143,20 +143,35 @@ class ParticleWorld:
     step_index = 0
     sim_time = 0.0
     applied_revision = 1
+    solver_name = 'implicit-mpm'
+    fail_observation = False
     entities = {}
     scene = {'entities': [entity('particle-view', [0, 0, 0], {'camera': {'fovYDeg': 60}})]}
     def require_ready(self):
         pass
     def observe(self, selection):
-        return {'frameId': 'particle-camera:1:0', 'stepIndex': 0, 'simTime': 0.0, 'entities': []}
+        if selection.get('contacts'):
+            raise worker.SimError('UNSUPPORTED_CAPABILITY', 'MPM 不提供刚体 Contacts / MPM does not expose rigid Contacts')
+        if self.fail_observation:
+            raise worker.SimError('WORLD_UNAVAILABLE', '注入的观测错误 / Injected observation error')
+        return {'frameId': 'particle-camera:1:0', 'stepIndex': 0, 'simTime': 0.0, 'entities': [],
+                'sensorsOnly': selection == {'sensors': True}}
 particle_camera = NewtonCamera(ParticleWorld(), worker.SimError, worker.native_source, worker.world_poses)
 particle_capture = particle_camera.capture({'cameraName': 'particle-view/particle-view', 'width': 64, 'height': 48,
                                             'outputDir': str(output/'particle')})
 report['particlePixels'] = pixels(particle_capture)
+report['particleObservation'] = particle_capture['observation']
 particle_state.particle_q.assign(np.array([[0, 0, -3]], dtype=np.float32))
 particle_changed = particle_camera.capture({'cameraName': 'particle-view/particle-view', 'width': 64, 'height': 48,
                                             'outputDir': str(output/'particle-moved')})
 report['particleMovedPixels'] = pixels(particle_changed)
+particle_camera.world.fail_observation = True
+try:
+    particle_camera.capture({'cameraName': 'particle-view/particle-view', 'width': 64, 'height': 48,
+                             'outputDir': str(output/'particle-observation-error')})
+    report['particleObservationError'] = {'unexpectedSuccess': True}
+except worker.SimError as exc:
+    report['particleObservationError'] = {'code': exc.code, 'message': str(exc)}
 report['device'] = str(world.model.device)
 report['versions'] = {'newton': worker.NEWTON_VERSION, 'warp': worker.WARP_VERSION}
 camera.close()

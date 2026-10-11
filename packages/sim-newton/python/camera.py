@@ -374,6 +374,10 @@ class NewtonCamera:
                             'rgb': {'uri': rgb_path.as_uri(), 'mimeType': 'image/png'},
                             'depth': {'uri': depth_path.as_uri(), 'mimeType': 'application/x-npy', 'units': 'm'},
                             'depthRangeM': [float(depth.min()), float(depth.max())], 'calibration': calibration})
+        observation_selection = {'sensors': True}
+        # MPM 使用原生 collider，未提供刚体 Contacts；其余路径保持接触读回。
+        if self.world.solver_name != 'implicit-mpm':
+            observation_selection['contacts'] = True
         result = {'worldId': self.world.id, 'generation': self.world.generation,
                   'stepIndex': self.world.step_index, 'simTime': float(self.world.sim_time),
                   'sceneRevision': self.world.applied_revision,
@@ -381,7 +385,7 @@ class NewtonCamera:
                   'source': 'newton-sensor-tiled-camera', 'captureId': capture_id,
                   'multi': len(entries) > 1, 'cameraNames': list(names), 'width': width, 'height': height,
                   'cameras': entries, 'renderOption': {'source': 'Newton VISIBLE shapes and native particles'},
-                  'observation': self.world.observe({'sensors': True, 'contacts': True})}
+                  'observation': self.world.observe(observation_selection)}
         self.captures[capture_id] = copy.deepcopy(result)
         return result
 
