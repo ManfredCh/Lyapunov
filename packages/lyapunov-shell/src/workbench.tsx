@@ -39,6 +39,7 @@ import {appSidePanelHost,appSidePanelGeometry} from "./app-side.ts"
 import {ViewerOverlays,ViewerSurfaceState} from "./viewer-surface-state.tsx"
 
 import {EntityEditor,type Translate} from "./entity-editor.tsx"
+import {NativePhysicsPanel} from "./native-physics-panel.tsx"
 import {RobotControlPanel,ActionCards,type RecentAction,type NativeJointResult} from "./robot-control-panel.tsx"
 import {RobotAuthoringPanel} from "./robot-authoring-panel.tsx"
 import type {RobotSetBaseInput,RobotSetTcpInput} from "../../lyapunov-contracts/src/robot-authoring.ts"
@@ -353,6 +354,18 @@ export function worldFactLines(world:WorldHandle|undefined):WorkbenchFactLine[]{
  const runtimeZh=[world.device||world.deviceKind?`设备 ${world.device??"未知"}${world.deviceKind?`（${world.deviceKind}）`:""}`:"",world.solver?`求解器 ${world.solver}`:"",world.warpVersion?`Warp ${world.warpVersion}`:""].filter(Boolean)
  const runtimeEn=[world.device||world.deviceKind?`device ${world.device??"unknown"}${world.deviceKind?` (${world.deviceKind})`:""}`:"",world.solver?`solver ${world.solver}`:"",world.warpVersion?`Warp ${world.warpVersion}`:""].filter(Boolean)
  if(runtimeZh.length)lines.push({key:"runtime",tone:"muted",zh:runtimeZh.join(" · "),en:runtimeEn.join(" · ")})
+ const capabilities=world.capabilities
+ if(capabilities){
+  const supported=capabilities.supported,unsupported=capabilities.unsupported
+  if(supported&&typeof supported==="object"){
+   const entries=Object.entries(supported).filter(([,value])=>value===true).map(([key])=>key)
+   if(entries.length)lines.push({key:"native-supported",tone:"muted",zh:`当前后端声明的入口：${entries.join("、")}。实际运行结果以当前世界回执为准。`,en:`Entrypoints declared by this backend: ${entries.join(", ")}. Actual execution is reported by the current world.`})
+  }
+  if(unsupported&&typeof unsupported==="object"){
+   const entries=Object.entries(unsupported).map(([key,value])=>`${key}: ${typeof value==="string"?value:JSON.stringify(value)}`)
+   if(entries.length)lines.push({key:"native-unsupported",tone:"warn",zh:`当前后端未接入或受限：${entries.join("；")}`,en:`Unavailable or limited in this backend: ${entries.join("; ")}`})
+  }
+ }
  return lines
 }
 /**
@@ -1709,7 +1722,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 
  const editableEntity=scene&&selected?sceneEditTarget(scene,selected):undefined
  const objectInfo=entity&&scene&&<div className="lya-help" data-testid="scene-edit-target"><strong>{sceneNodeName(entity,tr)}</strong> · {nodeRoleLabel(entity)}{editableEntity&&editableEntity.entityId!==entity.entityId&&<span> · {tr('编辑实例：','Editing instance: ')}{editableEntity.name} <button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('选择编辑实例','Select editing instance')}</button></span>}{entity.parentId&&<span> · {tr('父节点：','Parent: ')}{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId} <button type="button" onClick={()=>chooseSceneEntity(entity.parentId!)}>{tr('选择父实例','Select parent instance')}</button></span>}<button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button></div>
- const objectEditor=entity&&scene&&!readOnly?<>{objectInfo}<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/>{entity.components.light&&<SceneLightPanel key={scene.sceneId+':light:'+entity.entityId} light={entity.components.light as SceneLight} disabled={readOnly||replayActive} apply={light=>perform(()=>applySceneLight(light))} tr={tr}/>}<MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/></>:undefined
+ const objectEditor=entity&&scene&&!readOnly?<>{objectInfo}<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/><NativePhysicsPanel sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} observation={ready&&frame?.worldId===world?.worldId&&frame?.generation===world?.worldGeneration&&frame?.sceneRevision===scene.revision?frame.entities.find(row=>row.entityId===(editableEntity??entity).entityId):undefined} readOnly={readOnly||replayActive} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'native-physics:'+api.clientId}/>{entity.components.light&&<SceneLightPanel key={scene.sceneId+':light:'+entity.entityId} light={entity.components.light as SceneLight} disabled={readOnly||replayActive} apply={light=>perform(()=>applySceneLight(light))} tr={tr}/>}<MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/></>:undefined
  const objectPanel=<>
   {!objectEditor&&objectInfo}
   {!objectEditor&&<p className="lya-help">{!sessionId?tr("先在左侧选择工作区，再编辑对象。","Choose a workspace on the left to edit objects."):readOnly?tr("当前世界是只读投影，不能编辑。","The current world is a read-only projection."):tr("先选择一个对象：在场景层级里点它的名字，或在画布上点它。","Select an object first: click its name in the scene tree or click it on the canvas.")}</p>}

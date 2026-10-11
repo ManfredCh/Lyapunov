@@ -15,7 +15,7 @@ const edits:ValueSchemaSpec={type:'array',description:"Atomic edit array; use an
 ]}}
 export const sceneEditParameters:ParameterSchemaSpec={input:{
   type:'object',required:true,additionalProperties:false,
-  description:"Submit a ScenePatch array using the observed revision. After a conflict, observe again before deciding; never silently substitute the latest revision.",
+  description:"Submit a ScenePatch array using the observed revision. After a conflict, observe again before deciding; never silently substitute the latest revision. For native materials, preserve all components and read actual names from sim_observe sensors.nativePhysics before editing mujoco.flexMaterials[name].{youngPa,poisson,rayleighDamping}, mujoco.cableMaterials[name].{bendPa,twistPa}, or isaac.materialOverrides[relative Material path]. Newton water uses newton.mpm densityKgM3/viscosityPaS/youngModulusPa/poissonRatio; the last two control native MPM compression response. Synchronize and observe actual engine values after editing; a Scene commit alone is not proof of application. / 原生材料先保留完整组件并读实际原生名称，沿同一场景编辑入口修改；同步后回读实际参数，不能以声明保存代替引擎应用。",
   examples:[{sceneId:'room',expectedRevision:3,patch:[{op:'update',entityId:'box',changes:{name:"New name"}}]}],
   properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},patch:{...edits,required:true}},
 }}

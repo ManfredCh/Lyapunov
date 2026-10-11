@@ -3,7 +3,7 @@ import type {Entity,SceneCommit,SceneSnapshot,ScenePatch} from "../../lyapunov-c
 import {entityDisplayName} from './scene-entity-name.ts'
 import type {CameraExitBridge} from './camera-authoring.ts'
 export type Translate=(cn:string,en:string)=>string
-export interface NumericProps {label:string;value:number;set:(value:number)=>void;min?:number;max?:number;step?:number;disabled?:boolean}
+export interface NumericProps {label:string;value:number;set:(value:number)=>void;min?:number;max?:number;step?:number|"any";disabled?:boolean}
 export function NumericInput({label,value,set,min,max,step=.1,disabled}:NumericProps){
  const [text,setText]=useState(String(value)),focused=useRef(false)
  useEffect(()=>{if(!focused.current)setText(String(value))},[value])

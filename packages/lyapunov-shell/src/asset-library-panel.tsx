@@ -6,10 +6,11 @@ import {SceneNodeVisibility,assetSceneInstances,sceneSubtreeIds} from "./scene-n
 import type {Vec3} from '../../lyapunov-contracts/src/types.ts'
 import type {ResourcePhysicsProgress} from './physics-binding-settings.ts'
 
-export interface AssetPlacement {resourceId:string;version:number;name:string;alignBottomToSurface:boolean}
+export interface AssetPlacement {resourceId:string;version:number;name:string;alignBottomToSurface:boolean;nativeUsd?:boolean}
 /** 只消费资源库的真实解析类型；原生模型按源原点放置，不推测底脚或文件扩展名。 */
 export function assetPlacementOf(asset:AssetRecord):AssetPlacement{
- return {resourceId:asset.ref.resourceId,version:asset.ref.version,name:asset.name,alignBottomToSurface:asset.parsed?.kind!=='robot'}
+ const nativeUsd=asset.ref.original.mimeType==='model/vnd.usd'
+ return {resourceId:asset.ref.resourceId,version:asset.ref.version,name:asset.name,alignBottomToSurface:asset.parsed?.kind!=='robot'&&!nativeUsd,...nativeUsd?{nativeUsd:true}:{}}
 }
 export function assetPlacementInput(sceneId:string,asset:AssetPlacement,point:Vec3){
  return {sceneId,resourceId:asset.resourceId,version:asset.version,alignBottomToSurface:asset.alignBottomToSurface,transform:{position:point,quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as Vec3}}
@@ -18,6 +19,7 @@ export function assetPlacementInput(sceneId:string,asset:AssetPlacement,point:Ve
 export function AssetPlacementBar({asset,point,tr,alignment,confirm,cancel}:{asset:AssetPlacement;point?:Vec3;tr:Translate;alignment(value:boolean):void;confirm():void;cancel():void}){
  return <div className="lya-placement-bar" style={{flexWrap:'wrap'}} aria-label={tr('放置素材','Place asset')}>
   <strong title={asset.name}>{asset.name}</strong>
+  {asset.nativeUsd&&<span className="lya-help">{tr('原生 USD 默认按源原点放置；启动对应引擎后读取可变形体或粒子状态。','Native USD defaults to its source origin; start the matching engine to read deformable or particle state.')}</span>}
   <label title={tr('模型原点放在点击位置；底面对齐需要可用的模型几何范围。','Model origin goes at the clicked point; bottom alignment requires available model geometry bounds.')}>{tr('放置基准','Placement basis')} <select aria-label={tr('放置基准','Placement basis')} value={asset.alignBottomToSurface?'bottom':'origin'} onChange={event=>alignment(event.target.value==='bottom')}><option value="origin">{tr('模型原点','Model origin')}</option><option value="bottom">{tr('底面对齐','Align bottom')}</option></select></label>
   {point?<span className="lya-placement-point">{point.map(value=>value.toFixed(2)).join(', ')}</span>:<span className="lya-muted">{tr('点击场景选择位置','Click a spot in the scene')}</span>}
   {point&&<button className="lya-primary" onClick={confirm}>{tr('确认放置','Confirm placement')}</button>}<button onClick={cancel}>{tr('取消','Cancel')}</button>

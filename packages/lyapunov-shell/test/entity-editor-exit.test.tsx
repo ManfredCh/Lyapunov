@@ -10,21 +10,22 @@ import {SCENE_COORDINATES,identityTransform,type SceneSnapshot,type SceneCommit}
 import {ExitCoordinator,ExitParticipants,type ExitFailureAction} from '../../desktop/src/exit-coordinator.ts'
 
 const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
-async function fixture(surface=false){
+async function fixture(surface=false,native=false){
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div><div id="app-side-panel"></div>',{url:'http://fixture.invalid'})
  const previous=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){
   previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})
  }
- const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),{EntityEditor}=await import('../src/entity-editor.tsx'),{WorkSurface}=await import('../src/work-surface.tsx'),{useWorkbenchUI}=await import('../src/workbench-ui.ts'),{appSidePanelHost}=await import('../src/app-side.ts')
+ const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),{EntityEditor}=await import('../src/entity-editor.tsx'),{NativePhysicsPanel}=await import('../src/native-physics-panel.tsx'),{WorkSurface}=await import('../src/work-surface.tsx'),{useWorkbenchUI}=await import('../src/workbench-ui.ts'),{appSidePanelHost}=await import('../src/app-side.ts')
  const directory=await mkdtemp(join(tmpdir(),'entity-exit-')),store=new SceneStore(directory),participants=new ExitParticipants(),rootHost=document.getElementById('root')!,root=createRoot(rootHost),host=surface?document.body:rootHost
  const previousPanelHost=appSidePanelHost.current;if(surface)appSidePanelHost.current=document.getElementById('app-side-panel')
  let snapshot:SceneSnapshot={sceneId:'s',revision:0,coordinates:SCENE_COORDINATES,entities:[{entityId:'a',name:'original-a',transform:identityTransform(),resources:[],components:{}},{entityId:'b',name:'original-b',transform:identityTransform(),resources:[],components:{}}]}
+ if(native)for(const entity of snapshot.entities)entity.components={mujoco:{xml:'<mujoco><worldbody/></mujoco>',flexMaterials:{soft:{youngPa:2000,poisson:.3}}}}
  const operations=new SceneOperations(directory);await operations.create({sceneId:'s'});snapshot=await operations.scene.commit({sceneId:'s',expectedRevision:0,patch:snapshot.entities.map(entity=>({op:'add' as const,entity}))})
  const writes:SceneCommit[]=[],bridge={registerExitParticipant:(id:string,p:Parameters<ExitParticipants['register']>[1])=>participants.register(id,p)}
  let selected='a',commitGate:(input:SceneCommit)=>Promise<void>=async()=>{}
  const commit=async(input:SceneCommit)=>{writes.push(structuredClone(input));await commitGate(input);snapshot=await store.commit(input);draw();return snapshot}
- const editor=(revision:number)=>React.createElement(EntityEditor,{sceneId:snapshot.sceneId,revision,entity:snapshot.entities.find(row=>row.entityId===selected)!,entities:snapshot.entities,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'entity-editor:test'})
+ const editor=(revision:number)=>native?React.createElement(NativePhysicsPanel,{sceneId:snapshot.sceneId,revision,entity:snapshot.entities.find(row=>row.entityId===selected)!,readOnly:false,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'native:test'}):React.createElement(EntityEditor,{sceneId:snapshot.sceneId,revision,entity:snapshot.entities.find(row=>row.entityId===selected)!,entities:snapshot.entities,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'entity-editor:test'})
  let selectedAvailable=true
  function SurfaceHarness({revision}:{revision:number}){
   const ui=useWorkbenchUI(),state=ui.getSnapshot()
@@ -37,7 +38,7 @@ async function fixture(surface=false){
  }
  const draw=(revision=snapshot.revision)=>root.render(surface?React.createElement(SurfaceHarness,{revision}):editor(revision))
  await React.act(async()=>draw())
- const name=()=>host.querySelector('input[aria-label="Entity name"]') as HTMLInputElement
+ const name=()=>host.querySelector(native?'input[aria-label="Young\'s modulus Pa"]':'input[aria-label="Entity name"]') as HTMLInputElement
  const edit=async(value:string)=>{await React.act(async()=>{Simulate.change(name(),{target:{value}} as any)})}
  const close=async()=>{await React.act(async()=>root.unmount());await rm(directory,{recursive:true,force:true});appSidePanelHost.current=previousPanelHost;dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
  return {React,Simulate,host,root,store,participants,writes,name,edit,close,draw,select:(id:string)=>{selected=id},snapshot:()=>snapshot,external:async(input:SceneCommit)=>{snapshot=await store.commit(input);await React.act(async()=>draw())},gate:(run:typeof commitGate)=>{commitGate=run},selectionAvailable:(available:boolean)=>{selectedAvailable=available}}
@@ -170,7 +171,7 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){
   previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})
  }
- const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),{EntityEditor}=await import('../src/entity-editor.tsx'),{WorkSurface}=await import('../src/work-surface.tsx'),{useWorkbenchUI}=await import('../src/workbench-ui.ts'),{appSidePanelHost}=await import('../src/app-side.ts'),{ToolRail}=await import('../src/tool-rail.tsx')
+ const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),{EntityEditor}=await import('../src/entity-editor.tsx'),{NativePhysicsPanel}=await import('../src/native-physics-panel.tsx'),{WorkSurface}=await import('../src/work-surface.tsx'),{useWorkbenchUI}=await import('../src/workbench-ui.ts'),{appSidePanelHost}=await import('../src/app-side.ts'),{ToolRail}=await import('../src/tool-rail.tsx')
  const priorPortal=appSidePanelHost.current;appSidePanelHost.current=document.getElementById('shared-panel')
  const directory=await mkdtemp(join(tmpdir(),'two-session-portal-')),participants=new ExitParticipants(),root=createRoot(document.getElementById('root')!),host=document.body
  const stores={a:new SceneOperations(join(directory,'a')),b:new SceneOperations(join(directory,'b'))},writes:Array<{owner:string;input:SceneCommit}>=[]
@@ -221,4 +222,56 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
  }finally{
   await React.act(async()=>root.unmount());expect((await participants.summary()).participants).toBe(0);await rm(directory,{recursive:true,force:true});appSidePanelHost.current=priorPortal;dom.window.close();for(const[key,value]of previous){if(value)Object.defineProperty(globalThis,key,value);else Reflect.deleteProperty(globalThis,key)}
  }
+})
+
+
+test('原生材料稿复用原退出协调器：取消不保存，确认才沿Scene CAS保存并保原生源',async()=>{
+ const f=await fixture(false,true)
+ try{
+  await f.edit('4000');expect((await f.participants.summary()).dirtyDrafts).toBe(1);expect(f.writes).toHaveLength(0)
+  const cancelled=new ExitCoordinator({summary:()=>f.participants.summary(),confirm:async()=>false,flush:()=>f.participants.flush(),stop:async()=>{},close:async()=>{},exit:()=>{throw Error('不能退出')}})
+  await f.React.act(async()=>{expect(await cancelled.request('window')).toMatchObject({decision:'cancelled'})})
+  expect(f.name().value).toBe('4000');expect(f.writes).toHaveLength(0);expect((await f.participants.summary()).dirtyDrafts).toBe(1)
+  const e=exits(f)
+  await f.React.act(async()=>{expect(await e.coordinator.request('window')).toMatchObject({decision:'closed',cleanup:'confirmed'})})
+  const saved=(await f.store.snapshot('s')).entities[0]!.components.mujoco as any
+  expect(saved.xml).toBe('<mujoco><worldbody/></mujoco>');expect(saved.flexMaterials.soft.youngPa).toBe(4000)
+  expect(f.writes).toHaveLength(1);expect(f.writes[0]!.expectedRevision).toBe(1);expect((await f.participants.summary()).dirtyDrafts).toBe(0)
+ }finally{await f.close()}
+})
+test('原生材料稿切换实体仍由原owner保存，迟到结果不覆盖新选中输入',async()=>{
+ const f=await fixture(false,true)
+ try{
+  await f.edit('4500');await f.React.act(async()=>{f.select('b');f.draw()})
+  expect(f.name().value).toBe('2000');expect((await f.participants.summary()).dirtyDrafts).toBe(1)
+  const e=exits(f);await f.React.act(async()=>{await e.coordinator.request('window')})
+  expect(f.name().value).toBe('2000');expect(f.writes[0]!.patch[0]).toMatchObject({entityId:'a'})
+  const stored=await f.store.snapshot('s');expect((stored.entities[0]!.components.mujoco as any).flexMaterials.soft.youngPa).toBe(4500);expect((stored.entities[1]!.components.mujoco as any).flexMaterials.soft.youngPa).toBe(2000)
+ }finally{await f.close()}
+})
+test('原生材料CAS冲突保留输入和退出失败，返回可编辑且不覆盖外部版本',async()=>{
+ const f=await fixture(false,true)
+ try{
+  await f.edit('5000');const original=f.snapshot().entities[0]!
+  await f.external({sceneId:'s',expectedRevision:1,patch:[{op:'update',entityId:'a',changes:{components:{...original.components,mujoco:{xml:'<mujoco><worldbody/></mujoco>',flexMaterials:{soft:{youngPa:3000,poisson:.3}}}}}}]})
+  const e=exits(f,async()=> 'return')
+  await f.React.act(async()=>{expect(await e.coordinator.request('window')).toMatchObject({decision:'failed'})})
+  expect(f.name().value).toBe('5000');expect(f.name().disabled).toBe(false);expect((await f.participants.summary()).dirtyDrafts).toBe(1)
+  expect((f.snapshot().entities[0]!.components.mujoco as any).flexMaterials.soft.youngPa).toBe(3000)
+ }finally{await f.close()}
+})
+test('原生材料稿随已发布WorkSurface隐藏保留，关闭面板后退出等待同一保存Promise',async()=>{
+ const f=await fixture(true,true)
+ try{
+  await f.React.act(async()=>{f.Simulate.click([...f.host.querySelectorAll('button')].find(row=>row.textContent==='Object')!)})
+  await f.edit('6000');const input=f.name()
+  await f.React.act(async()=>{f.Simulate.click([...f.host.querySelectorAll('button')].find(row=>row.textContent==='Scene')!)})
+  expect(f.name()).toBe(input);expect(input.closest('[hidden]')).not.toBeNull();expect((await f.participants.summary()).dirtyDrafts).toBe(1)
+  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});f.gate(()=>gate)
+  let pending!:Promise<void>;await f.React.act(async()=>{pending=f.participants.flush();await Promise.resolve()})
+  expect(f.writes).toHaveLength(1)
+  const e=exits(f);let result!:Promise<any>;await f.React.act(async()=>{result=e.coordinator.request('window');await Promise.resolve()})
+  await f.React.act(async()=>{release();await pending;await result})
+  expect(f.writes).toHaveLength(1);expect((await f.participants.summary()).dirtyDrafts).toBe(0)
+ }finally{await f.close()}
 })

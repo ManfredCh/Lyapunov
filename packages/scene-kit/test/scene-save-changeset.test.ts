@@ -9,11 +9,13 @@
  * 夹具是测试自己写的最小 GLB，只用于证明"引用替换/变更集口径"，不代表真实模型几何。
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { SceneOperations } from "../src/operations.ts"
 import { sceneSaveParameters } from "../src/tool-schema.ts"
+import { nativePhysicsCommit, nativePhysicsTargets } from "../../lyapunov-shell/src/native-physics-panel.tsx"
 
 let base: string, dataRoot: string, operations: SceneOperations
 
@@ -136,5 +138,60 @@ describe("scene_save 的增量导出（变更集）", () => {
     const properties = (sceneSaveParameters.input as { properties: Record<string, unknown>; additionalProperties: boolean }).properties
     expect(Object.keys(properties).sort()).toEqual(["diffPath", "path", "portable", "projectFiles", "sceneId", "sinceRevision"])
     expect((sceneSaveParameters.input as { additionalProperties: boolean }).additionalProperties).toBe(false)
+  })
+})
+
+describe("原生源与材料经同一scene_edit保存重开", () => {
+  test("flex、cable、独立USD与MPM声明随便携工程搬家，原件字节不变且不保存瞬态帧", async () => {
+    // 这里只验证真实文件/SceneStore/ResourceLibrary闭环；原生求解由各引擎的硬件测试独立验收。
+    const sceneId = "native-roundtrip"
+    await operations.create({ sceneId })
+    const xml = '<mujoco model="native"><worldbody><body name="base"><geom type="sphere" size=".02"/></body></worldbody></mujoco>'
+    const usd = '#usda 1.0\n(defaultPrim = "Root")\ndef Xform "Root" { def Points "Fluid" { point3f[] points = [(0,0,1),(.1,0,1)] } }\n'
+    const examples = [
+      { entityId: "soft", filename: "flex.xml", bytes: xml, components: { mujoco: { flexMaterials: { soft: { youngPa: 20000, poisson: .3, rayleighDamping: .02 } } } } },
+      { entityId: "cable", filename: "cable.xml", bytes: xml.replace('model="native"', 'model="cable"'), components: { mujoco: { cableMaterials: { compositewire: { bendPa: 1000, twistPa: 500 } } } } },
+      { entityId: "fluid", filename: "fluid.usda", bytes: usd, components: { isaac: { materialOverrides: { "Materials/Water": { densityKgM3: 1000, viscosity: .01 } } } } },
+    ]
+    for (const example of examples) {
+      const path = join(base, "fixtures", example.filename); await writeFile(path, example.bytes)
+      const components = example.entityId === "fluid" ? { ...example.components, isaac: { ...example.components.isaac, sourcePath: path } } : example.components
+      const mounted = await operations.import({ sceneId, entityId: example.entityId, resourceId: `res_${example.entityId}`, path, components, alignBottomToSurface: false })
+      const entity = mounted.snapshot!.entities.find(row => row.entityId === example.entityId)!
+      if (example.entityId === "soft") {
+        // 修复前 mount 用 {sourcePath} 覆盖整个mujoco键，这里真实复现材料声明丢失。
+        expect(entity.components.mujoco).toMatchObject(example.components.mujoco!)
+        const target = nativePhysicsTargets(entity)[0]!
+        await operations.scene.commit(nativePhysicsCommit(sceneId, mounted.snapshot!.revision, entity, target, { youngPa: 40000, poisson: .35, rayleighDamping: .03 }))
+      }
+      expect(await readFile(path, "utf8")).toBe(example.bytes)
+    }
+    const before = await operations.scene.snapshot(sceneId)
+    await operations.scene.commit({ sceneId, expectedRevision: before.revision, patch: [{ op: "add", entity: {
+      entityId: "mpm", name: "Water", resources: [], transform: { position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+      components: { newton: { mpm: { kind: "water", gridType: "dense", dimensions: [4, 4, 4], spacingM: .02, densityKgM3: 1000, viscosityPaS: .001, youngModulusPa: 1e5, poissonRatio: .3, voxelSizeM: .04 } } },
+    } }] })
+    const pkg = join(base, "package"), moved = join(base, "moved-package")
+    await operations.save(sceneId, join(pkg, "scene.json"), { portable: true })
+    const saved = JSON.parse(await readFile(join(pkg, "scene.json"), "utf8"))
+    expect(JSON.stringify(saved)).not.toContain("dynamicGeometry")
+    expect(JSON.stringify(saved)).not.toContain("nativePhysics")
+    await rename(pkg, moved)
+    await rm(dataRoot, { recursive: true, force: true }); await rm(join(base, "fixtures"), { recursive: true, force: true })
+    const reopened = await new SceneOperations(join(base, "reopened-data")).open(join(moved, "scene.json"), { sceneId: "native-reopened" })
+    const byId = new Map(reopened.entities.map(entity => [entity.entityId, entity]))
+    expect(byId.get("soft")!.components.mujoco).toMatchObject({ flexMaterials: { soft: { youngPa: 40000, poisson: .35, rayleighDamping: .03 } } })
+    expect(byId.get("cable")!.components.mujoco).toMatchObject(examples[1]!.components.mujoco!)
+    expect(byId.get("fluid")!.components.isaac).toMatchObject(examples[2]!.components.isaac!)
+    expect(byId.get("mpm")!.components.newton).toEqual(saved.entities.find((row: {entityId: string}) => row.entityId === "mpm").components.newton)
+    for (const entity of reopened.entities) for (const ref of entity.resources) {
+      const path = fileURLToPath(ref.original.uri)
+      expect(path.startsWith(moved + "/")).toBe(true)
+      expect(await stat(path)).toBeDefined()
+      const expected = examples.find(row => row.entityId === entity.entityId)!.bytes
+      expect(await readFile(path, "utf8")).toBe(expected)
+      const native = (entity.components.mujoco ?? entity.components.isaac) as {sourcePath?: string} | undefined
+      if (native?.sourcePath) expect(resolve(dirname(join(moved, "scene.json")), native.sourcePath)).toBe(path)
+    }
   })
 })

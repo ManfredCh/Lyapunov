@@ -15,6 +15,9 @@ import { test, expect, mock } from "bun:test"
 import * as THREE from "three"
 import {SceneViewer} from "../../viewer/src/index.ts"
 import { readFileSync } from "node:fs"
+import {createRequire} from "node:module"
+import {AssetLibraryPanel,AssetPlacementBar,assetPlacementOf,assetPlacementInput,type AssetPlacement} from "../src/asset-library-panel.tsx"
+import type {AssetRecord} from "../src/workbench-api.ts"
 
 import {projectSceneCameraRigs} from "../../viewer/src/scene-camera-rigs.ts"
 let viewerFactory:(...args:unknown[])=>any=()=>({})
@@ -137,4 +140,38 @@ test("原环境/材质/面积灯面板提交真实补丁；空数值不写0，�
   expect(document.getElementById('controls')!.textContent).toContain('toneMapping 不受支持')
 
  }finally{await act(async()=>root.unmount());owner.reset();dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
+})
+
+// 真实SDK jsdom + 原素材库/放置条，继续使用已发布放置基准开关，不是原生窗口点击验收。
+test('原生USD素材库真实DOM按源原点进入scene_mount，明确选择底面对齐与取消仍走原放置条',async()=>{
+ const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
+ const dom=new JSDOM('<div id="native-placement"></div>',{url:'http://fixture.invalid'}),previous=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
+ const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),root=createRoot(document.getElementById('native-placement')!)
+ const asset:AssetRecord={name:'Water',folder:'',tags:[],ref:{resourceId:'water',version:1,original:{uri:'file:///water.usda',mimeType:'model/vnd.usd'}},parsed:{kind:'source'}}
+ const commands:unknown[]=[],noop=()=>{}
+ function Harness(){
+  const [placement,setPlacement]=React.useState<AssetPlacement>()
+  return React.createElement(React.Fragment,null,React.createElement(AssetLibraryPanel,{assets:[asset],builtin:[],builtinBusy:false,query:'',loading:false,includeDeleted:false,canMount:true,available:true,tr:(_zh:string,en:string)=>en,setQuery:noop,setIncludeDeleted:noop,search:noop,refresh:noop,mount:value=>setPlacement(assetPlacementOf(value)),verify:noop,rename:noop,toggleDeleted:noop,importFile:noop,importBuiltin:noop,browseEnvironment:noop}),placement&&React.createElement(AssetPlacementBar,{asset:placement,point:[1,2,3],tr:(_zh:string,en:string)=>en,alignment:value=>setPlacement({...placement,alignBottomToSurface:value}),confirm:()=>commands.push(assetPlacementInput('scene',placement,[1,2,3])),cancel:()=>setPlacement(undefined)}))
+ }
+ try{
+  await React.act(async()=>root.render(React.createElement(Harness)))
+  const button=()=>document.querySelector('.lya-asset-use') as HTMLButtonElement
+  expect(button().disabled).toBe(false)
+  await React.act(async()=>Simulate.click(button()))
+  const basis=()=>document.querySelector('select[aria-label="Placement basis"]') as HTMLSelectElement
+  expect(basis().value).toBe('origin');expect(document.body.textContent).toContain('Native USD defaults to its source origin')
+  const confirm=()=>[...document.querySelectorAll('button')].find(row=>row.textContent==='Confirm placement')!
+  await React.act(async()=>Simulate.click(confirm()))
+  expect(commands[0]).toEqual({sceneId:'scene',resourceId:'water',version:1,alignBottomToSurface:false,transform:{position:[1,2,3],quaternion:[0,0,0,1],scale:[1,1,1]}})
+  await React.act(async()=>Simulate.change(basis(),{target:{value:'bottom'}} as any))
+  await React.act(async()=>Simulate.click(confirm()));expect(commands[1]).toMatchObject({alignBottomToSurface:true})
+  await React.act(async()=>Simulate.click([...document.querySelectorAll('button')].find(row=>row.textContent==='Cancel')!))
+  expect(document.querySelector('.lya-placement-bar')).toBeNull()
+  expect(assetPlacementOf({...asset,parsed:{kind:'mesh'}}).alignBottomToSurface).toBe(false)
+  expect(assetPlacementOf({...asset,ref:{...asset.ref,original:{uri:'file:///box.glb',mimeType:'model/gltf-binary'}},parsed:{kind:'mesh'}}).alignBottomToSurface).toBe(true)
+  expect(assetPlacementOf({...asset,ref:{...asset.ref,original:{uri:'file:///arm.xml',mimeType:'application/x-mjcf+xml'}},parsed:{kind:'robot'}}).alignBottomToSurface).toBe(false)
+ }finally{
+  await React.act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}
+ }
 })

@@ -32,6 +32,8 @@ import {describe,expect,mock,test} from "bun:test"
 import {readFileSync} from "node:fs"
 import {join} from "node:path"
 import {renderToStaticMarkup} from "react-dom/server"
+import {NativePhysicsPanel,nativePhysicsCommit,nativePhysicsTargets} from "../src/native-physics-panel.tsx"
+import {identityTransform,type Entity,type EntityObservation} from "../../lyapunov-contracts/src/types.ts"
 
 import {projectSceneCameraRigs} from "../../viewer/src/scene-camera-rigs.ts"
 mock.module("@lyapunov/viewer/client",()=>({projectSceneCameraRigs,createViewer:()=>({}),WebGLUnavailableError:class WebGLUnavailableError extends Error{}}))
@@ -191,5 +193,52 @@ describe("D3 · WorldHandle 自报读数：世界状态行补的几行",()=>{
   }
   const unknown=markup(<WorldPhysicsPanel state={{phase:'idle'}} worlds={[]} disabled={false} tr={tr} start={noop} sync={noop} pause={noop} stop={noop} close={noop} prepare={noop} saveGravity={noop} selectWorld={noop} cancel={noop} diagnostics={<WorldFacts world={undefined} tr={tr}/>}/>).split('<details')[0]!
   expect(unknown).not.toContain('data-world-line=');expect(unknown).not.toContain('data-testid="world-gravity-readback"');expect(unknown).toContain('世界尚未读回重力与碰撞状态')
+ })
+})
+
+describe("原生材料产品入口与真实读回的边界",()=>{
+ const entity=(components:Entity["components"]):Entity=>({entityId:"native",name:"Native",resources:[],transform:identityTransform(),components})
+ const observation=(nativePhysics:unknown):EntityObservation=>({entityId:"native",transform:identityTransform(),sensors:{nativePhysics}})
+ test("MuJoCo参数使用真实nativeName；CAS保存保留原件和其它组件，缺回读不显示实测数",()=>{
+  const source=entity({mujoco:{sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:40000}}},sensor:{camera:"kept"}})
+  const readback=observation({flex:[{nativeName:"soft",youngPa:20000,poisson:.3,rayleighDamping:.02}],cable:[]})
+  const target=nativePhysicsTargets(source,readback)[0]!
+  expect(target.parameters.youngPa).toBe(40000)
+  expect(target.measured.youngPa).toBe(20000)
+  const request=nativePhysicsCommit("scene",7,source,target,{youngPa:50000,poisson:.35,rayleighDamping:.03})
+  expect(request.expectedRevision).toBe(7)
+  const changes=(request.patch[0] as {changes:{components:Entity["components"]}}).changes.components
+  expect(changes.mujoco).toEqual({sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:50000,poisson:.35,rayleighDamping:.03}}})
+  expect(changes.sensor).toEqual({camera:"kept"})
+  expect(source.components.mujoco).toEqual({sourcePath:"/native/flex.xml",flexMaterials:{soft:{youngPa:40000}}})
+  const offline=markup(<NativePhysicsPanel sceneId="scene" revision={7} entity={source} readOnly={false} tr={tr} commit={async()=>{throw new Error("渲染不提交")}}/>)
+  expect(offline).toContain("杨氏模量 Pa")
+  expect(offline).toContain("尚未读到；启动或同步对应引擎后观察。")
+  expect(offline).not.toContain("=40000")
+  expect(()=>nativePhysicsCommit("scene",7,source,target,{poisson:.5})).toThrow("NATIVE_PARAMETER_INVALID")
+ })
+ test("Isaac仅映射实际USD schema参数，水MPM双语界面说明压缩响应而非弹性固体本构",()=>{
+  const usd=entity({isaac:{sourcePath:"/native/soft.usda"}})
+  const target=nativePhysicsTargets(usd,observation({materials:[{nativeName:"Materials/Elastic",schema:"OmniPhysicsDeformableMaterialAPI",parameters:{"omniphysics:youngsModulus":20000,"omniphysics:poissonsRatio":.35,"omniphysics:density":1000}}]}))[0]!
+  expect(target.parameters).toEqual({youngsModulusPa:20000,poissonsRatio:.35,densityKgM3:1000})
+  const request=nativePhysicsCommit("scene",2,usd,target,{youngsModulusPa:30000})
+  expect((request.patch[0] as {changes:{components:Entity["components"]}}).changes.components.isaac).toEqual({sourcePath:"/native/soft.usda",materialOverrides:{"Materials/Elastic":{youngsModulusPa:30000}}})
+  const water=entity({newton:{mpm:{kind:"water",dimensions:[4,5,6],spacingM:.02,voxelSizeM:.04,youngModulusPa:1e5,poissonRatio:.3,densityKgM3:1000,viscosityPaS:.001}}})
+  const zh=markup(<NativePhysicsPanel sceneId="scene" revision={2} entity={water} readOnly={false} tr={tr} commit={async()=>{throw new Error("渲染不提交")}}/>)
+  const en=markup(<NativePhysicsPanel sceneId="scene" revision={2} entity={water} readOnly={true} tr={(_zh,en)=>en} commit={async()=>{throw new Error("渲染不提交")}}/>)
+  expect(zh).toContain("原生 MPM 压缩响应")
+  expect(zh).toContain("不表示液体具有弹性固体的杨氏材料本构")
+  expect(en).toContain("native MPM compression response")
+  expect(en).toContain("Native physics parameters")
+  expect(en).toContain("disabled")
+ })
+ test("世界能力表只显示当前后端声明的事实和具体拒绝原因，不把选中引擎当运行验收",()=>{
+  const world={worldId:"w",sceneId:"s",engineId:"isaac",engineVersion:"6",worldGeneration:1,appliedSceneRevision:1,status:"ready" as const,capabilities:{supported:{nativeUsd:true,deformable:false},unsupported:{deformable:"requires CUDA",cable:"not integrated"}}}
+  const html=markup(<WorldFacts world={world} tr={tr}/>)
+  expect(html).toContain("当前后端声明的入口：nativeUsd")
+  expect(html).toContain("实际运行结果以当前世界回执为准")
+  expect(html).toContain("deformable: requires CUDA")
+  expect(html).not.toContain("入口：nativeUsd、deformable")
+  expect(workbenchSource).toContain("<NativePhysicsPanel")
  })
 })

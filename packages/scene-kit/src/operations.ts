@@ -835,10 +835,12 @@ export class SceneOperations {
       const components: Entity["components"] = { ...provided, visual: { ...provided.visual, kind: resource.parsed.kind } }
       if (resource.parsed.kind === "robot") {
         const sourcePath = localPath(resource.ref.original.uri)
-        if (resource.parsed.metadata.format === "mjcf") components.mujoco = { sourcePath }
+        if (resource.parsed.metadata.format === "mjcf") components.mujoco = { ...(provided.mujoco as Record<string, unknown> | undefined), sourcePath }
         components.articulation = { ...provided.articulation, source: resource.ref.original, format: resource.parsed.metadata.format }
         components.visual = { ...components.visual, robot: await robotVisual(sourcePath) }
       }
+      // 原生USD绑定资源库已登记原件，材料覆写随实例保存，便携搬家不残留导入前路径。
+      if (resource.parsed.mimeType === "model/vnd.usd") components.isaac = { ...(provided.isaac as Record<string, unknown> | undefined), sourcePath: localPath(resource.ref.original.uri) }
       entities = [{ entityId, name: resource.name, transform: transform ?? identityTransform(), resources: [resource.ref], components }]
       if (resource.parsed.kind === "splat") {
         // 可信绑定以外仍保持纯视觉，不从公开 SSOG 猜碰撞。
