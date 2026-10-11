@@ -3016,6 +3016,22 @@
       "markers": [],
       "decision": "include",
       "reason": "2026-10-09: real DOM bilingual viewer menu and original workspace manifest write/readback with structured entity/resource provenance; no live model or desktop."
+    },
+    {
+      "path": "packages/sim-mujoco/test/native-deformable.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要原生 MuJoCo 3.13 worker 与 LYAPUNOV_MUJOCO_PYTHON 指定的本机解释器（envgate）；默认离线 CI 不供给此环境，需单独明确执行；缺解释器时跳过，不记为原生运行通过。"
+    },
+    {
+      "path": "packages/sim-newton/test/camera.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Newton 原生 CPU 相机模块回归：射线 RGB、米制轴向深度、挂载外参与同一步读取；沿既有 Newton 无外部标记分类纳入。所选解释器（LYAPUNOV_NEWTON_PYTHON，未设置则候选 .runtime/newton-env/bin/python）不存在时明确跳过，跳过不记为原生运行通过；最终 worker 消费链另行验收。"
     }
   ]
 }
