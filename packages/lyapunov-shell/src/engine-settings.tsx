@@ -87,7 +87,7 @@ function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disab
   catch(reason){setError(String(reason instanceof Error?reason.message:reason))}finally{setBusy(false)}
  }
  const blocked=disabled||busy
- return <div style={{display:"grid",gap:8,padding:10,border:"1px solid var(--dsw-alias-border-l1)",borderRadius:6}} aria-label={tr("本地 Isaac Sim 安装","Local Isaac Sim installation")}>
+ return <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:8,padding:10,border:"1px solid var(--dsw-alias-border-l1)",borderRadius:6}} aria-label={tr("本地 Isaac Sim 安装","Local Isaac Sim installation")}>
   <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
    <strong style={{fontSize:13}}>{tr("已有 Isaac Sim？直接使用本地安装","Already have Isaac Sim? Use a local installation")}</strong>
    <button type="button" disabled={blocked} onClick={()=>void discover(false)}>{busy?tr("检查中…","Checking…"):tr("发现本地安装","Find local installation")}</button>
@@ -103,7 +103,7 @@ function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disab
    <div>{isaacSelectionDetail(tr,selection)}</div>
    {selection.savedPython&&<button type="button" disabled={blocked||installing} onClick={()=>void select(null)}>{tr("恢复产品默认路径","Restore product default path")}</button>}
   </div>}
-  {candidates.map(candidate=><div key={candidate.python} style={{display:"grid",gap:4,padding:8,background:"var(--dsw-alias-bg-l1,#0001)",borderRadius:6}}>
+  {candidates.map(candidate=><div key={candidate.python} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:4,padding:8,background:"var(--dsw-alias-bg-l1,#0001)",borderRadius:6}}>
    <code style={{wordBreak:"break-all"}}>{candidate.python}</code>
    <span style={{fontSize:12}}>{isaacCandidateDetail(tr,candidate)}</span>
    <button type="button" disabled={blocked||installing||!candidate.compatible||selection?.savedPython===candidate.python} onClick={()=>void select(candidate.python)}>{selection?.savedPython===candidate.python?tr("已保存此安装","Installation saved"):tr("使用此安装（下次启动）","Use this installation (next startup)")}</button>
@@ -124,11 +124,11 @@ function ProviderRowView({row,install,preference,busy,license,tr,onAcceptLicense
  const blocked=isIsaac&&!license
  const localSelected=isIsaac&&row.runtimeSource==="saved-preference"
  const result=install?.result??undefined
- return <div style={{display:"grid",gap:6,padding:"10px 12px",border:"1px solid var(--dsw-alias-border-l1)",borderRadius:8}}>
+ return <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,overflowWrap:"anywhere",gap:6,padding:"10px 12px",border:"1px solid var(--dsw-alias-border-l1)",borderRadius:8}}>
   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
    <strong>{row.label}</strong>
    <span style={{opacity:.85}}>{row.installed?`${isPolicyRuntime?tr("独立 CPU 模块/版本已核","Independent CPU modules/versions verified"):tr("当前解释器可发现 SDK","SDK found in selected interpreter")}${row.version?` · ${row.version}`:""}`:isPolicyRuntime?tr("独立 CPU 环境待准备","Independent CPU environment needs preparation"):tr("当前解释器未发现 SDK","SDK not found in selected interpreter")}</span>
-   <span style={{opacity:.6,fontSize:12}}>{row.detail}</span>
+   <span style={{minWidth:0,overflowWrap:"anywhere",opacity:.6,fontSize:12}}>{row.detail}</span>
    <span style={{flex:1}}/>
    {row.engineChoice
     ? <button type="button" disabled={busy!==undefined||install?.running||preference===row.engineChoice} onClick={()=>onChoose(row.engineChoice!)}>
@@ -142,7 +142,7 @@ function ProviderRowView({row,install,preference,busy,license,tr,onAcceptLicense
   <div style={{opacity:.65,fontSize:12,wordBreak:"break-all"}}>{tr("下次启动 SDK 路径：","SDK path for next startup: ")}{row.runtimePython}（{row.runtimeSource==="env-override"?tr("外置覆盖","external override"):row.runtimeSource==="saved-preference"?tr("已保存的本地安装","saved local installation"):tr("产品默认","product default")}；{tr("本页检查 SDK 可发现性","this page checks SDK discovery")}）</div>
   <div style={{opacity:.6,fontSize:12,wordBreak:"break-all"}}>{tr("产品托管安装：","Product managed install: ")}{row.managedStatus==="ready"?tr("SDK 可发现","SDK found"):row.managedStatus==="missing"?tr("前缀不存在","prefix missing"):tr("前缀存在但 SDK 未就绪","prefix present; SDK incomplete")} · {row.prefix}</div>
   {isIsaac&&<IsaacLocalPicker tr={tr} disabled={busy!==undefined} installing={Boolean(install?.running)} onChanged={onSdkChanged}/>}
-  {isIsaac&&<div style={{display:"grid",gap:4}}>
+  {isIsaac&&<div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:4}}>
    <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13}}>
     <input type="checkbox" checked={Boolean(license)} onChange={event=>onAcceptLicense(event.target.checked)}/>
     <span>{tr("我已阅读并同意 NVIDIA Omniverse 许可协议","I have read and accept the NVIDIA Omniverse License Agreement")}（
@@ -203,7 +203,7 @@ export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Tran
  const rows=snapshot?.providers.filter(row=>kinds.includes(row.kind))??[]
  // "自动" = 偏好层没有显式引擎（`null`）。宿主写 `"auto"` 时会**清除** `engine` 键，所以读回也是 null。
  const isAuto=preference===null
- return <section style={{display:"grid",gap:14,padding:20}} aria-label={title}>
+ return <section style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,overflowWrap:"anywhere",gap:14,padding:20}} aria-label={title}>
   <h2 style={{margin:0}}>{title}</h2>
   <p style={{margin:0,opacity:.75}}>{blurb}</p>
   {showSwitch&&<p style={{margin:0}}>
@@ -231,7 +231,7 @@ export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Tran
   {showSwitch&&decision?.error?<p role="alert" style={{margin:0}}>{tr("引擎判定不可用：","Engine decision unavailable: ")}{decision.error}</p>:null}
   {error&&<p role="alert" style={{margin:0}}>{error}</p>}
   {!snapshot&&!error&&<p role="status">{tr("正在读取状态…","Reading status…")}</p>}
-  {snapshot&&<div style={{display:"grid",gap:10}}>
+  {snapshot&&<div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:10}}>
    {rows.map(row=><ProviderRowView key={row.id} row={row} install={snapshot.installs.find(item=>item.provider===row.id)} preference={preference} busy={busy} license={snapshot.licenses?.isaac} tr={tr} onAcceptLicense={accepted=>void acceptLicense(accepted)} onInstall={provider=>void install(provider)} onChoose={provider=>void choose(provider)} onSdkChanged={refresh}/>)}
   </div>}
   {snapshot&&<p style={{margin:0,opacity:.6,fontSize:12}}>
