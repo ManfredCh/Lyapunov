@@ -1578,24 +1578,34 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
  let providerCache:{at:number;rows:EngineProviderStatus[]}|undefined
  registerIsaacLocalRoutes(register,{productRoot:PRODUCT_ROOT_FOR_ENGINE,onChanged:()=>{providerCache=undefined;clearSdkImportCache()}})
  /**
-  * Newton 第一切片的**能力范围**（面板措辞）。唯一权威是 Provider 自己的能力表
+  * Newton 当前 Provider 的**入口与世界限制**（面板措辞）。唯一权威是 Provider 自己的能力表
   * （`packages/sim-newton/python/worker.py` 的 `CAPABILITIES`，模型侧通过 `describe`/`capabilities`
   * 读真值）；这段只是把同一份事实写进面板——W5/DEV-008 报的正是"面板说的与实际做的范围不一致"，
   * 所以它有一条回归用例（`test/engine-panel-decision.test.ts`）**直接读 worker.py 核对**：
   * Python 侧能力表一变，这里的措辞就会红，逼作者一起改。
   *
   * `supported` 必须**逐个列出** worker `CAPABILITIES.supported` 的**全部**键（不是"只列方法"）：
-  * 少列一个已支持的键就是【能用却说不能用】的反向假声明（DEV-008 复查实测：`list_worlds`
-  * 真能用——`[]` → `open` → `[{worldId:"w-lw",status:"ready"}]`、退出码 0——而面板那句
-  * "仅 …" 把它排除在能力范围之外）。判据是**集合相等**且**双向**：
+  * 少列一个已支持的键就是【能用却说不能用】的反向假声明。该表是 Provider 入口集合，
+  * 当前世界还会按求解器和源驱动覆盖 execute/manualClockAdvance/contacts 等值，不能承诺每个
+  * 世界都有这些能力。入口判据是**集合相等**且**双向**：
   *   · worker 少一个键（或把某个键从 supported 挪走）⇒ 面板仍写着它 ⇒ 红；
   *   · 面板少列一个 worker 已支持的键（含 worker 新加键）⇒ 也红。
   * 用例是**解析** worker.py 得到键集合再比对，不手抄这份清单：这里的**顺序可以变、名字不能少**。
-  * 措辞骨架被用例按 `第一切片能力范围：仅 <键>/<键>/…；<不可用说明>不可用` 解析；
-  * 改骨架（分隔符、"仅"、"；"）会让用例红，这是有意的——保证这段文本始终可被机器核对。
+  * 用例分别解析“当前 Newton Provider 能力入口（按世界条件启用）”和“尚未接通”两个集合，
+  * 世界条件另列，避免把 MPM 的局部拒绝写成整个 Provider 不可用；骨架损坏也必须转红。
   */
- const NEWTON_SLICE={supported:["open","sync","observe","describe","close","list_worlds","mjcf","urdf","groundPlane","realtimeClock","freeBodies","articulatedJoints","sceneCollisionCompilation"] as const,unsupported:["动作（execute 全部 ACTION_UNSUPPORTED）","相机（capture/camera_*）","接触（observe.contacts/penetrations）","assist"] as const}
- const newtonSliceNote=()=>`第一切片能力范围：仅 ${NEWTON_SLICE.supported.join("/")}；${NEWTON_SLICE.unsupported.join("、")}不可用`
+ const NEWTON_SLICE={
+  supported:["open","sync","observe","describe","close","list_worlds","mjcf","urdf","groundPlane","realtimeClock","freeBodies","articulatedJoints","sceneCollisionCompilation","execute","manualClockAdvance","contacts","liquidParticles","capture","captureMulti","cameraList"] as const,
+  unsupported:["observe.collisionTopology","observe.sensors.sites","observe.tendons","cameraAdjust","cameraProjectAnnotation","cameraDatasetExport","assist","collisionPatches"] as const,
+  conditions:[
+   "这是 Provider 入口集合，当前世界以 WorldHandle.capabilities 与 robot_describe 读回为准 / Provider entries are enabled by the current world; use its WorldHandle.capabilities and robot_describe readback",
+   "XPBD 仅接已核验单自由度、gear=1、无激活动态或多执行器混合的源位置 PD：joint/trajectory/control；保源增益与关节/ctrlrange，源力限等不支持项返回 UNSUPPORTED_CAPABILITY。没有合格源驱动的世界关闭 execute/manualClockAdvance；control 仅 manual，trajectory 须覆盖全部受控关节 / XPBD accepts verified single-DOF source position PD drives with gear=1, no activation dynamics or multiple mixed actuators: joint/trajectory/control. Source gains and joint/ctrlrange limits are retained; unsupported modes or source force limits return UNSUPPORTED_CAPABILITY. Worlds without supported source drives disable execute/manualClockAdvance; control requires manual clock and trajectory covers all controlled joints",
+   "MPM 水例用 realtime 推进，仅接受固定/静态 collider；manual 模式明确告警并冻结。该世界无机器人动作或刚体 Contacts/penetrations，freeBodies/articulatedJoints 关闭。vehicle/lift/gripper/gait/thrust/tendon/batch 及 MPM 中的全部机器人动作返回 ACTION_UNSUPPORTED / MPM water advances with realtime and accepts fixed/static colliders only; manual clock is explicitly frozen with a warning. Robot actions, rigid Contacts/penetrations, freeBodies and articulatedJoints are unavailable in this world. vehicle/lift/gripper/gait/thrust/tendon/batch and all robot actions in MPM return ACTION_UNSUPPORTED",
+   "capture/captureMulti/cameraList 使用显式命名原生相机，RGB 与轴向米制深度来自同一物理步，采集不推进物理，不默认自由机位 / capture/captureMulti/cameraList use explicitly named native cameras with same-step RGB and axial metric depth; capture does not step physics or select an implicit free camera",
+   "刚体接触/穿透读回来自原生接触候选；XPBD 的 forceN 是冲量/dt 近似值，semi 不提供该力读值；尚未接通的上述入口返回 UNSUPPORTED_CAPABILITY / Rigid contacts and penetrations come from native candidates; XPBD forceN is an impulse/dt approximation and semi has no such force readback. The unavailable entries above return UNSUPPORTED_CAPABILITY",
+  ] as const,
+ }
+ const newtonSliceNote=()=>`当前 Newton Provider 能力入口（按世界条件启用） / Provider entries (world-dependent)：${NEWTON_SLICE.supported.join("/")}；尚未接通 / Unavailable：${NEWTON_SLICE.unsupported.join("/")}；使用条件 / Conditions：${NEWTON_SLICE.conditions.join("；")}`
  /**
   * 引擎选择的**唯一判定**在上游（`script/engine-preference.ts` 的 `resolveEngine`），面板不在这里
   * 重新排优先级、也不自己编回退原因：只把上游这次给的原话与事实读出来（W2 的四条件真值表）。

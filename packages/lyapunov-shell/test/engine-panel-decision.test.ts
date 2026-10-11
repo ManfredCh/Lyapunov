@@ -6,11 +6,11 @@
  *      判据全部来自 `script/engine-preference.ts` 的 `resolveEngine()`，插件侧不重新推导；
  *   ② "当前运行"与"已保存偏好"是**两个不同的显示位**（条件 C：偏好已存但本次运行的是另一个引擎时，
  *      面板必须说出"重启后生效"，不能把两者合并成一个值）；
- *   ③ Newton 那一行必须写出**第一切片的能力范围**（状态"已就绪" ≠ 能力与 Isaac/MuJoCo 相当）。
+ *   ③ Newton 那一行必须写出**当前 Provider 入口及世界限制**（静态入口集合 ≠ 每个世界都可用）。
  *      这段措辞由本文件**直接读 `packages/sim-newton/python/worker.py` 的 `CAPABILITIES` 核对**，
  *      且判据**双向**：worker 少一个键要红，**面板少列一个已支持键也要红**——只查"面板提到的
  *      键在 worker 里是不是 True"是单向的，面板把 `list_worlds` 这种已声明、已实现、实测可用的
- *      键排除在"仅 …"之外时它照样绿（DEV-008 复查实测：删掉 `'list_worlds': True` 判据仍 true）。
+ *      键排除在入口集合之外时它照样绿（DEV-008 复查实测：删掉 `'list_worlds': True` 判据仍 true）。
  *      键集合由本文件**解析** worker.py 得到，不手抄任何清单；Python 侧能力表一变，面板文本就会红
  *      （W5 报的正是"产品说的和实际做的不一致"）。
  *
@@ -119,13 +119,13 @@ function externalMujocoPython(): string {
 }
 /**
  * 面板的 Newton 能力范围文本是否还与 Provider 的能力表一致。**判据是集合相等、且双向**：
- *   · worker `supported` 的键，面板"仅 …"里一个都不能少（**面板少列已支持键 ⇒ 红**）；
- *   · 面板"仅 …"里写着的键，worker 必须真的支持（**worker 少一个键 ⇒ 红**）。
+ *   · worker `supported` 的键，面板入口集合里一个都不能少（**面板少列已支持键 ⇒ 红**）；
+ *   · 面板入口集合里写着的键，worker 必须真的支持（**worker 少一个键 ⇒ 红**）。
  * 两边的键集合都是**解析**出来的（worker 侧解析 `CAPABILITIES`，面板侧解析渲染出来的 detail），
  * 本文件不手抄任何一份清单 —— 手抄的清单会和它要保护的东西一起过期。
  *
  * 另外两条同族判据（都只钉**语义**，不钉源码怎么写）：
- *   · 面板说"不可用"的键必须真的不在 `supported` 里（"能用却说不能用"的反向假声明）；
+ *   · 面板“尚未接通”的集合对应无条件缺项；部分动作和 MPM 世界限制另列，不能混成整个通道不可用；
  *   · 动作拒绝码取 worker 里**解析出来的值**。旧判据钉的是源码字面量
  *     `'execute': {kind: 'ACTION_UNSUPPORTED' for kind in ACTION_KINDS}`，worker 把码抽成
  *     `ACTION_UNSUPPORTED_CODE` 常量之后，这条判据自己就红了 —— 那是守卫的病，不是产品缺陷；
@@ -185,8 +185,8 @@ const parseWorkerCapabilities = (worker: string): WorkerCapabilities | undefined
   return { supported, unsupported: keysOf(unsupportedBlock), refusalCodes }
 }
 
-/** 面板措辞的骨架：`第一切片能力范围：仅 <键>/<键>/…；<不可用说明>不可用`（见 plugin.ts 的 NEWTON_SLICE）。 */
-const PANEL_SLICE = /第一切片能力范围：仅 ([^；]+)；/
+/** Provider 入口与无条件缺项分段解析，世界条件中的局部拒绝不能误判为 Provider 全局不可用。 */
+const PANEL_SLICE = /当前 Newton Provider 能力入口（按世界条件启用） \/ Provider entries \(world-dependent\)：([^；]+)；/
 
 /** 面板文案里**声明为可用**的键集合。骨架被改坏 ⇒ 返回 undefined ⇒ 判据转红（不静默放过）。 */
 const panelSliceKeys = (panelText: string): string[] | undefined => {
@@ -196,13 +196,8 @@ const panelSliceKeys = (panelText: string): string[] | undefined => {
   return keys.length === 0 ? undefined : keys
 }
 
-/** 面板文案里"不可用"那半句（"仅 …；" 之后到 `不可用` 之前）。 */
-const panelUnavailableClause = (panelText: string): string => {
-  const match = PANEL_SLICE.exec(panelText)
-  const after = panelText.slice(match === null ? 0 : match.index + match[0].length)
-  const end = after.indexOf("不可用")
-  return end < 0 ? after : after.slice(0, end)
-}
+/** 缺项必须有完整段落骨架；解析失败不当成空集合放过。 */
+const panelUnavailableClause = (panelText: string): string | undefined => /；尚未接通 \/ Unavailable：([^；]+)；/.exec(panelText)?.[1]
 
 const sameKeySet = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && [...left].sort().join("\u0000") === [...right].sort().join("\u0000")
@@ -211,14 +206,17 @@ const sameKeySet = (left: readonly string[], right: readonly string[]): boolean 
 const panelSliceMatchesWorker = (worker: string, panelText: string): boolean => {
   const capabilities = parseWorkerCapabilities(worker)
   const claimed = panelSliceKeys(panelText)
-  if (capabilities === undefined || claimed === undefined) return false
+  const unavailable = panelUnavailableClause(panelText)
+  if (capabilities === undefined || claimed === undefined || unavailable === undefined) return false
   // ① 双向集合相等：面板少列已支持键 ⇒ 红；worker 少一个键（或把键挪走）⇒ 红。
   if (!sameKeySet(claimed, capabilities.supported)) return false
-  // ② 面板说"不可用"的键必须真的不在 supported 里（能用却说不能用）。
+  // ② 无条件缺项与 worker 逐键相等；execute 的部分动作拒绝属于后面的世界/动作条件。
+  const denied = unavailable.split("/").map(key => key.trim()).filter(Boolean)
   const declared = new Set([...capabilities.supported, ...capabilities.unsupported])
-  for (const token of panelUnavailableClause(panelText).match(/[A-Za-z_][A-Za-z0-9_.]*/g) ?? []) {
-    if (declared.has(token) && capabilities.supported.includes(token)) return false
+  for (const token of denied) {
+    if (!declared.has(token) || capabilities.supported.includes(token)) return false
   }
+  if (!sameKeySet(denied, capabilities.unsupported.filter(key => key !== "execute"))) return false
   // ③ 面板写出的动作拒绝码必须等于 worker 解析出来的值。
   if (capabilities.refusalCodes.length === 0) return false
   return capabilities.refusalCodes.every(code => panelText.includes(code))
@@ -435,13 +433,13 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
 })
 
 describe("Newton 面板文本与实际能力范围同源（W5/DEV-008）", () => {
-  test("newton 行写明第一切片范围，且与 worker.py 的 CAPABILITIES **双向**一致", async () => {
+  test("newton 行写明当前Provider入口和世界限制，且与 worker.py 的 CAPABILITIES **双向**一致", async () => {
     const host = await boot()
     try {
       const payload = await host.panel()
       const row = payload.providers.find(item => item.id === "newton")!
-      expect(row.detail).toContain("第一切片能力范围")
-      expect(row.detail).toContain("不可用")
+      expect(row.detail).toContain("当前 Newton Provider 能力入口（按世界条件启用）")
+      expect(row.detail).toContain("尚未接通")
       const worker = readFileSync(workerPath(), "utf8")
       const capabilities = parseWorkerCapabilities(worker)
       // 解析失败 ⇒ 守卫失效，必须先红（而不是把"解析不出来"当成"一致"）。
@@ -450,6 +448,18 @@ describe("Newton 面板文本与实际能力范围同源（W5/DEV-008）", () =>
       expect(panelSliceKeys(row.detail)?.slice().sort()).toEqual([...capabilities!.supported].sort())
       // ② 合起来的判据（含"不可用"半句与动作拒绝码）也必须成立。
       expect(panelSliceMatchesWorker(worker, row.detail)).toBe(true)
+      expect(row.detail).toContain("当前世界以 WorldHandle.capabilities 与 robot_describe 读回为准")
+      expect(row.detail).toContain("Worlds without supported source drives disable execute/manualClockAdvance")
+      expect(row.detail).toContain("源力限等不支持项返回 UNSUPPORTED_CAPABILITY")
+      expect(row.detail).toContain("control requires manual clock")
+      expect(row.detail).toContain("MPM 水例用 realtime 推进，仅接受固定/静态 collider")
+      expect(row.detail).toContain("manual clock is explicitly frozen with a warning")
+      expect(row.detail).toContain("vehicle/lift/gripper/gait/thrust/tendon/batch")
+      expect(row.detail).toContain("显式命名原生相机")
+      expect(row.detail).toContain("same-step RGB and axial metric depth")
+      expect(row.detail).not.toContain("execute 全部 ACTION_UNSUPPORTED")
+      expect(row.detail).not.toContain("相机（capture/camera_*）")
+      expect(row.detail).not.toContain("接触（observe.contacts/penetrations）")
     } finally { await host.dispose() }
   })
 
@@ -479,11 +489,21 @@ describe("Newton 面板文本与实际能力范围同源（W5/DEV-008）", () =>
       expect(workerExtra).not.toBe(worker)
       expect(panelSliceMatchesWorker(workerExtra, panelText)).toBe(false)
 
-      // 方向 ④：**反向假声明**——worker 把 capture 提前变成可用 ⇒ 面板还说"相机…不可用" ⇒ 红。
-      // （旧用例只验了这一族方向，所以"面板少列"那半边没人看着。）
-      const workerAdvanced = worker.replace("'capture': 'UNSUPPORTED_CAPABILITY'", "'capture': True")
+      // 方向 ④：**反向假声明**——仍未接通的 cameraAdjust 提前声明可用，面板还列缺项 ⇒ 红。
+      // capture 已真实接通，不能再用“不存在的 capture 不支持声明”造空变异。
+      const workerAdvanced = worker.replace("'cameraAdjust': 'UNSUPPORTED_CAPABILITY'", "'cameraAdjust': True")
       expect(workerAdvanced).not.toBe(worker)
       expect(panelSliceMatchesWorker(workerAdvanced, panelText)).toBe(false)
+      // 相反方向：面板把已支持 capture 写为无条件缺项，入口集合仍完整，也必须红。
+      const panelFalseDenial = panelText.replace("；尚未接通 / Unavailable：", "；尚未接通 / Unavailable：capture/")
+      expect(panelFalseDenial).not.toBe(panelText)
+      expect(panelSliceMatchesWorker(worker, panelFalseDenial)).toBe(false)
+      const panelExtra = panelText.replace("/urdf", "/urdf/teleport")
+      expect(panelExtra).not.toBe(panelText)
+      expect(panelSliceMatchesWorker(worker, panelExtra)).toBe(false)
+      const panelMissingDenial = panelText.replace("/cameraAdjust", "")
+      expect(panelMissingDenial).not.toBe(panelText)
+      expect(panelSliceMatchesWorker(worker, panelMissingDenial)).toBe(false)
 
       // 方向 ⑤：**动作拒绝码的"值"变了** ⇒ 面板还写着旧码 ⇒ 红。
       // 注意这里变的是**值**不是写法：worker 把码抽成常量（`ACTION_UNSUPPORTED_CODE`）时本判据
@@ -491,11 +511,17 @@ describe("Newton 面板文本与实际能力范围同源（W5/DEV-008）", () =>
       const workerRecoded = worker.replace("ACTION_UNSUPPORTED_CODE = 'ACTION_UNSUPPORTED'", "ACTION_UNSUPPORTED_CODE = 'ACTION_UNSUPPORTED_V2'")
       expect(workerRecoded).not.toBe(worker)
       expect(panelSliceMatchesWorker(workerRecoded, panelText)).toBe(false)
+      const workerRenamedCode = worker.replaceAll("ACTION_UNSUPPORTED_CODE", "CURRENT_ACTION_REFUSAL")
+      expect(workerRenamedCode).not.toBe(worker)
+      expect(panelSliceMatchesWorker(workerRenamedCode, panelText)).toBe(true)
 
       // 方向 ⑥：**面板措辞骨架被改坏**（解析不出来）⇒ 红，不静默放过。
       const panelBroken = panelText.replace("；", "，")
       expect(panelBroken).not.toBe(panelText)
       expect(panelSliceMatchesWorker(worker, panelBroken)).toBe(false)
+      const panelBrokenDenial = panelText.replace("；尚未接通 / Unavailable：", "；缺项：")
+      expect(panelBrokenDenial).not.toBe(panelText)
+      expect(panelSliceMatchesWorker(worker, panelBrokenDenial)).toBe(false)
     } finally { await host.dispose() }
   })
 })
