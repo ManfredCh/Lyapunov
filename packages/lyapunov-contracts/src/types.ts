@@ -115,13 +115,29 @@ export interface WorldHandle {
   deviceDegraded?: boolean
   /** 仅 Newton：设备选择／降级的说明文本。 */
   deviceNote?: string
-  /** 仅 Newton：本次世界实际使用的求解器（`LYAPUNOV_NEWTON_SOLVER` 只接受这两个值）。 */
-  solver?: 'semi' | 'xpbd'
+  /** 仅 Newton：本次世界实际使用的求解器；原生水粒子世界报告 implicit-mpm。 */
+  solver?: 'semi' | 'xpbd' | 'implicit-mpm'
   /** 仅 Newton：Warp 运行时版本。 */
   warpVersion?: string
 }
 /** 该实体的实测肌腱坐标（引擎自身缓存 ten_length/ten_velocity，不用关节角重算代替）。 */
 export interface TendonObservation { names: string[]; lengths: number[]; velocities: number[] }
+/**
+ * 原生求解器在当前 Frame 同一步读回的瞬态几何。坐标是世界系米制、右手 Z-up，
+ * positionsM 按 xyz 扁平排列；不得再乘实体或父节点的摆放变换。
+ * nativeName 在同一实体内稳定，数组顺序即该原生几何的顶点/粒子索引。
+ * 原生 MJCF/USD、材料声明与创建参数仍由 Entity.resources/components 持久化；
+ * 这里不保存源声明，也不为单个粒子创建 Scene Entity。
+ */
+export type NativeDynamicGeometry =
+  | { nativeName: string; kind: "mesh"; positionsM: number[]; /** 每三个索引组成一个表面三角形。 */ indices: number[] }
+  | {
+      nativeName: string; kind: "lines"; positionsM: number[]
+      /** 每两个索引组成一段实体缆线中心线。 */ indices: number[]; radiusM?: number
+      /** 原生插件身份实际绑定的 body 名；Viewer 只替换本实体中这些静态节点，保留同源障碍。 */
+      nativeBodyNames?: string[]
+    }
+  | { nativeName: string; kind: "particles"; positionsM: number[]; radiusM: number }
 export interface EntityObservation {
   entityId: string; transform: Transform
   /** 当前原生编译产物的刚体事实；缺此字段不推断物理已就绪。 */
@@ -133,6 +149,11 @@ export interface EntityObservation {
    * 肌腱不是关节：它们只出现在这个顶层字段里，不混入 joints。
    */
   tendons?: TendonObservation
+  /**
+   * 与本实体位姿、joints 同属当前帧。实体出现在帧中且此字段缺省/为空时清除旧动态显示；
+   * 选择性观测没有出现的实体保持原显示。材料实值由 sensors.nativePhysics 按引擎原生字段读回。
+   */
+  dynamicGeometry?: NativeDynamicGeometry[]
   sensors?: Record<string, unknown>
 }
 export interface ContactObservation {
