@@ -1,9 +1,9 @@
 """Newton Provider worker：NDJSON 请求/响应协议，与 packages/sim-mujoco/python/worker.py 同形。
 
-第一切片（最小但真实）：
+RC2 原生后端切片：
 - 真物理：Newton 1.6.0 + Warp 1.17.0；MJCF/URDF 由 Newton 的 ModelBuilder 真实导入并步进。
 - device 可降级：auto → 有 CUDA 用 cuda:0，没有则 cpu；显式指定的设备不可用时明确报错（不静默顶替）。
-- 不支持的能力（动作、接触观测、渲染、辅助附着…）一律返回结构化错误，绝不静默成功或返回假数据。
+- 未接通的动作、渲染与辅助附着返回结构化错误，绝不静默成功或返回假数据。
 - stdout 只承载 NDJSON：库自身的 print（Warp 初始化横幅/内核装载日志）被改道到 stderr。
 
 协议要点（与 sim-mujoco 一致）：
@@ -474,19 +474,21 @@ def is_ground_shape_name(name):
 # 能力表：本切片真实支持什么、明确不支持什么。握手与 capabilities 方法原样交出。
 # ---------------------------------------------------------------------------
 ACTION_KINDS = ['trajectory', 'joint', 'vehicle', 'lift', 'gripper', 'gait', 'control', 'thrust', 'tendon', 'batch']
-# 动作拒绝码：**一处定义**。声明表（CAPABILITIES.unsupported.execute）、describe 的 6 条 reason 前缀、
+EXECUTABLE_KINDS = {'trajectory', 'joint', 'control'}
+ROBOT_CAPABILITY_KINDS = ['thrust', 'vehicle', 'joint', 'gripper', 'lift', 'control', 'gait', 'tendon']
+# 动作拒绝码：**一处定义**。声明表（CAPABILITIES.unsupported.execute）、describe 的缺项 reason 前缀、
 # execute 的真实拒绝码全部从这一个常量出 —— 判定与拒绝同源，不靠人在多处抄同一个字面量。
 # 值就是线上码（合同/README 都按这个字符串读），改它等于改协议。
 ACTION_UNSUPPORTED_CODE = 'ACTION_UNSUPPORTED'
 
 # 需要 worldId 的方法（其余方法名一律 UNKNOWN_METHOD，不让「未知方法」被世界查询掩盖）。
 WORLD_METHODS = {'sync', 'observe', 'describe', 'handle', 'stop', 'receipt', 'execute', 'assist',
-                 'capture', 'capture_multi', 'camera_list', 'camera_adjust',
+                 'capture', 'capture_multi', 'capture_publish', 'camera_list', 'camera_adjust',
                  'camera_project_annotation', 'camera_dataset_export', 'close'}
 
 CAPABILITIES = {
     'engine': 'newton',
-    'slice': 'minimal-1',
+    'slice': 'joint-contact-mpm-rc2',
     'supported': {
         'open': True,
         'sync': True,
@@ -501,35 +503,36 @@ CAPABILITIES = {
         'freeBodies': True,
         'articulatedJoints': True,
         'sceneCollisionCompilation': True,
+        'execute': True,
+        'manualClockAdvance': True,
+        'contacts': True,
+        'liquidParticles': True,
+        'capture': True,
+        'captureMulti': True,
+        'cameraList': True,
     },
     'unsupported': {
-        'execute': {kind: ACTION_UNSUPPORTED_CODE for kind in ACTION_KINDS},
-        'observe.contacts': 'UNSUPPORTED_CAPABILITY',
-        'observe.penetrations': 'UNSUPPORTED_CAPABILITY',
+        'execute': {kind: ACTION_UNSUPPORTED_CODE for kind in ACTION_KINDS if kind not in EXECUTABLE_KINDS},
         'observe.collisionTopology': 'UNSUPPORTED_CAPABILITY',
         'observe.sensors.sites': 'UNSUPPORTED_CAPABILITY',
         'observe.tendons': 'UNSUPPORTED_CAPABILITY',
-        'capture': 'UNSUPPORTED_CAPABILITY',
-        'captureMulti': 'UNSUPPORTED_CAPABILITY',
-        'cameraList': 'UNSUPPORTED_CAPABILITY',
         'cameraAdjust': 'UNSUPPORTED_CAPABILITY',
         'cameraProjectAnnotation': 'UNSUPPORTED_CAPABILITY',
         'cameraDatasetExport': 'UNSUPPORTED_CAPABILITY',
         'assist': 'UNSUPPORTED_CAPABILITY',
         'collisionPatches': 'UNSUPPORTED_CAPABILITY',
-        'manualClockAdvance': 'UNSUPPORTED_CAPABILITY',
     },
     'notes': [
         '支持 MJCF/URDF 原生源、地面及 Scene collision 的 box/shapes、sphere、cylinder、capsule、静态 plane 与 OBJ parts；没有原生源也没有碰撞的实体按纯视觉跳过并带 ENTITY_SKIPPED_NO_NATIVE_SOURCE。',
         'Scene 环境/静态 OBJ 使用真实三角面，不合成整件凸包；动态 OBJ 仅接受明确凸件策略。组合盒保留逐件尺寸与空区，缺尺寸不造默认盒。',
-        'Scene 碰撞支持完整父链线性映射烘焙到 OBJ；原生形状仅接受保持其形状的变换，剪切与球/胶囊非均匀缩放明确拒绝。动态体须有正 massKg；逐体关闭重力、SDF、补丁绑定与 topology/contacts 观测尚未接入。',
-        'manual 时钟下没有任何动作可驱动，世界不会自行推进（不假装推进）；真步进请用 realtime 时钟。',
+        'Scene 碰撞支持完整父链线性映射烘焙到 OBJ；原生形状仅接受保持其形状的变换，剪切与球/胶囊非均匀缩放明确拒绝。动态体须有正 massKg；逐体关闭重力、SDF、补丁绑定与 topology 观测尚未接入。',
+        'manual 只由已接受动作推进；control 精确执行 stepCount 步。MPM 水例使用 realtime / Manual clock advances accepted robot actions only; MPM water uses realtime.',
         'joints.positions/velocities 用 Newton eval_ik 从 body_q/body_qd 反解；自由根的速度按 Newton 自身的约定 (v_com_world, omega_world) 报告，字段名与 MuJoCo 的自由根速度约定（世界线速度 + 本地角速度）不同，见 README。',
-        'STOP 在没有任何动作的切片里是空真值（receipts=[]、affectedEntityIds=[]），不伪造停止回执。',
+        'STOP 保持实测关节参考，不清零刚体速度；XPBD 接触力为原生冲量/dt近似值。MPM 水例不执行机器人动作 / STOP holds measured references; XPBD forces are native approximations; MPM has no robot action channel.',
+        '原生 SensorTiledCamera 消费当前 Newton 形状与粒子，采集需显式命名相机，不默认自由机位；RGB与轴向米制深度同物理步 / Named cameras use native pixels and axial metric depth from the same physical step.',
         '含 mesh 资产的 MJCF/URDF 需要 Newton 的 importers extra（trimesh 等）：缺失时 open/sync 明确报 PROVIDER_DEPENDENCY_MISSING 并给出安装方式，不会退化成「场景非法」。',
     ],
 }
-CAPABILITIES['supported']['execute'] = False
 
 
 NEWTON_VERSION = getattr(newton, '__version__', 'unknown')
@@ -598,6 +601,10 @@ class World:
         self.warnings = []
         self.ground_names = []
         self.entities = {}
+        self.active = {}
+        self.receipts = {}
+        self.commanded = {}
+        self.camera_provider = None
         # 原生句柄：close 时逐一丢弃（Warp 没有显式 dispose，释放靠丢引用 + gc）
         self.builder = None
         self.model = None
@@ -607,6 +614,8 @@ class World:
         self.solver = None
         self.pipeline = None
         self.contacts = None
+        self.contact_distances = None
+        self.contact_points0 = self.contact_points1 = None
         self.ik_q = None
         self.ik_qd = None
         self.signature = None
@@ -626,8 +635,7 @@ class World:
             'status': self.status,
             'clock': self.clock,
             'timestepS': float(self.dt),
-            # Newton 切片不提供接触通道（见 capabilities），这里的名字只是 Newton shape label，
-            # 用于标识世界里的地面几何，不参与任何接触过滤。
+            # 接触几何沿用原生 shape label；地面来源另见 worldPhysics。
             'groundGeomNames': list(self.ground_names),
             'warnings': [dict(w) for w in self.warnings],
             **({'worldPhysics':self.world_physics()}if self.model is not None else{}),
@@ -638,6 +646,7 @@ class World:
             'deviceNote': self.device_note,
             'solver': self.solver_name,
             'warpVersion': WARP_VERSION,
+            'capabilities': self.world_capabilities(),
             # 配置的 Warp 内核缓存基目录（= warp.init() 之前设进 wp.config.kernel_cache_dir 的值，来源见 note）
             # ——**不是**"实际生效目录"：warp 会在它下面再挂 `<warp 版本>` 子目录，真正生效的是
             # ready/capabilities 的 kernelCacheDir（那个值取自 init 之后，带版本子目录）。两者同名不同义。
@@ -653,6 +662,18 @@ class World:
             reason = (': ' + self.status_reason) if self.status_reason else ''
             raise SimError('WORLD_UNAVAILABLE', '世界未同步或已关闭: ' + self.status + reason)
 
+    def camera(self):
+        self.require_ready()
+        if self.camera_provider is None:
+            from camera import NewtonCamera
+            self.camera_provider = NewtonCamera(self, SimError, native_source, world_poses)
+        return self.camera_provider
+
+    def release_camera(self):
+        if self.camera_provider is not None:
+            self.camera_provider.close()
+            self.camera_provider = None
+
     def fault(self, error):
         """Transition a world to unavailable and release native handles immediately.
 
@@ -662,6 +683,9 @@ class World:
         """
         self.status = 'unavailable'
         self.status_reason = type(error).__name__ + ': ' + str(error)
+        for aid in list(self.active):
+            self.finish(aid, 'failed', 'WORLD_UNAVAILABLE', state_available=False)
+        self.release_camera()
         self.builder = None
         self.model = None
         self.state_a = self.state_b = None
@@ -669,8 +693,11 @@ class World:
         self.solver = None
         self.pipeline = None
         self.contacts = None
+        self.contact_distances = None
+        self.contact_points0 = self.contact_points1 = None
         self.ik_q = self.ik_qd = None
         self.entities = {}
+        self.commanded = {}
         gc.collect()
 
     # -- 编译 ---------------------------------------------------------------
@@ -695,6 +722,7 @@ class World:
                 'parentId': e.get('parentId'),
                 'transform': e.get('transform'),
                 'source': None if cfg is None else {'sourcePath': cfg.get('sourcePath'), 'xml': cfg.get('xml')},
+                'mpm': e.get('components', {}).get('newton', {}).get('mpm'),
                 'collision': e.get('components', {}).get('collision'),
                 'rigidBody': e.get('components', {}).get('rigidBody'),
                 'physicsBinding': e.get('components', {}).get('physicsBinding'),
@@ -738,9 +766,8 @@ class World:
                            + ' 或最小集 "trimesh>=4.6.8"') from exc
         return body_start, builder.body_count, joint_start, builder.joint_count, shape_start, builder.shape_count
 
-    def compile(self, scene):
-        """把 Scene 编译成真实的 Newton 模型；失败即抛结构化错误，不产出半成品世界。"""
-        builder = newton.ModelBuilder(gravity=wp.vec3(*scene_gravity(scene,SimError)))
+    def build_scene(self, builder, scene, excluded=()):
+        """复用RC2原生/Scene碰撞、模板地面替换与完整仿射装配。"""
         ground_names = []
         skipped = []
         poses = world_poses(scene)
@@ -750,6 +777,8 @@ class World:
         # 原生资产先真实导入；之后才决定未编辑模板地面是否让位，不按名字或bbox猜。
         ordered=sorted(scene['entities'],key=lambda entity:0 if native_source(entity)else 1)
         for e in ordered:
+            if e['entityId'] in excluded:
+                continue
             eid = e['entityId']
             cfg = native_source(e)
             if cfg:
@@ -779,7 +808,16 @@ class World:
                          'shapeStart': bodies[4], 'shapeEnd': bodies[5], 'source': source, 'entity': e}
         if explicit_ground_requested(scene,self.options)and not native_planes:
             builder.add_ground_plane(label='__ground');ground_names.append('__ground')
+        return poses, maps, ground_names, skipped, native_planes, replaced
+
+    def compile(self, scene):
+        """把 Scene 编译成真实的 Newton 模型；失败即抛结构化错误，不产出半成品世界。"""
+        if any(e.get('components', {}).get('newton', {}).get('mpm') is not None for e in scene['entities']):
+            return self.compile_mpm(scene)
+        builder = newton.ModelBuilder(gravity=wp.vec3(*scene_gravity(scene,SimError)))
+        poses, maps, ground_names, skipped, native_planes, replaced = self.build_scene(builder, scene)
         model = builder.finalize(device=self.device)
+        model.request_contact_attributes('force')
         states = (model.state(), model.state())
         control = model.control()
         solver_name = os.environ.get('LYAPUNOV_NEWTON_SOLVER', 'xpbd').strip().lower()
@@ -795,6 +833,9 @@ class World:
             raise SimError('INVALID_ARGUMENT', 'LYAPUNOV_NEWTON_SOLVER 只支持 xpbd/semi，收到: ' + solver_name)
         pipeline = newton.CollisionPipeline(model)
         contacts = pipeline.contacts()
+        distances = wp.zeros(contacts.rigid_contact_max, dtype=float, device=self.device)
+        points0 = wp.zeros(contacts.rigid_contact_max, dtype=wp.vec3, device=self.device)
+        points1 = wp.zeros(contacts.rigid_contact_max, dtype=wp.vec3, device=self.device)
         ik_q = wp.zeros(model.joint_coord_count, dtype=float, device=self.device)
         ik_qd = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
 
@@ -811,6 +852,7 @@ class World:
         target_ke = model.joint_target_ke.numpy().tolist()
         target_kd = model.joint_target_kd.numpy().tolist()
         effort = model.joint_effort_limit.numpy().tolist()
+        drives = self.source_drives(model)
         entity_maps = {}
         for eid, m in maps.items():
             root = m['bodyStart']
@@ -836,12 +878,21 @@ class World:
                         entry['driveStiffness'] = float(target_ke[d])
                     if math.isfinite(target_kd[d]):
                         entry['driveDamping'] = float(target_kd[d])
+                    entry['drive'] = copy.deepcopy(drives.get(d, {
+                        'available': False,
+                        'reason': 'UNSUPPORTED_CAPABILITY: 没有可核验的源关节位置执行器 / No verified source position actuator',
+                    }))
+                    if solver_name != 'xpbd':
+                        entry['drive'].update(available=False, reason='UNSUPPORTED_CAPABILITY: 位置动作只在已验收的 XPBD 路径开放 / Position actions require the verified XPBD path')
+                    if entry['drive']['available'] and math.isfinite(effort[d]) and effort[d] < EFFORT_DEFAULT:
+                        entry['drive'].update(available=False, reason='UNSUPPORTED_CAPABILITY: XPBD 不执行源关节力限 / XPBD does not enforce source joint effort limits')
                     joints.append(entry)
                 elif jtype == int(newton.JointType.FREE):
                     free_joints.append(entry)
             entity_maps[eid] = {
                 'entity': copy.deepcopy(m['entity']),
                 'rootBody': root if m['bodyEnd']>m['bodyStart']else None,
+                'bodyStart': m['bodyStart'], 'bodyEnd': m['bodyEnd'],
                 'bodyLabels': body_labels[m['bodyStart']:m['bodyEnd']],
                 'joints': joints,
                 'freeJoints': free_joints,
@@ -859,6 +910,7 @@ class World:
             print('[sim-newton] WARNING ' + w['message'], file=sys.stderr, flush=True)
         return {'builder': builder, 'model': model, 'states': states, 'control': control, 'solver': solver,
                 'solverName': solver_name, 'pipeline': pipeline, 'contacts': contacts, 'ik_q': ik_q, 'ik_qd': ik_qd,
+                'contactDistances': distances, 'contactPoints0': points0, 'contactPoints1': points1,
                 'entities': entity_maps, 'ground': ground_names, 'warnings': skipped,'nativeGround':native_planes,'replacedGround':replaced}
 
     def sync(self, scene, force=False, initial=False):
@@ -882,6 +934,9 @@ class World:
             if isinstance(exc, SimError):
                 raise
             raise SimError('COMPILE_FAILED', '场景重编译失败，上一可用世界已完整保留: ' + str(exc)) from exc
+        for aid in list(self.active):
+            self.finish(aid, 'cancelled', 'MODEL_REBUILT')
+        self.release_camera()
         # 编译成功才原子替换运行中的世界；旧代次的原生句柄在此丢弃。
         # builder 与 model 同寿命保留：MJCF/URDF 的网格等资产归它所有，不能让它在 model 之前被回收。
         self.builder = compiled['builder']
@@ -892,12 +947,16 @@ class World:
         self.solver_name = compiled['solverName']
         self.pipeline = compiled['pipeline']
         self.contacts = compiled['contacts']
+        self.contact_distances = compiled.get('contactDistances')
+        self.contact_points0 = compiled.get('contactPoints0')
+        self.contact_points1 = compiled.get('contactPoints1')
         self.ik_q, self.ik_qd = compiled['ik_q'], compiled['ik_qd']
         self.entities = compiled['entities']
         self.ground_names = compiled['ground']
         self.native_ground=compiled['nativeGround'];self.replaced_ground=compiled['replacedGround']
         self.warnings = compiled['warnings']
         self.scene = copy.deepcopy(scene)
+        self.commanded = {}
         self.signature = signature
         self.applied_revision = scene['revision']
         if not initial:
@@ -915,6 +974,9 @@ class World:
         if getattr(self,'_physics_layout_key',None)!=key:
             physical=[];sources=[];enabled=self.model.shape_flags.numpy();ground_ids=set(declared_ground_ids(self.scene))
             for eid,info in self.entities.items():
+                if info.get('liquid'):
+                    physical.append(eid)
+                    continue
                 names=[self.model.shape_label[sid]for sid in range(info['shapeStart'],info['shapeEnd'])if int(enabled[sid])&int(newton.ShapeFlags.COLLIDE_SHAPES)]
                 if names:physical.append(eid)
                 if eid in ground_ids and names:sources.append({'source':'scene','entityId':eid,'geomNames':names})
@@ -936,12 +998,8 @@ class World:
         selection = selection or {}
         if selection.get('collisionTopology') is not None:
             raise SimError('UNSUPPORTED_CAPABILITY', 'Newton Provider 尚未实现通用 collisionTopology 读回')
-        if selection.get('contacts') or selection.get('penetrations'):
-            # Newton 1.6.0 的标准碰撞管线不暴露逐接触的有符号距离（MuJoCo contact.dist 口径），
-            # 于是不能按合同给出 distanceM/penetrations；明确拒绝而不是给出半真数据。
-            raise SimError('UNSUPPORTED_CAPABILITY',
-                           'Newton Provider 切片未实现 contacts/penetrations 观测：Newton 1.6.0 的 CollisionPipeline '
-                           '不暴露逐接触有符号距离，无法按合同字段如实给出；不返回估算值')
+        if self.solver_name == 'implicit-mpm':
+            return self.observe_mpm(selection)
         only = selection.get('entityIds')
         ik_q, ik_qd = self._read_joint_arrays()
         body_q = self.state_a.body_q.numpy()
@@ -994,6 +1052,8 @@ class World:
         frame['assistAdvanceCount'] = 0
         frame['device'] = self.device
         frame['worldPhysics']=self.world_physics()
+        if selection.get('contacts') or selection.get('penetrations'):
+            frame.update(self.contact_observation())
         return frame
 
     def _free_base(self, joint, body_q, body_qd):
@@ -1038,71 +1098,502 @@ class World:
                 item['driveStiffness'] = j['driveStiffness']
             if 'driveDamping' in j:
                 item['driveDamping'] = j['driveDamping']
+            for key in ('actuator', 'controlMode'):
+                if j['drive'].get(key) is not None:
+                    item[key] = j['drive'][key]
             joints.append(item)
         free_bases = [{'jointName': j['label'], 'bodyName': self._body_label(self._body_of_free_joint(j))} for j in info['freeJoints']]
+        controlled = [j['label'] for j in info['joints'] if j['drive']['available']]
+        capabilities = []
+        for kind in ROBOT_CAPABILITY_KINDS:
+            error = self.action_capability(kind, info)
+            item = {'kind': kind, 'available': error is None}
+            if error:
+                item['reason'] = error.code + ': ' + str(error)
+            elif kind == 'joint':
+                item.update(joints=len(info['joints']), controlledJointNames=controlled, controlledSource='source-metadata')
+            elif kind == 'control':
+                item['jointNames'] = controlled
+            capabilities.append(item)
         return {
             'entityId': eid,
             'modelVersion': str(info['source']),
             'expectedGeneration': self.generation,
             'collisionContextVersion': str(self.generation),
             'joints': joints,
-            # 本切片不驱动任何关节（没有执行器映射/控制通道），受控关节列表为空而不是伪造。
-            'controlledJointNames': [],
+            'controlledJointNames': controlled,
             'tendonActuators': [],
             'freeBases': free_bases,
             'controller': {},
-            # 合同的 RobotCapability.kind 是**封闭 6 元组**（thrust/vehicle/joint/gripper/lift/control）：
-            # 少报一条就等于让调用方"点了才知道"（DEV-008）。这里 6 条全部逐项交出，available 一律 false，
-            # reason 前缀就是执行侧 execute 真实返回的码（ACTION_UNSUPPORTED_CODE）——**同一个常量**，
-            # 不是三处各抄一遍字面量（判定与拒绝同源）。
-            'capabilities': [
-                {'kind': 'joint', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有关节控制通道'},
-                {'kind': 'thrust', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有 wrench/执行器通道'},
-                {'kind': 'vehicle', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有车轮/转向映射'},
-                {'kind': 'gripper', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有 controller.gripper 映射与执行器写回通道'},
-                {'kind': 'lift', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有 controller.lift 映射与执行器写回通道'},
-                {'kind': 'control', 'available': False, 'reason': ACTION_UNSUPPORTED_CODE + ': Newton 第一切片没有执行器写回通道（manual 时钟下也没有任何东西能推进）'},
-            ],
-            # controlledJointNames 恒为空的原因（合同里这一项就是"为什么受控列表是空的"的如实出口）：
-            # 不是"这台机器人关节都被动"，而是这个 Provider 根本没有动作/控制通道。
-            'controlMetadata': {'status': 'UNAVAILABLE',
-                                'reason': 'Newton 第一切片没有动作/控制通道（capabilities.execute 全部 ' + ACTION_UNSUPPORTED_CODE + '）：'
-                                          'controlledJointNames 恒为空，导入的执行器目标保持模型初值，不冒充受控关节'},
+            'capabilities': capabilities,
+            **({} if controlled else {'controlMetadata': {'status': 'UNAVAILABLE',
+                'reason': 'UNSUPPORTED_CAPABILITY: 没有当前求解器可忠实驱动的源位置执行器 / No supported source position drives'}}),
             # 加法字段：Newton 自己的关节标签与形状标签，便于调用方定位原生对象。
             'nativeJointLabels': [j['label'] for j in info['joints']] + [j['label'] for j in info['freeJoints']],
             'nativeShapeLabels': list(info['shapeLabels']),
             'device': self.device,
         }
 
+    def world_capabilities(self):
+        result = copy.deepcopy(CAPABILITIES)
+        result['supported']['liquidParticles'] = self.solver_name == 'implicit-mpm'
+        if self.solver_name == 'implicit-mpm':
+            result['slice'] = 'mpm-water-1'
+            result['supported'].update(execute=False, manualClockAdvance=False, contacts=False,
+                                       freeBodies=False, articulatedJoints=False)
+            result['unsupported']['execute'] = {kind: ACTION_UNSUPPORTED_CODE for kind in ACTION_KINDS}
+            result['unsupported'].update({'observe.contacts': 'UNSUPPORTED_CAPABILITY',
+                                                                            'manualClockAdvance': 'UNSUPPORTED_CAPABILITY'})
+            return result
+        drives = any(j['drive']['available'] for info in self.entities.values() for j in info['joints'])
+        result['supported']['execute'] = drives
+        result['supported']['manualClockAdvance'] = drives
+        if not drives:
+            result['unsupported']['execute'].update({kind: 'UNSUPPORTED_CAPABILITY' for kind in EXECUTABLE_KINDS})
+        return result
+
+    def source_drives(self, model):
+        """读取 Newton 导入器归一化的源执行器；不从非零增益猜控制模式。"""
+        native = getattr(model, 'mujoco', None)
+        if native is None or not hasattr(native, 'actuator_trnid'):
+            return {}
+        fields = ['actuator_trnid', 'actuator_trntype', 'actuator_dyntype', 'actuator_gaintype',
+                  'actuator_biastype', 'actuator_gear', 'actuator_gainprm', 'actuator_biasprm',
+                  'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_has_ctrlrange',
+                  'actuator_forcelimited', 'actuator_has_forcerange', 'ctrl_source', 'ctrl_type']
+        values = {key: getattr(native, key).numpy().tolist() for key in fields}
+        result = {}
+        for a, label in enumerate(native.actuator_label):
+            if int(values['actuator_trntype'][a]) != 0:
+                continue
+            dof = int(values['actuator_trnid'][a][0])
+            gain, bias = values['actuator_gainprm'][a], values['actuator_biasprm'][a]
+            mode = {0: 'position', 1: 'velocity', 2: 'torque'}.get(int(values['ctrl_type'][a]))
+            drive = {'actuator': label, 'controlMode': mode, 'available': False}
+            reason = '源执行器不是当前接通的直接位置 PD / Source actuator is not a supported position PD drive'
+            supported = (mode == 'position' and int(values['ctrl_source'][a]) == 0
+                         and int(values['actuator_dyntype'][a]) == 0
+                         and int(values['actuator_gaintype'][a]) == 0
+                         and int(values['actuator_biastype'][a]) == 1
+                         and np.allclose(values['actuator_gear'][a], [1, 0, 0, 0, 0, 0])
+                         and gain[0] > 0 and math.isclose(gain[0], -bias[1], rel_tol=1e-6)
+                         and bias[0] == 0 and bias[2] <= 0
+                         and np.allclose(gain[1:], 0) and np.allclose(bias[3:], 0))
+            limited_force = (int(values['actuator_forcelimited'][a]) != 0
+                             and bool(values['actuator_has_forcerange'][a]))
+            if supported and limited_force:
+                reason = 'XPBD 不执行源 forcerange，未接通该执行器 / XPBD does not enforce source force limits'
+                supported = False
+            if supported:
+                drive['available'] = True
+                if int(values['actuator_ctrllimited'][a]) != 0 and values['actuator_has_ctrlrange'][a]:
+                    drive['controlRange'] = values['actuator_ctrlrange'][a]
+            else:
+                drive['reason'] = 'UNSUPPORTED_CAPABILITY: ' + reason
+            if dof in result:
+                drive['available'] = False
+                drive['reason'] = 'UNSUPPORTED_CAPABILITY: 同一关节有多个源执行器 / Multiple source actuators drive this joint'
+            result[dof] = drive
+        return result
+
+    def compile_mpm(self, scene):
+        """最小原生水例：与同 pin water_dam_break 相同的隐式 MPM 与材料，不借用 XPBD。"""
+        from newton.solvers import SolverImplicitMPM
+        liquids = [e for e in scene['entities'] if e.get('components', {}).get('newton', {}).get('mpm') is not None]
+        if len(liquids) != 1:
+            raise SimError('UNSUPPORTED_CAPABILITY', '当前 MPM 路径需要一个 water 粒子实体 / Current MPM path requires one water entity')
+        water = liquids[0]
+        cfg = water['components']['newton']['mpm']
+        if not isinstance(cfg, dict) or cfg.get('kind') != 'water':
+            raise SimError('UNSUPPORTED_CAPABILITY', '当前原生 MPM 只接通 kind=water / Only native MPM kind=water is connected')
+        if native_source(water) is not None:
+            raise SimError('UNSUPPORTED_CAPABILITY', 'water 实体同时声明了 MJCF/URDF 源；未接通把原生模型转为流体 / Native source-to-fluid conversion is not connected')
+        dims = cfg.get('dimensions', [4, 4, 4])
+        if not isinstance(dims, list) or len(dims) != 3 or any(type(n) is not int or n <= 0 for n in dims):
+            raise SimError('INVALID_ARGUMENT', 'dimensions 必须是三个正整数 / dimensions must contain three positive integers')
+        spacing = positive(cfg.get('spacingM', .03), 'spacingM')
+        density = positive(cfg.get('densityKgM3', 1000.0), 'densityKgM3')
+        young = positive(cfg.get('youngModulusPa', 1e15), 'youngModulusPa')
+        poisson = finite(cfg.get('poissonRatio', .3), 'poissonRatio')
+        if not -1 < poisson < .5:
+            raise SimError('INVALID_ARGUMENT', 'poissonRatio 必须在 (-1,.5) 内 / poissonRatio must lie within (-1,.5)')
+        viscosity = finite(cfg.get('viscosityPaS', 0.0), 'viscosityPaS')
+        if viscosity < 0:
+            raise SimError('INVALID_ARGUMENT', 'viscosityPaS 不能为负 / viscosityPaS must be nonnegative')
+        voxel = positive(cfg.get('voxelSizeM', spacing * 2), 'voxelSizeM')
+        if cfg.get('gridType', 'dense') != 'dense':
+            raise SimError('UNSUPPORTED_CAPABILITY', '当前水例使用原生 dense grid / Current water path uses the native dense grid')
+        builder = newton.ModelBuilder(gravity=wp.vec3(*scene_gravity(scene, SimError)))
+        SolverImplicitMPM.register_custom_attributes(builder)
+        poses, maps, ground, warnings, native_planes, replaced = self.build_scene(builder, scene, {water['entityId']})
+        # 本切片没有刚体求解器耦合，不能静默冻结一台有自由/驱动关节的机器人充当容器。
+        if any(int(kind) != int(newton.JointType.FIXED) for kind in builder.joint_type):
+            raise SimError('UNSUPPORTED_CAPABILITY', 'MPM 水例仅接受固定原生碰撞体；未接通动态刚体/机器人耦合 / MPM water currently accepts fixed colliders only')
+        p, q, scale = poses[water['entityId']]
+        if not np.allclose(scale, [1, 1, 1]):
+            raise SimError('UNSUPPORTED_CAPABILITY', 'MPM 粒子不接受实体缩放，请使用 spacingM / MPM particles require unit entity scale; use spacingM')
+        builder.add_particle_grid(pos=wp.vec3(*[float(v) for v in p]), rot=wp.quat(*[float(v) for v in q]),
+                                  vel=wp.vec3(0.0), dim_x=dims[0], dim_y=dims[1], dim_z=dims[2],
+                                  cell_x=spacing, cell_y=spacing, cell_z=spacing,
+                                  mass=density * spacing ** 3, jitter=0.0, radius_mean=spacing * .5,
+                                  flags=newton.ParticleFlags.ACTIVE)
+        model = builder.finalize(device=self.device)
+        model.mpm.young_modulus.fill_(young)
+        model.mpm.poisson_ratio.fill_(poisson)
+        model.mpm.viscosity.fill_(viscosity)
+        # 与原生水例一致：无摩擦/偏应力屈服强度，允许水的张力屈服比。
+        model.mpm.friction.fill_(0.0)
+        model.mpm.yield_stress.fill_(0.0)
+        model.mpm.tensile_yield_ratio.fill_(1.0)
+        config = SolverImplicitMPM.Config()
+        config.grid_type = 'dense'
+        config.voxel_size = voxel
+        config.max_iterations = 50
+        config.tolerance = 1e-3
+        config.warmstart_mode = 'particles'
+        config.strain_basis = 'P0'
+        config.collider_basis = 'pic'
+        config.velocity_basis = 'Q1'
+        solver = SolverImplicitMPM(model, config=config)
+        solver.setup_collider(collider_projection_threshold=[.25 * voxel])
+        states = (model.state(), model.state())
+        states[0].mpm.particle_Jp.fill_(1.0)
+        entities = {}
+        for eid, native in maps.items():
+            b0, b1 = native['bodyStart'], native['bodyEnd']
+            s0, s1 = native['shapeStart'], native['shapeEnd']
+            entities[eid] = {'entity': copy.deepcopy(next(e for e in scene['entities'] if e['entityId'] == eid)),
+                             'rootBody': b0 if b1 > b0 else None, 'bodyStart': b0, 'bodyEnd': b1,
+                             'joints': [], 'freeJoints': [],
+                             'shapeLabels': list(model.shape_label[s0:s1]), 'shapeStart': s0, 'shapeEnd': s1,
+                             'source': native['source']}
+        entities[water['entityId']] = {'entity': copy.deepcopy(water), 'rootBody': None, 'joints': [],
+                                      'freeJoints': [], 'shapeLabels': [], 'source': 'newton-native-mpm-water',
+                                      'liquid': True, 'bodyStart': 0, 'bodyEnd': 0, 'shapeStart': 0, 'shapeEnd': 0}
+        for index, kind in enumerate(model.shape_type.numpy()):
+            if int(kind) == int(newton.GeoType.PLANE) and model.shape_label[index] not in ground:
+                ground.append(model.shape_label[index])
+        if self.clock == 'manual':
+            warnings.append({'code': 'MPM_MANUAL_CLOCK_FROZEN',
+                             'message': 'MPM 水例没有机器人动作推进窗口；请用 realtime 时钟 / MPM water requires realtime clock for advancement'})
+        return {'builder': builder, 'model': model, 'states': states, 'control': None, 'solver': solver,
+                'solverName': 'implicit-mpm', 'pipeline': None, 'contacts': None, 'ik_q': None, 'ik_qd': None,
+                'entities': entities, 'ground': ground, 'warnings': warnings,
+                'nativeGround': native_planes, 'replacedGround': replaced}
+
+    def observe_mpm(self, selection):
+        if selection.get('contacts') or selection.get('penetrations'):
+            raise SimError('UNSUPPORTED_CAPABILITY', 'MPM 碰撞由原生 collider 求解，未导出刚体 Contacts 观测 / MPM collider contacts are not exposed as rigid Contacts')
+        poses = world_poses(self.scene)
+        particles = self.state_a.particle_q.numpy()
+        radius = float(self.model.particle_radius.numpy()[0])
+        entities = []
+        for entity in self.scene['entities']:
+            eid = entity['entityId']
+            if selection.get('entityIds') and eid not in selection['entityIds']:
+                continue
+            p, q, scale = poses[eid]
+            item = {'entityId': eid, 'transform': {'position': p.tolist(), 'quaternion': q.tolist(), 'scale': scale.tolist()}}
+            info = self.entities.get(eid)
+            if info and info.get('liquid'):
+                item['dynamicGeometry'] = [{'nativeName': 'newton-mpm/' + eid, 'kind': 'particles',
+                                            'positionsM': particles.reshape(-1).tolist(), 'radiusM': radius}]
+                if selection.get('sensors', True):
+                    material = {name: float(getattr(self.model.mpm, attr).numpy()[0]) for name, attr in {
+                        'youngModulusPa': 'young_modulus', 'poissonRatio': 'poisson_ratio',
+                        'viscosityPaS': 'viscosity', 'friction': 'friction', 'yieldStressPa': 'yield_stress',
+                        'tensileYieldRatio': 'tensile_yield_ratio',
+                    }.items()}
+                    material.update(solver='implicit-mpm', kind='water', gridType=self.solver.grid_type,
+                                    particleCount=int(self.model.particle_count), spacingM=radius * 2,
+                                    voxelSizeM=float(self.solver.voxel_size),
+                                    densityKgM3=float(self.model.particle_mass.numpy()[0]) / (radius * 2) ** 3,
+                                    materialNote='E/nu 是原生 MPM 压缩响应参数；水例采用零摩擦与零偏应力屈服 / E and nu control native MPM compressive response, with zero friction and deviatoric yield stress')
+                    item['sensors'] = {'nativePhysics': material}
+            entities.append(item)
+        return {'worldId': self.id, 'generation': self.generation, 'sceneRevision': self.applied_revision,
+                'stepIndex': self.step_index, 'simTime': float(self.sim_time),
+                'frameId': f'{self.id}:{self.generation}:{self.step_index}', 'entities': entities,
+                'executionMode': 'physical-contact', 'assistAdvanceCount': 0, 'device': self.device,
+                'worldPhysics': self.world_physics()}
+
+    def contact_observation(self):
+        # 碰撞点属于本步原生碰撞流形；距离按当前积分状态求值，不以 shape 包围盒估算。
+        if self.step_index == 0:
+            self.pipeline.collide(self.state_a, self.contacts)
+        newton.eval_rigid_contact_kinematics(self.model, self.state_a, self.contacts,
+                                           out_distance=self.contact_distances,
+                                           out_point0_world=self.contact_points0,
+                                           out_point1_world=self.contact_points1)
+        count = min(int(self.contacts.rigid_contact_count.numpy()[0]), self.contacts.rigid_contact_max)
+        shape0 = self.contacts.rigid_contact_shape0.numpy()[:count]
+        shape1 = self.contacts.rigid_contact_shape1.numpy()[:count]
+        distances = self.contact_distances.numpy()[:count]
+        points0, points1 = self.contact_points0.numpy()[:count], self.contact_points1.numpy()[:count]
+        normals = self.contacts.rigid_contact_normal.numpy()[:count]
+        # step() 后立即 update_contacts，同一 Contacts 对应本步的原生冲量；首次碰撞没有力测量。
+        forces = self.contacts.force.numpy()[:count] if self.step_index > 0 and self.solver_name == 'xpbd' else None
+        labels = self.model.shape_label
+        contacts, penetrations = [], {}
+        for i in range(count):
+            s0, s1 = int(shape0[i]), int(shape1[i])
+            if s0 < 0 or s1 < 0:
+                continue
+            distance = float(distances[i])
+            item = {'geom1': labels[s0], 'geom2': labels[s1], 'distanceM': distance,
+                    'positionM': ((points0[i] + points1[i]) * .5).tolist(),
+                    'normal': normals[i].tolist(), 'sourceStep': self.step_index}
+            if forces is not None:
+                item['forceN'] = forces[i][:3].tolist()
+            contacts.append(item)
+            if distance < 0:
+                key = tuple(sorted((s0, s1)))
+                if key not in penetrations or distance < penetrations[key]['minDistanceM']:
+                    penetrations[key] = {'geom1': labels[key[0]], 'geom2': labels[key[1]],
+                                         'geom1Id': key[0], 'geom2Id': key[1], 'minDistanceM': distance}
+        return {'contacts': contacts, 'penetrations': {'count': len(penetrations),
+                'worst': sorted(penetrations.values(), key=lambda p: p['minDistanceM'])[:20]},
+                'contactForceNote': 'XPBD 原生接触冲量/dt 近似值，forceN 为世界坐标下 shape1 对 shape0 的力；首次碰撞或 semi 不提供力 / Native XPBD approximate world-space contact force on shape0'}
+
+    def action_capability(self, kind, info):
+        if self.solver_name == 'implicit-mpm':
+            return SimError(ACTION_UNSUPPORTED_CODE, 'MPM 水例未接通机器人动作 / Robot actions are unavailable in the MPM water world: ' + str(kind))
+        if kind not in EXECUTABLE_KINDS:
+            return SimError(ACTION_UNSUPPORTED_CODE, 'Newton 未接通动作 ' + str(kind) + ' / Newton action is not implemented: ' + str(kind))
+        if not any(j['drive']['available'] for j in info['joints']):
+            return SimError('UNSUPPORTED_CAPABILITY', '实体没有当前求解器可忠实驱动的源位置执行器 / Entity has no supported source position drive')
+        if kind == 'control' and self.clock != 'manual':
+            return SimError('UNSUPPORTED_CAPABILITY', 'control 需要 manual 时钟 / control requires manual clock')
+        return None
+
+    def execute(self, action):
+        self.require_ready()
+        kind = action.get('kind')
+        if self.solver_name == 'implicit-mpm':
+            raise self.action_capability(kind, {})
+        if kind not in EXECUTABLE_KINDS:
+            raise self.action_capability(kind, {})
+        if type(action.get('expectedGeneration')) is not int or action['expectedGeneration'] != self.generation:
+            raise SimError('STALE_GENERATION', '动作属于旧模型代次 / Action generation does not match world')
+        aid = action.get('actionId')
+        if not isinstance(aid, str) or not aid:
+            raise SimError('INVALID_ARGUMENT', 'actionId 必须是非空字符串 / actionId must be a nonempty string')
+        if aid in self.receipts:
+            return copy.deepcopy(self.receipts[aid])
+        eid = action.get('entityId')
+        info = self.entities.get(eid)
+        if not info:
+            raise SimError('ENTITY_NOT_SIMULATED', '实体没有已加载的物理表示 / Entity is not simulated: ' + str(eid))
+        error = self.action_capability(kind, info)
+        if error:
+            raise error
+        if any(a['entityId'] == eid for a in self.active.values()):
+            raise SimError('WORLD_BUSY', '实体已有活动动作 / Entity already has an active action: ' + eid)
+        names = action.get('jointNames', [])
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names) or len(set(names)) != len(names):
+            raise SimError('INVALID_ARGUMENT', 'jointNames 必须非空且唯一 / jointNames must be nonempty and unique')
+        joints = {j['label']: j for j in info['joints']}
+        selected = []
+        for name in names:
+            if name not in joints:
+                raise SimError('JOINT_NOT_FOUND', '未知关节 / Unknown joint: ' + name)
+            joint = joints[name]
+            if not joint['drive']['available']:
+                raise SimError('UNSUPPORTED_CAPABILITY', joint['drive']['reason'])
+            selected.append(joint)
+        if kind == 'trajectory' and set(names) != {j['label'] for j in info['joints'] if j['drive']['available']}:
+            raise SimError('INCOMPLETE_JOINT_VECTOR', 'trajectory 必须覆盖全部受控关节 / trajectory must cover all controlled joints')
+
+        def positions(values):
+            if not isinstance(values, list) or len(values) != len(names):
+                raise SimError('INVALID_ARGUMENT', '目标向量与关节数不一致 / Position vector length does not match joints')
+            result = [finite(v, n) for n, v in zip(names, values)]
+            for j, value in zip(selected, result):
+                for bounds in (j.get('range'), j['drive'].get('controlRange')):
+                    if bounds and not bounds[0] <= value <= bounds[1]:
+                        raise SimError('OUT_OF_RANGE', '目标超出源关节/执行器范围 / Target exceeds source joint or actuator range: ' + j['label'])
+            return result
+
+        current, _ = self._read_joint_arrays()
+        origin = [float(current[j['coord']]) for j in selected]
+        if kind == 'control':
+            steps = action.get('stepCount')
+            if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
+                raise SimError('INVALID_ARGUMENT', 'stepCount 必须是正整数 / stepCount must be a positive integer')
+            points = [{'timeS': 0.0, 'positions': positions(action.get('positions'))}]
+            duration, total_steps = steps * self.dt, steps
+        else:
+            if kind == 'joint':
+                duration = positive(action.get('durationS'), 'durationS')
+                points = [{'timeS': 0.0, 'positions': origin},
+                          {'timeS': duration, 'positions': positions(action.get('positions'))}]
+            else:
+                points = []
+                raw = action.get('points')
+                if not isinstance(raw, list) or not raw:
+                    raise SimError('INVALID_ARGUMENT', 'trajectory 需要非空 points / trajectory requires nonempty points')
+                for point in raw:
+                    t = finite(point.get('timeS'), 'timeS')
+                    if t < 0 or (points and t <= points[-1]['timeS']):
+                        raise SimError('INVALID_ARGUMENT', 'points 时间必须非负且严格递增 / Point times must be nonnegative and increasing')
+                    points.append({'timeS': t, 'positions': positions(point.get('positions'))})
+                duration = positive(points[-1]['timeS'], 'trajectory duration')
+                if points[0]['timeS'] > 0:
+                    points.insert(0, {'timeS': 0.0, 'positions': origin})
+                plan = action.get('plan')
+                if plan and (plan.get('expectedGeneration') != self.generation or plan.get('entityId') != eid
+                             or str(plan.get('collisionContextVersion')) != str(self.generation)
+                             or str(plan.get('modelVersion')) != str(info['source'])
+                             or plan.get('jointNames') != names or plan.get('points') != raw):
+                    raise SimError('STALE_PLAN', '轨迹 plan 与当前模型/请求不一致 / Trajectory plan does not match current model or request')
+            settle = finite(action.get('settleTimeS', .2), 'settleTimeS')
+            if settle < 0:
+                raise SimError('INVALID_ARGUMENT', 'settleTimeS 不能为负 / settleTimeS must be nonnegative')
+            total_steps = max(1, math.ceil((duration + settle) / self.dt - 1e-9))
+        tolerance = positive(action.get('tolerance', .02), 'tolerance')
+        start = action.get('startStep', self.step_index + 1)
+        if isinstance(start, bool) or not isinstance(start, int) or start <= self.step_index:
+            raise SimError('INVALID_START_STEP', 'startStep 必须是未来整数步 / startStep must be a future integer step')
+        self.active[aid] = {'entityId': eid, 'kind': kind, 'joints': selected, 'points': points,
+                            'start': start, 'duration': duration, 'steps': total_steps, 'appliedSteps': 0,
+                            'tolerance': tolerance, 'lastApplied': None,
+                            'originAtStart': kind == 'joint' or (kind == 'trajectory' and action['points'][0]['timeS'] > 0)}
+        self.receipts[aid] = {'actionId': aid, 'worldId': self.id, 'generation': self.generation, 'status': 'accepted'}
+        self.status = 'running'
+        self.next_tick = time.monotonic()
+        return copy.deepcopy(self.receipts[aid])
+
+    def write_targets(self, joints, values):
+        targets = self.control.joint_target_q.numpy()
+        velocities = self.control.joint_target_qd.numpy()
+        for joint, value in zip(joints, values):
+            targets[joint['coord'] if newton.use_coord_layout_targets else joint['dof']] = value
+            velocities[joint['dof']] = 0.0
+        self.control.joint_target_q.assign(targets)
+        self.control.joint_target_qd.assign(velocities)
+
+    def finish(self, aid, status, reason=None, state_available=True):
+        active = self.active.pop(aid)
+        receipt = self.receipts[aid]
+        receipt.update(status=status, endStep=self.step_index)
+        if reason:
+            receipt['reason'] = reason
+        joints = active['joints']
+        measured = None
+        hold = None
+        reached = False
+        if state_available:
+            q, _ = self._read_joint_arrays()
+            measured = [float(q[j['coord']]) for j in joints]
+            reached = bool(active['appliedSteps'] and max(abs(a-b) for a, b in zip(measured, active['points'][-1]['positions'])) <= active['tolerance'])
+            if status != 'completed' and active['appliedSteps']:
+                self.write_targets(joints, measured)
+                reference = self.control.joint_target_q.numpy()
+                hold = [float(reference[j['coord'] if newton.use_coord_layout_targets else j['dof']]) for j in joints]
+                for joint in joints:
+                    self.commanded.pop((active['entityId'], joint['label']), None)
+            receipt['finalState'] = self.observe({'entityIds': [active['entityId']], 'contacts': True})
+        receipt['effect'] = {'motions': [{'entityId': active['entityId'], 'kind': active['kind'],
+            'jointNames': [j['label'] for j in joints], 'referencePositions': active['points'][-1]['positions'],
+            'measuredPositions': measured, 'lastAppliedPositions': active['lastApplied'], 'holdReference': hold,
+            'appliedSteps': active['appliedSteps'], 'targetReached': reached, 'tolerance': active['tolerance'],
+            'controlMode': 'source-position-PD'}], 'executionMode': 'physical-contact'}
+        if status != 'completed':
+            receipt['taskAchieved'] = False
+        if not self.active and self.status == 'running':
+            self.status = 'ready'
+        emit({'event': 'receipt', 'receipt': copy.deepcopy(receipt)})
+
     # -- 物理 ---------------------------------------------------------------
     def tick(self):
         if self.status not in ('ready', 'running'):
             return
-        if self.clock == 'manual':
-            # 没有动作通道 ⇒ 没有可推进的窗口；manual 世界保持冻结（如实，不假装步进）。
+        if self.clock == 'manual' and not self.active:
             return
-        self.state_a.clear_forces()
-        self.pipeline.collide(self.state_a, self.contacts)
-        self.solver.step(self.state_a, self.state_b, self.control, self.contacts, self.dt)
-        self.state_a, self.state_b = self.state_b, self.state_a
+        for aid, active in list(self.active.items()):
+            if self.step_index + 1 < active['start']:
+                continue
+            receipt = self.receipts[aid]
+            if receipt['status'] == 'accepted':
+                receipt.update(status='running', startStep=self.step_index + 1)
+                # 未来排程从实际开始时的位置插值，不采用排程时已过时的初态。
+                if active['originAtStart']:
+                    q, _ = self._read_joint_arrays()
+                    active['points'][0]['positions'] = [float(q[j['coord']]) for j in active['joints']]
+            elapsed = min((active['appliedSteps'] + 1) * self.dt, active['duration'])
+            points = active['points']
+            values = points[-1]['positions']
+            for first, second in zip(points, points[1:]):
+                if elapsed <= second['timeS']:
+                    alpha = max(0.0, min(1.0, (elapsed - first['timeS']) / (second['timeS'] - first['timeS'])))
+                    values = [(1-alpha)*a + alpha*b for a, b in zip(first['positions'], second['positions'])]
+                    break
+            self.write_targets(active['joints'], values)
+            active['lastApplied'] = list(values)
+            for joint in active['joints']:
+                self.commanded[(active['entityId'], joint['label'])] = {'joint': joint, 'actionId': aid}
+        if self.solver_name == 'implicit-mpm':
+            self.solver.step(self.state_a, self.state_b, None, None, self.dt)
+            self.solver.project_outside(self.state_b, self.state_b, self.dt)
+            self.state_a, self.state_b = self.state_b, self.state_a
+            if not np.isfinite(self.state_a.particle_q.numpy()).all() or not np.isfinite(self.state_a.particle_qd.numpy()).all():
+                raise SimError('ENGINE_INSTABILITY', 'MPM 产生非有限粒子状态 / MPM produced nonfinite particle state')
+        else:
+            self.state_a.clear_forces()
+            self.pipeline.collide(self.state_a, self.contacts)
+            self.solver.step(self.state_a, self.state_b, self.control, self.contacts, self.dt)
+            self.state_a, self.state_b = self.state_b, self.state_a
+            if not np.isfinite(self.state_a.body_q.numpy()).all() or not np.isfinite(self.state_a.body_qd.numpy()).all():
+                raise SimError('ENGINE_INSTABILITY', 'Newton 产生非有限刚体状态 / Newton produced nonfinite body state')
         self.step_index += 1
         self.sim_time = self.step_index * self.dt
+        if self.solver_name == 'xpbd':
+            self.solver.update_contacts(self.contacts, self.state_a)
+        for aid, active in list(self.active.items()):
+            if self.receipts[aid]['status'] == 'running':
+                active['appliedSteps'] += 1
+                if active['appliedSteps'] >= active['steps']:
+                    self.finish(aid, 'completed')
         now = time.monotonic()
         if now - self.last_frame >= 1.0 / self.frame_hz:
             emit({'event': 'frame', 'frame': self.observe()})
             self.last_frame = now
 
     def stop(self, selection):
-        """本切片没有任何可接受的动作，停止集合恒为空；返回真实空集而不是伪造回执。"""
         selection = selection or {}
-        if selection.get('actionId'):
-            raise SimError('ACTION_NOT_FOUND', 'actionId 未知（Newton 切片未接受过任何动作）: ' + str(selection['actionId']))
+        if selection.get('expectedGeneration') is not None and (type(selection['expectedGeneration']) is not int or selection['expectedGeneration'] != self.generation):
+            raise SimError('STALE_GENERATION', '停止请求属于旧代次 / Stop request has a stale generation')
         self.require_ready()
-        return {'stopped': True, 'stepIndex': self.step_index, 'receipts': [], 'affectedEntityIds': []}
+        aid = selection.get('actionId')
+        if aid and aid not in self.receipts:
+            raise SimError('ACTION_NOT_FOUND', 'actionId 未知 / Unknown actionId: ' + str(aid))
+        receipts, affected = [], set()
+        for action_id, active in list(self.active.items()):
+            if aid and action_id != aid:
+                continue
+            if selection.get('entityIds') is not None and active['entityId'] not in selection['entityIds']:
+                continue
+            affected.add(active['entityId'])
+            self.finish(action_id, 'cancelled', 'STOP_CONFIRMED')
+            receipts.append(copy.deepcopy(self.receipts[action_id]))
+        # 已完成动作留下的参考仍可由 stop 撤销；旧 actionId 不得改写后来动作拥有的参考。
+        held = [(key, value) for key, value in self.commanded.items()
+                if (not aid or value['actionId'] == aid)
+                and (selection.get('entityIds') is None or key[0] in selection['entityIds'])]
+        if held:
+            q, _ = self._read_joint_arrays()
+            self.write_targets([v['joint'] for _, v in held], [float(q[v['joint']['coord']]) for _, v in held])
+            for key, _ in held:
+                self.commanded.pop(key)
+                affected.add(key[0])
+        return {'stopped': True, 'stepIndex': self.step_index, 'receipts': receipts, 'affectedEntityIds': sorted(affected)}
 
     def close(self):
         if self.status == 'closed':
             return
+        for aid in list(self.active):
+            self.finish(aid, 'cancelled', 'WORLD_CLOSED', state_available=self.model is not None)
+        self.release_camera()
         self.status = 'closed'
         # 丢弃全部 Newton/Warp 原生句柄：Warp 没有显式 dispose，数组按其分配器在引用归零后回收。
         self.builder = None
@@ -1112,8 +1603,11 @@ class World:
         self.solver = None
         self.pipeline = None
         self.contacts = None
+        self.contact_distances = None
+        self.contact_points0 = self.contact_points1 = None
         self.ik_q = self.ik_qd = None
         self.entities = {}
+        self.commanded = {}
         self.scene = None
         gc.collect()
 
@@ -1133,6 +1627,7 @@ def read_requests():
 def main():
     try:
         device, kind, degraded, note = resolve_device(None)
+        wp.init()
     except Exception as exc:
         # 连 cpu 都不可用：按依赖缺失的写法致命退出。
         emit({'event': 'fatal', 'error': {'code': 'PROVIDER_UNAVAILABLE', 'message': 'Newton/Warp 设备初始化失败: ' + str(exc)}})
@@ -1149,7 +1644,7 @@ def main():
     while running:
         batch = []
         # 只有在真的有 realtime 世界需要推进时才自旋；否则阻塞等请求。
-        if not any(w.status in ('ready', 'running') and w.clock == 'realtime' for w in worlds.values()):
+        if not any(w.status in ('ready', 'running') and (w.clock == 'realtime' or w.active) for w in worlds.values()):
             batch.append(requests.get())
         while not requests.empty():
             batch.append(requests.get_nowait())
@@ -1203,21 +1698,23 @@ def main():
                     elif method == 'stop':
                         result = world.stop(args.get('selection', {}))
                     elif method == 'receipt':
-                        raise SimError('ACTION_NOT_FOUND', 'actionId 未知（Newton 切片未接受过任何动作）: ' + str(args.get('actionId')))
+                        aid = args.get('actionId')
+                        if aid not in world.receipts:
+                            raise SimError('ACTION_NOT_FOUND', 'actionId 未知 / Unknown actionId: ' + str(aid))
+                        result = copy.deepcopy(world.receipts[aid])
                     elif method == 'execute':
-                        action = args.get('action') or {}
-                        kind = action.get('kind')
-                        if kind == 'batch':
-                            kinds = [m.get('kind') for m in action.get('motions', [])]
-                            raise SimError(ACTION_UNSUPPORTED_CODE,
-                                           'Newton Provider 第一切片未实现任何动作类型（batch: ' + ', '.join(str(k) for k in kinds) + '）；'
-                                           '只支持 open/sync/observe/close，动作通道未接线，拒绝而不是假装执行')
-                        raise SimError(ACTION_UNSUPPORTED_CODE,
-                                       'Newton Provider 第一切片未实现动作类型 ' + str(kind) + '；只支持 open/sync/observe/close，'
-                                       '动作通道未接线，拒绝而不是假装执行')
+                        result = world.execute(args.get('action') or {})
                     elif method == 'assist':
                         raise SimError('UNSUPPORTED_CAPABILITY', 'Newton 切片未实现 assist（附着/辅助写回）')
-                    elif method in ('capture', 'capture_multi', 'camera_list', 'camera_adjust',
+                    elif method == 'camera_list':
+                        result = world.camera().list(args.get('options', {}))
+                    elif method == 'capture':
+                        result = world.camera().capture(args.get('options', {}))
+                    elif method == 'capture_multi':
+                        result = world.camera().capture_multi(args.get('options', {}))
+                    elif method == 'capture_publish':
+                        result = world.camera().publish_capture(args['captureId'], args['fromDir'], args['toDir'])
+                    elif method in ('camera_adjust',
                                     'camera_project_annotation', 'camera_dataset_export'):
                         raise SimError('UNSUPPORTED_CAPABILITY', 'Newton 切片未实现渲染/相机通道: ' + method)
                     elif method == 'close':
@@ -1234,10 +1731,10 @@ def main():
                 emit({'id': rid, 'error': {'code': getattr(exc, 'code', 'ENGINE_ERROR'), 'message': str(exc)}})
         now = time.monotonic()
         for world in list(worlds.values()):
-            if now >= world.next_tick and world.status in ('ready', 'running') and world.clock != 'manual':
+            if now >= world.next_tick and world.status in ('ready', 'running') and (world.clock != 'manual' or world.active):
                 try:
                     world.tick()
-                    world.next_tick = max(world.next_tick + world.dt / world.factor, now - .05)
+                    world.next_tick = (time.monotonic() if world.clock == 'manual' else max(world.next_tick + world.dt / world.factor, now - .05))
                 except Exception as exc:
                     # Drop all native handles before exposing the fault.  The
                     # world remains listable for diagnosis, but is no longer

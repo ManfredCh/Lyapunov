@@ -1,8 +1,8 @@
 # @lyapunov/sim-newton
 
 把 [Newton](https://github.com/newton-physics/newton)（GPU 物理引擎，1.6.0 + Warp 1.17.0）作为可装配的
-模拟 Provider 接进产品。**第一切片（minimal-1）**：只做「真的 open / 真的 step / 真的读状态」，
-其余合同特性一律**明确报不支持**，绝不静默成功或返回假数据。
+模拟 Provider 接进产品。**RC2 关节、接触与液体切片（joint-contact-mpm-rc2）**：真实导入、步进和状态读回，并接通可核验源位置执行器的
+`joint` / `trajectory` / `control`。另有 `components.newton.mpm.kind="water"` 选择的原生隐式 MPM 水例。命名原生相机可采集同一物理步的 RGB 与轴向米制深度；未接通的动作、相机覆盖/标注/数据集导出与辅助能力继续明确拒绝。
 
 ## 支持 / 不支持
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `open` / `sync` / `close` / `list_worlds` | ✅ | Scene → Newton 模型，真编译；`sync` 用物理签名判断是否需要重建 |
 | `observe`（时间 + qpos/qvel + 实体位姿） | ✅ | `stepIndex`、`simTime`、`entities[].transform`、`entities[].joints`、`sensors.bodyLinearVelocityMps/bodyAngularVelocityRadps` |
-| `describe` | ✅ | 关节名/类型/单位/限位 + 引擎侧 PD 增益回读；`capabilities` 按合同 `RobotCapability.kind` 的**封闭 6 元组**（joint/thrust/vehicle/gripper/lift/control）逐项给 `available=false` + 原因，原因前缀就是 `execute` 实际返回的码 `ACTION_UNSUPPORTED`（判定与拒绝同源）；`controlMetadata` 如实说明 `controlledJointNames` 为何恒为空（本 Provider 没有动作/控制通道，不是"关节都被动"） |
+| `describe` | ✅ | 关节、源执行器控制模式及原生 PD 增益回读；逐实体能力覆盖共享 8 种 kind，只开放已核验源位置驱动的 joint，以及 manual 下的 control；其他能力逐项给出错误码与原因 |
 | realtime 时钟真步进 | ✅ | `options.timestepS`（默认 1/500 s）与 `options.realtimeFactor` 生效，按 `frameRateHz` 发 `frame` 事件；**冷缓存下首个 tick 会阻塞十几秒（负载高时二十几秒）**（首个内核的 JIT，不是卡死 —— 用户会以为卡住的就是这一格，见「Warp 内核缓存」） |
 | MJCF / URDF 原生源 | ✅ | 复用 `components.mujoco.sourcePath/xml` 与 mjcf/urdf resource（与 sim-mujoco 同一解析口径） |
 | 地面 | ✅ | 消费 Scene 管理的零厚度无限 plane；用户入口首次建世界先沿 Scene CAS 保存默认地面。隐藏只改变显示，删除/禁用选择重开后保留；原生同位置静态 plane 去重。仅旧无模板 Scene 的显式 `ground:true` 可请求兼容地面。 |
@@ -20,17 +20,19 @@
 | 无原生源也无 Scene collision 的实体 | ⚠️ 跳过 + 结构化告警 | `handle.warnings[].code = ENTITY_SKIPPED_NO_NATIVE_SOURCE`；帧里仍给出 Scene 位姿，不假装被模拟。原生源与 Scene collision 同时声明时，原生碰撞优先并返回 `SCENE_COLLISION_IGNORED_NATIVE_SOURCE` |
 | SDF、逐体关闭重力与补丁绑定 | ❌ | Scene SDF、动态 `gravityEnabled=false`、需要 collisionPatches 的 mesh binding 明确返回 `UNSUPPORTED_CAPABILITY`；缺尺寸不造默认盒，缺 OBJ 不用包围盒代替 |
 | 含 mesh 资产的 MJCF/URDF | ✅（依赖缺失时明确报错） | 本机独立环境**已装** Newton 的 `importers` extra（实测 `trimesh 5.1.0`），带 `<mesh>` 的模型**真的能导入**：`materials/robots/franka_panda/franka_emika_panda/panda_nohand.xml` 实测 `open` → `status="ready"`、`warnings=[]`、`describe` 给出 7 关节 / 60 形状；只有依赖**真的缺失**时才返回 `PROVIDER_DEPENDENCY_MISSING` 并给出安装方式，不降级成「场景非法」 |
-| `execute`（trajectory/joint/vehicle/lift/gripper/gait/control/thrust/tendon/batch） | ❌ | 返回 `ACTION_UNSUPPORTED`（动作通道未接线） |
-| `observe(contacts/penetrations)` | ❌ | 返回 `UNSUPPORTED_CAPABILITY`：Newton 1.6.0 的 CollisionPipeline 不暴露逐接触有符号距离，无法按合同字段如实给出 |
-| `capture` / `capture_multi` / `camera_*`（渲染） | ❌ | 返回 `UNSUPPORTED_CAPABILITY` |
+| 原生 MPM 水粒子 | ✅，独立模式 | 同 pin SolverImplicitMPM；静态原生容器碰撞、同帧世界坐标粒子与材料读回；不执行机器人动作，不冒充 XPBD 刚体 |
+| `execute`（joint / trajectory / control） | ✅，按源能力 | 单自由度位置 PD，保留源 kp/kv 和 joint/ctrlrange。trajectory 须覆盖全部受控关节；control 仅 manual 且精确推进 stepCount 步。其他 7 种动作仍返回 ACTION_UNSUPPORTED |
+| `observe(contacts/penetrations)` | ✅ | 距离与接触点来自原生 eval_rigid_contact_kinematics；负距离按 shape 对聚合。XPBD 的 forceN 来自 update_contacts，为原生冲量/dt 近似值，世界坐标下 shape1 对 shape0 的力；首帧或 semi 没有力读数 |
+| `capture` / `capture_multi` / `camera_list` | ✅，显式命名源相机 | 原生 SensorTiledCamera 消费当前 Newton shapes/particles；RGB PNG 与轴向米制 float32 NPY，提供源 K、外参、frameId；多视图内部不推进物理 |
+| `camera_adjust` / `camera_project_annotation` / `camera_dataset_export` | ❌ | 临时相机覆盖、标注与数据集导出继续返回 UNSUPPORTED_CAPABILITY |
 | `assist`（附着/辅助写回） | ❌ | 返回 `UNSUPPORTED_CAPABILITY` |
 | `collisionPatches`（splat 场景碰撞编译） | ❌ | 传入即 `UNSUPPORTED_CAPABILITY`；本包**不含** sim-mujoco 的 splat 碰撞编译器 |
-| manual 时钟 | ❌（如实冻结） | 没有动作通道就没有任何东西能驱动 tick；世界保持冻结，不假装推进。要真步进请用 `realtime` |
-| `stop` | ⚪️ 空真值 | 从未接受过任何动作 ⇒ `receipts: []`、`affectedEntityIds: []`，不伪造回执（`ProcessSimProvider.close` 需要它成功） |
-| `receipt` | ❌ | 恒 `ACTION_NOT_FOUND`（本切片没有任何动作回执） |
+| manual 时钟 | ✅，按动作推进 | 有已接受动作才推进；空闲或停止后冻结。未来 startStep 会推进到排程开始，未开始动作的 appliedSteps=0 |
+| `stop` | ✅ | 已开始动作取消并把参考保持在当前实测位置，不清零刚体速度；未开始动作不写控制。回执记录 appliedSteps、lastAppliedPositions、holdReference；停止不代表瞬时静止 |
+| `receipt` | ✅ | accepted/running/completed/cancelled/failed 终态与真实 finalState。重建成功先取消旧动作；失败保留旧世界及动作；旧代次 stop 不触碰新模型 |
 
 完整能力表由 worker 的 `ready` 事件与 `capabilities` 方法原样交出（`supported` / `unsupported` / `notes`），
-并随 `WorldHandle.capabilities` 到达调用方。两条自报路径给同一份表、同一份设备事实；`capabilities` 还带
+并随 `WorldHandle.capabilities` 到达调用方。ready / capabilities 给 Provider 总能力，WorldHandle 按当前世界是否有可驱动源执行器报告 execute / manualClockAdvance；`capabilities` 还带
 `kernelCacheDir` 与 `kernelCacheNote`（**实际生效**目录 + 配置基目录及其来源；两者同名不同义，见下）。
 
 **入口不等于能力**：`--engine newton`（开发 YAML 的 `engine: newton`、桌面/建筑入口、`ui_engine_switch`、
@@ -38,12 +40,50 @@ SDK 解释器解析）说明的是"这个引擎能被装配"，**不是**"装配
 `script/runtime-patch.ts` 的 `sim-newton` 分支完成（`cacheRoot=<sceneRoot>/provider-cache/newton`），
 装配后能做什么只有上面这份自报说了算；入口侧面向人的措辞归各入口自己的文件，本包不复制第二份。
 
+## 源控制与结果含义
+
+动作必须使用 `robot_describe` 返回的原生完整关节名，不能假定源短名在导入后保持。Newton 的归一化 MJCF 执行器元数据用于判定控制模式，不从非零刚度猜执行器。当前仅接通 gear=1、无激活动态、单一关节级位置 PD。源有限 forcerange / joint effort limit、混合执行器、velocity / torque、URDF 无可核验执行器元数据等明确拒绝；不改源物理来开放能力。显式 `semi` 的位置动作也保持关闭，当前动作验收对象为 XPBD。
+
+`joint` 和 `trajectory` 在窗口内插值原生位置参考，窗口结束即返回 completed；`targetReached` 另按实测坐标与容差判断，不把 completed 当作到位或任务成功。`control` 保持参考且仅推进请求整数步。XPBD 本身的 armature、joint friction、effort limit 等限制沿用当前 pin 的原生限制，不由适配器补造。
+
+接触列表来自碰撞管线的原生流形候选；正距离表示间隙，负距离表示穿透。forceN 是原生 XPBD 求解器估计，不是独立力传感器；不据此宣称抓取成功。停止撤销动作后仍保留正常动力学惯性，manual 模式因没有活动动作才停止推进。
+
+英文说明：Only verified scalar source position PD drives are enabled. Actions preserve source gains and ranges. STOP holds measured position references without zeroing physical velocity. Completion is distinct from target convergence. XPBD contact forces are solver approximations.
+
+## 原生 MPM 水例
+
+实体直接保存以下原生模式声明；其他实体可提供 RC2 既有的静态 Scene collision 或固定 MJCF/URDF 碰撞体；共用原装配与地面/重力合同。water 实体的 transform 决定粒子网格初始世界位姿，单位为米，scale 必须为 1。
+
+```json
+{"components":{"newton":{"mpm":{"kind":"water","dimensions":[3,3,3],"spacingM":0.03,"densityKgM3":1000,"viscosityPaS":0,"youngModulusPa":1000000000000000,"poissonRatio":0.3,"voxelSizeM":0.06}}}}
+```
+
+`dimensions` 是三个正整数，`spacingM` 是格点间距，单粒子质量为 `densityKgM3 × spacingM³`，原生半径为间距的一半。`youngModulusPa` 与 `poissonRatio` 对应原生 `model.mpm.young_modulus/poisson_ratio`；在水例里用于 MPM 压缩响应。水例沿用同 pin `example_mpm_water_dam_break.py` 的零摩擦、零偏应力屈服强度、tensile_yield_ratio=1 与粘度参数，不将 E/nu 表述为液体实体的杨氏弹性。
+
+该切片使用原生 dense grid，原生水例的 P0 应变基、pic 碰撞基、Q1 速度基。`voxelSizeM` 控制求解网格；没有另设物理循环。`clock:"realtime"` 真推进，manual 模式明确告警并冻结（未接通该模式的动作推进入口）。动态自由/关节刚体作为容器时明确拒绝，不静默冻结机器人或假称双向耦合。
+
+`Frame.entities[].dynamicGeometry` 的 particles 项直接来自当前原生 `state.particle_q`，positionsM 是扁平 xyz 世界坐标，radiusM 来自原生粒子半径，nativeName 在重建前后稳定。同一 Frame 的 world/generation/revision/step/simTime 标明数据归属。`sensors.nativePhysics` 从原生模型/求解器回读粒子数、网格、材料和初始格点质量对应的静止密度；不从请求原文回显材料假装已应用。
+
+材料与尺寸变化进入原有 physics_signature → sim_sync 原子重建；失败保留旧世界。components 声明可随现有 Scene 保存重开。MPM 不输出刚体 Contacts 数据；未接通逐粒子碰撞力观测或动态机器人耦合。相机采集会原生渲染当前粒子，并附同一步的真实粒子 Frame；Viewer 的粒子显示与原生采集分别验收。
+
+英文说明：Water uses the pinned native SolverImplicitMPM with dense grids and static colliders. Particle positions and material values are read from native state/model. E and nu control MPM compressive response. Robot actions and rigid Contacts observations are disabled in this mode. Realtime advances the fluid; manual mode is explicitly frozen.
+
+## 原生命名相机
+
+MJCF 的命名 fixed 透视相机由已装 MuJoCo parser 读取 include/default、原生局部位姿与 K；不使用 MuJoCo 求解。挂载 body 在该实体的 Newton bodyStart/bodyEnd 内按完整祖先标签精确匹配，外参随当前 `state_a.body_q` 更新。tracking/targetbody、orthographic 与不明确的 body 匹配保持不可用。
+
+Scene 相机沿用 `components.camera` 或保存的 `components.viewerCamera.cameras[].state`。调用 camera_list 选择返回的命名相机，再请求 capture / capture_multi；不提供任意自由机位兜底。K 按整数像素中心缩放，保留非方形像素和主点。深度为沿相机 -Z 轴的米制深度，depth<=0 表示未命中，不解释为欧氏射线距离。
+
+每次采集对同一原生 state refit 形状与粒子 BVH 后渲染，图像与 observation 的 frameId 一致，多视图调用内没有 tick。MPM observation 不请求不存在的刚体 Contacts，仍包含真实粒子与 WorldPhysics。成功重建、fault、close 释放旧管理器；失败编译保留旧模型及相机。会话媒体仍走现有 transport 暂存、授权核对、发布与 URI 回写，不绕开用户文件模式。
+
+英文说明：Named native cameras render current Newton shapes and particles. RGB and axial metric depth share the same physical state; multi-view capture never advances the clock. Unsupported tracking, distortion, overrides, annotations, and dataset export are rejected explicitly.
+
 ## 设备选择与降级
 
 `auto`（默认）→ 有 CUDA 设备用 `cuda:0`，**没有则自动降级 `cpu`**（`handle.deviceDegraded=true` + `handle.deviceNote` 说明原因）。
 显式指定 `cpu` / `cuda:N` 时**不静默顶替**：设备不可用即 `UNSUPPORTED_CAPABILITY`。
 
-本机（无 NVIDIA 驱动、`wp.get_cuda_devices()` 为空）实测原文：
+历史无 NVIDIA 驱动环境（`wp.get_cuda_devices()` 为空）的实测原文：
 
 | 入口 | 读数 |
 | --- | --- |

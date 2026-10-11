@@ -15,7 +15,7 @@ export interface NewtonConfig {
   /**
    * Warp 编译内核的缓存目录（产品传 <cacheRoot>/provider-cache/newton）。
    * 必须在 worker 进程里于 warp 初始化前生效，故经环境变量 LYAPUNOV_NEWTON_CACHE_ROOT 传入；
-   * 目录不可用时 worker 只告警并回落 Warp 默认缓存，不因此变成不可用。
+   * 目录不可用时按会话运行根/XDG/临时目录等真实可写候选回落；全部不可写则明确报错。
    */
   cacheRoot?: string
   /**
@@ -26,8 +26,8 @@ export interface NewtonConfig {
   device?: string
 }
 /**
- * Newton（GPU 物理引擎）Provider。第一切片只做真实 open/sync/step/observe：
- * 场景实体的 MJCF/URDF 原生源 + 地面被 Newton 真实导入并步进；动作/接触/相机/附着
+ * Newton（GPU 物理引擎）Provider。支持真实 open/sync/step/observe 以及已核验源位置 PD 的 joint/trajectory/control：
+ * 保留 RC2 Scene 碰撞、地面与重力，接通原生 MPM 水、接触及命名相机采集。其他动作/相机覆盖/附着
  * 等未实现的合同特性由 worker 返回结构化错误（ACTION_UNSUPPORTED / UNSUPPORTED_CAPABILITY），
  * 不静默成功。Newton 的 pin（mujoco==3.12.0，Newton 1.6.0 的 MJCF 导入依赖）与产品的
  * MuJoCo 3.13.0 冲突，因此走独立解释器 .runtime/newton-env。

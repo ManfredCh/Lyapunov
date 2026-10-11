@@ -22,8 +22,9 @@
  * 文档面只读文件，不需要引擎，因此不 skip。
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import type { SceneSnapshot, Transform } from '../../lyapunov-contracts/src/types.ts'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -63,7 +64,7 @@ const SUPPORTED_KEYS = [
 type Reply = { result?: any; error?: { code?: string; message?: string } }
 type Request = { id: string; method: string; args: unknown }
 
-const POSE = { position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] }
+const POSE: Transform = { position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] }
 
 /** 文件型原生源（MJCF/URDF 都走 `components.mujoco.sourcePath`，与 sim-mujoco 同口径）。 */
 function fileSnapshot(sceneId: string, entityId: string, sourcePath: string, revision = 1) {
@@ -81,7 +82,7 @@ function drive(requests: Request[]) {
   lines.push(JSON.stringify({ id: '__eof', method: 'shutdown', args: {} }))
   const run = spawnSync(PYTHON, ['-u', WORKER], {
     cwd: DEV, input: lines.join('\n') + '\n', encoding: 'utf8', timeout: 900_000,
-    env: { ...process.env, LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot! },
+    env: { ...process.env, CUDA_VISIBLE_DEVICES: '', LYAPUNOV_NEWTON_DEVICE: 'cpu', LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot! },
   })
   const events: any[] = []
   const replies = new Map<string, Reply>()
@@ -111,7 +112,7 @@ type Session = {
  */
 function openSession(): Session {
   const proc = spawn(PYTHON, ['-u', WORKER], {
-    cwd: DEV, env: { ...process.env, LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot! },
+    cwd: DEV, env: { ...process.env, CUDA_VISIBLE_DEVICES: '', LYAPUNOV_NEWTON_DEVICE: 'cpu', LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot! },
   })
   const events: any[] = []
   const waiters = new Map<string, (reply: Reply) => void>()
@@ -274,7 +275,7 @@ describe.skipIf(!available)('DEV-008：supported 面逐键「声明 ↔ 现实�
     }
 
     // 完整性：`supported` 里出现本文件没有真机读数的键（或漏掉一个已知键）都要红 —— 不许"只声明不验证"。
-    expect(Object.keys(declared).sort()).toEqual([...SUPPORTED_KEYS, 'execute'].sort())
+    expect(Object.keys(declared).sort()).toEqual([...SUPPORTED_KEYS, 'execute', 'manualClockAdvance', 'contacts', 'liquidParticles', 'capture', 'captureMulti', 'cameraList'].sort())
   }, 900_000)
 
   test('含 mesh 资产的 MJCF 真的能导入：README 那条反向假声明不许回来', () => {
@@ -399,4 +400,179 @@ describe('DEV-008：声明面措辞守卫（README 与 worker 注释）', () => 
     // 并且要给出"这是冷缓存、不是卡死"的判据（否则等于把现象原样丢回给用户）。
     expect(cacheSection).toContain('不是卡死')
   })
+})
+
+
+const MPM_PARAMETERS = { kind: 'water', dimensions: [3, 3, 3], spacingM: .03, densityKgM3: 1000,
+  viscosityPaS: 0, youngModulusPa: 1e15, poissonRatio: .3, voxelSizeM: .06 }
+const MPM_TANK = `<mujoco model="mpm-tank"><worldbody>
+  <geom name="tank-floor" type="plane" size="1 1 .01"/>
+  <geom name="wall-left" type="box" pos="-.22 0 .15" size=".02 .24 .15"/>
+  <geom name="wall-right" type="box" pos=".22 0 .15" size=".02 .24 .15"/>
+  <geom name="wall-front" type="box" pos="0 -.22 .15" size=".24 .02 .15"/>
+  <geom name="wall-back" type="box" pos="0 .22 .15" size=".24 .02 .15"/>
+</worldbody></mujoco>`
+const mpmSnapshot = (sceneId = 'native-mpm'): SceneSnapshot => ({ sceneId, revision: 1,
+  coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' }, entities: [
+  { entityId: 'water', name: 'water', resources: [], transform: { ...POSE, position: [0, 0, .12] }, components: { newton: { mpm: { ...MPM_PARAMETERS } } } },
+  { entityId: 'tank', name: 'tank', resources: [], transform: POSE, components: { mujoco: { xml: MPM_TANK } } },
+] })
+const meanZ = (positions: number[]) => positions.filter((_, i) => i % 3 === 2).reduce((a, b) => a + b, 0) / (positions.length / 3)
+const extent = (positions: number[], axis: number) => {
+  const values = positions.filter((_, i) => i % 3 === axis)
+  return Math.max(...values) - Math.min(...values)
+}
+
+describe.skipIf(!available)('Newton 原生 MPM 水、静态容器与同帧粒子（真实 CPU）', () => {
+  test('声明参数保存重开、sync 原子重建、粒子实际下落和碰撞后的非刚体铺展', async () => {
+    const session = openSession()
+    try {
+      const ready = await session.ready
+      expect(ready.event).toBe('ready')
+      const source = mpmSnapshot()
+      // JSON 序列化再重开同一声明；产品 Scene 保存入口由 E06 独立验收。
+      const saved = JSON.parse(JSON.stringify(source))
+      const opened = await session.send('mpm-open', 'open', { snapshot: saved,
+        options: { worldId: 'w-mpm-frozen', clock: 'manual', device: 'cpu', ground: false, timestepS: .005 } })
+      expect(opened.error).toBeUndefined()
+      expect(opened.result.solver).toBe('implicit-mpm')
+      expect(opened.result.device).toBe('cpu')
+      expect(opened.result.capabilities.supported).toMatchObject({ liquidParticles: true, execute: false, contacts: false, manualClockAdvance: false })
+      expect(opened.result.capabilities.supported.sceneCollisionCompilation).toBe(true)
+      expect(opened.result.worldPhysics.gravityWorldMps2.slice(0, 2)).toEqual([0, 0])
+      expect(opened.result.worldPhysics.gravityWorldMps2[2]).toBeCloseTo(-9.81, 5)
+      expect(opened.result.worldPhysics.collisionCoverage.physicalEntityIds).toEqual(['tank', 'water'])
+      expect(opened.result.warnings.some((w: any) => w.code === 'MPM_MANUAL_CLOCK_FROZEN')).toBe(true)
+      const initial = (await session.send('mpm-initial', 'observe', { worldId: 'w-mpm-frozen' })).result
+      const water = initial.entities.find((e: any) => e.entityId === 'water')
+      const geometry = water.dynamicGeometry[0]
+      const material = water.sensors.nativePhysics
+      expect(geometry.kind).toBe('particles')
+      expect(geometry.positionsM).toHaveLength(81)
+      expect(geometry.radiusM).toBeCloseTo(.015, 6)
+      expect(geometry.positionsM.every(Number.isFinite)).toBe(true)
+      expect(material.solver).toBe('implicit-mpm')
+      expect(material.gridType).toBe('dense')
+      expect(material.particleCount).toBe(27)
+      expect(material.densityKgM3).toBeCloseTo(1000, 2)
+      expect(material.viscosityPaS).toBe(0)
+      expect(material.poissonRatio).toBeCloseTo(.3, 6)
+      expect(material.youngModulusPa / 1e15).toBeCloseTo(1, 6)
+      expect(material.voxelSizeM).toBeCloseTo(.06, 6)
+      expect(material.friction).toBe(0)
+      expect(material.yieldStressPa).toBe(0)
+      expect(material.tensileYieldRatio).toBe(1)
+      const description = (await session.send('mpm-description', 'describe', { worldId: 'w-mpm-frozen', entityId: 'water' })).result
+      expect(description.capabilities).toHaveLength(8)
+      expect(description.capabilities.every((c: any) => c.available === false)).toBe(true)
+      expect((await session.send('mpm-no-actions', 'execute', { worldId: 'w-mpm-frozen', action: {
+        kind: 'control', actionId: 'no-robot', expectedGeneration: 1, entityId: 'water', stepCount: 1,
+      } })).error?.code).toBe('ACTION_UNSUPPORTED')
+      expect((await session.send('mpm-no-rigid-contacts', 'observe', { worldId: 'w-mpm-frozen', selection: { contacts: true } })).error?.code).toBe('UNSUPPORTED_CAPABILITY')
+      const edited = JSON.parse(JSON.stringify(saved))
+      edited.revision = 2
+      edited.entities[0].components.newton.mpm.viscosityPaS = 2
+      edited.entities[0].components.newton.mpm.densityKgM3 = 1200
+      const synced = (await session.send('mpm-sync', 'sync', { worldId: 'w-mpm-frozen', snapshot: edited })).result
+      expect(synced.worldGeneration).toBe(2)
+      expect(synced.appliedSceneRevision).toBe(2)
+      const changed = (await session.send('mpm-changed', 'observe', { worldId: 'w-mpm-frozen' })).result
+      const changedMaterial = changed.entities.find((e: any) => e.entityId === 'water').sensors.nativePhysics
+      expect(changedMaterial.viscosityPaS).toBe(2)
+      expect(changedMaterial.densityKgM3).toBeCloseTo(1200, 2)
+      expect(changed.entities.find((e: any) => e.entityId === 'water').dynamicGeometry[0].positionsM).toEqual(geometry.positionsM)
+      await session.send('mpm-close-frozen', 'close', { worldId: 'w-mpm-frozen' })
+      const reopened = (await session.send('mpm-reopen', 'open', { snapshot: JSON.parse(JSON.stringify(edited)),
+        options: { worldId: 'w-mpm-reopened', clock: 'manual', device: 'cpu', ground: false, timestepS: .005 } })).result
+      expect(reopened.solver).toBe('implicit-mpm')
+      const reopenedFrame = (await session.send('mpm-reopen-observe', 'observe', { worldId: 'w-mpm-reopened' })).result
+      expect(reopenedFrame.entities.find((e: any) => e.entityId === 'water').sensors.nativePhysics.viscosityPaS).toBe(2)
+      await session.send('mpm-close-reopened', 'close', { worldId: 'w-mpm-reopened' })
+      // 动态刚体不能悄悄被冻结成“容器”。失败后原世界保持可用由原sync回滚测试覆盖。
+      const dynamic = mpmSnapshot('mpm-dynamic-rejected')
+      dynamic.entities[1]!.components = { mujoco: { xml: FREE_BODY_XML } } as any
+      expect((await session.send('mpm-no-dynamic-coupling', 'open', { snapshot: dynamic,
+        options: { worldId: 'w-mpm-no-dynamic', clock: 'manual', device: 'cpu' } })).error?.code).toBe('UNSUPPORTED_CAPABILITY')
+      const mixedSource = JSON.parse(JSON.stringify(saved))
+      mixedSource.entities[0].components.mujoco = { xml: FREE_BODY_XML }
+      expect((await session.send('mpm-preserve-native-source', 'open', { snapshot: mixedSource,
+        options: { worldId: 'w-mpm-mixed-source', clock: 'manual', device: 'cpu' } })).error?.code).toBe('UNSUPPORTED_CAPABILITY')
+      // 最终流动也消费 RC2 的 Scene box/shapes 容器，保留已有仿射/三角装配路径。
+      const sceneContainer = JSON.parse(JSON.stringify(saved))
+      sceneContainer.entities[1].components = { rigidBody: { type: 'static' }, collision: { shape: 'box', shapes: [
+        { center: [0, 0, -.01], halfExtents: [.24, .24, .01] },
+        { center: [-.22, 0, .15], halfExtents: [.02, .24, .15] },
+        { center: [.22, 0, .15], halfExtents: [.02, .24, .15] },
+        { center: [0, -.22, .15], halfExtents: [.24, .02, .15] },
+        { center: [0, .22, .15], halfExtents: [.24, .02, .15] },
+      ] } }
+      sceneContainer.entities.push({ entityId: 'fluid-view', name: 'fluid-view', resources: [],
+        transform: { position: [0, 0, .6], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+        components: { camera: { fovYDeg: 60 } } })
+      const realtime = await session.send('mpm-realtime', 'open', { snapshot: sceneContainer,
+        options: { worldId: 'w-mpm-real', clock: 'realtime', device: 'cpu', ground: false, timestepS: .005 } })
+      expect(realtime.error).toBeUndefined()
+      expect(realtime.result.worldPhysics.collisionCoverage.physicalEntityIds).toEqual(['tank', 'water'])
+      let advanced: any = null
+      const deadline = Date.now() + 120_000
+      let attempt = 0
+      while (Date.now() < deadline) {
+        const reply = await session.send(`mpm-observe-${attempt++}`, 'observe', { worldId: 'w-mpm-real' })
+        expect(reply.error).toBeUndefined()
+        advanced = reply.result
+        if (advanced.simTime >= .25) break
+        await sleep(10)
+      }
+      expect(advanced.simTime).toBeGreaterThanOrEqual(.25)
+      expect(advanced.stepIndex).toBeGreaterThanOrEqual(50)
+      expect(advanced.simTime).toBeCloseTo(advanced.stepIndex * .005, 9)
+      const moved = advanced.entities.find((e: any) => e.entityId === 'water').dynamicGeometry[0]
+      expect(moved.positionsM).toHaveLength(81)
+      expect(moved.positionsM.every(Number.isFinite)).toBe(true)
+      expect(meanZ(moved.positionsM)).toBeLessThan(meanZ(geometry.positionsM) - .03)
+      expect(Math.max(extent(moved.positionsM, 0), extent(moved.positionsM, 1))).toBeGreaterThan(.075)
+      expect(Math.min(...moved.positionsM.filter((_: number, i: number) => i % 3 === 2))).toBeGreaterThan(-.03)
+      expect(moved.nativeName).toBe(geometry.nativeName)
+      expect(session.events.some(e => e.event === 'frame' && e.frame.worldId === 'w-mpm-real'
+        && e.frame.entities.some((item: any) => item.entityId === 'water' && item.dynamicGeometry?.[0]?.positionsM.length === 81))).toBe(true)
+      const cameras = await session.send('mpm-camera-list', 'camera_list', { worldId: 'w-mpm-real' })
+      expect(cameras.error).toBeUndefined()
+      expect(cameras.result.cameras.find((c: any) => c.cameraName === 'fluid-view/fluid-view')?.available).toBe(true)
+      const mediaDir = process.env.LYAPUNOV_NEWTON_MPM_MEDIA_OUTPUT ?? join(cacheRoot!, 'mpm-media')
+      const image = await session.send('mpm-capture', 'capture', { worldId: 'w-mpm-real', options: {
+        cameraName: 'fluid-view/fluid-view', width: 32, height: 24, outputDir: mediaDir,
+      } })
+      expect(image.error).toBeUndefined()
+      expect(image.result.source).toBe('newton-sensor-tiled-camera')
+      expect(image.result.observation.frameId).toBe(image.result.frameId)
+      expect(image.result.observation.entities.find((e: any) => e.entityId === 'water').dynamicGeometry[0].positionsM).toHaveLength(81)
+      expect(image.result.observation.contacts).toBeUndefined()
+      const depth = readFileSync(fileURLToPath(image.result.depth.uri))
+      expect(depth.subarray(1, 6).toString()).toBe('NUMPY')
+      const start = depth[6] === 1 ? 10 + depth.readUInt16LE(8) : 12 + depth.readUInt32LE(8)
+      const centerDepths: number[] = []
+      for (let row = 10; row <= 14; row++) for (let col = 14; col <= 18; col++) {
+        const value = depth.readFloatLE(start + (row * 32 + col) * 4)
+        if (value > 0) centerDepths.push(value)
+      }
+      // 中央射线不经过围墙；无粒子时仅见z=0地面，深度为.6m。
+      expect(centerDepths.length).toBeGreaterThan(0)
+      expect(Math.min(...centerDepths)).toBeLessThan(.595)
+      expect(readFileSync(fileURLToPath(image.result.rgb.uri)).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+      if (process.env.LYAPUNOV_NEWTON_MPM_MEDIA_OUTPUT) {
+        writeFileSync(join(mediaDir, 'capture.json'), JSON.stringify(image.result, null, 2))
+        writeFileSync(join(mediaDir, 'scene.json'), JSON.stringify(sceneContainer, null, 2))
+        writeFileSync(join(mediaDir, 'handle.json'), JSON.stringify(realtime.result, null, 2))
+      }
+      console.info('MPM 真实 CPU 读数', JSON.stringify({ device: advanced.device, stepIndex: advanced.stepIndex,
+        simTime: advanced.simTime, particleCount: moved.positionsM.length / 3,
+        initialMeanZM: meanZ(geometry.positionsM), finalMeanZM: meanZ(moved.positionsM),
+        initialExtentXM: extent(geometry.positionsM, 0), finalExtentXM: extent(moved.positionsM, 0),
+        finalExtentYM: extent(moved.positionsM, 1), gridType: material.gridType,
+      }))
+      await session.send('mpm-close-real', 'close', { worldId: 'w-mpm-real' })
+    } finally {
+      await session.stop()
+    }
+  }, 600_000)
 })

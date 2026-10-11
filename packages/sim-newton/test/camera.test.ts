@@ -1,7 +1,9 @@
 /** 原生 Newton CPU 相机：真实 XPBD 状态、原生射线像素、K/挂载/同物理步；不使用 GUI/GPU。 */
 import { beforeAll, describe, expect, test } from 'bun:test'
+import { NewtonProvider } from '../src/provider.ts'
+import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +12,15 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../../..')
 const python = process.env.LYAPUNOV_NEWTON_PYTHON ?? join(root, '.runtime/newton-env/bin/python')
 const output = process.env.LYAPUNOV_NEWTON_CAMERA_TEST_OUTPUT ?? mkdtempSync(join(tmpdir(), 'newton-camera-'))
+
+function depthValues(uri: string): number[] {
+  const bytes = readFileSync(fileURLToPath(uri))
+  expect(bytes.subarray(1, 6).toString()).toBe('NUMPY')
+  const header = bytes[6] === 1 ? 10 + bytes.readUInt16LE(8) : 12 + bytes.readUInt32LE(8)
+  const values: number[] = []
+  for (let offset = header; offset < bytes.length; offset += 4) values.push(bytes.readFloatLE(offset))
+  return values
+}
 
 describe.skipIf(!existsSync(python))('Newton 原生相机 CPU 运行回归', () => {
   let report: any
@@ -132,4 +143,71 @@ describe.skipIf(!existsSync(python))('Newton 原生相机 CPU 运行回归', () 
     expect(report.published.files).toBe(4)
     expect(report.publishedUris[0]).toContain('/published/')
   })
+
+  test('真实公共 Provider/RPC 接线：命名相机、同帧多视图、暂存发布与成功重建后采集', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'newton-camera-rpc-workspace-'))
+    const product = process.env.LYAPUNOV_NEWTON_CAMERA_RPC_OUTPUT ?? mkdtempSync(join(root, '.runtime/newton-camera-rpc-'))
+    const runtime = join(workspace, 'runtime')
+    const provider = new NewtonProvider({ pythonPath: python, device: 'cpu', cacheRoot: join(output, 'warp-cache'),
+      launch: async input => ({ argv: [input.pythonPath, '-u', input.workerPath], cwd: workspace,
+        env: { ...input.env, CUDA_VISIBLE_DEVICES: '', NVIDIA_VISIBLE_DEVICES: '' },
+        facts: { sessionId: 'newton-camera-rpc-fixture', mode: 'workspace-write', workspaceRoot: workspace,
+          writableRoot: workspace, runtimeRoot: runtime, productRoots: [product], privateRootBoundary: 'none' },
+        check: async () => ({ stale: false, current: { mode: 'workspace-write', workspaceRoot: workspace } }),
+      }),
+    })
+    // 这里只验证既有媒体中转与真实worker，不声称该测试接线施加了OS沙箱。
+    const scene: SceneSnapshot = { sceneId: 'camera-rpc', revision: 1,
+      coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' }, entities: [
+        { entityId: 'box', name: 'box', resources: [], transform: { position: [0, 0, .5], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+          components: { collision: { shape: 'box', halfExtents: [.4, .4, .1] }, rigidBody: { type: 'static' } } },
+        ...['view-a', 'view-b'].map((name, index) => ({ entityId: name, name, resources: [],
+          transform: { position: [index * .05, 0, 1.5] as [number, number, number], quaternion: [0, 0, 0, 1] as [number, number, number, number], scale: [1, 1, 1] as [number, number, number] },
+          components: { camera: { fovYDeg: 60 } } })),
+      ] }
+    try {
+      const opened = await provider.open(scene, { worldId: 'w-camera-rpc', clock: 'manual', ground: false })
+      expect(opened.device).toBe('cpu')
+      const list = await provider.listCameras(opened.worldId) as any
+      expect(list.cameras.filter((c: any) => c.available).map((c: any) => c.cameraName)).toEqual(['view-a/view-a', 'view-b/view-b'])
+      const capture = await provider.capture(opened.worldId, { cameraName: 'view-a/view-a', width: 32, height: 24, outputDir: join(product, 'single') }) as any
+      expect(capture.source).toBe('newton-sensor-tiled-camera')
+      expect(capture.stepIndex).toBe(0)
+      expect(capture.observation.frameId).toBe(capture.frameId)
+      expect(existsSync(fileURLToPath(capture.rgb.uri))).toBe(true)
+      expect(fileURLToPath(capture.depth.uri)).toStartWith(product)
+      expect(existsSync(join(runtime, 'staging/media-1'))).toBe(false)
+      const depths = depthValues(capture.depth.uri)
+      expect(depths).toHaveLength(32 * 24)
+      expect(depths[12 * 32 + 16]!).toBeCloseTo(.9, 5)
+      const multi = await provider.captureMulti(opened.worldId, { cameraNames: ['view-a/view-a', 'view-b/view-b'],
+        width: 32, height: 24, outputDir: join(product, 'multi') }) as any
+      expect(multi.cameras).toHaveLength(2)
+      expect(multi.stepIndex).toBe(capture.stepIndex)
+      expect(multi.observation.frameId).toBe(multi.frameId)
+      for (const camera of multi.cameras) {
+        expect(existsSync(fileURLToPath(camera.rgb.uri))).toBe(true)
+        expect(existsSync(fileURLToPath(camera.depth.uri))).toBe(true)
+      }
+      await expect(provider.capture(opened.worldId, { cameraName: 'missing', outputDir: join(product, 'missing') }))
+        .rejects.toMatchObject({ code: 'CAMERA_NOT_FOUND' })
+      const edited = structuredClone(scene)
+      edited.revision = 2
+      edited.entities[1]!.components.camera = { fovYDeg: 40 }
+      expect((await provider.sync(opened.worldId, edited)).worldGeneration).toBe(1)
+      expect((await provider.listCameras(opened.worldId) as any).cameras[0].fovyDeg).toBeCloseTo(40, 6)
+      const rebuilt = await provider.sync(opened.worldId, { ...edited, revision: 3 }, { forceRebuild: true })
+      expect(rebuilt.worldGeneration).toBe(2)
+      const newCapture = await provider.capture(opened.worldId, { cameraName: 'view-a/view-a', width: 32, height: 24, outputDir: join(product, 'rebuilt') }) as any
+      expect(newCapture.generation).toBe(2)
+      expect(newCapture.observation.generation).toBe(2)
+      expect(depthValues(newCapture.depth.uri)[12 * 32 + 16]!).toBeCloseTo(.9, 5)
+      await provider.close(opened.worldId)
+      await expect(provider.listCameras(opened.worldId)).rejects.toMatchObject({ code: 'WORLD_NOT_FOUND' })
+    } finally {
+      await provider.dispose()
+      rmSync(workspace, { recursive: true, force: true })
+      if (!process.env.LYAPUNOV_NEWTON_CAMERA_RPC_OUTPUT) rmSync(product, { recursive: true, force: true })
+    }
+  }, 180_000)
 })

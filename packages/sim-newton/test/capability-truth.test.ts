@@ -3,10 +3,10 @@
  *
  * 本文件钉三件事（都是**真实读数**，不是"代码已写"）：
  *  1. 自报↔实际：`ready`／`capabilities` 里声明为 unsupported 的能力，运行时必须按**同一个码**拒绝；
- *     10 个动作 kind 逐个 ACTION_UNSUPPORTED，7 个方法级能力逐个 UNSUPPORTED_CAPABILITY，
+ *     7 个未接通动作 kind 逐个 ACTION_UNSUPPORTED，7 个方法级能力逐个 UNSUPPORTED_CAPABILITY，
  *     `observe.contacts` 与 `collisionPatches`（open/sync）同样按声明的码拒绝。
- *  2. 能力范围事先说清：`describe().capabilities` 覆盖合同 `RobotCapability.kind` 的**封闭 6 元组**
- *     （thrust/vehicle/joint/gripper/lift/control），全部 available=false 并给原因；`controlMetadata`
+ *  2. 能力范围事先说清：`describe().capabilities` 覆盖合同 `RobotCapability.kind` 的**共享 8 元组**
+ *     （thrust/vehicle/joint/gripper/lift/control），逐源可用性并给原因；`controlMetadata`
  *     说明 controlledJointNames 为什么恒为空。少一条就是"等用户点了才报错"。
  *  3. 设备降级如实：设备真值（直接问 warp）为空时 auto 必须 degraded=true 且 note 说明"降级到 cpu"；
  *     显式 cpu 不是降级；显式 cuda:0 在无 CUDA 时**明确拒绝**（world 选项 → UNSUPPORTED_CAPABILITY；
@@ -15,6 +15,9 @@
  * 需要真实 Newton 环境（`.runtime/newton-env/bin/python`）；缺失即整体 skip（不假装通过）。
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { NewtonProvider } from '../src/provider.ts'
+import { ROBOT_CAPABILITY_KINDS } from '../../sim-contract/src/index.ts'
+import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,24 +43,24 @@ const available = existsSync(PYTHON)
  * 隔离后"无 CUDA"是**构造出来的、可复现的事实**，不再是宿主偶然；worker 子进程与独立 warp 读数探针
  * 走**同一个 env**，两边的设备事实因此一致（这里证明的是 CPU/无 CUDA 分支，**不伪造** CUDA 事实）。
  */
-const NO_CUDA_ENV: Record<string, string> = { CUDA_VISIBLE_DEVICES: '', NVIDIA_VISIBLE_DEVICES: '' }
+const NO_CUDA_ENV: Record<string, string> = { CUDA_VISIBLE_DEVICES: '', NVIDIA_VISIBLE_DEVICES: '', LYAPUNOV_NEWTON_DEVICE: 'auto' }
 
-/** 合同 `RobotCapability.kind` 的封闭 6 元组（`packages/sim-contract/src/index.ts:129-142`）。 */
-const CONTRACT_KINDS = ['thrust', 'vehicle', 'joint', 'gripper', 'lift', 'control'] as const
+/** 合同 `RobotCapability.kind` 的共享 8 元组（`packages/sim-contract/src/index.ts:129-142`）。 */
+const CONTRACT_KINDS = ROBOT_CAPABILITY_KINDS
 /** 合同 `ACTION_KINDS` 的 10 个动作 kind（worker CAPABILITIES.unsupported.execute 的键）。 */
-const ACTION_KINDS = ['trajectory', 'joint', 'vehicle', 'lift', 'gripper', 'gait', 'control', 'thrust', 'tendon', 'batch'] as const
+const ACTION_KINDS = ['vehicle', 'lift', 'gripper', 'gait', 'thrust', 'tendon', 'batch'] as const
 /** 声明键（CAPABILITIES.unsupported）→ 线上方法名。两份表都取自 worker 的实时自报，不是抄来的常量。 */
 const DECLARED_METHODS: Record<string, string> = {
-  capture: 'capture', captureMulti: 'capture_multi', cameraList: 'camera_list', cameraAdjust: 'camera_adjust',
+  cameraAdjust: 'camera_adjust',
   cameraProjectAnnotation: 'camera_project_annotation', cameraDatasetExport: 'camera_dataset_export', assist: 'assist',
 }
 
 type Reply = { result?: any; error?: { code?: string; message?: string } }
 
-const snapshot = (sceneId: string) => ({
-  sceneId, revision: 1,
+const snapshot = (sceneId: string): SceneSnapshot => ({
+  sceneId, revision: 1, coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' },
   entities: [{
-    entityId: 'arm-a', name: 'arm-a',
+    entityId: 'arm-a', name: 'arm-a', resources: [],
     transform: { position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
     components: { mujoco: { sourcePath: ARM } },
   }],
@@ -73,7 +76,8 @@ function drive(requests: Array<{ method: string; args: unknown }>, env: Record<s
   lines.push(JSON.stringify({ id: '__eof', method: 'shutdown', args: {} }))
   const run = spawnSync(PYTHON, ['-u', WORKER], {
     cwd: DEV, input: lines.join('\n') + '\n', encoding: 'utf8', timeout: 600_000,
-    env: { ...process.env, LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot!, ...env },
+    env: { ...process.env, CUDA_VISIBLE_DEVICES: '', NVIDIA_VISIBLE_DEVICES: '',
+      LYAPUNOV_NEWTON_DEVICE: 'cpu', LYAPUNOV_NEWTON_CACHE_ROOT: cacheRoot!, ...env },
   })
   const events: any[] = []
   const replies = new Map<number, Reply>()
@@ -136,7 +140,7 @@ describe.skipIf(!available)('DEV-008：Newton 自报 ↔ 实际（真机 worker�
     describeReply = run.replies.get(base + 5)!.result
   }, 600_000)
 
-  test('10 个动作 kind 逐个按 ACTION_UNSUPPORTED 拒绝（含 batch 展开）', () => {
+  test('未接通的 7 个动作 kind 按 ACTION_UNSUPPORTED 拒绝', () => {
     expect(run.status).toBe(0)
     const declaredExecute = declaredUnsupported.execute as Record<string, string>
     expect(Object.keys(declaredExecute).sort()).toEqual([...ACTION_KINDS].sort())
@@ -147,7 +151,7 @@ describe.skipIf(!available)('DEV-008：Newton 自报 ↔ 实际（真机 worker�
     }
     const batch = run.replies.get(3 + ACTION_KINDS.length)!
     expect(batch.error?.code).toBe(declaredExecute.batch)
-    expect(batch.error?.message).toContain('batch: joint')
+    expect(batch.error?.message).toContain('batch')
   })
 
   test('方法级 unsupported 键按自报的码拒绝，一个不漏（声明表即断言表）', () => {
@@ -158,8 +162,8 @@ describe.skipIf(!available)('DEV-008：Newton 自报 ↔ 实际（真机 worker�
       expect({ key, code: reply.error?.code }).toEqual({ key, code: declaredUnsupported[key] })
     }
     // 声明里的非"方法名"键：observe.contacts 走观测选择，collisionPatches 走 open/sync 入参。
-    expect(declaredUnsupported['observe.contacts']).toBe('UNSUPPORTED_CAPABILITY')
-    expect(run.replies.get(offset + declaredKeys.length)!.error?.code).toBe('UNSUPPORTED_CAPABILITY')      // 21 observe(contacts)
+    expect(declaredUnsupported['observe.contacts']).toBeUndefined()
+    expect(run.replies.get(offset + declaredKeys.length)!.result.contacts).toBeArray()      // 21 observe(contacts)
     expect(run.replies.get(offset + declaredKeys.length + 2)!.error?.code).toBe('UNSUPPORTED_CAPABILITY')  // 23 open(collisionPatches)
     expect(run.replies.get(offset + declaredKeys.length + 3)!.error?.code).toBe('UNSUPPORTED_CAPABILITY')  // 24 sync(collisionPatches)
   })
@@ -174,28 +178,23 @@ describe.skipIf(!available)('DEV-008：Newton 自报 ↔ 实际（真机 worker�
     expect(plainFrame.assistAdvanceCount).toBe(0)
   })
 
-  test('describe 覆盖合同封闭 6 个 kind，全部 available=false 且原因前缀＝执行侧真实拒绝码', () => {
+  test('describe 覆盖共享 8 个 kind，已接通的源驱动可用，其他逐项给真实拒绝码', () => {
     const capabilities = describeReply.capabilities as Array<{ kind: string; available: boolean; reason?: string }>
     expect(capabilities.map(item => item.kind).sort()).toEqual([...CONTRACT_KINDS].sort())
-    const declaredExecute = declaredUnsupported.execute as Record<string, string>
     for (const item of capabilities) {
-      expect({ kind: item.kind, available: item.available }).toEqual({ kind: item.kind, available: false })
-      // **6 条逐条**对照（此前只对了 joint 一条 ⇒ 另外 5 条是敞口）：前缀必须恰好等于 execute 侧对
-      // **同一个 kind** 的拒绝码。"声明 == 真机拒绝回执"由上面那条 10 个 kind 的用例逐条从真机回执钉住，
-      // 于是三段合成一条链：describe 的 reason 前缀 ≡ 声明表 ≡ execute 真实返回码。
-      expect({ kind: item.kind, prefix: item.reason?.split(': ')[0] })
-        .toEqual({ kind: item.kind, prefix: declaredExecute[item.kind] })
-      expect(item.reason?.startsWith(declaredExecute[item.kind] + ': ')).toBe(true)
+      const supported = item.kind === 'joint' || item.kind === 'control'
+      expect(item.available).toBe(supported)
+      if (!supported) expect(item.reason?.startsWith(declaredUnsupported.execute[item.kind] + ': ')).toBe(true)
     }
-    // 逐实体能力表的判定与 execute 的真实拒绝同源：两边都能查到同一个码（值本身是线上码，钉死）。
-    expect(describeReply.controlledJointNames).toEqual([])
-    expect(declaredUnsupported.execute.joint).toBe('ACTION_UNSUPPORTED')
+    expect(describeReply.controlledJointNames).toHaveLength(3)
+    expect(describeReply.joints.every((joint: any) => joint.controlMode === 'position')).toBe(true)
+    expect(describeReply.controlMetadata).toBeUndefined()
   })
 
-  test('controlledJointNames 为空有回执：controlMetadata 如实说明原因', () => {
-    expect(describeReply.controlMetadata.status).toBe('UNAVAILABLE')
-    expect(describeReply.controlMetadata.reason).toContain('没有动作/控制通道')
-    expect(describeReply.controlMetadata.reason).toContain('ACTION_UNSUPPORTED')
+  test('可用性逐世界回传：有源位置驱动才开放 execute/manualClockAdvance', () => {
+    expect(openHandle.capabilities.supported.execute).toBe(true)
+    expect(openHandle.capabilities.supported.manualClockAdvance).toBe(true)
+    expect(openHandle.capabilities.supported.contacts).toBe(true)
   })
 
   test('ready 与 capabilities 两条自报路径给同一份能力表与同一份设备事实', () => {
@@ -300,5 +299,172 @@ describe.skipIf(!available)('DEV-008：无 CUDA 时的设备降级必须如实�
     expect(fatal.error.code).toBe('PROVIDER_UNAVAILABLE')
     expect(fatal.error.message).toContain('显式指定的设备不可用: cuda:0')
     expect(run.replies.size).toBe(0)                          // 没有伪造任何能力回复
+  }, 600_000)
+})
+
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+describe.skipIf(!available)('Newton 源位置控制、停止与接触（真实 CPU 解释器和公共 Provider）', () => {
+  let provider: NewtonProvider
+  let names: string[]
+  const worldId = 'w-position-cpu'
+  const scene = snapshot('position-cpu')
+  beforeAll(async () => {
+    provider = new NewtonProvider({ pythonPath: PYTHON, workerPath: WORKER, device: 'cpu', cacheRoot })
+    const handle = await provider.open(scene, { worldId, clock: 'manual', timestepS: .002 })
+    expect(handle.device).toBe('cpu')
+    names = (await provider.describe(worldId, 'arm-a')).controlledJointNames
+    expect(names).toHaveLength(3)
+  }, 600_000)
+  afterAll(async () => { if (provider) await provider.dispose() })
+
+  test('manual 空闲冻结；joint、trajectory 真运动；control 精确推进整数步', async () => {
+    const first = await provider.observe(worldId)
+    await wait(30)
+    expect((await provider.observe(worldId)).stepIndex).toBe(first.stepIndex)
+    const joint = await provider.execute(worldId, {
+      actionId: 'joint-physical', expectedGeneration: 1, kind: 'joint', entityId: 'arm-a',
+      jointNames: [names[0]!], positions: [.4], durationS: .2, settleTimeS: .2,
+    })
+    expect(joint.status).toBe('completed')
+    expect(joint.finalState!.stepIndex).toBe(200)
+    expect(Math.abs(joint.finalState!.entities[0]!.joints!.positions[0]! - .4)).toBeLessThan(.06)
+    expect(joint.finalState!.entities[0]!.joints!.positions[0]!).toBeGreaterThan(.25)
+    expect(joint.finalState!.simTime).toBeCloseTo(.4, 9)
+    const before = joint.endStep!
+    const control = await provider.execute(worldId, {
+      actionId: 'control-37', expectedGeneration: 1, kind: 'control', entityId: 'arm-a',
+      jointNames: [names[0]!], positions: [.2], stepCount: 37,
+    })
+    expect(control.status).toBe('completed')
+    expect(control.endStep! - control.startStep! + 1).toBe(37)
+    expect(control.endStep! - before).toBe(37)
+    expect((control.effect!.motions as any[])[0].appliedSteps).toBe(37)
+    const trajectory = await provider.execute(worldId, {
+      actionId: 'trajectory-physical', expectedGeneration: 1, kind: 'trajectory', entityId: 'arm-a',
+      jointNames: names, points: [{ timeS: .15, positions: [.1, -.1, .1] }], settleTimeS: .15,
+    })
+    expect(trajectory.status).toBe('completed')
+    expect(trajectory.endStep! - trajectory.startStep! + 1).toBe(150)
+    expect(Math.abs(trajectory.finalState!.entities[0]!.joints!.positions[0]! - .1)).toBeLessThan(.06)
+    expect(trajectory.finalState!.entities[0]!.joints!.positions.every(Number.isFinite)).toBe(true)
+    await wait(25)
+    expect((await provider.observe(worldId)).stepIndex).toBe(trajectory.endStep!)
+  }, 600_000)
+
+  test('范围/不完整轨迹不推进；AbortSignal 产生真实取消回执并保持当时实测参考', async () => {
+    const before = (await provider.observe(worldId)).stepIndex
+    await expect(provider.execute(worldId, {
+      actionId: 'bad-range', expectedGeneration: 1, kind: 'joint', entityId: 'arm-a',
+      jointNames: [names[0]!], positions: [3], durationS: .2,
+    })).rejects.toMatchObject({ code: 'OUT_OF_RANGE' })
+    await expect(provider.execute(worldId, {
+      actionId: 'bad-vector', expectedGeneration: 1, kind: 'trajectory', entityId: 'arm-a',
+      jointNames: [names[0]!], points: [{ timeS: .2, positions: [.2] }],
+    })).rejects.toMatchObject({ code: 'INCOMPLETE_JOINT_VECTOR' })
+    expect((await provider.observe(worldId)).stepIndex).toBe(before)
+    const abort = new AbortController()
+    const pending = provider.execute(worldId, {
+      actionId: 'cancel-real', expectedGeneration: 1, kind: 'control', entityId: 'arm-a',
+      jointNames: [names[0]!], positions: [-.3], stepCount: 1_000_000,
+    }, abort.signal)
+    const deadline = Date.now() + 30_000
+    while ((await provider.observe(worldId)).stepIndex < before + 5 && Date.now() < deadline) await wait(5)
+    abort.abort()
+    const cancelled = await pending
+    expect(cancelled.status).toBe('cancelled')
+    expect(cancelled.reason).toBe('STOP_CONFIRMED')
+    expect(cancelled.endStep!).toBeGreaterThan(before)
+    const effect = (cancelled.effect!.motions as any[])[0]
+    expect(effect.appliedSteps).toBeGreaterThan(0)
+    expect(effect.holdReference).toEqual(effect.measuredPositions)
+    expect(effect.lastAppliedPositions).toEqual([-.3])
+    await wait(25)
+    expect((await provider.observe(worldId)).stepIndex).toBe(cancelled.endStep!)
+    expect((await provider.receipt(worldId, 'cancel-real')).status).toBe('cancelled')
+  }, 600_000)
+
+  test('未来动作尚未写目标可停止；重建终结旧代次动作，迟到停止不触碰新代次', async () => {
+    const before = await provider.observe(worldId)
+    const future = provider.execute(worldId, {
+      actionId: 'future-cancel', expectedGeneration: 1, kind: 'joint', entityId: 'arm-a',
+      startStep: before.stepIndex + 1_000_000, jointNames: [names[0]!], positions: [.2], durationS: .2,
+    })
+    await wait(20)
+    const stopped = await provider.stop(worldId, { actionId: 'future-cancel', expectedGeneration: 1 })
+    const receipt = await future
+    expect(stopped.affectedEntityIds).toEqual(['arm-a'])
+    expect(receipt.status).toBe('cancelled')
+    expect((receipt.effect!.motions as any[])[0].appliedSteps).toBe(0)
+    expect((receipt.effect!.motions as any[])[0].lastAppliedPositions).toBeNull()
+    expect((receipt.effect!.motions as any[])[0].holdReference).toBeNull()
+    const long = provider.execute(worldId, {
+      actionId: 'rebuild-cancel', expectedGeneration: 1, kind: 'control', entityId: 'arm-a',
+      jointNames: [names[0]!], positions: [.3], stepCount: 1_000_000,
+    })
+    await wait(20)
+    const rebuilt = await provider.sync(worldId, { ...scene, revision: 2 }, { forceRebuild: true })
+    const old = await long
+    expect(old.status).toBe('cancelled')
+    expect(old.reason).toBe('MODEL_REBUILT')
+    expect(old.generation).toBe(1)
+    expect(rebuilt.worldGeneration).toBe(2)
+    await expect(provider.stop(worldId, { expectedGeneration: 1 })).rejects.toMatchObject({ code: 'STALE_GENERATION' })
+    expect((await provider.observe(worldId)).stepIndex).toBe(0)
+    expect((await provider.receipt(worldId, 'rebuild-cancel')).generation).toBe(1)
+  }, 600_000)
+
+  test('源 ctrlrange 生效；XPBD 不支持的有限力限在 describe 与执行侧同样拒绝', async () => {
+    const source = readFileSync(ARM, 'utf8')
+    const bounded = snapshot('bounded-source')
+    bounded.entities[0]!.components.mujoco = { xml: source.replace('<position name="a1"', '<position ctrllimited="true" ctrlrange="-.1 .1" name="a1"') }
+    const handle = await provider.open(bounded, { worldId: 'w-bounded', clock: 'manual' })
+    const description = await provider.describe(handle.worldId, 'arm-a')
+    await expect(provider.execute(handle.worldId, {
+      actionId: 'source-range', expectedGeneration: 1, kind: 'control', entityId: 'arm-a',
+      jointNames: [description.controlledJointNames[0]!], positions: [.2], stepCount: 1,
+    })).rejects.toMatchObject({ code: 'OUT_OF_RANGE' })
+    expect((await provider.observe(handle.worldId)).stepIndex).toBe(0)
+    await provider.close(handle.worldId)
+    const limited = snapshot('force-limited-source')
+    limited.entities[0]!.components.mujoco = { xml: source.replaceAll('<position ', '<position forcelimited="true" forcerange="-1 1" ') }
+    const blocked = await provider.open(limited, { worldId: 'w-force-limit', clock: 'manual' })
+    const blockedDescription = await provider.describe(blocked.worldId, 'arm-a')
+    expect(blockedDescription.controlledJointNames).toEqual([])
+    expect(blocked.capabilities!.supported).toMatchObject({ execute: false, manualClockAdvance: false })
+    expect(blockedDescription.capabilities!.find(c => c.kind === 'joint')!.available).toBe(false)
+    await expect(provider.execute(blocked.worldId, {
+      actionId: 'force-limit', expectedGeneration: 1, kind: 'joint', entityId: 'arm-a',
+      jointNames: [blockedDescription.joints[0]!.name], positions: [.1], durationS: .1,
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
+    await provider.close(blocked.worldId)
+  }, 600_000)
+
+  test('真实球体接触读回距离、法线与XPBD力；穿透聚合来自负距离而非占位值', async () => {
+    const ball = snapshot('contact-cpu')
+    ball.entities[0]!.components.mujoco = { xml: '<mujoco model="ball"><worldbody><body name="ball" pos="0 0 .04"><freejoint/><geom name="ball-surface" type="sphere" size=".05" mass="1"/></body></worldbody></mujoco>' }
+    const handle = await provider.open(ball, { worldId: 'w-contact', clock: 'realtime', timestepS: .002, ground: true })
+    expect(handle.device).toBe('cpu')
+    const initial = await provider.observe(handle.worldId, { contacts: true })
+    expect(initial.contacts!.length).toBeGreaterThan(0)
+    expect(initial.contacts!.some(c => c.distanceM! < 0)).toBe(true)
+    expect(initial.penetrations!.count).toBeGreaterThan(0)
+    let frame = initial
+    const deadline = Date.now() + 30_000
+    while (!frame.contacts!.some(c => c.forceN && Math.hypot(...c.forceN) > .01) && Date.now() < deadline) {
+      await wait(10)
+      frame = await provider.observe(handle.worldId, { contacts: true })
+    }
+    expect(frame.stepIndex).toBeGreaterThan(0)
+    expect(frame.contacts!.some(c => c.geom1 === '__ground' || c.geom2 === '__ground')).toBe(true)
+    expect(frame.contacts!.some(c => c.forceN && Math.hypot(...c.forceN) > .01)).toBe(true)
+    for (const contact of frame.contacts!) {
+      expect(Number.isFinite(contact.distanceM)).toBe(true)
+      expect(contact.sourceStep).toBe(frame.stepIndex)
+      expect(contact.normal!.every(Number.isFinite)).toBe(true)
+      if (contact.forceN) expect(contact.forceN.every(Number.isFinite)).toBe(true)
+    }
+    await provider.close(handle.worldId)
   }, 600_000)
 })

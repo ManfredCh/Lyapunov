@@ -16,6 +16,7 @@ for name in ('numpy', 'newton', 'warp'):
     module.__version__ = 'offline-stub'
     sys.modules[name] = module
 sys.modules['warp'].config = types.SimpleNamespace(kernel_cache_dir=None)
+sys.modules['warp'].init = lambda: None
 worker_path = sys.argv.pop(1)
 os.environ['LYAPUNOV_NEWTON_CACHE_ROOT'] = os.path.join(os.getcwd(), 'cache')
 spec = importlib.util.spec_from_file_location('offline_newton_worker', worker_path)

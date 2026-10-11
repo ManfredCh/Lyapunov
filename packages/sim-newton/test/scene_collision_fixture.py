@@ -246,10 +246,13 @@ class SceneCollisionTests(unittest.TestCase):
             value.sync(scene(parent, base, revision=2))
         self.assertEqual(caught.exception.code, 'UNSUPPORTED_CAPABILITY')
         self.assertIn('剪切', str(caught.exception))
-        for selection in ({'contacts': True}, {'collisionTopology': {}}, {'penetrations': True}):
-            with self.assertRaises(worker.SimError) as caught:
-                value.observe(selection)
-            self.assertEqual(caught.exception.code, 'UNSUPPORTED_CAPABILITY')
+        for selection in ({'contacts': True}, {'penetrations': True}):
+            observation = value.observe(selection)
+            self.assertIsInstance(observation['contacts'], list)
+            self.assertEqual(observation['penetrations'], {'count': 0, 'worst': []})
+        with self.assertRaises(worker.SimError) as caught:
+            value.observe({'collisionTopology': {}})
+        self.assertEqual(caught.exception.code, 'UNSUPPORTED_CAPABILITY')
         EVIDENCE['refusals'] = refusals
 
 
