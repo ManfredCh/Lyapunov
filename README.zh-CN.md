@@ -30,6 +30,16 @@
 
 感谢 [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) 的支持，使 Lyapunov 的开发得以实现。
 
+## Alpha8 本次更新 · 0.1.0-alpha.8
+
+- 世界关闭暂时失败后可重试，修复 [Issue #1](https://github.com/ManfredCh/Lyapunov/issues/1) 描述的问题。
+- 接通原生物理材料与状态：MuJoCo flex 与实体缆线；Newton 受限源位置控制、静态容器 water MPM 与原生 RGB-D 相机；已有 Isaac USD 可变形体与 PBD 粒子的参数及节点／粒子读回。可用范围遵循各引擎支持的能力与本机运行环境要求。
+- 修改原生参数后同步并读回实际值，再保存与重开便携工程，保留原生文档和资源。
+- 同名工程可用**打开副本 / Open copy**创建新场景，保留原场景及其资源。
+- 自动检查点限定所选工程目录，准备过程支持取消。
+
+查看[完整 Alpha8 发布说明](docs/releases/alpha8.md)与[Alpha8 发布及下载](https://github.com/ManfredCh/Lyapunov/releases/tag/v0.1.0-alpha.8)。
+
 **杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。
