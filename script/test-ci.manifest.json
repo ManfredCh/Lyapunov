@@ -3033,6 +3033,13 @@
       "markers": [],
       "decision": "include",
       "reason": "Newton 原生 CPU 相机模块回归：射线 RGB、米制轴向深度、挂载外参与同一步读取；沿既有 Newton 无外部标记分类纳入。所选解释器（LYAPUNOV_NEWTON_PYTHON，未设置则候选 .runtime/newton-env/bin/python）不存在时明确跳过，跳过不记为原生运行通过；最终 worker 消费链另行验收。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/project-open.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha8 工程重开：真实 SceneOperations 验证显式副本保留同 ID 冲突保护、原场景与资源，错误传播。离线临时目录。"
     }
   ]
 }

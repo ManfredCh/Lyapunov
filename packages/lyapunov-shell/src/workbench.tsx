@@ -69,6 +69,7 @@ import {settleStoppedActions} from "./action-state.ts"
 import {applySceneIfCurrent,runRestoreFollowthrough} from "./workbench-import.ts"
 import {adoptWorldHandle,isStaleStateResponse,projectionWorldLanded} from "./workbench-state-order.ts"
 import {sameWorldBinding} from "./workbench-batch-binding.ts"
+import {openProjectFile} from "./project-open.ts"
 const savedCameraViews=new Map<string,ViewerViewState>()
 const WORKBENCH_STATE_POLL_MS=250
 export const VIEWER_NAVIGATION_HELP={zh:"漫游模式：中键拖动环顾，Shift+中键平移，滚轮前后移动，点画面后 WASD 移动，Q 下降 / E 上升，按住 Shift 加速 5 倍；Esc 切换环绕。",en:"First-person mode: middle-drag to look, Shift+middle-drag to pan, wheel to dolly, click the canvas then WASD to move, Q down / E up, hold Shift for 5x speed; Esc switches to orbit."} as const
@@ -1514,9 +1515,14 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // ---- 面板内容（每个工具面板一次只渲染一个；未渲染的不挂载、不发请求） ----
  // 四个域面板（素材/机器人/物件/环境）共用同一份「可加入场景」判据：有可编辑场景、非录制回放。
  const canMountAsset=Boolean(scene&&!readOnly&&!replayActive)
+ const openProject=async(asCopy:boolean)=>{
+  const next=await openProjectFile(path,asCopy,input=>api.command<SceneSnapshot>("scene_open",input))
+  await refreshScenes();await loadScene(next.sceneId);await refreshAssets()
+ }
  const projectFiles=<details className="lya-project-files"><summary>{tr("打开与保存工程","Open & save project")}</summary>
   <label className="lya-field-label">{tr("工程文件路径","Project file path")}<input className="lya-wide" aria-label={tr("工程文件路径","Project file path")} placeholder="/path/to/scene.json" value={path} onChange={event=>setPath(event.target.value)}/></label>
-  <div className="lya-row"><button disabled={readOnly||!sessionId||!path.trim()} onClick={()=>perform(async()=>{const next=await api.command<SceneSnapshot>("scene_open",{path});await refreshScenes();await loadScene(next.sceneId);await refreshAssets()})}>{tr("打开工程","Open project")}</button>
+  <div className="lya-row"><button disabled={readOnly||!sessionId||!path.trim()} onClick={()=>perform(async()=>{await openProject(false)})}>{tr("打开工程","Open project")}</button>
+  <button disabled={readOnly||!sessionId||!path.trim()} title={tr("同名场景已有更改时，可作为新场景打开；现有场景保留。","When the existing scene has changed, open a copy as a new scene and keep the existing scene.")} onClick={()=>perform(()=>openProject(true))}>{tr("打开副本","Open copy")}</button>
   <button disabled={readOnly||!scene||!path.trim()} onClick={()=>perform(async()=>{const result=await api.command<any>("scene_save",{sceneId:scene!.sceneId,path,portable:true});setNotice(result.missing?.length?tr(`工程已保存，${result.missing.length} 个引用文件需要处理。`,`Project saved; ${result.missing.length} references need attention.`):tr("工程及依赖已保存。","Project and dependencies saved."))})}>{tr("保存工程","Save project")}</button></div>
  </details>
  const [historyState,setHistoryState]=useState<SessionHistoryState|null>(null),[historyNotice,setHistoryNotice]=useState("")
