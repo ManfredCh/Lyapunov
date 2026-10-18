@@ -26,6 +26,17 @@ function requestDescription(value:any,actualModel?:string,formalProduct?:Generat
  return rows.join('\n\n')
 }
 const pendingByHost=new WeakMap<object,Map<string,{fingerprint:string;promise:Promise<void>}>>()
+/** 复用共享授权时只取消当前等待者，不取消仍由原调用持有的授权任务。 */
+async function waitForPending(promise:Promise<void>,signal?:AbortSignal):Promise<void> {
+ if(!signal)return promise
+ signal.throwIfAborted()
+ let onAbort!:()=>void
+ const aborted=new Promise<never>((_,reject)=>{
+  onAbort=()=>reject(signal.reason)
+  signal.addEventListener('abort',onAbort,{once:true})
+ })
+ try{await Promise.race([promise,aborted])}finally{signal.removeEventListener('abort',onAbort)}
+}
 /** 原生一次授权，绑定实际请求及报价；原生grant只在用户明确回答后写入。 */
 export function generationAuthorizer(ctx:Context,agent:Agent|undefined,allowPrompt=true):GenerationAuthorizer {
  return async(input,signal)=>{
@@ -42,7 +53,7 @@ export function generationAuthorizer(ctx:Context,agent:Agent|undefined,allowProm
   let pending=pendingByHost.get(ctx.root)
   if(!pending){pending=new Map();pendingByHost.set(ctx.root,pending)}
   const active=pending.get(key)
-  if(active){if(active.fingerprint!==fingerprint)throw new Error('GENERATION_REQUEST_ID_CONFLICT: 同一requestId已有不同请求等待确认');await active.promise;signal?.throwIfAborted();return}
+  if(active){if(active.fingerprint!==fingerprint)throw new Error('GENERATION_REQUEST_ID_CONFLICT: 同一requestId已有不同请求等待确认');await waitForPending(active.promise,signal);return}
   const task=(async()=>{
   // 弹窗标题与问句按产品给：3D 三件套沿用原文案；图像请求不能显示"生成 3D"（出的是图不是 3D 资产）。
   const names={marble:'World Labs Marble',hunyuan:'混元 3D',tripo:'Tripo 3D（阿里云百炼）',image:'图像生成'},titles={marble:'生成 3D',hunyuan:'生成 3D',tripo:'生成 3D',image:'生成图像'},id='generate-'+randomUUID()

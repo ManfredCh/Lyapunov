@@ -176,9 +176,11 @@ type Asked = {
 }
 
 /** 最小 ctx：只提供授权流程真正用到的 credentials / userQuestions，以及 pending 去重用的 root。 */
-function authorizer(selected = "提交生成") {
+function authorizer(selected = "提交生成", waitForAnswer?: Promise<void>) {
   const store = new Map<string, unknown>()
   const asked: Asked[] = []
+  let markPrompted!: () => void
+  const prompted = new Promise<void>((resolve) => { markPrompted = resolve })
   const credentials = {
     readRecord: async (key: string) => store.get(key),
     modifyRecord: async (key: string, update: (prior: unknown) => unknown) => {
@@ -190,6 +192,8 @@ function authorizer(selected = "提交生成") {
   const questions = {
     ask: async (input: Asked) => {
       asked.push(input)
+      markPrompted()
+      if (waitForAnswer) await waitForAnswer
       return { answers: [{ id: input.questions[0]!.id, selected: selected ? [selected] : [] }] }
     },
   }
@@ -198,7 +202,7 @@ function authorizer(selected = "提交生成") {
     get: (name: string) =>
       name === "credentials" ? credentials : name === "userQuestions" ? questions : undefined,
   } as unknown as Context
-  return { authorize: generationAuthorizer(ctx, {} as Agent), asked, store, ctx }
+  return { authorize: generationAuthorizer(ctx, {} as Agent), asked, store, ctx, prompted }
 }
 
 const imageQuote = {
@@ -343,6 +347,60 @@ describe("授权与取消边界", () => {
     expect(asked.length).toBe(2)
     const grant = [...store.values()][0] as { payload: Record<string, unknown> }
     expect(grant.payload).toMatchObject({ points: 800, quoteId: "d".repeat(64) })
+  })
+
+  test("并发复用确认时，后来的调用可单独取消且不影响原调用", async () => {
+    let answerPrompt!: () => void
+    const waitForAnswer = new Promise<void>((resolve) => { answerPrompt = resolve })
+    const { authorize, asked, store, prompted } = authorizer("提交生成", waitForAnswer)
+    const request = approval("tripo-coalesced")
+    const original = authorize(request)
+    await prompted
+    expect(asked).toHaveLength(1)
+
+    let originalSettled = false
+    void original.then(() => { originalSettled = true }, () => { originalSettled = true })
+    const controller = new AbortController()
+    const abortReason = new Error("secondary caller stopped waiting")
+    const secondary = authorize(request, controller.signal)
+    await Promise.resolve()
+    controller.abort(abortReason)
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const outcome = await Promise.race([
+        secondary.then(
+          () => ({ status: "fulfilled" as const }),
+          (error: unknown) => ({ status: "rejected" as const, error }),
+        ),
+        new Promise<{ status: "timed-out" }>((resolve) => {
+          timeout = setTimeout(() => resolve({ status: "timed-out" }), 50)
+        }),
+      ])
+      expect(outcome.status).toBe("rejected")
+      if (outcome.status === "rejected") expect(outcome.error).toBe(abortReason)
+      expect(originalSettled).toBe(false)
+      expect(asked).toHaveLength(1)
+      expect(store.size).toBe(0)
+    } finally {
+      clearTimeout(timeout)
+      answerPrompt()
+      await original
+    }
+
+    expect(store.size).toBe(1)
+    expect(asked).toHaveLength(1)
+  })
+
+  test("已经取消的调用不会读取授权记录或弹出确认", async () => {
+    const { authorize, asked, store } = authorizer()
+    const controller = new AbortController()
+    const abortReason = new Error("already stopped")
+    controller.abort(abortReason)
+
+    await expect(authorize(approval("tripo-already-aborted"), controller.signal)).rejects.toBe(abortReason)
+    expect(asked).toHaveLength(0)
+    expect(store.size).toBe(0)
   })
 
   test("后台确认没有既有 grant 就拒绝；前台确认过的同一请求可在后台复用", async () => {
