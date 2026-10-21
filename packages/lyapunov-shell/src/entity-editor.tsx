@@ -3,13 +3,17 @@ import type {Entity,SceneCommit,SceneSnapshot,ScenePatch} from "../../lyapunov-c
 import {entityDisplayName} from './scene-entity-name.ts'
 import type {CameraExitBridge} from './camera-authoring.ts'
 export type Translate=(cn:string,en:string)=>string
-export interface NumericProps {label:string;value:number;set:(value:number)=>void;min?:number;max?:number;step?:number|"any";disabled?:boolean}
-export function NumericInput({label,value,set,min,max,step=.1,disabled}:NumericProps){
- const [text,setText]=useState(String(value)),focused=useRef(false)
- useEffect(()=>{if(!focused.current)setText(String(value))},[value])
- return <input type="number" aria-label={label} value={text} disabled={disabled} min={min} max={max} step={step} onFocus={()=>{focused.current=true}} onChange={event=>{const text=event.target.value;setText(text);if(text.trim()&&Number.isFinite(Number(text)))set(Number(text))}} onBlur={()=>{focused.current=false;setText(String(value))}}/>
+export interface NumericProps {label:string;value:number;set:(value:number)=>void;min?:number;max?:number;step?:number|"any";disabled?:boolean;format?:(value:number)=>string}
+export function NumericInput({label,value,set,min,max,step=.1,disabled,format}:NumericProps){
+ const display=(next:number)=>format?format(next):String(next)
+ const [text,setText]=useState(display(value)),focused=useRef(false)
+ useEffect(()=>{if(!focused.current)setText(display(value))},[value])
+ return <input type="number" aria-label={label} value={text} disabled={disabled} min={min} max={max} step={step} onFocus={()=>{focused.current=true}} onChange={event=>{const text=event.target.value;setText(text);if(text.trim()&&Number.isFinite(Number(text)))set(Number(text))}} onBlur={()=>{focused.current=false;setText(display(value))}}/>
 }
 export function NumberField(props:NumericProps){return <label>{props.label}<NumericInput {...props}/></label>}
+/** 设计稿 object-properties 的折叠行摘要：Rotation 显示角度、Scale 显示比例。 */
+const eulerDegreesText=(q:[number,number,number,number]):string=>{const [x,y,z,w]=q;const roll=Math.atan2(2*(w*x+y*z),1-2*(x*x+y*y));const pitch=Math.asin(Math.max(-1,Math.min(1,2*(w*y-z*x))));const yaw=Math.atan2(2*(w*z+x*y),1-2*(y*y+z*z));return [roll,pitch,yaw].map(value=>`${Math.round(value*180/Math.PI)}°`).join(' · ')}
+const scaleSummaryText=(scale:[number,number,number]):string=>scale.map(value=>String(Number(value.toFixed(3)))).join(' · ')
 interface Draft {sceneId:string;baseRevision:number;base:Entity;name:string;position:[number,number,number];quaternion:[number,number,number,number];scale:[number,number,number];parent:string;visible:boolean;dirty:boolean}
 function createDraft(sceneId:string,revision:number,entity:Entity):Draft{return {sceneId,baseRevision:revision,base:structuredClone(entity),name:entity.name,position:[...entity.transform.position],quaternion:[...entity.transform.quaternion],scale:[...entity.transform.scale],parent:entity.parentId??"",visible:entity.components.visual?.visible!==false,dirty:false}}
 export function EntityEditor({sceneId,revision,entity,entities,tr,commit,exitBridge,exitId}:{sceneId:string;revision:number;entity:Entity;entities:Entity[];tr:Translate;commit:(input:SceneCommit)=>Promise<SceneSnapshot>;exitBridge?:CameraExitBridge;exitId?:string}){
@@ -66,18 +70,29 @@ export function EntityEditor({sceneId,revision,entity,entities,tr,commit,exitBri
   summary:()=>({dirtyDrafts:pendingDrafts().length,runningActions:0}),
   flush:async()=>{if(pendingSave.current)await pendingSave.current;for(const value of pendingDrafts())await submitRef.current(value);if(pendingDrafts().length)throw Error('ENTITY_DRAFT_SAVE_UNCONFIRMED')},
  }),[exitBridge,exitId])
- return <fieldset className="lya-property-editor"><legend>{tr("属性","Properties")}</legend>
-  {entity.locked&&<p className="lya-help" data-testid="entity-locked">{tr('此节点已锁定。请在场景层级中解锁后编辑变换；仍可显隐或删除。','This node is locked. Unlock it in the scene hierarchy to edit transforms. Visibility and deletion remain available.')}</p>}
-  <label className="lya-field-label">{tr("名称","Name")}<input className="lya-entity-name" aria-label={tr("实体名称","Entity name")} value={entityDisplayName({...draft.base,name:draft.name},tr)} disabled={saving} onChange={event=>edit({name:event.target.value})}/></label>
-  <div className="lya-values" style={{marginTop:7}}>{draft.position.map((value,index)=><NumberField key={key+index} label={["X m","Y m","Z m"][index]!} value={value} disabled={saving||entity.locked===true} step={.01} set={next=>edit({position:draft.position.map((value,i)=>i===index?next:value) as [number,number,number]})}/>)}</div>
-  <details><summary>{tr('方向与比例','Orientation and scale')}</summary><div className="lya-values">{draft.quaternion.map((value,index)=><NumberField key={key+'q'+index} label={['Qx','Qy','Qz','Qw'][index]!} value={value} disabled={saving||entity.locked===true} step={.01} set={next=>edit({quaternion:draft.quaternion.map((value,i)=>i===index?next:value) as [number,number,number,number]})}/>)}</div><div className="lya-values">{draft.scale.map((value,index)=><NumberField key={key+'s'+index} label={['Scale X','Scale Y','Scale Z'][index]!} value={value} disabled={saving||entity.locked===true||Boolean(entity.components.mujoco||entity.components.isaac||entity.components.articulation)} step={.1} set={next=>edit({scale:draft.scale.map((value,i)=>i===index?next:value) as [number,number,number]})}/>)}</div></details>
-  <div className="lya-row"><button type="button" disabled={saving||entity.locked===true} onClick={()=>{const [x,y,z,w]=draft.quaternion;edit({quaternion:[w,-z,y,-x]})}} title={tr("绕父坐标系 X 轴翻转 180°；保存后随场景保留。适用于没有上方向声明、显示颠倒的模型。","Rotate 180° around parent X. Save to keep the correction in the scene.")}>{tr("上下翻转","Flip upright")}</button></div>
-  <select className="lya-wide" aria-label={tr("父实体","Parent entity")} value={draft.parent} disabled={saving||entity.locked===true} onChange={event=>edit({parent:event.target.value})} style={{marginTop:7}}><option value="">{tr("场景根","Scene root")}</option>{entities.filter(candidate=>candidate.entityId!==entity.entityId&&!descendant(candidate)).map(candidate=><option key={candidate.entityId} value={candidate.entityId}>{candidate.name}</option>)}</select>
-  <label style={{marginTop:8}}><input type="checkbox" disabled={saving} checked={draft.visible} onChange={event=>edit({visible:event.target.checked})}/>{tr("显示实体","Visible")}</label>
+ return <fieldset className="lya-property-editor"><legend style={{position:'absolute',width:1,height:1,overflow:'hidden',clip:'rect(0 0 0 0)'}}>{tr("属性","Properties")}</legend>
+  {/* 设计稿 V8-05：首屏不放说明文。锁定事实用一行短状态表达，完整解释收进折叠。 */}
+ {entity.locked&&<details className="lya-advanced" data-testid="entity-locked"><summary>{tr('已锁定 · 变换只读','Locked · transforms read-only')}</summary><p className="lya-help">{tr('请在场景层级中解锁后编辑变换；仍可显隐或删除。','Unlock it in the scene hierarchy to edit transforms. Visibility and deletion remain available.')}</p></details>}
+  <div className="lya-section"><span>{tr('位置','Position')}</span><span className="lya-section-side">m</span></div>
+  <div className="lya-values" data-testid="entity-position">{draft.position.map((value,index)=><NumberField key={key+index} label={["X m","Y m","Z m"][index]!} value={value} disabled={saving||entity.locked===true} step={.01} format={value=>value.toFixed(2)} set={next=>edit({position:draft.position.map((value,i)=>i===index?next:value) as [number,number,number]})}/>)}</div>
+  <details className="lya-advanced" data-testid="entity-rotation"><summary>{tr('旋转','Rotation')} · {eulerDegreesText(draft.quaternion)}</summary><div className="lya-values">{draft.quaternion.map((value,index)=><NumberField key={key+'q'+index} label={['Qx','Qy','Qz','Qw'][index]!} value={value} disabled={saving||entity.locked===true} step={.01} set={next=>edit({quaternion:draft.quaternion.map((value,i)=>i===index?next:value) as [number,number,number,number]})}/>)}</div></details>
+  <details className="lya-advanced" data-testid="entity-scale"><summary>{tr('比例','Scale')} · {scaleSummaryText(draft.scale)}</summary><div className="lya-values">{draft.scale.map((value,index)=><NumberField key={key+'s'+index} label={['Scale X','Scale Y','Scale Z'][index]!} value={value} disabled={saving||entity.locked===true||Boolean(entity.components.mujoco||entity.components.isaac||entity.components.articulation)} step={.1} set={next=>edit({scale:draft.scale.map((value,i)=>i===index?next:value) as [number,number,number]})}/>)}</div></details>
+  {/* 设计稿 object-properties：Parent 是带当前值的折叠行；Components 行给数量摘要。 */}
+  <details className="lya-advanced" data-testid="entity-parent"><summary>{tr('父实体','Parent')} · {draft.parent?(entities.find(item=>item.entityId===draft.parent)?.name??tr('未知','Unknown')):tr('场景根','Scene root')}</summary><select className="lya-wide" aria-label={tr("父实体","Parent entity")} value={draft.parent} disabled={saving||entity.locked===true} onChange={event=>edit({parent:event.target.value})}><option value="">{tr("场景根","Scene root")}</option>{entities.filter(candidate=>candidate.entityId!==entity.entityId&&!descendant(candidate)).map(candidate=><option key={candidate.entityId} value={candidate.entityId}>{candidate.name}</option>)}</select></details>
+  <details className="lya-advanced" data-testid="entity-components-row"><summary>{tr('组件','Components')} · {Object.keys(entity.components).length}</summary><p className="lya-help" style={{overflowWrap:'anywhere'}}>{Object.keys(entity.components).join(' · ')||tr('无','None')}</p></details>
+  <details className="lya-advanced" data-testid="entity-more"><summary>{tr('更多','More')}</summary>
+   {/* 设计稿首屏标题即名称：重命名收进 More，编辑功能仍可达。 */}
+   <label className="lya-field-label">{tr("名称","Name")}<input className="lya-entity-name" aria-label={tr("实体名称","Entity name")} value={entityDisplayName({...draft.base,name:draft.name},tr)} disabled={saving} onChange={event=>edit({name:event.target.value})}/></label>
+   <div className="lya-row"><button type="button" disabled={saving||entity.locked===true} onClick={()=>{const [x,y,z,w]=draft.quaternion;edit({quaternion:[w,-z,y,-x]})}} title={tr("绕父坐标系 X 轴翻转 180°；保存后随场景保留。适用于没有上方向声明、显示颠倒的模型。","Rotate 180° around parent X. Save to keep the correction in the scene.")}>{tr("上下翻转","Flip upright")}</button></div>
+   <label><input type="checkbox" disabled={saving} checked={draft.visible} onChange={event=>edit({visible:event.target.checked})}/>{tr("显示实体","Visible")}</label>
+   <p className="lya-help" data-testid="draft-base-revision">rev {draft.baseRevision} · {entity.resources.length} {tr("资源引用","resource references")}</p>
+  </details>
+  {draft.dirty&&<p className="lya-help" data-testid="entity-draft-state">{tr('草稿未保存','Unsaved draft')}</p>}
   {draft.dirty&&revision!==draft.baseRevision&&<p className="lya-warning lya-help" data-testid="draft-revision-warning">{tr(`场景已更新到 rev ${revision}；这份草稿仍基于 rev ${draft.baseRevision}。`,`The scene is at rev ${revision}; this draft is based on rev ${draft.baseRevision}.`)}</p>}
+  {/* 设计稿 object-properties 首屏不常驻提交行：只有草稿脏时（或保存中/有错误）才出现 Apply / Reload。 */}
+  {(draft.dirty||saving||Boolean(error))&&<details className="lya-advanced" data-testid="entity-apply-menu"><summary>{tr('提交与重载','Apply / Reload')}{draft.dirty?tr(' · 有未保存草稿',' · unsaved draft'):''}</summary><div className="lya-row"><button className="lya-primary" disabled={saving||!draft.dirty} onClick={()=>void submit().catch(()=>undefined)}>{saving?tr("保存中…","Saving…"):tr("提交编辑","Apply edit")}</button><button disabled={saving} onClick={reload}>{tr("读取当前版本","Reload current")}</button></div></details>}
   {error&&<p className="lya-error lya-help" role="alert">{error}</p>}
   {notice&&<p className="lya-help" role="status">{notice}</p>}
-  <div className="lya-row" style={{marginTop:8}}><button className="lya-primary" disabled={saving||!draft.dirty} onClick={()=>void submit().catch(()=>undefined)}>{saving?tr("保存中…","Saving…"):tr("提交编辑","Apply edit")}</button><button disabled={saving} onClick={reload}>{tr("读取当前版本","Reload current")}</button></div>
-  <p className="lya-help" data-testid="draft-base-revision">rev {draft.baseRevision} · {entity.resources.length} {tr("资源引用","resource references")}{draft.dirty?tr(" · 草稿未保存"," · Unsaved draft"):""}</p>
+  {/* 设计稿首屏无提交按钮：Apply/Reload 收进具名折叠，草稿态仍如实提示。 */}
  </fieldset>
 }

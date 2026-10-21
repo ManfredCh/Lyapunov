@@ -1,7 +1,9 @@
 import type {ControlGestureDisplay} from "./control-gesture.ts"
+import {frameVideoPayload, type CaptureVideoRecord} from "./capture-video.ts"
 import type { SceneSnapshot,WorldHandle,Frame } from "../../lyapunov-contracts/src/types.ts"
 import type {EnvironmentCaptureFace} from './environment-capture.ts'
 import type {LodCaptureFace} from './lod-capture.ts'
+import type {PresentationCaptureFace} from './presentation-capture.ts'
 import type {VerifiedAdministrator} from '../../lyapunov-product-bundle/src/account/administrator.ts'
 /**
  * D1（`bugfixHistory/VISIBILITY-HOLES-20260926.md`）：computer-use 会话的**自报事实**——宿主 `plugin.ts` 的
@@ -29,12 +31,12 @@ export interface ComputerUseFacts {
   /** 被拒的输入（宿主保留最近 5 条）：`code`/`rule` 是拒它的判据，`combos` 是命中的组合键。 */
   refusals:Array<{at:string;tool:string;code:string;rule:string;combos:readonly string[]}>
 }
-export interface WorkbenchState { hostInstanceId:string; lastSceneId?:string; administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key';scene?:SceneSnapshot; worlds:WorldHandle[]; providerAvailable:boolean; captures?:CaptureRecord[]; recentActions?:Array<{id:string;label:string;waiting:boolean;receipt?:any;error?:string}>; uiActions?:Array<{id:string;action:string;args:Record<string,unknown>;enqueuedAt:string}>; /** 本窗口（clientId）自己的选择事实：多窗口同会话时，另一个窗口的选择不会覆盖它。 */ selection?:{clientId:string;facts:Record<string,unknown>}; /** D1：computer-use 会话事实（宿主 `computerUseFacts()`）；缺省＝宿主没给这一面。**渲染点**见 `workbench.tsx` 的 `ComputerUseFacts` 组件。 */ computerUse?:ComputerUseFacts }
+export interface WorkbenchState { hostInstanceId:string; lastSceneId?:string; administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key';scene?:SceneSnapshot; worlds:WorldHandle[]; providerAvailable:boolean; captures?:CaptureRecord[]; /** 连续视频记录（R-005）：与 `captures` 图像列表**分开**的具名数组，不能混用。 */ videos?:CaptureVideoRecord[]; recentActions?:Array<{id:string;label:string;waiting:boolean;receipt?:any;error?:string}>; uiActions?:Array<{id:string;action:string;args:Record<string,unknown>;enqueuedAt:string}>; /** 本窗口（clientId）自己的选择事实：多窗口同会话时，另一个窗口的选择不会覆盖它。 */ selection?:{clientId:string;facts:Record<string,unknown>}; /** D1：computer-use 会话事实（宿主 `computerUseFacts()`）；缺省＝宿主没给这一面。**渲染点**见 `workbench.tsx` 的 `ComputerUseFacts` 组件。 */ computerUse?:ComputerUseFacts }
 /** 一条批注的落盘行：编号、文字、锚点（实体局部坐标 + 下单时世界坐标）。编号与标记、截图圈点同源。 */
 export interface CaptureAnnotationRecord { index:number; annotationId:string; sceneId?:string; entityId:string; entity?:string; text:string; anchor:import('../../viewer/src/annotations.ts').ViewerAnnotationAnchor }
 /** 带批注采集在 state 投影里只给计数与摘要：界面列表用不到整套锚点，250ms 轮询不该背几百条坐标。 */
 export interface CaptureAnnotationDigest { index:number; entity:string; text:string }
-export interface CaptureRecord { captureId:string; sceneId:string; sceneRevision:number; worldId?:string; generation?:number; worldSceneRevision?:number; frameSceneRevision?:number; frameId?:string; stepIndex?:number; simTime?:number; capturedAt:string; imagePath:string; posePath?:string; attachment:{attachmentId:string;mediaType:string;width:number;height:number}; /** 附件库把图缩小入库时才有：原分辨率帧的逐字节副本（同一附件库的文件通道），`imagePath` 指向它；`attachment` 是预览。换算见 previewScaleOf/framePixelOfPreviewPixel。 */ originalImage?:{path:string;bytes:number;width:number;height:number;mediaType:string;storage:"verbatim";attachmentId:string}; camera?:unknown; /** 仅带批注的采集有：逐条编号/文字/锚点。 */ annotations?:CaptureAnnotationRecord[]; annotationCount?:number; annotationDigest?:CaptureAnnotationDigest[]; /** 带批注采集才有：发起时的相机位姿（"这张图什么视角"的正本）与喂给模型的说明。 */ prompt?:string; /** 说明投递失败时如实记录原因，不改采集本身。 */ injectionError?:string; /** 采集时该画面**可用但缺件**的警告（实体 id + 原因）：不是加载失败，但模型必须知道少的是哪一部分。 */ visualWarnings?:Array<{entityId:string;warning:string}>; /** 采集时这一帧的 **LOD 事实**：每个参与级别选择的实体用的是哪一级、哪份资源版本（`resourceId@version`）、多少三角形、距离多少。按距离正常简化时也要如实带出（数据集必须知道这份几何是简化件）；只有"比这台相机该用的级别更粗"或"该读的级别没读进来"才是降级。 */ lod?:LodCaptureFace; /** 载荷带了 LOD 面但整形没通过时的原因（见 `lod-capture.ts` 的 `lodFaceIssue`）：`lod` 读不出来**不等于**"场景里没有 LOD"，回执要如实说这一点。缺省＝这次载荷里根本没有这一面。 */ lodIssue?:string; /** 采集时这一帧的**环境光照事实**（请求的 HDRI 是否真的在画面里）：回退到内置光时必须随图如实带出。 */ environment?:EnvironmentCaptureFace }
+export interface CaptureRecord { captureId:string; sceneId:string; sceneRevision:number; worldId?:string; generation?:number; worldSceneRevision?:number; frameSceneRevision?:number; frameId?:string; stepIndex?:number; simTime?:number; capturedAt:string; imagePath:string; posePath?:string; attachment:{attachmentId:string;mediaType:string;width:number;height:number}; /** 附件库把图缩小入库时才有：原分辨率帧的逐字节副本（同一附件库的文件通道），`imagePath` 指向它；`attachment` 是预览。换算见 previewScaleOf/framePixelOfPreviewPixel。 */ originalImage?:{path:string;bytes:number;width:number;height:number;mediaType:string;storage:"verbatim";attachmentId:string}; camera?:unknown; /** 仅带批注的采集有：逐条编号/文字/锚点。 */ annotations?:CaptureAnnotationRecord[]; annotationCount?:number; annotationDigest?:CaptureAnnotationDigest[]; /** 带批注采集才有：发起时的相机位姿（"这张图什么视角"的正本）与喂给模型的说明。 */ prompt?:string; /** 说明投递失败时如实记录原因，不改采集本身。 */ injectionError?:string; /** 采集时该画面**可用但缺件**的警告（实体 id + 原因）：不是加载失败，但模型必须知道少的是哪一部分。 */ visualWarnings?:Array<{entityId:string;warning:string}>; /** 采集时这一帧的 **LOD 事实**：每个参与级别选择的实体用的是哪一级、哪份资源版本（`resourceId@version`）、多少三角形、距离多少。按距离正常简化时也要如实带出（数据集必须知道这份几何是简化件）；只有"比这台相机该用的级别更粗"或"该读的级别没读进来"才是降级。 */ lod?:LodCaptureFace; /** 载荷带了 LOD 面但整形没通过时的原因（见 `lod-capture.ts` 的 `lodFaceIssue`）：`lod` 读不出来**不等于**"场景里没有 LOD"，回执要如实说这一点。缺省＝这次载荷里根本没有这一面。 */ lodIssue?:string; /** 采集时这一帧的**环境光照事实**（请求的 HDRI 是否真的在画面里）：回退到内置光时必须随图如实带出。 */ environment?:EnvironmentCaptureFace; /** 采集时这一帧的**展示层事实**（R-011）：是不是 Exploded view、展开比例、选中的真实部件与资源版本。`displayOnly` 恒真——相机/截图工具据此知道画面里的偏移只是查看，不是物理拆卸。 */ presentation?:PresentationCaptureFace }
 /**
  * 附件库把大图缩成预览入库时的**坐标口径**：预览 = 原帧 × scale（整体等比缩放），像素按中心对齐（像素 i 的中心在 i+0.5）。
  * 宿主回执（`cameraImage.preview` / `imagePreviewNote`）与工作台采集面板的点击换算共用这一份，不各算各的。
@@ -168,7 +170,13 @@ export function workbenchAPI(sessionId:string){
   // state 查询带三件事：要读哪个场景（sceneId，可选）、这个窗口此刻**正在显示**的场景与版本
   // （displaySceneId/displayRevision）。后两者是"这个窗口在场且看的是什么"的事实，服务端据此
   // 分辨多窗口目标、并核对主动观察拿回来的图属于哪个版本——不新增上报通道，就走这次轮询。
-  return {request,command,clientId,mediaURL,sessionId,selection,clearControlSelection,setControlsBlocked,areControlsBlocked:()=>controlsBlocked,state:(input?:{sceneId?:string;displaySceneId?:string;displayRevision?:number})=>{
+  /**
+   * V8-13：资源详情只读预览复用原生 `model-preview` RPC 与字节路由。
+   * 两者都按本窗口 session 寻址；不新增后端接口，也不写 Scene。
+   */
+  const modelPreview=(path:string,signal?:AbortSignal)=>request<{kind?:string;reason?:string;robot?:Record<string,unknown>;error?:string}>("workspace",{method:"POST",signal,body:JSON.stringify({sessionId,action:"model-preview",input:{path}})})
+  const modelPreviewURL=(path:string)=>mediaURL("model-preview",{path})
+  return {request,command,clientId,mediaURL,modelPreview,modelPreviewURL,sessionId,selection,clearControlSelection,setControlsBlocked,areControlsBlocked:()=>controlsBlocked,state:(input?:{sceneId?:string;displaySceneId?:string;displayRevision?:number})=>{
     const query=new URLSearchParams({sessionId,clientId})
     if(input?.sceneId)query.set("sceneId",input.sceneId)
     if(input?.displaySceneId){query.set("displaySceneId",input.displaySceneId);if(input.displayRevision!==undefined)query.set("displayRevision",String(input.displayRevision))}
@@ -178,7 +186,13 @@ export function workbenchAPI(sessionId:string){
     if(collision){query.set("collisionTopology","1");query.set("collisionGeometry",collision.includeGeometry?"1":"0");for(const id of collision.entityIds)query.append("collisionEntityId",id)}
     if(selection){for(const field of ['sensors','contacts','cameraAuthoring'] as const)if(selection[field]!==undefined)query.set(field,selection[field]?'1':'0');for(const id of selection.entityIds??[])query.append('entityId',id)}
     return request<Frame>("frame?"+query.toString())
-  },capture:(capture:Record<string,unknown>)=>command<CaptureRecord>("viewer_capture",{...capture,sessionId,clientId}),captureURL:(id:string)=>mediaURL("capture",{captureId:id})}
+  },capture:(capture:Record<string,unknown>)=>command<CaptureRecord>("viewer_capture",{...capture,sessionId,clientId}),captureURL:(id:string)=>mediaURL("capture",{captureId:id}),videoURL:(id:string)=>mediaURL("capture-video-media",{videoId:id}),saveVideo:async(payload:{metadata:Record<string,unknown>;blob:Blob}):Promise<CaptureVideoRecord>=>{
+    // 真实字节走 `capture-video`（封包见 `frameVideoPayload`）：不经 JSON、不重新编码视频。
+    const response=await fetch("/api/lyapunov/"+withSession("capture-video"),{method:"POST",headers:{"content-type":"application/octet-stream"},body:await frameVideoPayload(payload.metadata,payload.blob)})
+    const value=await response.json().catch(()=>({})) as {error?:string}&Record<string,unknown>
+    if(!response.ok)throw new Error(typeof value.error==="string"?value.error:response.statusText)
+    return value as unknown as CaptureVideoRecord
+  }}
 }
 /** 桌面退出 owner 的状态订阅：失败解锁；不把 committing 冒充世界状态或触发新动作。 */
 export function bindControlExitState(bridge:{onExitStateChanged?:(listener:(committing:boolean)=>void)=>()=>void}|undefined,api:{setControlsBlocked:(value:boolean)=>void},changed?:(value:boolean)=>void):()=>void {

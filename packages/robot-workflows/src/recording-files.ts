@@ -9,10 +9,87 @@ import { recordingActions, recordingEventResult, type RecordingCapture, type Rec
 export interface RecordedCamera {
  cameraName: string; resolvedCameraName?: string; override?: boolean; width?: number; height?: number; rgb?: string; depth?: string; depthRangeM?: [number, number]
 }
+/**
+ * P7C：这次录制**开始时固定下来的来源**。机器人/机位是开始那一刻的真实身份，开始后用户在面板上改选
+ * 只改变"下一次录制"的准备，不会替换当前作业的来源。`channels` 是请求的通道；`captured` 通道由
+ * `RecordingManifest.channels` 按**实际产出**登记（请求了不等于采到了）。
+ */
+export interface RecordedSource {
+ /** 机位所属机器人实例（Scene 实体 id）；世界固定机位为 undefined。 */
+ robotEntityId?: string; robotName?: string
+ /** 机位挂载的真实 body（Scene mount.bodyName 或原生回执 parentBodyName）。 */
+ bodyName?: string
+ /** 真实相机名（原生清单的 cameraName，或 Scene 实体的 局部名 / 实体名）。 */
+ cameraName: string
+ resolvedCameraName?: string
+ referenceFrame?: string
+ /** 开始那一刻绑定到的世界身份：世界换代/来源消失时据此终止本次固定来源作业，不继续用旧来源收新数据。 */
+ worldId?: string; generation?: number; sceneRevision?: number
+ /** 请求的通道清单（rgb/camera-depth/lidar-range）：判据是实际产出，见 manifest.channels。 */
+ channels: string[]
+ width?: number; height?: number; cameraEveryNFrames?: number
+ /** LiDAR range 请求的射线图案与量程（未请求 lidar-range 时不出现）。 */
+ lidar?: { channels?: number; horizontalSamples?: number; horizontalFovDeg?: number; verticalFovDeg?: [number, number]; rangeM?: number; geomGroups?: number[] }
+}
+/** 录制目录内**单个通道产物文件**：role 是该通道里的角色（range/valid/hitGeom/preview/rgb/depth），
+ *  `uri` 是已登记的录制相对路径（可直接走 recording-resource 读回）。 */
+export interface RecordedChannelFile {
+ role: string; uri: string; mimeType?: string; bytes?: number
+ /** npy 自报的形状与 dtype（读原始数组时不用再猜）；PNG 无此字段。 */
+ shape?: number[]; dtype?: string
+ /** 该文件承载的物理量单位（range/depth=m 等）；不是"像素"就写清。 */
+ unit?: string
+ /** 本文件属于第几次真实测量样本（`RecordedChannelStat.samples` 下标）；旧录制没有此字段。 */
+ sampleIndex?: number
+}
+/**
+ * P7C-review：**一次真实测量样本**的回放身份。LiDAR 的 range/valid/hitGeom/preview 四个辅助文件
+ * 属于同一次真实量测；RGB 与相机Z深度属于同一次 captureId。回放以本结构为单位（不是以文件为单位），
+ * 量程/颜色尺度取该次自己的真实配置（`rangeM`），不是"最新一次"的值。
+ * 旧录制没有这一项：界面必须如实说缺身份，不编造时间。
+ */
+export interface RecordedChannelSample {
+ /** 原生采集回执自己的 captureId（与 captures/lidarCaptures 对得上）。 */
+ captureId?: string
+ frameId?: string; stepIndex?: number; generation?: number; sceneRevision?: number; worldId?: string
+ /** 该次采集的真实模拟时间（秒）；旧记录没有就缺失，不猜。 */
+ simTime?: number
+ cameraName?: string; parentEntityId?: string; parentBodyName?: string; referenceFrame?: string
+ /** 该样本可读回的原始回执（录制目录内相对路径）。 */
+ receiptPath?: string
+ /** 这次采集对应的订阅帧步号与真实步差（同步差）；相机通道登记，旧记录缺省不编造。 */
+ targetStepIndex?: number; stepDrift?: number; synchronized?: boolean
+ /** 该次量测真实使用的量程上界（LiDAR rayPattern.rangeM），不是通道最新值。 */
+ rangeM?: number
+ /** 传感器位姿（自包含：回执已落盘，这里只留必要数值）。 */
+ worldFromSensor?: { positionM?: number[]; quaternionXyzw?: number[] }
+ /** 该样本的文件（主图在前：rgb/depth/range，其余是同次辅助文件）。 */
+ files: RecordedChannelFile[]
+}
+/**
+ * **逐通道**真实产出统计。只有实际成功的采集才计入 `frames`/`files`；请求了但引擎不支持/采集失败的
+ * 通道保留 `unavailable` 原因，**不得**显示成已完成。LiDAR range 的有效/无返回只按真实 npy 统计。
+ */
+export interface RecordedChannelStat {
+ channel: string; cameraName: string; unit: string
+ /** 成功采集的通道帧数（不等于订阅帧数）。 */
+ frames: number; files: RecordedChannelFile[]
+ /** P7C-review：逐样本真实测量身份（回放单位）；旧录制缺省。有 samples 时其长度必须等于 frames。 */
+ samples?: RecordedChannelSample[]
+ /** 最近一次采集的帧身份：与订阅帧的步差继续由 manifest.captures 的 target* 字段如实登记。 */
+ lastFrameId?: string; lastStepIndex?: number
+ /** LiDAR range：射线总数/有效/无返回与量程统计（相机 RGB/Depth 无此字段）。 */
+ rayCount?: number; validCount?: number; noReturnCount?: number
+ rangeMinM?: number; rangeMaxM?: number; rangeMeanM?: number
+ /** 声明但未采到的原因（`SENSOR_UNAVAILABLE` 等）；此时 frames 必须为 0。 */
+ unavailable?: string
+}
 export interface RecordedCapture extends RecordingCaptureSource {
  worldId: string; generation?: number; stepIndex?: number; sceneRevision?: number; frameId?: string; receiptPath: string; cameraName?: string; observationFrameId?: string
  /** 原生回执自己的 captureId：标注/数据集只按它把像素、深度与标定对回同一次真实采集。 */
  captureId?: string
+ /** 该机位真实所属实体与 body（LiDAR 回执自带；相机条目没有这一项时不写）。 */
+ parentEntityId?: string; parentBodyName?: string
  /** 这次采集挂到的订阅帧身份；stepDrift 是同一步之外的步差，synchronized 只在步号完全相同时为 true。 */
  targetFrameId?: string; targetStepIndex?: number; stepDrift?: number; synchronized?: boolean
  /** 同一次 camera_capture_multi 采到的全部命名相机：共享同一 stepIndex/frameId，绝不把不同步的相机拼在一起。 */
@@ -20,17 +97,26 @@ export interface RecordedCapture extends RecordingCaptureSource {
 }
 export interface RecordingManifest {
  recordingId: string; sessionRef: string; sceneId: string; status: 'recording' | 'completed' | 'killed' | 'failed' | 'interrupted'; createdAt: string; stoppedAt?: string; stopReason?: string; jobId?: string; runId: string
- maxDurationS: number; frameCount: number; eventCount: number; observationCount?: number; firstFrame?: { frameId: string; generation: number; sceneRevision?: number; stepIndex: number; simTime: number }; lastFrame?: { frameId: string; generation: number; sceneRevision?: number; stepIndex: number; simTime: number }
+ maxDurationS: number; frameCount: number; eventCount: number; observationCount?: number
+ /** 本次录制**累计仿真秒**（同一代次只累加正 delta）；旧清单没有这一项时保持缺失，不编造。 */
+ elapsedS?: number
+ firstFrame?: { frameId: string; generation: number; sceneRevision?: number; stepIndex: number; simTime: number }; lastFrame?: { frameId: string; generation: number; sceneRevision?: number; stepIndex: number; simTime: number }
  segments: Array<{ generation: number; world: WorldHandle; sceneFile: string; sourceSceneFile: string }>
  resources: Array<{ uri: string; path: string; bytes: number; mimeType: string }>; missing: Array<{ uri: string; reason: string }>
  captures?: RecordedCapture[]
  /** 录制期多视角采集的真实统计：synchronizedFrames 只统计采集步号与订阅帧步号完全相同的次数，driftedFrames/maxStepDrift 如实登记偏差。 */
  cameraCapture?: { cameraNames: string[]; width: number; height: number; everyNFrames: number; frames?: number; captures: number; synchronizedFrames: number; driftedFrames: number; maxStepDrift: number; stopped?: string }
+ /** P7C：开始时固定的来源身份（旧录制没有这一项，缺失即"通用/未固定来源"）。 */
+ source?: RecordedSource
+ /** P7C：逐通道真实产出（rgb/camera-depth/lidar-range）；缺省即旧录制的兼容语义。 */
+ channels?: RecordedChannelStat[]
+ /** P7C：LiDAR range 采集回执（每次真实 scanLidar 一条，含同帧/步差身份），与 captures 分开不互相冒充。 */
+ lidarCaptures?: RecordedCapture[]
 }
 export interface RecordingReplay { manifest: RecordingManifest; segments: Array<{ world: WorldHandle; scene: SceneSnapshot; frames: Frame[] }> }
 /** `sessionId` 是这份录制所属的会话（manifest 的 sessionRef）：带上它 `replayURL` 才是能按会话取回的地址
  *  ——录制读取路由与写入端一样只按会话取，没有会话即明确失败，不落回全局共享目录。 */
-export function recordingSummary(m: RecordingManifest, sessionId?: string) { return { recordingId: m.recordingId, ...(m.jobId === undefined ? {} : { jobId: m.jobId }), sessionRef: m.sessionRef, sceneId: m.sceneId, status: m.status, createdAt: m.createdAt, ...(m.stopReason === undefined ? {} : { stopReason: m.stopReason }), frameCount: m.frameCount, eventCount: m.eventCount, observationCount: m.observationCount ?? 0, ...(m.firstFrame === undefined ? {} : { firstFrame: m.firstFrame }), ...(m.lastFrame === undefined ? {} : { lastFrame: m.lastFrame }), generations: m.segments.map(s => ({ generation: s.generation, sceneRevision: s.world.appliedSceneRevision })), ...(m.cameraCapture === undefined ? {} : { cameraCapture: m.cameraCapture, cameraCaptureCount: m.captures?.filter(capture => capture.multiView).length ?? 0 }), missing: m.missing.slice(0, 20), missingCount: m.missing.length, replayURL: '/api/lyapunov/recording?recordingId=' + encodeURIComponent(m.recordingId) + (sessionId ? '&sessionId=' + encodeURIComponent(sessionId) : '') } }
+export function recordingSummary(m: RecordingManifest, sessionId?: string) { return { recordingId: m.recordingId, ...(m.jobId === undefined ? {} : { jobId: m.jobId }), sessionRef: m.sessionRef, sceneId: m.sceneId, status: m.status, createdAt: m.createdAt, ...(m.stopReason === undefined ? {} : { stopReason: m.stopReason }), frameCount: m.frameCount, eventCount: m.eventCount, observationCount: m.observationCount ?? 0, maxDurationS: m.maxDurationS, ...(m.elapsedS === undefined ? {} : { elapsedS: m.elapsedS }), ...(m.firstFrame === undefined ? {} : { firstFrame: m.firstFrame }), ...(m.lastFrame === undefined ? {} : { lastFrame: m.lastFrame }), generations: m.segments.map(s => ({ generation: s.generation, sceneRevision: s.world.appliedSceneRevision })), ...(m.cameraCapture === undefined ? {} : { cameraCapture: m.cameraCapture, cameraCaptureCount: m.captures?.filter(capture => capture.multiView).length ?? 0 }), ...(m.source === undefined ? {} : { source: m.source }), ...(m.channels === undefined ? {} : { channels: m.channels }), missing: m.missing.slice(0, 20), missingCount: m.missing.length, replayURL: '/api/lyapunov/recording?recordingId=' + encodeURIComponent(m.recordingId) + (sessionId ? '&sessionId=' + encodeURIComponent(sessionId) : '') } }
 export function recordingSegmentMatches(segment: RecordingManifest['segments'][number], frame: Pick<Frame, 'worldId' | 'generation' | 'sceneRevision'>): boolean { return segment.world.worldId === frame.worldId && segment.generation === frame.generation && (frame.sceneRevision === undefined || segment.world.appliedSceneRevision === frame.sceneRevision) }
 export function recordingDirectory(root: string, id: string) { if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('INVALID_RECORDING_ID'); return join(resolve(root), id) }
 export async function writeRecordingManifest(root: string, value: RecordingManifest) {
@@ -220,9 +306,134 @@ export async function captureRecordingResult(root: string, manifest: RecordingMa
  captures.push({ ...source, worldId: result.worldId, generation: result.generation, stepIndex: result.stepIndex, sceneRevision: result.sceneRevision, frameId: result.frameId, cameraName: result.cameraName, ...typeof result.captureId === 'string' ? { captureId: result.captureId } : {}, ...(observation ? { observationFrameId: observation.frameId } : {}), receiptPath,
   ...cameras === undefined ? {} : { multiView: cameras.length > 1, cameraNames: cameras.map(camera => camera.cameraName), cameras } })
 }
+/** 逐通道统计的唯一起点：同 (channel, cameraName) 只有一条；重复调用复用同一条累计。 */
+function channelStat(manifest: RecordingManifest, channel: string, cameraName: string, unit: string, unavailable?: string): RecordedChannelStat {
+ const existing = manifest.channels?.find(row => row.channel === channel && row.cameraName === cameraName)
+ if (existing) return existing
+ const created: RecordedChannelStat = { channel, cameraName, unit, frames: 0, files: [], ...(unavailable === undefined ? {} : { unavailable }) }
+ ;(manifest.channels ??= []).push(created)
+ return created
+}
+/** 声明了却采不到的通道（引擎无 scanLidar / 采集抛错）：保留原因且 frames 为 0，面板不得显示完成。 */
+export function recordingChannelUnavailable(manifest: RecordingManifest, channel: string, cameraName: string, unit: string, reason: string) { const stat = channelStat(manifest, channel, cameraName, unit); stat.unavailable = reason; return stat }
+/** 一个真实媒体条目 → 录制目录内的通道文件登记（已登记过就复用，不重复复制）；
+ *  绝对 uri 与已折算的相对路径两种形式都认，找不到才走 `captureRecordingFiles` 复制并记录缺件。
+ *  `sampleIndex` 标注该文件属于第几次测量样本（同一次量测的 range/valid/hitGeom/preview 共享一个下标）。 */
+export async function recordChannelMedia(root: string, manifest: RecordingManifest, role: string, entry: any, sampleIndex?: number): Promise<RecordedChannelFile | undefined> {
+ if (!entry || typeof entry.uri !== 'string') return undefined
+ let resource = manifest.resources.find(candidate => candidate.uri === entry.uri)
+ if (!resource) { await captureRecordingFiles(root, manifest, [entry.uri]); resource = manifest.resources.find(candidate => candidate.uri === entry.uri) }
+ if (!resource) return undefined
+ return { role, uri: resource.path, ...(typeof entry.mimeType === 'string' ? { mimeType: entry.mimeType } : resource.mimeType ? { mimeType: resource.mimeType } : {}), bytes: resource.bytes,
+  ...(Array.isArray(entry.shape) ? { shape: entry.shape.map(Number) } : {}),
+  ...(typeof entry.dtype === 'string' ? { dtype: entry.dtype } : {}),
+  ...(typeof entry.units === 'string' ? { unit: entry.units } : {}),
+  ...(sampleIndex === undefined ? {} : { sampleIndex }) }
+}
+/** 从一份真实采集回执抽取**一次样本**的身份：缺字段就不写，不编造（旧格式回执缺 simTime 时如实缺失）。 */
+function channelSampleIdentity(result: any, cameraName: string, receiptPath?: string): Omit<RecordedChannelSample, 'files'> {
+ const identity: Omit<RecordedChannelSample, 'files'> = { cameraName }
+ if (typeof result?.captureId === 'string') identity.captureId = result.captureId
+ if (typeof result?.frameId === 'string') identity.frameId = result.frameId
+ if (Number.isInteger(result?.stepIndex)) identity.stepIndex = result.stepIndex
+ if (Number.isInteger(result?.generation)) identity.generation = result.generation
+ if (Number.isInteger(result?.sceneRevision)) identity.sceneRevision = result.sceneRevision
+ if (typeof result?.worldId === 'string') identity.worldId = result.worldId
+ if (Number.isFinite(result?.simTime)) identity.simTime = Number(result.simTime)
+ if (typeof result?.parentEntityId === 'string') identity.parentEntityId = result.parentEntityId
+ if (typeof result?.parentBodyName === 'string') identity.parentBodyName = result.parentBodyName
+ if (typeof result?.referenceFrame === 'string') identity.referenceFrame = result.referenceFrame
+ if (receiptPath !== undefined) identity.receiptPath = receiptPath
+ if (Number.isFinite(result?.rayPattern?.rangeM)) identity.rangeM = Number(result.rayPattern.rangeM)
+ if (result?.worldFromSensor && typeof result.worldFromSensor === 'object') identity.worldFromSensor = {
+  ...Array.isArray(result.worldFromSensor.positionM) ? { positionM: result.worldFromSensor.positionM.map(Number) } : {},
+  ...Array.isArray(result.worldFromSensor.quaternionXyzw) ? { quaternionXyzw: result.worldFromSensor.quaternionXyzw.map(Number) } : {},
+ }
+ return identity
+}
+/** 相机采集成功后登记**请求过的** RGB/相机Depth通道：只按真实产出计数，没请求的通道不写。
+ *  逐相机各记一条（多视角时每台相机各自的文件），一次 captureMulti 同时给 RGB 与轴向 Z 深度；
+ *  两者来自同一 captureId/frameId，绝不改名互换。每个 (capture, camera) 是一次真实样本：
+ *  RGB 与相机Z深度共享同一个 captureId/frameId/stepIndex/simTime，界面据此保持配对；
+ *  样本身份从**已落盘的真实回执**读回，不靠调用时猜。 */
+export async function recordCameraChannels(root: string, manifest: RecordingManifest, channels: readonly string[]) {
+ const recorded = manifest.captures?.[manifest.captures.length - 1]
+ if (!recorded) return
+ const cameras = recorded.cameras ?? []
+ // 该次采集的真实回执（已是录制目录内副本）：simTime 与逐相机父身份只从这里读。
+ let receipt: any
+ if (typeof recorded.receiptPath === 'string') {
+  try { receipt = JSON.parse(await readFile(join(recordingDirectory(root, manifest.recordingId), recorded.receiptPath), 'utf8')) } catch { receipt = undefined }
+ }
+ const receiptCameras: any[] = Array.isArray(receipt?.cameras) ? receipt.cameras : []
+ for (const channel of channels) {
+  const unit = channel === 'rgb' ? 'png-rgb-8bit' : channel === 'camera-depth' ? 'm-axial-z' : undefined
+  if (unit === undefined) continue
+  for (const camera of cameras) {
+   const stat = channelStat(manifest, channel, camera.cameraName, unit)
+   const entry = channel === 'rgb' ? { uri: camera.rgb, mimeType: 'image/png' } : { uri: camera.depth, mimeType: 'application/x-npy', units: 'm-axial-z' }
+   const file = await recordChannelMedia(root, manifest, channel === 'rgb' ? 'rgb' : 'depth', entry)
+   if (!file) continue
+   stat.files.push(file)
+   stat.frames++; stat.lastFrameId = recorded.frameId; stat.lastStepIndex = recorded.stepIndex; delete stat.unavailable
+   // 该相机的真实回执条目带自己的 parentEntityId/parentBodyName；顶层回执带 simTime 与帧身份。
+   const receiptCamera = receiptCameras.find(row => row && (row.cameraName === camera.cameraName || row.resolvedCameraName === camera.cameraName))
+   const identity = channelSampleIdentity({
+    ...receipt,
+    ...(receiptCamera ? { parentEntityId: receiptCamera.parentEntityId ?? receipt?.parentEntityId, parentBodyName: receiptCamera.parentBodyName ?? receipt?.parentBodyName, referenceFrame: receiptCamera.referenceFrame } : {}),
+   }, camera.cameraName, recorded.receiptPath)
+   // 订阅帧步号与真实步差（同步差）来自 plugin 在 capture 上下文写入的这同一条 capture。
+   if (Number.isInteger(recorded.targetStepIndex)) identity.targetStepIndex = recorded.targetStepIndex
+   if (Number.isFinite(recorded.stepDrift)) identity.stepDrift = Number(recorded.stepDrift)
+   if (recorded.synchronized !== undefined) identity.synchronized = Boolean(recorded.synchronized)
+   file.sampleIndex = stat.samples?.length ?? 0
+   ;(stat.samples ??= []).push({ ...identity, files: [file] })
+  }
+ }
+}
+/** LiDAR range 采集：range/valid/hitGeom/preview 四个真实文件各自登记（缺哪个读得到），
+ *  有效/无返回/量程只抄真实回执；回执自包含落盘（含来源、位姿、射线图案），与相机 captures 分开。 */
+export async function captureRecordingLidarResult(root: string, manifest: RecordingManifest, capture: RecordingCapture) {
+ const { result, source } = capture
+ const cameraName = typeof result.cameraName === 'string' ? result.cameraName : String(source.name)
+ const stat = channelStat(manifest, 'lidar-range', cameraName, 'm-euclidean-range')
+ const lidarCaptures = manifest.lidarCaptures ??= [], receiptPath = join('resources', `lidar-receipt-${lidarCaptures.length}.json`)
+ const files: RecordedChannelFile[] = []
+ for (const role of ['range', 'valid', 'hitGeom', 'preview'] as const) {
+  const file = await recordChannelMedia(root, manifest, role, result[role])
+  if (file) { files.push(file); stat.files.push(file) }
+ }
+ // 一个通道帧算一次成功采集：四个文件里至少 range 真实落盘才算；否则保留 unavailable（files 为空）。
+ // range/valid/hitGeom/preview 是**同一次量测**的辅助文件：共享一个 sampleIndex、一次 frames++，
+ // 界面按 samples 回放时它们属于同一帧（辅助文件不额外增加帧数）。
+ if (files.some(file => file.role === 'range')) {
+  for (const file of files) file.sampleIndex = stat.samples?.length ?? 0
+  ;(stat.samples ??= []).push({ ...channelSampleIdentity(result, cameraName, receiptPath), files })
+  stat.frames++
+ } else if (stat.unavailable === undefined) stat.unavailable = 'LIDAR_RANGE_FILE_MISSING'
+ for (const [key, target] of [['rayCount', 'rayCount'], ['validCount', 'validCount'], ['noReturnCount', 'noReturnCount'], ['rangeMinM', 'rangeMinM'], ['rangeMaxM', 'rangeMaxM'], ['rangeMeanM', 'rangeMeanM']] as const) {
+  const value = Number(result[key]); if (Number.isFinite(value)) (stat as any)[target] = value
+ }
+ if (Number.isInteger(result.stepIndex)) stat.lastStepIndex = result.stepIndex
+ if (typeof result.frameId === 'string') stat.lastFrameId = result.frameId
+ const receipt = structuredClone(result) as Record<string, any>
+ for (const role of ['range', 'valid', 'hitGeom', 'preview'] as const) {
+  const uri = receipt[role]?.uri
+  if (typeof uri !== 'string') continue
+  const resource = manifest.resources.find(item => item.uri === uri)
+  if (resource) receipt[role].uri = resource.path
+ }
+ delete receipt.outputDir
+ const directory = recordingDirectory(root, manifest.recordingId), content = JSON.stringify(receipt, null, 2)
+ await mkdir(join(directory, 'resources'), { recursive: true }); await writeFile(join(directory, receiptPath), content, { mode: 0o600 })
+ manifest.resources.push({ uri: recordingResourceKey(receiptPath), path: receiptPath, bytes: Buffer.byteLength(content), mimeType: 'application/json' })
+ lidarCaptures.push({ ...source, worldId: result.worldId, generation: result.generation, stepIndex: result.stepIndex, sceneRevision: result.sceneRevision, frameId: result.frameId, cameraName: result.cameraName, receiptPath,
+  ...typeof result.captureId === 'string' ? { captureId: result.captureId } : {},
+  ...result.parentEntityId === undefined ? {} : { parentEntityId: String(result.parentEntityId) },
+  ...typeof result.parentBodyName === 'string' ? { parentBodyName: result.parentBodyName } : {} })
+}
 /** 相机时刻的关节/接触只能来自Provider同次capture，不用邻近订阅帧补造。 */
-export function recordingCaptureObservation(receipt: Record<string, any>, capture?: RecordedCapture): Frame | undefined {
- const observation = receipt.observation as Frame | undefined
+export function recordingCaptureObservation(receipt: Record<string, any>, capture?: RecordedCapture): Frame | undefined { const observation = receipt.observation as Frame | undefined
  if (!observation) return undefined
  for (const key of ['worldId', 'generation', 'sceneRevision', 'stepIndex', 'simTime', 'frameId'] as const) {
   if (observation[key] === undefined || observation[key] !== receipt[key]) throw new Error(`CAPTURE_OBSERVATION_SOURCE_MISMATCH: ${key}`)
@@ -347,7 +558,7 @@ export async function exportRecording(root: string, id: string) {
    traceable: recordedCaptureIds.has(result.captureId),
   })
  }
- const dataset = { format: 'lyapunov-simulation-jsonl-v1', recordingId: id, sessionRef: replay.manifest.sessionRef, recordingStatus: replay.manifest.status, taskAchieved: null, frames: recordedFrames, manifestFrameCount: replay.manifest.frameCount, trajectoryFrames: trajectory.length, captureObservationFrames: capturedFrames.size, actions, sessionEvents, contactSensorObservations: observationEvents, generations: replay.manifest.segments.map(s => ({ generation: s.generation, sceneRevision: s.world.appliedSceneRevision, scene: s.sceneFile })), assistedFrames, physicalOnly: replay.segments.every(s => s.frames.every(f => (f as any).executionMode === 'physical-contact')), resources: [...new Set(replay.manifest.resources.map(r => r.path))], captures: replay.manifest.captures ?? [], multiView: multiViewCaptures.length > 0, multiViewCameras: multiViewCaptures, calibrations: calibrationRefs, annotations, annotationCount: annotations.length, untraceableAnnotations: annotations.filter(annotation => !annotation.traceable).map(annotation => annotation.annotationId), missing: replay.manifest.missing, events: 'events.jsonl', trajectory: 'trajectory.jsonl', cameraSamples: 'camera-samples.jsonl', cameraSampleCount: cameraSamples.length, source: '实际模拟订阅帧与原生DSH会话事件；录制完成不等于任务成功；trajectory.jsonl按frameId去重合并订阅实帧与Provider同次采集(capture回执)的observation，不插值补帧；frames/contactSensorObservations/sessionEvents按events.jsonl实际记录独立计数，manifestFrameCount保留清单原值供核对；周期contact/sensor observation只保存在events.jsonl，不并入trajectory；multiViewCameras逐条来自同一次camera_capture_multi（同stepIndex/frameId），calibrations/annotations只引用本次录制登记过的真实capture' }
+ const dataset = { format: 'lyapunov-simulation-jsonl-v1', recordingId: id, sessionRef: replay.manifest.sessionRef, recordingStatus: replay.manifest.status, taskAchieved: null, frames: recordedFrames, manifestFrameCount: replay.manifest.frameCount, trajectoryFrames: trajectory.length, captureObservationFrames: capturedFrames.size, actions, sessionEvents, contactSensorObservations: observationEvents, generations: replay.manifest.segments.map(s => ({ generation: s.generation, sceneRevision: s.world.appliedSceneRevision, scene: s.sceneFile })), assistedFrames, physicalOnly: replay.segments.every(s => s.frames.every(f => (f as any).executionMode === 'physical-contact')), resources: [...new Set(replay.manifest.resources.map(r => r.path))], captures: replay.manifest.captures ?? [], multiView: multiViewCaptures.length > 0, multiViewCameras: multiViewCaptures, calibrations: calibrationRefs, annotations, annotationCount: annotations.length, untraceableAnnotations: annotations.filter(annotation => !annotation.traceable).map(annotation => annotation.annotationId), missing: replay.manifest.missing, events: 'events.jsonl', trajectory: 'trajectory.jsonl', cameraSamples: 'camera-samples.jsonl', cameraSampleCount: cameraSamples.length, source: replay.manifest.source ?? null, channels: replay.manifest.channels ?? [], lidarCaptures: replay.manifest.lidarCaptures ?? [], sourceNote: '实际模拟订阅帧与原生DSH会话事件；录制完成不等于任务成功；trajectory.jsonl按frameId去重合并订阅实帧与Provider同次采集(capture回执)的observation，不插值补帧；frames/contactSensorObservations/sessionEvents按events.jsonl实际记录独立计数，manifestFrameCount保留清单原值供核对；周期contact/sensor observation只保存在events.jsonl，不并入trajectory；multiViewCameras逐条来自同一次camera_capture_multi（同stepIndex/frameId），calibrations/annotations只引用本次录制登记过的真实capture；channels逐通道只按实际落盘文件计数，未请求/失败通道保留unavailable，lidar range与相机Z深度分源不互换' }
  await writeFile(join(target, 'dataset.json'), JSON.stringify(dataset, null, 2), { mode: 0o600 })
  return { recordingId: id, directory: target, manifestPath: join(target, 'dataset.json'), frameCount: dataset.frames, eventCount: dataset.sessionEvents, resourceCount: dataset.resources.length, missing: dataset.missing, status: dataset.missing.length ? 'PARTIAL' : 'completed', taskAchieved: null }
 }

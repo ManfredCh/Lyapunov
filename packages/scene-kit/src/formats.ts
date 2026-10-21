@@ -526,7 +526,7 @@ export function glbEntities(ref: ResourceRef, parsed: ParsedAsset, rootId: strin
     const node = nodes[index]
     if (!node) throw new Error(`GLTF_NODE_MISSING: ${index}`)
     const entityId = `${rootId}:node:${index}`
-    entities.push({ entityId, parentId, name: node.name ?? `节点 ${index}`, transform: structuredClone(transformOf(node)), resources: [ref], components: { visual: { kind: "mesh", gltfNode: index, sourceTransformApplied: true }, ...(node.extras ? { "gltf.extras": node.extras } : {}) } })
+    entities.push({ entityId, parentId, name: node.name ?? `Node ${index}`, transform: structuredClone(transformOf(node)), resources: [ref], components: { visual: { kind: "mesh", gltfNode: index, sourceTransformApplied: true }, ...(node.extras ? { "gltf.extras": node.extras } : {}) } })
     for (const child of node.children ?? []) walk(child, entityId)
   }
   for (const index of roots) walk(index, sourceId)

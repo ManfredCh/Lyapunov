@@ -28,6 +28,10 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MuJoCoProvider } from '../src/provider.ts'
+// R-015 走真实产品实现 robot_set_base（setRobotBase）+ 真实 MuJoCo worker；SceneReader 用遵守
+// 真实 Scene CAS 合同的最小内存适配器，不替身引擎、不替身物理。
+import { setRobotBase } from '../../robot-tools/src/authoring.ts'
+import { undoRobotAssembly } from '../../robot-tools/src/assembly-history.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const defaultPython = resolve(here, '../../../.runtime/sim-python/bin/python')
@@ -301,6 +305,342 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
       assert.ok(desc.base.constraints.some((c: any) => c.kind === 'weld' && c.targetEntityId === 'parent'), 'free+目标必须有真实 equality weld')
       assert.match(String(desc.base.reason), /weld/i)
       assert.doesNotMatch(String(desc.base.reason), /Rigid/i)
+    } finally { await mujoco.dispose() }
+  })
+
+  /**
+   * R-015：独立子实体根以 fixed 原生刚性挂到另一实体 body 后，它仍是**该实体自己的可编辑根**
+   * （不是 world 树根，但仍是该实体的源根），内部 body 仍不是根。这里经真实 `setRobotBase`
+   * （robot_set_base 的实现）依次执行 free→source→换目标：每次按当前 Scene 版本 CAS 提交、
+   * 真实 worker 重建世界，再按**当前版本**回读实体根标记、真实基座模式与目标 body / 相对位姿。
+   * 同时保留负回归：内部 body 仍被 ROBOT_BASE_ROOT_REQUIRED 明确拒绝。
+   */
+  const childRootXml = '<mujoco><worldbody><body name="mount"><geom type="box" size=".08 .08 .08" mass="1"/>'
+    + '<body name="finger" pos="0 0 .2"><joint name="fj" type="hinge"/><geom type="box" size=".03 .03 .03" mass=".2"/></body>'
+    + '</body></worldbody></mujoco>'
+  const parentRootXml = '<mujoco><worldbody><body name="base"><geom type="box" size=".1 .1 .1" mass="2"/>'
+    + '<body name="tool" pos=".3 0 .1"><geom type="box" size=".05 .05 .05" mass=".5"/></body>'
+    + '</body></worldbody></mujoco>'
+  const namedEntity = (entityId: string, z: number, rootBody: string, xml: string, components: Record<string, unknown> = {}) => ({
+    entityId, name: entityId,
+    transform: { position: [0, 0, z], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+    resources: [], components: { mujoco: { rootBody, xml }, ...components },
+  })
+
+  test('已装配独立根再次编辑：free/source/换目标读回真实根，内部 body 仍非根', { timeout: 60_000 }, async () => {
+    const mujoco = create()
+    const sceneId = 'r015-rebind'
+    const initial = bindingSnapshot(sceneId, [
+      namedEntity('parent', 1, 'base', parentRootXml),
+      namedEntity('child', 0, 'mount', childRootXml, { baseBinding: fixedBinding('mount', { ...rigidTarget }) }),
+    ])
+    let snapshot: any = initial
+    // 最小 SceneReader：实现真实 Scene CAS 语义（提交必须基于当前 revision，成功后 revision+1），
+    // 不伪造冲突放行；setRobotBase 会在 CAS/世界代次/帧版本不一致时明确失败。
+    const store = {
+      snapshot: (id: string) => { assert.equal(id, sceneId); return structuredClone(snapshot) },
+      commit: (input: any) => {
+        assert.equal(input.sceneId, sceneId)
+        assert.equal(input.expectedRevision, snapshot.revision, 'CAS：提交必须基于当前场景版本')
+        const next = structuredClone(snapshot)
+        for (const op of input.patch) {
+          assert.equal(op.op, 'update')
+          const index = next.entities.findIndex((entity: any) => entity.entityId === op.entityId)
+          assert.ok(index >= 0, `patch 目标实体必须存在：${op.entityId}`)
+          next.entities[index] = { ...next.entities[index], ...structuredClone(op.changes) }
+        }
+        next.revision = snapshot.revision + 1
+        snapshot = next
+        return structuredClone(snapshot)
+      },
+    }
+    const baseInput = (expectedRevision: number, expectedGeneration: number, base: unknown) =>
+      ({ worldId: sceneId, sceneId, entityId: 'child', expectedRevision, expectedGeneration, base } as never)
+    const bodyWith = (description: Record<string, any>, name: string) => description.nativeBodies.find((body: any) => body.name === name)
+    try {
+      const opened = await mujoco.open(snapshot, { worldId: sceneId, clock: 'manual', startPaused: true, ground: false })
+      // 装配事实 + 复现点：已挂接后实体源根必须仍标记 root，内部 body 不得冒充根。
+      const assembled = await mujoco.describe(sceneId, 'child') as Record<string, any>
+      assert.equal(assembled.base.mode, 'fixed')
+      assert.equal(assembled.base.target.entityId, 'parent')
+      assert.equal(assembled.base.target.bodyName, 'base')
+      assert.deepEqual(assembled.base.constraints, [], '刚性父子不得挂 equality weld 软约束')
+      assert.equal(bodyWith(assembled, 'mount').root, true, '已装配实体源根必须仍是该实体的可编辑根')
+      assert.equal(bodyWith(assembled, 'finger').root, false, '内部 body 不得被当成根')
+      assert.deepEqual(bodyWith(assembled, 'finger').jointTypes, ['hinge'], '装配不得删除实体内部关节')
+
+      // ① 再次 free：经真实 robot_set_base 解除固定。
+      const freed = await setRobotBase(mujoco, store as never, baseInput(1, opened.worldGeneration, { mode: 'free', bodyName: 'mount' }))
+      assert.equal(freed.snapshot.revision, 2)
+      const freeDesc = freed.robot as Record<string, any>
+      assert.equal(freeDesc.base.mode, 'free')
+      assert.deepEqual(bodyWith(freeDesc, 'mount').jointTypes, ['free'], 'free 后根必须有真实自由关节')
+      assert.equal(bodyWith(freeDesc, 'mount').root, true)
+      assert.equal(bodyWith(freeDesc, 'finger').root, false)
+
+      // ② 再次 source：恢复源声明（本夹具源模型无关节 ⇒ 世界安装 fixed），删除场景基座声明。
+      const sourced = await setRobotBase(mujoco, store as never, baseInput(2, freed.world!.worldGeneration, { mode: 'source', bodyName: 'mount' }))
+      assert.equal(sourced.snapshot.revision, 3)
+      const childAfterSource = sourced.snapshot.entities.find((entity: any) => entity.entityId === 'child')!
+      assert.equal('baseBinding' in childAfterSource.components, false, 'source 必须删除场景基座声明')
+      assert.equal(bodyWith(sourced.robot as Record<string, any>, 'mount').root, true)
+
+      // ③ 换挂：fixed 到同一父实体的另一个真实 body（tool），按当前版本读回目标与相对位姿。
+      const target = { entityId: 'parent', bodyName: 'tool', positionM: [0.1, 0, 0.2], quaternionXyzw: [0, 0, 0, 1] }
+      const rebased = await setRobotBase(mujoco, store as never, baseInput(3, sourced.world!.worldGeneration, { mode: 'fixed', bodyName: 'mount', target }))
+      assert.equal(rebased.snapshot.revision, 4)
+      const rebasedDesc = rebased.robot as Record<string, any>
+      assert.equal(rebasedDesc.base.mode, 'fixed')
+      assert.equal(rebasedDesc.base.target.entityId, 'parent')
+      assert.equal(rebasedDesc.base.target.bodyName, 'tool')
+      assert.deepEqual(rebasedDesc.base.constraints, [])
+      assert.equal(bodyWith(rebasedDesc, 'mount').root, true)
+      assert.equal(bodyWith(rebasedDesc, 'finger').root, false)
+      assert.deepEqual(bodyWith(rebasedDesc, 'finger').jointTypes, ['hinge'], '再次编辑不得删除实体内部关节')
+      // parent(z=1) ∘ tool 局部(.3,0,.1) ∘ 安装(.1,0,.2) ⇒ 世界 (.4,0,1.3)。
+      const readback = rebasedDesc.base.worldFromBody.positionM
+      assert.ok(Math.abs(readback[0] - 0.4) < 1e-9 && Math.abs(readback[1]) < 1e-9 && Math.abs(readback[2] - 1.3) < 1e-9,
+        `换挂后应读回真实目标位姿，实测 ${JSON.stringify(readback)}`)
+
+      // 负回归：内部 body 仍被明确拒绝（修复不得放宽成任意 body 都可当根）。
+      await assert.rejects(
+        () => setRobotBase(mujoco, store as never, baseInput(4, rebased.world!.worldGeneration, { mode: 'free', bodyName: 'finger' })),
+        (error: any) => /ROBOT_BASE_ROOT_REQUIRED/.test(String(error?.message)),
+        '内部 body 必须仍以 ROBOT_BASE_ROOT_REQUIRED 拒绝',
+      )
+    } finally { await mujoco.dispose() }
+  })
+
+  /**
+   * R-014：已固定挂接的独立根在真实 MuJoCo 上直接走 robot_set_base → 局部 Undo，而不是只在 free
+   * 状态下测试。局部 Undo 复用既有 SceneStore 历史的 before/after 定位（本测试的内存 store 与真实
+   * SceneStore 同 CAS/历史语义），按当前 revision 只回填 baseBinding，再经同一 provider 链同步回读；
+   * source 是删除源声明的**不同语义**；换目标后再撤销旧事件必须报 ROBOT_ASSEMBLY_CONFLICT。
+   */
+  test('已装配后局部 Undo：真实回读 fixed/source/换目标，冲突拒绝且不删内部关节', { timeout: 90_000 }, async () => {
+    const mujoco = create()
+    const sceneId = 'r014-undo'
+    const initial = bindingSnapshot(sceneId, [
+      namedEntity('parent', 1, 'base', parentRootXml),
+      namedEntity('child', 0, 'mount', childRootXml, { baseBinding: fixedBinding('mount', { ...rigidTarget }) }),
+    ])
+    let snapshot: any = initial
+    const history = new Map<number, any>()
+    // 与真实 SceneStore 同口径：提交前把当前完整快照记入不可变历史，再写新 revision。
+    const store = {
+      snapshot: (id: string) => { assert.equal(id, sceneId); return structuredClone(snapshot) },
+      commit: (input: any) => {
+        assert.equal(input.sceneId, sceneId)
+        assert.equal(input.expectedRevision, snapshot.revision, 'CAS：提交必须基于当前场景版本')
+        history.set(snapshot.revision, structuredClone(snapshot))
+        const next = structuredClone(snapshot)
+        for (const op of input.patch) {
+          assert.equal(op.op, 'update')
+          const index = next.entities.findIndex((entity: any) => entity.entityId === op.entityId)
+          assert.ok(index >= 0, `patch 目标实体必须存在：${op.entityId}`)
+          next.entities[index] = { ...next.entities[index], ...structuredClone(op.changes) }
+        }
+        next.revision = snapshot.revision + 1
+        snapshot = next
+        return structuredClone(snapshot)
+      },
+      versions: (id: string) => [...new Set([...history.keys(), snapshot.revision])].sort((left, right) => left - right).map(revision => ({ sceneId: id, revision, current: revision === snapshot.revision })),
+      version: (id: string, revision: number) => {
+        if (revision === snapshot.revision) return structuredClone(snapshot)
+        const found = history.get(revision)
+        if (!found) throw new Error(`SCENE_VERSION_NOT_FOUND: ${id}@${revision}`)
+        return structuredClone(found)
+      },
+    }
+    const baseInput = (expectedRevision: number, expectedGeneration: number, base: unknown) =>
+      ({ worldId: sceneId, sceneId, entityId: 'child', expectedRevision, expectedGeneration, base } as never)
+    const bodyWith = (description: Record<string, any>, name: string) => description.nativeBodies.find((body: any) => body.name === name)
+    try {
+      const opened = await mujoco.open(snapshot, { worldId: sceneId, clock: 'manual', startPaused: true, ground: false })
+      // 固定挂接后直接 free：走真实 robot_set_base，回执带既有历史的 before/after 定位。
+      const freed = await setRobotBase(mujoco, store as never, baseInput(1, opened.worldGeneration, { mode: 'free', bodyName: 'mount' }))
+      assert.equal(freed.status, 'UPDATED')
+      assert.equal(freed.syncRequired, false)
+      assert.equal(freed.assembly?.field, 'baseBinding')
+      assert.equal(freed.assembly?.beforeRevision, 1)
+      assert.equal(freed.assembly?.afterRevision, 2)
+      assert.equal((freed.assembly?.before as Record<string, unknown>).mode, 'fixed')
+      assert.equal((freed.assembly?.after as Record<string, unknown>).mode, 'free')
+      assert.equal(bodyWith(freed.robot as Record<string, any>, 'mount').root, true)
+
+      // 局部 Undo：恢复 fixed 声明并按新 revision 真实同步回读。
+      const undone = await undoRobotAssembly(mujoco, store as never, { sceneId, entityId: 'child', expectedRevision: 2, field: 'baseBinding', beforeRevision: 1, afterRevision: 2, worldId: sceneId })
+      assert.equal(undone.snapshot.revision, 3)
+      assert.equal(undone.syncRequired, false, `Undo 后应真实同步：${undone.reason}`)
+      const undoneDesc = undone.robot as Record<string, any>
+      assert.equal(undoneDesc.base.mode, 'fixed')
+      assert.equal(undoneDesc.base.target.entityId, 'parent')
+      assert.equal(undoneDesc.base.target.bodyName, 'base')
+      assert.deepEqual(undoneDesc.base.constraints, [])
+      assert.equal(bodyWith(undoneDesc, 'mount').root, true)
+      assert.equal(bodyWith(undoneDesc, 'finger').root, false)
+      assert.deepEqual(bodyWith(undoneDesc, 'finger').jointTypes, ['hinge'], 'Undo 不得删除内部关节')
+
+      // source 是不同语义：删除场景基座声明，不是"恢复上一次"。
+      const sourced = await setRobotBase(mujoco, store as never, baseInput(3, undone.world!.worldGeneration, { mode: 'source', bodyName: 'mount' }))
+      const sourcedChild = sourced.snapshot.entities.find((entity: any) => entity.entityId === 'child')!
+      assert.equal('baseBinding' in sourcedChild.components, false)
+      assert.equal(sourced.assembly?.after, undefined)
+
+      // 再 fixed 到 tool，然后局部 Undo 应回到 source（无声明）并按新 revision 同步。
+      const rebased = await setRobotBase(mujoco, store as never, baseInput(4, sourced.world!.worldGeneration, { mode: 'fixed', bodyName: 'mount', target: { entityId: 'parent', bodyName: 'tool', positionM: [.1, 0, .2], quaternionXyzw: [0, 0, 0, 1] } }))
+      assert.equal(bodyWith(rebased.robot as Record<string, any>, 'mount').root, true)
+      const undone2 = await undoRobotAssembly(mujoco, store as never, { sceneId, entityId: 'child', expectedRevision: 5, field: 'baseBinding', beforeRevision: 4, afterRevision: 5, worldId: sceneId })
+      assert.equal(undone2.snapshot.revision, 6)
+      assert.equal(undone2.syncRequired, false, `回到 source 声明也应真实同步：${undone2.reason}`)
+      const backChild = undone2.snapshot.entities.find((entity: any) => entity.entityId === 'child')!
+      assert.equal('baseBinding' in backChild.components, false)
+
+      // 冲突：绑定后来又改了，撤销 free 那条必须拒绝，且不覆盖当前版本。
+      const refixed = await setRobotBase(mujoco, store as never, baseInput(6, undone2.world!.worldGeneration, { mode: 'fixed', bodyName: 'mount', target: { ...rigidTarget } }))
+      await setRobotBase(mujoco, store as never, baseInput(7, refixed.world!.worldGeneration, { mode: 'fixed', bodyName: 'mount', target: { entityId: 'parent', bodyName: 'tool', positionM: [.1, 0, .2], quaternionXyzw: [0, 0, 0, 1] } }))
+      await assert.rejects(
+        () => undoRobotAssembly(mujoco, store as never, { sceneId, entityId: 'child', expectedRevision: 8, field: 'baseBinding', beforeRevision: 1, afterRevision: 2, worldId: sceneId }),
+        (error: any) => /ROBOT_ASSEMBLY_CONFLICT/.test(String(error?.message)),
+        '目标绑定已被后来编辑，必须拒绝覆盖',
+      )
+      assert.equal((await store.snapshot(sceneId)).revision, 8)
+    } finally { await mujoco.dispose() }
+  })
+  // 部分 batch Stop 的原生作用域回归（真实 MuJoCo 物理，非替身）：同 batch 停止 a 只撤销 a，
+  // b 留在原 batch 继续按物理钟运动；a 释放控制所有权后可重新启动；最后只停止 b。
+  test('部分停止作用域：scheduled/running 同 batch 停止 a 不取消 b，a 可重启而 b 继续真实运动', { timeout: 60_000 }, async () => {
+    const mujoco = create()
+    const twoArmScene = (sceneId: string) => ({
+      sceneId, revision: 1,
+      coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' },
+      entities: ['a', 'b'].map((entityId, index) => ({
+        entityId, name: entityId,
+        transform: { position: [index * 3, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+        resources: [{ resourceId: entityId, version: 1, original: { uri: `file://${POSITION_ARM}`, mimeType: 'application/x-mjcf+xml' } }],
+        components: { mujoco: {} },
+      })),
+    }) as never
+    const bPosition = async (worldId: string) => positionOf(observed(await mujoco.observe(worldId, { entityIds: ['b'] })), 'j1')
+    try {
+      for (const phase of ['scheduled', 'running'] as const) {
+        const sceneId = `partial-stop-${phase}`
+        const opened = await mujoco.open(twoArmScene(sceneId), { worldId: sceneId, clock: 'realtime', ground: false, timestepS: TIMESTEP })
+        const first = await mujoco.observe(opened.worldId)
+        const actionId = `${phase}-both`
+        const completion = mujoco.execute(opened.worldId, {
+          actionId, kind: 'batch', expectedGeneration: opened.worldGeneration,
+          ...(phase === 'scheduled' ? { startStep: first.stepIndex + 1000 } : {}),
+          motions: ['a', 'b'].map(entityId => ({ kind: 'joint', entityId, jointNames: ['j1'], positions: [1], durationS: 4 })),
+        } as never).catch(error => ({ status: 'failed', reason: String(error) }))
+        const receipt = () => mujoco.receipt(opened.worldId, actionId)
+        const deadline = Date.now() + 25_000
+        let active = await receipt()
+        while (!['accepted', 'running', 'failed'].includes(active.status) && Date.now() < deadline) { await new Promise(resolve => setTimeout(resolve, 10)); active = await receipt() }
+        assert.ok(['accepted', 'running'].includes(active.status), `batch 应处于活动态，实测 ${active.status}`)
+        if (phase === 'running') await new Promise(resolve => setTimeout(resolve, 150))
+        const stoppedA = await mujoco.stop(opened.worldId, { expectedGeneration: opened.worldGeneration, ...(phase === 'scheduled' ? { actionId } : {}), entityIds: ['a'] })
+        assert.deepEqual(stoppedA.affectedEntityIds, ['a'], '只应撤销 a')
+        assert.equal((await receipt()).status, phase === 'scheduled' ? 'accepted' : 'running', '父 batch 应仍为其余成员活动')
+        const restarted = await mujoco.execute(opened.worldId, { actionId: `${phase}-restart-a`, kind: 'batch', expectedGeneration: opened.worldGeneration, motions: [{ kind: 'joint', entityId: 'a', jointNames: ['j1'], positions: [-.2], durationS: .15 }] } as never)
+        assert.equal(restarted.status, 'completed', `a 释放所有权后应能重新启动：${(restarted as unknown as Record<string, unknown>).reason ?? ''}`)
+        while ((await receipt()).status === 'accepted' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
+        const beforeB = await bPosition(opened.worldId)
+        await new Promise(resolve => setTimeout(resolve, 250))
+        const afterB = await bPosition(opened.worldId)
+        assert.ok(afterB - beforeB > 0.0002, `未停止的 b 应继续运动，实测 Δ=${afterB - beforeB}`)
+        const stoppedB = await mujoco.stop(opened.worldId, { expectedGeneration: opened.worldGeneration, actionId, entityIds: ['b'] })
+        assert.deepEqual(stoppedB.affectedEntityIds, ['b'], '最后只应撤销 b')
+        const final = await receipt()
+        assert.equal(final.status, 'cancelled', '含被撤销成员的父 batch 终态不得报成功')
+        assert.equal((final as unknown as Record<string, unknown>).taskAchieved, false)
+        assert.ok(((final.effect as { motions: Array<{ entityId: string, memberStatus?: string }> }).motions).some(motion => motion.entityId === 'a' && motion.memberStatus === 'cancelled'), '终态须含 a 的取消事实')
+        await completion
+        await mujoco.close(opened.worldId)
+      }
+    } finally { await mujoco.dispose() }
+  })
+  // 原生 Freeze/Restore：free 根按当前 pose 用预分配 inactive weld 保持，无关实体继续运动；
+  // Restore 只关 eq_active，不自动恢复旧动作，冻结期间新执行明确 ROBOT_FROZEN。
+  test('原生 Freeze/Restore：free 根保持当前 pose，无关实体继续运动，Restore 释放后重新下落', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    const freeScene = (sceneId: string) => ({
+      sceneId, revision: 1,
+      coordinates: { units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw' },
+      entities: ['cubeA', 'cubeB'].map((entityId, index) => ({
+        entityId, name: entityId,
+        transform: { position: [index * 2, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+        resources: [{ resourceId: entityId, version: 1, original: { uri: `file://${FREE_BODY}`, mimeType: 'application/x-mjcf+xml' } }],
+        components: { mujoco: { rootBody: 'cube' } },
+      })),
+    }) as never
+    const z = async (entityId: string) => (await mujoco.observe('freeze-native', { entityIds: [entityId] })).entities[0]!.transform.position[2]
+    try {
+      const opened = await mujoco.open(freeScene('freeze-native'), { worldId: 'freeze-native', clock: 'realtime', ground: false, timestepS: TIMESTEP })
+      const generation = opened.worldGeneration
+      await new Promise(resolve => setTimeout(resolve, 40))
+      const frozen = await mujoco.freeze('freeze-native', { entityIds: ['cubeA'], expectedGeneration: generation })
+      assert.equal(frozen.status, 'frozen')
+      assert.deepEqual(frozen.scope, ['cubeA'])
+      assert.equal(frozen.rootHeld?.cubeA, true)
+      assert.equal(frozen.controlConfigPreserved, true)
+      const holdZ = await z('cubeA')
+      const frozenBase = (await mujoco.describe('freeze-native', 'cubeA')).base as Record<string, any>
+      assert.equal(frozenBase.freeze?.frozen, true, '读回应确认 frozen')
+      assert.equal(frozenBase.mode, 'free', 'Freeze 不得把普通 free 基座误报为永久 fixed')
+      await assert.rejects(
+        () => mujoco.execute('freeze-native', { actionId: 'frozen-move', kind: 'joint', expectedGeneration: generation, entityId: 'cubeA', jointNames: ['body_free'], positions: [0], durationS: .1 } as never),
+        (error: any) => /ROBOT_FROZEN/.test(String(error?.code ?? error?.message)),
+        '冻结期间的新执行必须明确 ROBOT_FROZEN',
+      )
+      await new Promise(resolve => setTimeout(resolve, 300))
+      assert.ok(Math.abs(await z('cubeA') - holdZ) < 2e-3, '冻结实体必须保持当前 pose')
+      assert.ok(await z('cubeB') < holdZ - .02, '无关实体必须继续在物理钟下落')
+      const restored = await mujoco.restore('freeze-native', { entityIds: ['cubeA'], expectedGeneration: generation, freezeId: frozen.freezeId })
+      assert.equal(restored.status, 'restored')
+      assert.ok(restored.restoredEntityIds?.includes('cubeA'))
+      assert.equal(((await mujoco.describe('freeze-native', 'cubeA')).base as Record<string, any>).freeze?.frozen, false)
+      const releasedZ = await z('cubeA')
+      await new Promise(resolve => setTimeout(resolve, 300))
+      assert.ok(await z('cubeA') < releasedZ - .01, 'Restore 解除原生保持后应恢复真实下落')
+      await mujoco.close('freeze-native')
+    } finally { await mujoco.dispose() }
+  })
+  // 已挂接附属件 Freeze 的范围边界：baseBinding 到父实体后，子件根由真实 weld 随父运动，
+  // 不得再启用世界根锚（否则等于把无关父机器人锁到 world）。冻结只作用所选子件自身的 DOF。
+  test('已挂接附属件 Freeze 不锁根到 world：父机器人继续原生运动，子件随父移动', { timeout: 60_000 }, async () => {
+    const mujoco = create()
+    const sceneId = 'freeze-accessory'
+    const parentXml = '<mujoco><worldbody><body name="base"><geom type="box" size=".1 .1 .1" mass="2"/>'
+      + '<body name="tool" pos=".3 0 .1"><joint name="pj" type="hinge" axis="0 0 1" damping=".2"/><geom type="box" size=".05 .05 .05" mass=".5"/></body></body></worldbody>'
+      + '<actuator><position name="pj_act" joint="pj" kp="50"/></actuator></mujoco>'
+    const childXml = '<mujoco><worldbody><body name="mount"><geom type="box" size=".05 .05 .05" mass=".3"/></body></worldbody></mujoco>'
+    const snapshot = bindingSnapshot(sceneId, [
+      { entityId: 'parent', name: 'parent', transform: { position: [0, 0, 1], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] }, resources: [], components: { mujoco: { rootBody: 'base', xml: parentXml } } },
+      { entityId: 'tool', name: 'tool', transform: { position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] }, resources: [], components: { mujoco: { rootBody: 'mount', xml: childXml }, baseBinding: { mode: 'free', bodyName: 'mount', initialWorldPose: { entityId: 'parent', bodyName: 'tool', positionM: [.12, 0, 0], quaternionXyzw: [0, 0, 0, 1] } } } },
+    ]) as never
+    try {
+      const opened = await mujoco.open(snapshot, { worldId: sceneId, clock: 'realtime', ground: false, timestepS: TIMESTEP })
+      const generation = opened.worldGeneration
+      const childPos = async () => (await mujoco.observe(sceneId, { entityIds: ['tool'] })).entities[0]!.transform.position
+      const parentJoint = async () => positionOf(observed(await mujoco.observe(sceneId, { entityIds: ['parent'] })), 'pj')
+      const childBefore = await childPos()
+      const frozen = await mujoco.freeze(sceneId, { entityIds: ['tool'], expectedGeneration: generation })
+      assert.equal(frozen.status, 'frozen')
+      assert.equal(frozen.rootHeld?.tool, false, '已挂接子件不得被锁根到 world（会把无关父机器人一起锁死）')
+      assert.deepEqual(frozen.jointLocks?.tool, [])
+      const described = (await mujoco.describe(sceneId, 'tool')).base as Record<string, any>
+      assert.equal(described.freeze?.frozen, true)
+      assert.equal(described.freeze?.rootHeld, false)
+      const parentStart = await parentJoint()
+      await mujoco.execute(sceneId, { actionId: 'parent-move', kind: 'joint', expectedGeneration: generation, entityId: 'parent', jointNames: ['pj'], positions: [1], durationS: .6 } as never)
+      await new Promise(resolve => setTimeout(resolve, 250))
+      const parentNow = await parentJoint()
+      assert.ok(Math.abs(parentNow - parentStart) > .05, `父机器人应继续原生运动，实测 Δ=${parentNow - parentStart}`)
+      const childNow = await childPos()
+      assert.ok(Math.hypot(childNow[0]! - childBefore[0]!, childNow[1]! - childBefore[1]!, childNow[2]! - childBefore[2]!) > .01, '已挂接子件应随父运动')
+      await mujoco.restore(sceneId, { entityIds: ['tool'], expectedGeneration: generation, freezeId: frozen.freezeId })
+      await mujoco.close(sceneId)
     } finally { await mujoco.dispose() }
   })
 })

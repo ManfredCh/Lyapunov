@@ -119,9 +119,68 @@ def initialize_bindings(model, data, maps, pending):
     mj.mj_forward(model, data)
 
 
+def compile_freeze_constraints(spec, maps, spec_bodies):
+    """编译期预分配默认 inactive 的 Freeze 控制约束：每个实体一根根锚 + 每个 scalar 关节一把锁。
+
+    运行期 Freeze 只按**当前 pose**写 eq_data 并置 eq_active（见 worker.py 的 freeze/restore），
+    不重建模型、不每 tick 覆盖 qpos、不关碰撞、不暂停整 world。约束名固定，运行期按名字回读；
+    根锚只在实体根确为自由根（自由关节）时启用，固定/挂接根不会被锁到 world，父实体继续运动。
+    """
+    for eid, info in maps.items():
+        prefix = info['prefix']
+        root = None
+        entry = spec_bodies.get(eid)
+        if entry is not None:
+            root = entry[0]
+        if root is not None:
+            spec.add_equality(name=prefix + '__lyapunov_freeze_root', type=mj.mjtEq.mjEQ_WELD,
+                              objtype=mj.mjtObj.mjOBJ_BODY, name1=root.name, active=False,
+                              solref=[0.004, 1.0])
+        for joint in spec.joints:
+            if not joint.name.startswith(prefix):
+                continue
+            if int(joint.type) not in (int(mj.mjtJoint.mjJNT_HINGE), int(mj.mjtJoint.mjJNT_SLIDE)):
+                continue
+            local = joint.name[len(prefix):]
+            spec.add_equality(name=prefix + '__lyapunov_freeze_joint_' + local, type=mj.mjtEq.mjEQ_JOINT,
+                              name1=joint.name, active=False, solref=[0.004, 1.0])
+
+
+def freeze_constraint_names(prefix, local_joints):
+    """与 compile_freeze_constraints 同源的运行期名字：根锚名 + 逐 scalar 关节锁名。"""
+    return {'root': prefix + '__lyapunov_freeze_root',
+            'joints': {local: prefix + '__lyapunov_freeze_joint_' + local for local in local_joints}}
+
+
 def body_pose(world, body):
     q = world.data.xquat[body]
     return {'positionM': world.data.xpos[body].tolist(), 'quaternionXyzw': [*q[1:].tolist(), float(q[0])]}
+
+
+def install_eligibility(model, prefix):
+    """只读安装资格：该实体子树内是否有 plane geom。
+
+    MuJoCo 只允许 plane 出现在静态 body；把源根固定到另一个实体的 body（moving 挂接）会把
+    整个子树变成非静态，任何 plane 都会让重编译失败。这里按**实体前缀的 geom 名**识别归属
+    （源场景的 worldbody plane 被整份导入后会带实体前缀，引擎自带地面没有该前缀），只**如实
+    报告事实**（plane 所在 body），不删除几何、不改源模型，也不把独立根/世界固定子 body 的
+    正常安装当作不合法。
+    """
+    bodies = []
+    for g in range(model.ngeom):
+        if int(model.geom_type[g]) != int(mj.mjtGeom.mjGEOM_PLANE):
+            continue
+        name = model.geom(g).name
+        if not name or not name.startswith(prefix):
+            continue
+        body_name = model.body(int(model.geom_bodyid[g])).name
+        local = body_name[len(prefix):] if body_name.startswith(prefix) else body_name
+        if local not in bodies:
+            bodies.append(local)
+    result = {'attachable': not bodies, 'staticPlaneBodies': sorted(bodies)}
+    if bodies:
+        result['reason'] = 'SOURCE_HAS_STATIC_PLANE'
+    return result
 
 
 def authoring_description(world, info):
@@ -130,7 +189,10 @@ def authoring_description(world, info):
         if not model.body(i).name.startswith(prefix): continue
         parent = int(model.body_parentid[i]); name = model.body(i).name[len(prefix):]
         types = [mj.mjtJoint(int(model.jnt_type[j])).name.replace('mjJNT_', '').lower() for j in range(model.njnt) if int(model.jnt_bodyid[j]) == i]
-        bodies.append({'name': name, 'root': i == root and parent == 0, 'parentName': model.body(parent).name[len(prefix):] if model.body(parent).name.startswith(prefix) else None,
+        # root 身份 = 该实体的源根（info['body']，由可信 rootName/body 映射得到），不是 world 树根：
+        # 实体根以 fixed 原生挂到另一实体 body 后 parent != 0，但仍必须是该实体的可编辑根；
+        # 内部 body 因 i != root 恒为 False，不因这处放宽而可被当作根。
+        bodies.append({'name': name, 'root': i == root, 'parentName': model.body(parent).name[len(prefix):] if model.body(parent).name.startswith(prefix) else None,
                        'massKg': float(model.body_mass[i]), 'jointTypes': types, 'worldFromBody': body_pose(world, i)})
     sites = []
     for name, i in info['sites'].items():
@@ -139,6 +201,10 @@ def authoring_description(world, info):
     constraints = []
     root_weld = False
     for i in range(model.neq):
+        # Freeze 的根锚/关节锁是当前 world/generation 的运行控制状态，不是永久装配声明：
+        # 不得让它把普通 free/source 基座误报成 fixed（R-015 内部根保护不退化）。
+        if '__lyapunov_freeze_' in (model.equality(i).name or ''):
+            continue
         kind = mj.mjtEq(int(model.eq_type[i])).name.replace('mjEQ_', '').lower(); a = int(model.eq_obj1id[i]); b = int(model.eq_obj2id[i])
         if kind not in ('weld', 'connect') or root not in (a, b): continue
         other = b if a == root else a; full = model.body(other).name if other >= 0 else 'world'; eid, _, local = full.partition('/')
@@ -171,9 +237,14 @@ def authoring_description(world, info):
              'sourceMode': source['mode'], 'reason': reason,
              'constraints': constraints, 'worldFromBody': body_pose(world, root), 'editable': {'fixed': editable, 'free': editable, 'entity': editable}}
     if not editable: state['editable']['reason'] = '源根本体关节/约束或质量尚不能保真编辑；内部关节保留'
+    record = (getattr(world, 'frozen', None) or {}).get(info['entity'].get('entityId'))
+    state['freeze'] = ({'frozen': True, 'freezeId': record.get('freezeId'), 'scope': list(record.get('scope', [])),
+                        'rootHeld': bool(record.get('rootHeld')), 'jointLocks': list(record.get('jointLocks', [])),
+                        'holdPose': copy.deepcopy(record.get('holdPose')) if record.get('holdPose') else None,
+                        'restoreAvailable': True} if record else {'frozen': False, 'restoreAvailable': False})
     if declaration and declaration.get('target'): state['target'] = copy.deepcopy(declaration['target'])
     if source.get('modelFromBase'): state['modelFromBase'] = copy.deepcopy(source['modelFromBase'])
-    return {'nativeBodies': bodies, 'nativeSites': sites, 'base': state}
+    return {'nativeBodies': bodies, 'nativeSites': sites, 'base': state, 'installEligibility': install_eligibility(model, prefix)}
 
 
 def authoring_observation(world, info, sensors):

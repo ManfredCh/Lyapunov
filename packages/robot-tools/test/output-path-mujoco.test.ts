@@ -194,7 +194,9 @@ async function createHarness(pythonPath: string, sessionCwd: string): Promise<Ha
   }
   // Scene 只负责把这一份 fixture 快照喂给真实 Provider；物理与渲染全部来自真引擎。
   // 场景服务按会话取（产品 `ctx.scene.forSession` 那一份规则）：探针按会话各给一份，不吃全局单例。
-  const sceneProbe = () => ({ scene: { snapshot: async (sceneId: string) => ({ ...snapshot, sceneId }), commit: async () => snapshot } })
+  // 产品 scene.forSession 同时提供读口与 prepareWorld（P5 默认登记语义）；探针按同一形状给，
+  // 否则 sim_open 的 ground 准备路径会因夹具缺方法而假红（与被测的 outputDir 语义无关）。
+  const sceneProbe = () => ({ scene: { snapshot: async (sceneId: string) => ({ ...snapshot, sceneId }), commit: async () => snapshot }, prepareWorld: async (input: { sceneId: string }) => ({ ...snapshot, sceneId: input.sceneId }) })
   ctx.reflect.provide('scene', { forSession: () => sceneProbe() } as never)
   await ctx.plugin({ name: 'test-robot-tools', inject: ['tools', 'commands', 'scene', 'sim'], apply: (scoped: Context) => { apply(scoped) } } as never, undefined as never)
   const loop = await mountAgentLoopTestHarness(ctx)
@@ -246,7 +248,7 @@ describe('真实 MuJoCo 引擎 + 真实 ToolRegistry/Command 的 outputDir 落�
       chdir(hostCwd)
       harness = await createHarness(MUJOCO_PYTHON, sessionCwd)
       // 声明：这份文件里的相对路径都以会话工作区为基准（与 bash 一致）。
-      assert.deepEqual([...outputDirTools], ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export'])
+      assert.deepEqual([...outputDirTools], ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export', 'camera_lidar_scan'])
 
       const opened = await harness.call('sim_open', { sceneId: 'probe-camera-scene', options: { timestepS: 0.002, clock: 'manual', realtimeFactor: 1 } })
       assert.equal(opened.isError, false, opened.text)

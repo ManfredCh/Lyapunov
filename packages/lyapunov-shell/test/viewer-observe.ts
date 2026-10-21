@@ -2630,7 +2630,9 @@ try {
     check('a08_camera_save_foreign_ack_keeps_waiter',!settled&&Boolean(foreignAfter.uiActions?.some(row=>row.id===action.id)),'非目标窗口ACK不出队、不完成保存')
     await harness.command(SESSION_A,'ui_action_ack',{ids:[action.id],clientId:client,results:[{id:action.id,ok:true,clientId:client,value:face}]})
     const result=await pending,value=textValue(result),entity=value.snapshot?.entities?.find((row:any)=>row.entityId==='a08-view')
-    check('a08_camera_save_tool_persists_actual_metadata',!result.isError&&value.status==='SAVED'&&value.snapshot?.revision===1&&entity?.transform?.position?.join(',')==='4,5,6'&&entity?.components?.camera?.near===.04&&entity?.components?.camera?.far===3456&&Math.abs(entity.components.camera.intrinsics.cx-k.cx)<1e-6,`Tool→metadata→CAS：${JSON.stringify({isError:result.isError,keys:Object.keys(value),position:entity?.transform?.position,near:entity?.components?.camera?.near,far:entity?.components?.camera?.far,cx:entity?.components?.camera?.intrinsics?.cx,error:failureMessage(result)})}`)
+    // 相机分辨率取 Scene 草稿默认 640×480（不是当前画布 800×600）：声明 K 按默认分辨率等比缩放，主点占比保留。
+    const expectedLens=scaleIntrinsics(k,640,480)
+    check('a08_camera_save_tool_persists_actual_metadata',!result.isError&&value.status==='SAVED'&&value.snapshot?.revision===1&&entity?.transform?.position?.join(',')==='4,5,6'&&entity?.components?.camera?.near===.04&&entity?.components?.camera?.far===3456&&entity?.components?.camera?.width===640&&entity?.components?.camera?.height===480&&Math.abs(entity.components.camera.intrinsics.cx-expectedLens.cx)<1e-6&&Math.abs(entity.components.camera.intrinsics.fx-expectedLens.fx)<1e-6,`Tool→metadata→CAS：${JSON.stringify({isError:result.isError,keys:Object.keys(value),position:entity?.transform?.position,near:entity?.components?.camera?.near,far:entity?.components?.camera?.far,width:entity?.components?.camera?.width,height:entity?.components?.camera?.height,cx:entity?.components?.camera?.intrinsics?.cx,expectedCx:expectedLens.cx,error:failureMessage(result)})}`)
     const draft={...sceneCameraDraftOf(entity),position:'7 8 9'}
     const edited=await harness.command(SESSION_A,'camera_scene_save',{sceneId:id,expectedRevision:1,mode:'draft',entityId:'a08-view',draft}) as any
     check('a08_camera_save_command_same_contract',edited.status==='SAVED'&&edited.snapshot?.revision===2&&edited.snapshot.entities[0]?.transform?.position?.join(',')==='7,8,9'&&edited.snapshot.entities[0]?.components?.camera?.installation?.source==='current-view','人工Command与Tool共用操作；编辑保留安装来源和首次基线')
@@ -2684,6 +2686,58 @@ try {
       const manual=applyCameraNavigation({action,sceneId:id,entityId:'arm'},ports)
       check('camera_surface_foreground_manual_same_'+action,adopted.applied&&manual.applied&&naturalCalls===JSON.stringify(calls)&&!gone.uiActions?.some(row=>row.id===item.id),'目标转前台执行并确认出队；人工/NL调用同一handler且共享UI/Viewer参数相同')
     }
+  }
+
+  // P10 A0（R007 读取链）：viewer_annotation_read 的真实 SDK 输出必须过 lossless-JSON 判据。
+  // 普通物件锚点没有 body/normal/sceneId/sceneRevision，旧采集可能没有 camera；这些可选值必须按语义省略，
+  // 而不是以 `undefined` 形式进入工具结果——那正是正常模型三次 "value is not lossless JSON" 的根因。
+  {
+    const annotationClient='annotation-client'
+    const plainScene='scene-ann-plain',bodyScene='scene-ann-body',missingScene='scene-ann-missing',emptyScene='scene-ann-empty'
+    const entityOf=(entityId:string,name:string):Entity=>({entityId,name,transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}})
+    const seedAnnotationScene=async(sessionId:string,sceneId:string,entities:Entity[])=>{
+      await harness.stubSceneCreate(sessionId,sceneId)
+      await harness.commitScene(sessionId,sceneId,0,entities.map(entity=>({op:'add' as const,entity:{...entity}})))
+      await harness.state(sessionId,sessionId===SESSION_A?annotationClient:'annotation-client-b',{sceneId,revision:1},sceneId)
+    }
+    const captureAnnotation=(sessionId:string,sceneId:string,input:Record<string,unknown>)=>harness.command(sessionId,'viewer_capture',{dataURL:`data:image/png;base64,${PNG_BASE64}`,sceneId,sceneRevision:1,clientId:sessionId===SESSION_A?annotationClient:'annotation-client-b',...input})
+
+    // ① 普通物件锚点 + 无 camera（旧采集）：body/normal/sceneId/sceneRevision/pose 都必须省略。
+    await seedAnnotationScene(SESSION_A,plainScene,[entityOf('obj-plain','plain')])
+    await captureAnnotation(SESSION_A,plainScene,{capturedAt:'2026-10-16T00:00:01.000Z',annotations:[{annotationId:'a-plain',entityId:'obj-plain',entity:'plain',text:'plain note',anchor:{entityId:'obj-plain',local:[0.1,0.2,0.3],world:[1,2,3]}}]})
+    const plainRead=await harness.tool(SESSION_A,'viewer_annotation_read',{input:{sceneId:plainScene}})
+    check('annotation_read_plain_lossless',!plainRead.isError,'真实 SDK 工具边界不得再报 not lossless JSON：'+failureMessage(plainRead))
+    const plainValue=textValue(plainRead),plainRow=plainValue.annotations?.[0] as Record<string,unknown>|undefined
+    check('annotation_read_plain_omits_optional',plainValue.found===true&&!('pose' in plainValue)&&Boolean(plainRow)&&!('body' in plainRow!)&&!('normalWorld' in plainRow!)&&!('sceneId' in plainRow!)&&!('sceneRevision' in plainRow!),JSON.stringify(plainValue))
+
+    // ② 真实 body-local 批注：身份/原文/同一图附件保留，body 与 sceneId 如实带出。
+    await seedAnnotationScene(SESSION_A,bodyScene,[entityOf('robot-ann','robot')])
+    const bodyCapture=await captureAnnotation(SESSION_A,bodyScene,{capturedAt:'2026-10-16T00:00:02.000Z',camera:{position:[0,0,1],quaternion:[0,0,0,1],fov_y:45,projection:'perspective'},annotations:[{annotationId:'a-body',entityId:'robot-ann',entity:'robot',text:'hand note',anchor:{entityId:'robot-ann',local:[0.2,0.3,0.4],world:[2,3,4],normal:[0,0,1],sceneId:bodyScene,sceneRevision:1,body:{bodyName:'hand',localM:[0.01,0.02,0.03],surfaceLocalM:[0.01,0.02,0.03],normalLocal:[0,0,1],worldId:'w-ann',generation:1,frameId:'f-ann',stepIndex:1}}}]})
+    const bodyRead=await harness.tool(SESSION_A,'viewer_annotation_read',{input:{sceneId:bodyScene}})
+    check('annotation_read_body_lossless',!bodyRead.isError,'body-local 批注也要是 lossless JSON：'+failureMessage(bodyRead))
+    const bodyValue=textValue(bodyRead),bodyRow=bodyValue.annotations?.[0] as Record<string,any>|undefined
+    check('annotation_read_body_identity_retained',bodyValue.found===true&&bodyValue.captureId===bodyCapture?.captureId&&bodyRow?.annotationId==='a-body'&&bodyRow?.text==='hand note'&&bodyRow?.body?.bodyName==='hand'&&Array.isArray(bodyRow?.body?.localM)&&Array.isArray(bodyRow?.normalWorld)&&bodyRow?.sceneId===bodyScene&&bodyRow?.sceneRevision===1,JSON.stringify(bodyRow))
+    check('annotation_read_body_same_attachment',bodyValue.image?.attached===true&&typeof bodyValue.image?.attachmentId==='string','body-local 读取必须带回同一张图附件')
+
+    // ③ 缺图：附件读不到时仍返回坐标与批注正文，并如实说明图不可用。
+    await seedAnnotationScene(SESSION_A,missingScene,[entityOf('obj-missing','missing')])
+    const missingCapture=await captureAnnotation(SESSION_A,missingScene,{capturedAt:'2026-10-16T00:00:03.000Z',camera:{position:[0,0,1],quaternion:[0,0,0,1],fov_y:45,projection:'perspective'},annotations:[{annotationId:'a-missing',entityId:'obj-missing',entity:'missing',text:'missing note',anchor:{entityId:'obj-missing',local:[0,0,0],world:[0,0,0]}}]})
+    const storedMissing=JSON.parse(await readFile(harness.capturePath(SESSION_A,`${String(missingCapture?.captureId)}.json`),'utf8')) as {imagePath:string}
+    await rm(storedMissing.imagePath,{force:true})
+    const missingRead=await harness.tool(SESSION_A,'viewer_annotation_read',{input:{sceneId:missingScene}})
+    check('annotation_read_missing_image_lossless',!missingRead.isError,'缺图分支也必须是 lossless JSON：'+failureMessage(missingRead))
+    const missingValue=textValue(missingRead)
+    check('annotation_read_missing_image_reason',missingValue.found===true&&missingValue.image?.attached===false&&typeof missingValue.image?.reason==='string'&&missingValue.annotations?.[0]?.annotationId==='a-missing',JSON.stringify(missingValue.image))
+
+    // ④ 无带批注采集：显式 found=false，不是空对象或错误。
+    await seedAnnotationScene(SESSION_A,emptyScene,[entityOf('obj-empty','empty')])
+    const emptyValue=textValue(await harness.tool(SESSION_A,'viewer_annotation_read',{input:{sceneId:emptyScene}}))
+    check('annotation_read_found_false',emptyValue.found===false&&emptyValue.sceneId===emptyScene,JSON.stringify(emptyValue))
+
+    // ⑤ 跨会话隔离：A 的批注对 B 不可见（B 即使有同 sceneId 的 Scene 也读不到 A 的采集）。
+    await seedAnnotationScene(SESSION_B,bodyScene,[entityOf('robot-ann','robot')])
+    const crossValue=textValue(await harness.tool(SESSION_B,'viewer_annotation_read',{input:{sceneId:bodyScene}}))
+    check('annotation_read_cross_session_isolated',crossValue.found===false,JSON.stringify(crossValue))
   }
 
 } finally {

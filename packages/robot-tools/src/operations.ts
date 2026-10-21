@@ -1,10 +1,23 @@
-import type { Entity, SceneSnapshot, SceneCommit, WorldHandle } from '../../lyapunov-contracts/src/types.ts'
+import type { Entity, ResourceRef, SceneSnapshot, SceneCommit, WorldHandle } from '../../lyapunov-contracts/src/types.ts'
 import { SimError } from '../../sim-contract/src/index.ts'
-import type { SimWorlds, SimAction, EntityMotion, WorldOptions, StopSelection, MultiCaptureOptions, CameraAdjustOptions, CameraAnnotationOptions, CameraDatasetExportOptions } from '../../sim-contract/src/index.ts'
+import type { SimWorlds, SimAction, EntityMotion, WorldOptions, StopSelection, FreezeSelection, MultiCaptureOptions, CameraAdjustOptions, CameraAnnotationOptions, CameraDatasetExportOptions, LidarScanOptions } from '../../sim-contract/src/index.ts'
 import { setRobotBase, setRobotTcp } from './authoring.ts'
+import { previewRobotAssembly } from './assembly-preview.ts'
+import { checkRobotAssembly, replaceRobotAssembly, saveRobotAssemblyMount } from './assembly-actions.ts'
+import { extractRobotAssemblySubtree, precheckRobotAssemblySubtree, reassembleRobotAssemblySubtree } from './assembly-extract.ts'
+import { readRobotAssemblyHistory, undoRobotAssembly } from './assembly-history.ts'
 import { readRobotPresets } from './presets.ts'
-import type { RobotSetBaseInput, RobotSetTcpInput } from '../../lyapunov-contracts/src/robot-authoring.ts'
-export interface SceneReader { snapshot(sceneId: string): Promise<SceneSnapshot> | SceneSnapshot; commit(input: SceneCommit): Promise<SceneSnapshot> | SceneSnapshot }
+import type { RobotAnchorPose, RobotAssemblyCheckInput, RobotAssemblyHistoryInput, RobotAssemblyMountInput, RobotAssemblyPreviewInput, RobotAssemblyReplaceInput, RobotAssemblyUndoInput, RobotSetBaseInput, RobotSetTcpInput, RobotSubtreeDerivationRecord, RobotSubtreeExtractInput, RobotSubtreePrecheckInput, RobotSubtreePrecheckResult, RobotSubtreeReassembleInput } from '../../lyapunov-contracts/src/robot-authoring.ts'
+/**
+ * 只读/写入 Scene 的窄面。`version`/`versions` 是既有 SceneStore 历史在机器人 Undo 侧的**可选**读口：
+ * 缺省表示该 owner 没有可核历史，局部 Undo 会明确报 SCENE_HISTORY_UNAVAILABLE，而不是新建一套历史。
+ */
+export interface SceneReader {
+  snapshot(sceneId: string): Promise<SceneSnapshot> | SceneSnapshot
+  commit(input: SceneCommit): Promise<SceneSnapshot> | SceneSnapshot
+  version?(sceneId: string, revision: number): Promise<SceneSnapshot> | SceneSnapshot
+  versions?(sceneId: string): Promise<Array<{ revision: number }>> | Array<{ revision: number }>
+}
 /**
  * 接线缝（ISAAC-14(b)）：`robot_walk` 的策略执行路径**由注入提供**，本文件不 import `policy-registry`。
  *
@@ -19,6 +32,55 @@ export interface SceneReader { snapshot(sceneId: string): Promise<SceneSnapshot>
 export interface RobotOperationHooks {
   walk?: (input: { worldId: string; sceneId: string; action: SimAction }, signal?: AbortSignal) => Promise<unknown>
   prepareWorld?: (snapshot:SceneSnapshot,options?:WorldOptions,signal?:AbortSignal)=>Promise<SceneSnapshot>
+  /** R-013：源格式派生接线（scene-kit owner）。未接线时真实拆分明确拒绝，不按名称/扩展名猜能力。 */
+  subtree?: RobotSubtreeHooks
+}
+/** helper 返回的预检事实（只读），由接线方原样透传。 */
+export interface RobotSubtreeFacts {
+  source: string
+  sourceSha256: string
+  selectedBody: string
+  selectedBodyParent: string
+  supported: boolean
+  subtree: RobotSubtreePrecheckResult['subtree']
+  remaining: RobotSubtreePrecheckResult['remaining']
+  closure: { meshFiles: string[]; textureFiles: string[]; copiedBytes: number }
+  crossEdges: RobotSubtreePrecheckResult['crossEdges']
+  warnings: Array<Record<string, unknown>>
+  reason: string | null
+}
+/** 资源库只读预检结果；`supported=false` 带具名 unsupported（零 Scene/资源写入）。 */
+export interface RobotSubtreeInspection {
+  resourceId: string
+  version: number
+  path: string
+  sha256: string
+  format: string
+  supported: boolean
+  facts?: RobotSubtreeFacts
+  unsupported?: { code: string; message: string }
+}
+export interface RobotSubtreeDeriveRequest {
+  sceneId: string
+  entityId: string
+  sourceResourceId: string
+  sourceVersion: number
+  bodyName: string
+  operationId: string
+  partEntityId: string
+  partName: string
+  cutPoseInSourceRoot?: RobotAnchorPose
+}
+export interface RobotSubtreeDeriveOutcome {
+  derivation: RobotSubtreeDerivationRecord
+  remainingRef: ResourceRef
+  partRef: ResourceRef
+}
+export interface RobotSubtreeHooks {
+  precheck: (input: { resourceId: string; version: number; bodyName: string }) => Promise<RobotSubtreeInspection>
+  derive: (input: RobotSubtreeDeriveRequest) => Promise<RobotSubtreeDeriveOutcome>
+  /** 按已登记资源合成引擎/可视组件与**完整 ResourceRef**（与 scene_mount 同一口径；重组恢复原引用时两者都要）。 */
+  resourceComponents: (input: { resourceId: string; version: number }) => Promise<{ ref: ResourceRef; components: Partial<Entity['components']> }>
 }
 export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks: RobotOperationHooks = {}) {
   return {
@@ -75,6 +137,21 @@ export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks:
     robot_presets: (input: import('../../lyapunov-contracts/src/robot-authoring.ts').RobotConfigurationIdentity) => readRobotPresets(sim, scene, input),
     robot_set_tcp: (input: RobotSetTcpInput) => setRobotTcp(sim, scene, input),
     robot_set_base: (input: RobotSetBaseInput) => setRobotBase(sim, scene, input),
+    // R-012／§2.9 只读预览：算源根→目标 body 的安装变换并给出 `robot_set_base.applyInput`；
+    // 本方法不 commit/sync/start/step，也不读取任何 presentation/explode 偏移。
+    robot_assembly_preview: (input: RobotAssemblyPreviewInput) => previewRobotAssembly(sim, scene, input),
+    // R-012：保存/复用源安装点的窄元数据（`components.assemblyMount`，绑定资源版本），只读检查，
+    // 以及一次 CAS 的旧末端置换。都不新开历史/点数据库。
+    robot_assembly_mount: (input: RobotAssemblyMountInput) => saveRobotAssemblyMount(sim, scene, input),
+    robot_assembly_check: (input: RobotAssemblyCheckInput) => checkRobotAssembly(sim, scene, input),
+    robot_assembly_replace: (input: RobotAssemblyReplaceInput) => replaceRobotAssembly(sim, scene, input),
+    // R-013：只读预检 + 真实内部拆分 + 重组。派生/登记由 scene-kit owner 经 `hooks.subtree` 执行，
+    // 本层只做一次 Scene CAS、一次 sync，以及成对标记与受保护局部 Undo 的核对。
+    robot_assembly_extract_precheck: (input: RobotSubtreePrecheckInput) => precheckRobotAssemblySubtree(scene, hooks.subtree, input),
+    robot_assembly_extract: (input: RobotSubtreeExtractInput) => extractRobotAssemblySubtree(sim, scene, hooks.subtree, input),
+    robot_assembly_reassemble: (input: RobotSubtreeReassembleInput) => reassembleRobotAssemblySubtree(sim, scene, hooks.subtree, input),
+    robot_assembly_history: (input: RobotAssemblyHistoryInput) => readRobotAssemblyHistory(scene, input),
+    robot_assembly_undo: (input: RobotAssemblyUndoInput) => undoRobotAssembly(sim, scene, input),
     robot_state: (input: { worldId: string; entityId?: string; contacts?: boolean }) => sim.observe(input.worldId, { entityIds: input.entityId ? [input.entityId] : undefined, contacts: input.contacts }),
     robot_move: (input: { worldId: string; action: SimAction }, signal?: AbortSignal) => sim.execute(input.worldId, input.action, signal),
     robot_walk: async (input: { worldId: string; action: SimAction }, signal?: AbortSignal) => {
@@ -106,6 +183,15 @@ export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks:
     },
     robot_stop: (input: { worldId: string } & StopSelection) => sim.stop(input.worldId, { entityIds: input.entityIds, actionId: input.actionId, expectedGeneration: input.expectedGeneration }),
     sim_stop: (input: { worldId: string } & StopSelection) => sim.stop(input.worldId, { entityIds: input.entityIds, actionId: input.actionId, expectedGeneration: input.expectedGeneration }),
+    // 目标级原生 Freeze/Restore：只走同一个 SimWorlds 保持接口，不新开 world、不写 Scene、不暂停整 world。
+    robot_freeze: (input: { worldId: string } & FreezeSelection) => {
+      if (!sim.freeze) throw new SimError('FREEZE_UNSUPPORTED', '当前 Provider 未提供原生 Freeze 接口')
+      return sim.freeze(input.worldId, { entityIds: input.entityIds, expectedGeneration: input.expectedGeneration, freezeId: input.freezeId })
+    },
+    robot_restore: (input: { worldId: string } & FreezeSelection) => {
+      if (!sim.restore) throw new SimError('FREEZE_UNSUPPORTED', '当前 Provider 未提供原生 Freeze/Restore 接口')
+      return sim.restore(input.worldId, { entityIds: input.entityIds, expectedGeneration: input.expectedGeneration, freezeId: input.freezeId })
+    },
     sim_assist: (input: { worldId: string; mode: 'attach' | 'release'; expectedGeneration: number; objectId: string; robotId?: string; anchorBody?: string }) => sim.assist(input.worldId, input),
     // 落盘类工具的 outputDir 由 Tool/Command 边界解析成绝对路径后才到这里（见 plugin.ts/output-path.ts）：
     // Provider/worker 侧按宿主进程 cwd 解析相对路径，会把产物写到产品根；这里不再补一层 Agent 依赖。
@@ -117,6 +203,11 @@ export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks:
     camera_adjust: (input: { worldId: string } & CameraAdjustOptions) => sim.adjustCamera(input.worldId, input),
     camera_project_annotation: (input: { worldId: string } & CameraAnnotationOptions) => sim.projectAnnotation(input.worldId, input),
     camera_dataset_export: (input: { worldId: string } & CameraDatasetExportOptions) => sim.exportCameraDataset(input.worldId, input),
+    // 模拟LiDAR量测：真实原生物理射线，与相机RGB-D分源。Provider 未提供通道时结构化拒绝，不返回占位图。
+    camera_lidar_scan: (input: { worldId: string } & LidarScanOptions) => {
+      if (!sim.scanLidar) throw new SimError('SENSOR_UNAVAILABLE', '当前 Provider 未提供模拟LiDAR量测接口（scanLidar）')
+      return sim.scanLidar(input.worldId, input)
+    },
     sim_action_receipt: (input: { worldId: string; actionId: string }) => sim.receipt(input.worldId, input.actionId),
   }
 }

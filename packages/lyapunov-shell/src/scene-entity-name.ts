@@ -3,6 +3,8 @@ import type {Translate} from './entity-editor.tsx'
 
 /** 只投影内置模板的原始默认名；用户修改的名字与普通资产名照原文显示。 */
 export function entityDisplayName(entity:Entity,tr:Translate):string{
+ // 只翻译导入器生成且尚未被用户改名的坐标包装节点。
+ if(entity.parentId&&entity.entityId===`${entity.parentId}:source`&&entity.name==='源坐标转换')return tr('源坐标转换','Source transform')
  const support=entity.components.supportSurface as {source?:string;template?:string}|undefined
  return support?.source==='scene-template'&&support.template==='physics-workspace-v2'&&entity.name==='Infinite ground'?tr('无限地面','Infinite ground'):entity.name
 }

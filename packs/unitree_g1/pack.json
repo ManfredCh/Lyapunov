@@ -2,7 +2,7 @@
   "packId": "unitree_g1",
   "version": "2026.09.22",
   "family": "humanoid",
-  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/g1.xml" },
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/g1.xml", "preview": "asset/g1.png" },
   "pieces": {
     "asset": { "ref": "ASSET_STAGING_MANIFEST.json#unitree_g1" },
     "context": "ready",

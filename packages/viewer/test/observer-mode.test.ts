@@ -82,17 +82,19 @@ test('原导航DOM随同一locale显示Orbit/Roam和相机出口；换语言不�
     language='en';viewer.renderFrame()
     expect(host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Viewer navigation')
     expect(find('Orbit').title).toBe('Middle-drag to orbit selection · Shift+middle-drag to pan · wheel to zoom');expect(find('Roam').getAttribute('aria-label')).toBe('Roam view')
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('Free orbit')
+    // P17 视觉减法：默认自由模式不再常驻“Free orbit / Free movement · WASD/QE”；
+    // 模式由 Orbit/Roam 的 aria-pressed 选中态表达，完整键位仍在按钮 title 里（见上一行断言）。
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('')
     expect(updates).toBe(0);expectSameView(viewer.getViewState(),before)
     find('Roam').click();expect(viewer.observerState().navigation).toBe('first-person');expect(find('Roam').getAttribute('aria-pressed')).toBe('true')
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('Free movement · WASD/QE')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('')
     viewer.setCameraRigs([spec()]);viewer.pilotCameraRig('camera-a')
     expect(find('Exit camera').hidden).toBe(false);expect(find('Exit camera').title).toBe('Return to the main view')
     expect(host.querySelector('[role="status"]')?.textContent).toContain('Viewing camera (locked)')
     find('Exit camera').click();expect(viewer.observerState().mode).toBe('free');expect(find('Exit camera').hidden).toBe(true)
     const returned=viewer.getViewState(),after=updates;language='zh';viewer.renderFrame()
     expect(find('环绕')).toBeTruthy();expect(find('漫游')).toBeTruthy();expect(find('退出相机').getAttribute('aria-label')).toBe('退出相机')
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('自由漫游 · WASD/QE')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('')
     expect(updates).toBe(after);expectSameView(viewer.getViewState(),returned);unsubscribe()
   }finally{dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete (globalThis as any)[key]}}
 })

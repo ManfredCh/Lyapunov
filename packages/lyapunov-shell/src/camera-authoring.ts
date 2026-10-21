@@ -3,7 +3,7 @@ import type { ViewerViewState } from '@lyapunov/viewer/client'
 import type { ViewerCameraMeasurement } from '../../viewer/src/camera-view.ts'
 import { fovYFromIntrinsics, normalizeIntrinsics } from '../../viewer/src/camera-view.ts'
 import { mountLocalFrom, rigidPoseOf, type RigidPose } from '../../viewer/src/camera-frustum.ts'
-import { sceneCameraDraftOf, type CameraMountBody, type SceneCameraDraft } from './workbench-camera.ts'
+import { sceneCameraDraftOf, sceneCameraLensAtDefaultResolution, type CameraMountBody, type SceneCameraDraft } from './workbench-camera.ts'
 
 /** 只读采样来自Viewer实际已显示Frame，不使用轮询清单来替它的body姿态。 */
 export interface CameraAuthoringSnapshot {
@@ -46,10 +46,21 @@ export function cameraSampleBodies(scene: SceneSnapshot, world: WorldHandle | un
   if (!world || !['ready', 'running', 'paused'].includes(world.status) || world.sceneId !== scene.sceneId || world.appliedSceneRevision !== scene.revision || sampled.worldId !== world.worldId || sampled.generation !== world.worldGeneration || typeof sampled.frameId !== 'string' || !Number.isInteger(sampled.stepIndex)) throw new Error('CAMERA_AUTHORING_WORLD_STALE: 挂载需要当前世界同版本、同代次的已显示物理帧')
   return (sampled.bodies ?? []).filter(body => body.frameId === sampled.frameId && body.stepIndex === sampled.stepIndex && rigidPoseOf(body.worldFromBody) && scene.entities.some(entity => entity.entityId === body.entityId))
 }
-/** 当前镜头完整K保留；FOV表示由真实fy定义的有效垂直视场，不替换偏心/非方形像素。 */
+/**
+ * 从当前画面新建 Scene 相机：位姿与 FOV 来自采样，**分辨率不继承画布视口像素**。
+ *
+ * 为什么不能直接用 `measured.intrinsics`：它是由当前画布尺寸量出来的 K（`imageWidth/imageHeight`
+ * 等于可视区像素），把它当相机分辨率会把 UI 视口尺寸（实机 676×890）写成物理 intrinsics，
+ * 并顺着 Scene 声明、相机预览与固定机位录制来源污染下游。
+ *
+ * 判据（不是魔法阈值）：`sampled.view.intrinsics` 只在镜头无法由 fov+aspect 表达时出现
+ * （`cameraStateFromView` 的 `isPlainLens`），也就是采样相机**自己声明**的 K；自由观察相机的状态里
+ * 永远没有它。声明的 K 按 Scene 草稿默认分辨率等比缩放后采用（保留 fovX/fovY 与主点占比），
+ * 没有声明就按默认分辨率由采样 FOV 派生居中 K。
+ */
 export function cameraDraftFromSample(scene: SceneSnapshot, sampled: CameraAuthoringSnapshot, options: { name?: string; world?: WorldHandle; mount?: { entityId: string; bodyName: string } } = {}): SceneCameraDraft {
   requireCameraSample(scene, sampled)
-  const measured = sampled.camera, k = normalizeIntrinsics(measured.intrinsics)
+  const measured = sampled.camera, measuredK = normalizeIntrinsics(measured.intrinsics), fovYDeg = fovYFromIntrinsics(measuredK)
   let pose: RigidPose = { positionM: measured.position, quaternionXyzw: measured.quaternion }
   if (options.mount) {
     const bodies = cameraSampleBodies(scene, options.world, sampled)
@@ -57,7 +68,8 @@ export function cameraDraftFromSample(scene: SceneSnapshot, sampled: CameraAutho
     if (selected.length !== 1 || !selected[0]!.worldFromBody) throw new Error('CAMERA_AUTHORING_BODY_REQUIRED: 当前已显示帧中没有唯一的目标连杆位姿，未拼接其它帧')
     pose = mountLocalFrom(pose, selected[0]!.worldFromBody!)
   }
-  return { ...sceneCameraDraftOf(), name: options.name ?? '当前画面相机', position: pose.positionM.join(' '), quaternion: pose.quaternionXyzw.join(' '), fovYDeg: String(fovYFromIntrinsics(k)), width: String(k.width), height: String(k.height), near: String(measured.near), far: String(measured.far), intrinsics: k, ...(options.mount ? { parentEntityId: options.mount.entityId, bodyName: options.mount.bodyName } : {}) }
+  const draft = sceneCameraDraftOf(), k = sceneCameraLensAtDefaultResolution(fovYDeg, sampled.view.intrinsics)
+  return { ...draft, name: options.name ?? '当前画面相机', position: pose.positionM.join(' '), quaternion: pose.quaternionXyzw.join(' '), fovYDeg: String(fovYDeg), width: String(k.width), height: String(k.height), near: String(measured.near), far: String(measured.far), intrinsics: k, ...(options.mount ? { parentEntityId: options.mount.entityId, bodyName: options.mount.bodyName } : {}) }
 }
 /** gizmo事件拥有实际显示身份和完整镜头；已挂载相机只保存它的同帧localPose。 */
 export function cameraDraftFromRigEdit(scene:SceneSnapshot,world:WorldHandle|undefined,entity:Entity,edit:any):SceneCameraDraft{

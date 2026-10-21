@@ -23,7 +23,7 @@ import { cameraAdjustFromDrag, fovyFromLens, frustumFromReceipt } from "../../vi
 import type {EngineProvidersPayload} from "./engine-provider-contract.ts"
 import { pairDocumentAssets } from "../../viewer/src/asset-locator.ts"
 import type {Entity,ResourceRef,SceneCommit,SceneSnapshot,WorldHandle,Frame,ActionReceipt,Transform,Vec3} from "../../lyapunov-contracts/src/types.ts"
-import type {RobotDescription,EntityMotion,WorldOptions} from "../../sim-contract/src/index.ts"
+import type {RobotDescription,EntityMotion,WorldOptions,FreezeReceipt} from "../../sim-contract/src/index.ts"
 import {createViewer,projectSceneCameraRigs,WebGLUnavailableError,type SceneViewer,type ViewerDisplaySettings,type ViewerViewState,type CollisionTopologyStatus,type ViewerAnnotation,type ViewerAnnotationAnchor} from "@lyapunov/viewer/client"
 import {workbenchAPI,bindControlExitState,type AssetRecord,type BuiltinAssetRecord,type MissingAssetRecord,type MissingAssetRescan,type CaptureRecord,type SceneVersion,type WorkbenchState,type HistoryEntryRecord,type SessionHistoryState,type SessionHistoryPrecheck,type SessionHistoryRestore} from "./workbench-api.ts"
 import {captureForObserver as captureForObserverAction,createObserverActionGuard} from "./workbench-observe.ts"
@@ -39,41 +39,59 @@ import {appSidePanelHost,appSidePanelGeometry} from "./app-side.ts"
 import {ViewerOverlays,ViewerSurfaceState} from "./viewer-surface-state.tsx"
 
 import {EntityEditor,type Translate} from "./entity-editor.tsx"
+import {ComponentsPanel,useStableExtractionPort} from "./components-panel.tsx"
 import {NativePhysicsPanel} from "./native-physics-panel.tsx"
 import {RobotControlPanel,ActionCards,type RecentAction,type NativeJointResult} from "./robot-control-panel.tsx"
 import {RobotAuthoringPanel} from "./robot-authoring-panel.tsx"
-import type {RobotSetBaseInput,RobotSetTcpInput} from "../../lyapunov-contracts/src/robot-authoring.ts"
+import type {RobotAssemblyChange,RobotAssemblyCheckResult,RobotAssemblyHistoryResult,RobotAssemblyMountResult,RobotAssemblyPreviewResult,RobotAssemblyReplacementGroup,RobotAssemblyReplaceResult,RobotConfigurationReceipt,RobotSetBaseInput,RobotSetTcpInput,RobotSourceMount,RobotSubtreePrecheckResult,RobotSubtreeExtractResult,RobotSubtreeReassembleResult,RobotSubtreePartitionGroup} from "../../lyapunov-contracts/src/robot-authoring.ts"
+import {validRobotPose} from "../../lyapunov-contracts/src/robot-authoring.ts"
 import {FlightControlPanel} from "./flight-control-panel.tsx"
-import {RecordingPanel} from "./recording-panel.tsx"
+import {RecordingPanel,recordingPanelSeatKey} from "./recording-panel.tsx"
 import {CapturePanel,cameraRigSpecs} from "./capture-panel.tsx"
 import {CameraAimControl,CameraReturnControl,SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
+import {CaptureSessionBar,ContinuousCapturePanel} from "./capture-video-panel.tsx"
+import {useContinuousCaptureSession} from "./capture-session.ts"
+import {captureRoutesOfScene,parseCaptureRoutes,type CaptureRoute} from "./capture-route.ts"
+import type {CaptureVideoRecord} from "./capture-video.ts"
 import {AnnotationPanel,type AnnotatedCapture} from "./annotation-panel.tsx"
 import {annotationPromptText,annotationRows,createAnnotation,readAnnotations,writeAnnotations} from "./annotation-store.ts"
 import {ToolRail} from "./tool-rail.tsx"
 import {WorkbenchIcon} from "./vendor/tabler/icons.tsx"
-import {AssetLibraryPanel,AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,type AssetPlacement} from "./asset-library-panel.tsx"
+import {AssetLibraryPanel,AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,inAssetDomain,type AssetDomain,type AssetPlacement} from "./asset-library-panel.tsx"
 import {SceneNodeLock,sceneNodeName,infiniteGround,lockCommit,SceneNodeVisibility,SceneRemovalConfirmation,assetSceneInstances,removeSceneNodeCommit,sceneSubtreeIds,visibilityCommit,type SceneRemovalTarget} from "./scene-node-controls.tsx"
 import {PackLibraryPanel} from "./pack-library-panel.tsx"
 import {PolicyLibraryPanel} from "./policy-library-panel.tsx"
+import {RobotAtomicActions,RobotInstanceList,RobotLibrarySection,robotPolicyCaption,type RobotLibraryTab} from "./robot-library-panel.tsx"
+import {AssemblyAttachPanel,type AssemblyAttachSelection,type AssemblyParkingPickController,type AssemblyReplaceRequest,type AssemblyReplaceSubmit} from "./assembly-attach-panel.tsx"
+import type {RobotLibraryRow} from "./robot-library.ts"
+import {robotLibraryText} from "./robot-library-text.ts"
 import {EnvironmentPanel,type EnvironmentPatch,type EnvironmentStatus} from "./environment-panel.tsx"
 import {MaterialPanel,type MaterialPatch,type MaterialStatus} from "./material-panel.tsx"
 import {SceneLightPanel} from "./scene-light-panel.tsx"
 import {renderControlDiagnostic} from "./render-control-diagnostics.ts"
 import type {SceneLight} from "../../viewer/src/scene-light.ts"
 import {WorkSurface,type WorkbenchRenderSlot} from "./work-surface.tsx"
-import {surfaceDisposition,useWorkbenchUI,TOOL_PANEL_WIDTH,type ToolId} from "./workbench-ui.ts"
+import {PanelPage,PanelSection,ListRow,FieldRow,FooterActions,EmptyState} from "./panel-chrome.tsx"
+import {surfaceDisposition,useWorkbenchUI,migrateToolId,TOOL_PANEL_WIDTH,viewerReservedWidth,type ToolId} from "./workbench-ui.ts"
 // openResource 回执判据（与宿主 `plugin.ts` 共用同一份纯函数，防两边漂移出假成功）。
 import {openReceiptVerdict} from "./ui-action-open.ts"
 import {useEnginePreference} from "./engine-preference-client.ts"
 import {settleStoppedActions} from "./action-state.ts"
 import {applySceneIfCurrent,runRestoreFollowthrough} from "./workbench-import.ts"
-import {adoptWorldHandle,isStaleStateResponse,projectionWorldLanded} from "./workbench-state-order.ts"
+import {adoptWorldHandle,isStaleStateResponse,projectionWorldLanded,assemblyReadbackIdentity} from "./workbench-state-order.ts"
 import {sameWorldBinding} from "./workbench-batch-binding.ts"
+import {freezeReceiptIsFrozen,restoreReceiptCleared} from "./atomic-freeze-state.ts"
 import {openProjectFile} from "./project-open.ts"
 const savedCameraViews=new Map<string,ViewerViewState>()
 const WORKBENCH_STATE_POLL_MS=250
-export const VIEWER_NAVIGATION_HELP={zh:"漫游模式：中键拖动环顾，Shift+中键平移，滚轮前后移动，点画面后 WASD 移动，Q 下降 / E 上升，按住 Shift 加速 5 倍；Esc 切换环绕。",en:"First-person mode: middle-drag to look, Shift+middle-drag to pan, wheel to dolly, click the canvas then WASD to move, Q down / E up, hold Shift for 5x speed; Esc switches to orbit."} as const
-const initialDisplay:ViewerDisplaySettings={grid:true,axes:true,background:"#191d25",wireframe:false,splats:true,collision:true}
+export const VIEWER_NAVIGATION_HELP={zh:"环绕：中键拖动环绕，Shift+中键平移，滚轮缩放。漫游模式：中键拖动环顾，Shift+中键平移，滚轮前后移动，点画面后 WASD 移动，Q 下降 / E 上升，按住 Shift 加速 5 倍；Esc 切换环绕。",en:"Orbit: middle-drag to orbit, Shift+middle-drag to pan, wheel to zoom. First-person mode: middle-drag to look, Shift+middle-drag to pan, wheel to dolly, click the canvas then WASD to move, Q down / E up, hold Shift for 5x speed; Esc switches to orbit."} as const
+type SceneListEntry={sceneId:string;name?:string;title?:string;displayName?:string}
+const initialDisplay:ViewerDisplaySettings={grid:true,axes:true,background:"#242a32",wireframe:false,splats:true,collision:false}
+/** 场景选择器默认名：优先既有用户/元数据名称；没有名字时给稳定的可见序号别名，不把长 UUID 挤进 264px 栏。 */
+const sceneListEntryLabel=(entry:SceneListEntry,index:number)=>{
+ for(const value of [entry.name,entry.title,entry.displayName])if(typeof value==="string"&&value.trim())return value.trim()
+ return `Scene ${String(index+1).padStart(2,"0")}`
+}
 function readCache(key:string):{sceneId?:string;worldId?:string;hostInstanceId?:string;selectedEntityId?:string}{try{return JSON.parse(sessionStorage.getItem(key)??"{}")}catch{return {}}}
 /** 机器人判定：关节/控制器映射，或带关节名的引擎映射；官方投影里地板/桌子的 mujoco 映射没有关节，不算机器人。 */
 const robotEntity=(entity:Entity):boolean=>{
@@ -170,6 +188,15 @@ export function prepareViewerScene(scene:SceneSnapshot):{scene:SceneSnapshot;rew
  * 见回执 `P3-WIRING-REWORK-20260926.md` 的未覆盖/待裁一节。
  */
 export function viewerResourceURI(uri:string):string{return /^(res:[^?#]+)\?ext=\.[A-Za-z0-9]+$/.exec(uri)?.[1]??uri}
+/**
+ * 放置预览的**旧回调只能清自己的 token**：A 慢加载被 B 取代后，B 已显示，A 返回 SUPERSEDED
+ * 不得无条件 `clearPlacementPreview()` 把 B 清掉。先同步核对当前 ghost token；不递增 B 的 generation。
+ */
+export function clearPlacementPreviewIfOwned(instance:Pick<SceneViewer,"placementPreviewStatus"|"clearPlacementPreview">|undefined,token:string):boolean{
+ if(!instance||instance.placementPreviewStatus().token!==token)return false
+ instance.clearPlacementPreview()
+ return true
+}
 
 /** 一条要显示的事实：`tone` 决定颜色（`warn` 走既有 `.lya-warning`），`key` 既是 React key 也是测试锚点。 */
 export interface WorkbenchFactLine { key:string; tone:"warn"|"muted"; zh:string; en:string }
@@ -382,18 +409,59 @@ export function ComputerUseFacts({computerUse,tr,place="status"}:{computerUse:Wo
   {lines.map(line=><p key={line.key} data-cu-line={line.key} className={line.tone==="warn"?"lya-help lya-warning":"lya-help"}><span className={line.tone==="warn"?"lya-badge lya-warning":"lya-badge"}>computer-use</span> {tr(line.zh,line.en)}</p>)}
  </div>
 }
-/** D3 渲染点：世界状态行下面补的几行（告警条数 + 首条原文 / 设备降级原话 / 运行设备事实）。空数组＝不占位。 */
+/** 首屏只投影已知告警语义；未知来源原话留在详情，不把 JSON、路径或标识当英文说明。 */
+function worldWarningSummary(code:string,tr:Translate):string{
+ const labels:Record<string,[string,string]>={
+  ENTITY_SKIPPED_NO_COLLISION:['纯视觉实体不参与碰撞。','Visual-only entities do not participate in collisions.'],
+  SCENE_COLLISION_HEIGHTFIELD_APPROXIMATED:['地面碰撞使用高度场近似。','Ground collision uses a heightfield approximation.'],
+ }
+ const label=labels[code]
+ return label?tr(...label):tr('世界编译报告了告警，请查看详情。','World compilation reported a warning. Review details.')
+}
+/** 真实告警与设备降级默认可见；全部原文、标识和后端读数在具名详情内保留。 */
 export function WorldFacts({world,tr}:{world:WorldHandle|undefined;tr:Translate}){
  const lines=worldFactLines(world)
  if(!lines.length)return null
+ const warnings=world?.warnings??[]
+ const technical=lines.filter(line=>line.key!=='warnings'&&line.key!=='device-degraded')
+ const renderLine=(line:WorkbenchFactLine)=><p key={line.key} data-world-line={line.key} className={line.tone==="warn"?"lya-help lya-warning":"lya-help"}>{tr(line.zh,line.en)}</p>
  return <div data-testid="lyapunov-world-facts">
-  {lines.map(line=><p key={line.key} data-world-line={line.key} className={line.tone==="warn"?"lya-help lya-warning":"lya-help"}>{tr(line.zh,line.en)}</p>)}
+  {warnings.length>0&&<p data-world-line="warnings" className="lya-help lya-warning">{tr(`世界编译告警 ${warnings.length} 条`,`${warnings.length} world compile warning(s)`)}: {worldWarningSummary(warnings[0]!.code,tr)}</p>}
+  {world?.deviceDegraded&&<p data-world-line="device-degraded" className="lya-help lya-warning">{tr('设备已降级，请查看详情。','Device degraded. Review details.')}</p>}
+  {(warnings.length>0||world?.deviceDegraded)&&<details className="lya-advanced" data-testid="world-warning-details">
+   <summary>{tr('告警详情','Warning details')}</summary>
+   {warnings.map((warning,index)=><div key={`${index}:${warning.code}`} className="lya-help lya-warning" data-testid="world-warning-detail">
+    <p>{warning.message}</p><p><code>{warning.code}</code>{warning.entityId&&<> · <code>{warning.entityId}</code></>}</p>
+   </div>)}
+   {lines.filter(line=>line.key==='device-degraded').map(renderLine)}
+  </details>}
+  {technical.length>0&&<details className="lya-advanced" data-testid="world-backend-details"><summary>{tr('后端详情','Backend details')}</summary>{technical.map(renderLine)}</details>}
  </div>
 }
 
-export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeTab=false,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession,insertViewerReference}:{
+/** 原生窗口宽度订阅：Scene focus 只在真实 resize 后响应，不在渲染里直接读一次 window.innerWidth。 */
+function useViewportWidth(){
+ const read=()=>typeof window==="undefined"?1440:window.innerWidth
+ const [width,setWidth]=useState(read)
+ useEffect(()=>{
+  if(typeof window==="undefined")return
+  const update=()=>setWidth(window.innerWidth)
+  update()
+  window.addEventListener("resize",update)
+  return()=>window.removeEventListener("resize",update)
+ },[])
+ return width
+}
+/** 窄窗自动 Scene focus 的纯判据：只在此轮尚未尝试、未因自动全屏覆盖、且用户未手动退出时进入。 */
+export function shouldAutoFocusScene(input:{nativeTab:boolean;visible:boolean;hasScene:boolean;focusAvailable:boolean;focusActive:boolean;width:number;attempted:boolean}):boolean{
+ return input.nativeTab&&input.visible&&input.hasScene&&input.focusAvailable&&!input.focusActive&&!input.attempted&&input.width>=768&&input.width<=1100
+}
+export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeTab=false,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession,insertViewerReference,sceneFocus,sceneFocusActive=false}:{
  sessionId?:string
  insertViewerReference?:InsertViewerReference
+ /** 原生公开分栏全屏动作；只由 SceneTab 用 ctx.sidebarRight.toggleFullscreen 接线。 */
+ sceneFocus?:()=>void
+ sceneFocusActive?:boolean
  t:(key:"open")=>string
  /** 原生中央内容（`main.surface` 座位交过来的原生对话节点）。 */
  main?:ReactNode
@@ -425,9 +493,10 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 引擎状态与切换命令由共用 hook 提供（同一份逻辑同时服务 Workbench 与 WorkspaceTools 两处工具轨）。
  const {state:engineState,switchEngine:applyEnginePreference}=useEnginePreference(sessionId)
  const switchEngine=useCallback((next:"isaac"|"mujoco")=>{
+  const label=next==="isaac"?"Isaac":"MuJoCo"
   setError("");setNotice("")
   void applyEnginePreference(next)
-   .then(()=>setNotice(tr(`已将物理引擎偏好设为 ${next==="isaac"?"Isaac":"MuJoCo"}。引擎在启动时装配，按回执提示重启工作台后生效；当前运行中的会话与动作不受影响。`,`Physics engine preference set to ${next==="isaac"?"Isaac":"MuJoCo"}. The engine is composed at startup, so it takes effect after you restart the workbench as the receipt explains; the running session and actions are unaffected.`)))
+   .then(()=>setNotice(tr(`${label} · 下次启动生效\n引擎在启动时装配；当前运行中的会话与动作不受影响，按回执提示重启工作台后生效。`,`${label} · next start\nComposed at startup; the running session and actions are unaffected. Restart the workbench as the receipt explains.`)))
    .catch(value=>setError(value instanceof Error?value.message:String(value)))
  },[applyEnginePreference,tr])
  const ui=useWorkbenchUI(),uiState=ui.getSnapshot()
@@ -453,19 +522,91 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   }
  },[nativeTab,visible,globalPanel,uiState.tool,api.clientId])
  const [replayActive,setReplayActive]=useState(false)
+ const [replayHost,setReplayHost]=useState<HTMLDivElement|null>(null)
+ // V10：资源详情的只读模型预览挂到主画布宿主（Main Viewer 的兄弟），右栏只留身份/详情/Add。
+ const [resourcePreviewHost,setResourcePreviewHost]=useState<HTMLDivElement|null>(null)
  const nativeControlCancel=useRef<(()=>ControlGestureDisplay|undefined)|undefined>()
+ // 用户显式关闭过的 world：`worldRef.current` 为空既可能是后台轮询的瞬时缺口，也可能是用户关闭/
+ // 重置。这里只记录显式关闭这一事实，供迟到回执核对，不把"句柄为空"当成"仍是同一次操作"。
+ const closedWorldsRef=useRef(new Set<string>())
  const manualDrafts=useRef(new Set<string>()),manualActions=useRef<RecentAction[]>([])
  const [manualControlBlocked,setManualControlBlocked]=useState(false)
  const [administrator,setAdministrator]=useState<WorkbenchState["administrator"]>()
  const [officialCamera,setOfficialCamera]=useState(false)
- const [viewerVisible,setViewerVisible]=useState(true),[scenes,setScenes]=useState<Array<{sceneId:string}>>([]),[scene,setScene]=useState<SceneSnapshot>(),[worlds,setWorlds]=useState<WorldHandle[]>([]),[world,setWorld]=useState<WorldHandle>(),[frame,setFrame]=useState<Frame>()
+ const [viewerVisible,setViewerVisible]=useState(true),[scenes,setScenes]=useState<SceneListEntry[]>([]),[scene,setScene]=useState<SceneSnapshot>(),[worlds,setWorlds]=useState<WorldHandle[]>([]),[world,setWorld]=useState<WorldHandle>(),[frame,setFrame]=useState<Frame>()
+ const viewportWidth=useViewportWidth(),sceneFocusAttempt=useRef<{key:string;done:boolean}>({key:'',done:false})
+ // V10：自有 Scene 首次到达窄窗时用真实 pane target 进入原生全屏；用户手动退出后本轮 resize/轮询不抢回。
+ useEffect(()=>{
+  const key=`${sessionId??''}:${scene?.sceneId??''}`
+  if(!scene)return
+  if(viewportWidth>1100){
+   // 宽窗恢复：若当前全屏是**本轮自动进入**的（autoEntered），放大后要退出，否则 Chat 永远回不来。
+   // 用户手动进入的全屏不在这里退出（autoEntered=false），保持用户选择。
+   const autoEntered=sceneFocusAttempt.current.key===key&&sceneFocusAttempt.current.done
+   if(sceneFocusAttempt.current.key===key)sceneFocusAttempt.current={key,done:false}
+   if(autoEntered&&sceneFocusActive&&sceneFocus)sceneFocus()
+   return
+  }
+  if(sceneFocusAttempt.current.key!==key)sceneFocusAttempt.current={key,done:false}
+  if(!shouldAutoFocusScene({nativeTab,visible,hasScene:Boolean(scene),focusAvailable:Boolean(sceneFocus),focusActive:sceneFocusActive,width:viewportWidth,attempted:sceneFocusAttempt.current.done}))return
+  sceneFocusAttempt.current={key,done:true}
+  sceneFocus?.()
+ },[nativeTab,visible,scene?.sceneId,sceneFocus,sceneFocusActive,viewportWidth,sessionId])
  const [worldLifecycle,setWorldLifecycle]=useState<SceneWorldState>({phase:'idle'}),[worldHostEpoch,setWorldHostEpoch]=useState('')
  const automaticWorld=useMemo(()=>new SceneWorldLifecycle(setWorldLifecycle),[sessionId])
  const [versions,setVersions]=useState<SceneVersion[]>([]),[historyLoading,setHistoryLoading]=useState(false)
  const [assets,setAssets]=useState<AssetRecord[]>([]),[missingAssets,setMissingAssets]=useState<MissingAssetRecord[]>([]),[assetQuery,setAssetQuery]=useState(""),[includeDeleted,setIncludeDeleted]=useState(false),[assetsLoading,setAssetsLoading]=useState(false),[missingAssetsLoading,setMissingAssetsLoading]=useState(false),[renameAsset,setRenameAsset]=useState<{resourceId:string;original:string;value:string} | undefined>()
+ // R-004：最后有效 recipe（当前已配置动作）与当前 Freeze 回执。二者都只属于本 world/generation：
+ // world 重建/关闭/换场景时清理，不把旧保持/旧动作当新事实。
+ const [lastRecipes,setLastRecipes]=useState<Record<string,{jointNames:string[];positions:number[];durationS:number}>>({})
+ const [freezeReceipts,setFreezeReceipts]=useState<Record<string,FreezeReceipt>>({})
  const [selected,setSelected]=useState<string|undefined>(()=>{const value=readCache(cacheKey).selectedEntityId;return typeof value==="string"?value:undefined}),[batchIds,setBatchIds]=useState<string[]>([]),[collapsed,setCollapsed]=useState<Set<string>>(new Set()),[descriptions,setDescriptions]=useState<Record<string,RobotDescription>>({}),[targets,setTargets]=useState<Record<string,Record<string,number>>>({})
+ // 图层默认收起新导入实例的技术子树；只记当前视图展开选择，不改Scene/实体。
+ const layerRootsSeen=useRef<{sceneId?:string;ids:Set<string>}>({ids:new Set()})
+ useEffect(()=>{
+  if(!scene){layerRootsSeen.current={ids:new Set()};return}
+  const roots=scene.entities.filter(item=>!item.parentId),children=new Set(scene.entities.map(item=>item.parentId).filter(Boolean))
+  const changed=layerRootsSeen.current.sceneId!==scene.sceneId
+  const added=roots.filter(item=>children.has(item.entityId)&&(changed||!layerRootsSeen.current.ids.has(item.entityId))).map(item=>item.entityId)
+  layerRootsSeen.current={sceneId:scene.sceneId,ids:new Set(roots.map(item=>item.entityId))}
+  if(changed)setCollapsed(new Set(added));else if(added.length)setCollapsed(old=>new Set([...old,...added]))
+ },[scene?.sceneId,scene?.revision])
  const [newEntity,setNewEntity]=useState("")
+ // Objects 的「清单 ↔ 同栏二级 Inspector」与环境「清单 ↔ Lighting/资源详情」是纯展示子视图，
+ // 不新建 owner：选中/草稿仍归既有 Scene 状态与 EntityEditor；这里只记住当前看的是哪一级。
+ const [objectInspector,setObjectInspector]=useState(false)
+ // V8-07：Add object 是同栏二级资产选择页，不是清单下方常驻的大表单。
+ const [objectAdd,setObjectAdd]=useState(false),[objectAddSelection,setObjectAddSelection]=useState<string|undefined>()
+ const [objectQuery,setObjectQuery]=useState("")
+ // 手动变换手柄默认不显示；只有显式进入 Move/Rotate/Scale 才挂上 TransformControls。
+ const [transformEditing,setTransformEditing]=useState(false)
+ // R-011：Components 是对象/机器人二级详情里的**同栏子视图**（不新增全局工具/owner）。部件选择由 Viewer 拥有，
+ // 这里只镜像它上报的选中，用于把树与画布高亮对齐。关闭时显式合拢展开视图，不留不可发现的展开态。
+ const [componentsView,setComponentsView]=useState(false)
+ const [partSelection,setPartSelection]=useState<{entityId:string;partId:string}|undefined>()
+ const [environmentView,setEnvironmentView]=useState<"list"|"world"|"lighting">("list")
+ // 换会话/场景回到清单；换到别的工具时 Environment 回到默认清单（Objects 的 Inspector 有意保留，
+ // 因为未提交草稿与它同一 owner，切走再回来必须还在）。
+ useEffect(()=>{setObjectInspector(false);setObjectAdd(false);setObjectAddSelection(undefined);setTransformEditing(false);setEnvironmentView("list")},[sessionId,scene?.sceneId])
+ useEffect(()=>{setRobotView('library');setRobotHomeTab('library');setRobotSection('root');setRobotLibraryPack(undefined)},[sessionId,scene?.sceneId])
+ useEffect(()=>{setRobotSection('root')},[selected,sessionId,scene?.sceneId])
+ // 当前选择不再是机器人时，Robots 详情退回库清单（不把上次的实例身份留在详情里）。
+ useEffect(()=>{const candidate=scene?.entities.find(item=>item.entityId===selected);if(!candidate||!robotEntity(candidate))setRobotView('library')},[selected,scene])
+ useEffect(()=>{if(uiState.tool!=="environment")setEnvironmentView("list")},[uiState.tool])
+ // 换会话/场景关掉 Components（viewer 自己也会按身份清掉展开/高亮）；离开 Objects/Robots 工具时同样收口并显式合拢。
+ useEffect(()=>{setComponentsView(false)},[sessionId,scene?.sceneId])
+ useEffect(()=>{if(uiState.tool!=="object"&&uiState.tool!=="robot"){setComponentsView(false);setPartSelection(undefined);viewer.current?.restorePartExplode()}},[uiState.tool])
+ // R-012：换会话/场景/选择即关闭 Attach 二级页与临时拾取；离开 Robots 工具也收口。
+ useEffect(()=>{setAttachOpen(false);setAttachSourceId(undefined);setAttachPick(false);setPickedSourceMount(undefined);setAttachCheck(undefined);setAttachPending(undefined);setReplacePick({});setReplaceDraft(undefined);setParkingPickActive(false);setParkingPickPoint(undefined);viewer.current?.setMountPickMode(undefined);viewer.current?.setPlacementMode(false);viewer.current?.clearParkingGhost()},[sessionId,scene?.sceneId,selected])
+ // Freeze 回执属于当前 world/generation；世界重建/关闭/换场景后旧保持不再作为当前事实。
+ useEffect(()=>{setFreezeReceipts({})},[sessionId,scene?.sceneId,world?.worldId,world?.worldGeneration,worldHostEpoch])
+ useEffect(()=>{if(uiState.tool!=="robot"){setAttachOpen(false);setAttachPick(false);setParkingPickActive(false);setParkingPickPoint(undefined);viewer.current?.setMountPickMode(undefined);viewer.current?.setPlacementMode(false)}},[uiState.tool])
+ type PlacementPreviewState={status:'idle'|'loading'|'ready'|'unavailable';reason?:string;transform?:Transform;resourceId?:string;version?:number;token?:string}
  const [placingAsset,setPlacingAsset]=useState<AssetPlacement|undefined>(),[placingPoint,setPlacingPoint]=useState<[number,number,number]|undefined>()
+ const [placingPreview,setPlacingPreview]=useState<PlacementPreviewState>({status:'idle'}),[placingConfirming,setPlacingConfirming]=useState(false)
+ const placingAssetRef=useRef<AssetPlacement|undefined>(undefined),placingPointRef=useRef<Vec3|undefined>(undefined),placingPreviewRef=useRef<PlacementPreviewState>({status:'idle'})
+ const placingTokenRef=useRef(''),placingRequestRef=useRef(0),placingBusyRef=useRef(false)
+ placingAssetRef.current=placingAsset;placingPointRef.current=placingPoint;placingPreviewRef.current=placingPreview
  const [assetImportOpen,setAssetImportOpen]=useState(false),[assetPath,setAssetPath]=useState("")
  const [sourceTexturePolicy,setSourceTexturePolicy]=useState<'strict'|'available'>(DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY)
  const [importUsageChoice,setImportUsageChoice]=useState<LocalImportPhysicsUsage>()
@@ -476,6 +617,36 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  useEffect(()=>{setRemoval(undefined);setRemoving(false)},[sessionId])
  const [importBusy,setImportBusy]=useState(false)
  const [localPolicyImport,setLocalPolicyImport]=useState<{sessionId:string;receipt:LocalPolicyImportReceipt}>()
+ // R-004：Robots 的「库清单 ↔ 实例详情」纯展示子视图，不新建 owner。库条目来自既有 robot-library 投影。
+ const [robotView,setRobotView]=useState<'library'|'detail'>('library')
+ // V10：实例详情根页只留层级清单与原子控制；Policy/Joints/Configuration 是同栏独占二级页。
+ const [robotSection,setRobotSection]=useState<'root'|'policy'|'joints'|'configuration'>('root')
+ // R-012：Attach 是具名二级页面（默认只给紧凑入口）；表面拾取/保存点/检查是它的临时子状态。
+ const [attachOpen,setAttachOpen]=useState(false)
+ const [attachSourceId,setAttachSourceId]=useState<string|undefined>()
+ const [attachPick,setAttachPick]=useState(false)
+ const [pickedSourceMount,setPickedSourceMount]=useState<RobotSourceMount|undefined>()
+ const [attachCheck,setAttachCheck]=useState<RobotAssemblyCheckResult|undefined>()
+ // V10-33：安装预览是临时显示；显式框选前记住原视角，取消/退出时恢复，不与主 Scene 抢镜头。
+ const attachPreviewView=useRef<ViewerViewState>()
+ // Apply 已落盘但物理待同步时的原生读回登记：同一 Scene/实体/目标 world 代次，等 world owner 采纳
+ // 当前场景版本后自动收口；不靠固定延时，也不把旧代次的 STALE 永久留在面板上。
+ const [attachPending,setAttachPending]=useState<{sceneId:string;entityId:string;worldId?:string;generation:number}|undefined>()
+ // Replace：画布停放位置拾取（复用放置/平面拾取）；active 时暂时收起右栏，浮条负责确认/取消。
+ const [parkingPickActive,setParkingPickActive]=useState(false)
+ const [parkingPickPoint,setParkingPickPoint]=useState<[number,number,number]>()
+ const parkingPickRef=useRef(false);parkingPickRef.current=parkingPickActive
+ const parkingPickControllerRef=useRef<AssemblyParkingPickController>()
+ const [replacePick,setReplacePick]=useState<Record<string,string>>({})
+ // Replace 草稿：旧件 + 新件身份；进入同一 Attach 预览（源=新件、目标=旧件安装位），确认时一次 CAS。
+ const [replaceDraft,setReplaceDraft]=useState<{oldEntityId:string;newEntityId:string}|undefined>()
+ const [robotLibrary,setRobotLibrary]=useState<{models:RobotLibraryRow[];blocked?:Array<{packId:string;detail:string}>;status?:string;code?:string}>()
+ const [robotLibraryBusy,setRobotLibraryBusy]=useState(false),[robotLibraryError,setRobotLibraryError]=useState('')
+ const [robotLibraryQuery,setRobotLibraryQuery]=useState(''),[robotLibraryTab,setRobotLibraryTab]=useState<RobotLibraryTab>('builtin'),[robotLibraryPack,setRobotLibraryPack]=useState<string|undefined>()
+ // Robots 首屏页签：默认先给 Robot Library；场景实例是清楚的第二页签，不抢占首屏。
+ const [robotHomeTab,setRobotHomeTab]=useState<'library'|'instances'>('library')
+ const robotLibraryAlive=useRef(true)
+ useEffect(()=>()=>{robotLibraryAlive.current=false},[])
  const policySurfaceAlive=useRef(true)
  useEffect(()=>{policySurfaceAlive.current=true;return()=>{policySurfaceAlive.current=false}},[])
  useEffect(()=>{setLocalPolicyImport(undefined)},[sessionId,worldHostEpoch])
@@ -518,13 +689,22 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const [renderRetry,setRenderRetry]=useState(0)
  const [renderLoading,setRenderLoading]=useState(false)
  const [collisionStatus,setCollisionStatus]=useState<CollisionTopologyStatus>({status:"no-world",geoms:0,unsupported:0,omitted:0,infinitePlanes:0,reasons:[]})
- const [display,setDisplay]=useState(initialDisplay),[sceneLights,setSceneLights]=useState(true),[animationsPlaying,setAnimationsPlaying]=useState(true),[animationSummary,setAnimationSummary]=useState<AnimationDisplaySummary>(),[gizmo,setGizmo]=useState<"translate"|"rotate"|"scale">("translate"),[captures,setCaptures]=useState<CaptureRecord[]>([]),[capture,setCapture]=useState<CaptureRecord>()
+ const [display,setDisplay]=useState(initialDisplay),[sceneLights,setSceneLights]=useState(true),[animationsPlaying,setAnimationsPlaying]=useState(true),[animationSummary,setAnimationSummary]=useState<AnimationDisplaySummary>(),[gizmo,setGizmo]=useState<"translate"|"rotate"|"scale">("translate"),[captures,setCaptures]=useState<CaptureRecord[]>([]),[capture,setCapture]=useState<CaptureRecord>(),[videos,setVideos]=useState<CaptureVideoRecord[]>([])
  // 3D 批注：锚在实体局部坐标上，按场景各存一份（annotation-store）。viewer 是渲染与拾取的唯一所有者，
  // 这里只持有"用户写了什么"与"哪条在编辑"；渲染位置一律由 viewer 按实体当前矩阵重算。
  const [annotations,setAnnotations]=useState<ViewerAnnotation[]>([]),[activeAnnotation,setActiveAnnotation]=useState<string|undefined>(),[annotating,setAnnotating]=useState(false),[annotationCaptures,setAnnotationCaptures]=useState<Array<{captureId:string;capturedAt:string;imageURL:string;annotations:AnnotatedCapture[]}>>([])
  // 编辑器回调是"点下去那一刻"的闭包（viewer 一次性注册指针监听），必须经 ref 读最新列表，避免旧闭包把已有批注覆盖掉。
  const [annotationPrompt,setAnnotationPrompt]=useState<string|undefined>()
  const annotationIds=useRef<string[]>([]),annotationScene=useRef<string|undefined>(undefined)
+ // 明确的正文编辑焦点请求：落点/选中各发一次（token 自增），同一条标记 blur 后再点也发新的；
+ // 身份带上"当时场景"，切工具/换场景/关 Viewer 时下面的 effect 会作废它，迟到请求不抢别的焦点。
+ const [annotationFocusRequest,setAnnotationFocusRequest]=useState<{annotationId:string;sceneId?:string;token:number}>()
+ const annotationFocusToken=useRef(0)
+ const requestAnnotationFocus=(annotationId:string)=>{
+  annotationFocusToken.current+=1
+  setActiveAnnotation(annotationId)
+  setAnnotationFocusRequest({annotationId,sceneId:annotationScene.current,token:annotationFocusToken.current})
+ }
  // 采集时是否把说明直接投进当前会话（默认开：用户点一次就完成"标注→交给模型"）。
  const [injectAnnotations,setInjectAnnotations]=useState(true),injectAnnotationsRef=useRef(true)
  injectAnnotationsRef.current=injectAnnotations
@@ -552,14 +732,32 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const openResourceRef=useRef(openResource);openResourceRef.current=openResource
  // 窗口身份由 api 持有（`api.clientId`，按会话 memo）：选择上报、UI 动作目标与主动观察的目标窗口共用同一个 id。
  const [viewerMenu,setViewerMenu]=useState<ViewerContextRequest>(),[viewerMenuBusy,setViewerMenuBusy]=useState(false)
+ const viewerMenuSession=useRef<string|undefined>(undefined)
  const closeViewerMenu=useCallback(()=>setViewerMenu(undefined),[])
- useEffect(()=>{setViewerMenu(undefined)},[sessionId,scene?.sceneId,scene?.revision,selected])
+ // 右键切换目标时 Viewer 会先选中新实体再发 onContextMenu（同一事件批），因此“selected/scene/revision 变化”
+ // 不能无条件清菜单：新菜单自身的 scene/revision/entity 与当前选择一致时必须保留；切到别的对象/场景/版本、
+ // 换会话或 Escape/外部点才关闭（后两者由 ViewerContextMenu 负责）。
+ useEffect(()=>{setViewerMenu(current=>{
+  if(!current)return current
+  if(viewerMenuSession.current!==sessionId)return undefined
+  if(current.sceneId!==scene?.sceneId)return undefined
+  if(current.sceneRevision!==scene?.revision)return undefined
+  if(current.entityId!==selected)return undefined
+  return current
+ })},[sessionId,scene?.sceneId,scene?.revision,selected])
  const selectionSequence=useRef(0)
  /** 显式选场景的单调序号：只有**最后一次**显式选择自己的响应能落进视图（见 refreshState 的归属判据）。 */
  const sceneLoadSeq=useRef(0)
  const pendingFocus=useRef<{sceneId:string;entityId:string}>()
  const presentedScene=useRef<{viewer:SceneViewer;sceneId:string}>(),assetRewiring=useRef<AssetLocatorRewiring>()
  const container=useRef<HTMLDivElement>(null),viewer=useRef<SceneViewer>(),viewState=useRef<ViewerViewState>(),hostId=useRef<string>(),sceneRef=useRef(scene),worldRef=useRef(world),selectedRef=useRef(selected),descriptionsRef=useRef(descriptions),targetsRef=useRef(targets),apiRef=useRef(api),loadVersion=useRef(0),sceneIntent=useRef<string>()
+ const mounted=useRef(true)
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[])
+ const currentAPI=(requestAPI=api)=>mounted.current&&apiRef.current===requestAPI
+ // V8-21：三通道对照的浮层宿主在画布自有区域里；数据/判据仍归 Camera 面板的同一份采集与 LiDAR 回执。
+ const compareOverlayHost=useRef<HTMLDivElement>(null)
+ // 面板当前源实体（`attachSourceId` 优先，否则当前选择）的 ref：原生检查回执落地时据此判归属。
+ const attachSourceIdRef=useRef(attachSourceId);attachSourceIdRef.current=attachSourceId
  const [observerOwner,setObserverOwner]=useState<CameraAuthoringViewer>()
  const viewerVisibleRef=useRef(viewerVisible);viewerVisibleRef.current=viewerVisible
  const subscribeObserver=useCallback((listener:()=>void)=>observerOwner?.subscribeObserverState?.(listener)??(()=>{}),[observerOwner])
@@ -586,8 +784,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const ready=Boolean(sessionId&&!replayActive&&!reconnecting&&world&&["ready","running","paused"].includes(world.status)&&world.appliedSceneRevision===scene?.revision)
  const sceneWritePort={identity:()=>({sceneId:sceneRef.current?.sceneId,revision:sceneRef.current?.revision}),applyScene:(value:unknown)=>{sceneRef.current=value as SceneSnapshot;setScene(value as SceneSnapshot)}}
  const persist=(s:SceneSnapshot|undefined,w:WorldHandle|undefined)=>sessionStorage.setItem(cacheKey,JSON.stringify({sceneId:s?.sceneId,worldId:w?.worldId,hostInstanceId:hostId.current,selectedEntityId:s?.entities.some(e=>e.entityId===selectedRef.current)?selectedRef.current:undefined}))
- const perform=(fn:()=>Promise<unknown>)=>{setError("");void fn().catch(value=>{if(apiRef.current===api)setError(value instanceof Error?value.message:String(value))})}
- const refreshScenes=async()=>{const value=await api.request<Array<{sceneId:string}>>("scenes");if(apiRef.current===api)setScenes(value);return value}
+ const perform=(fn:()=>Promise<unknown>)=>{setError("");void fn().catch(value=>{if(currentAPI())setError(value instanceof Error?value.message:String(value))})}
+ const refreshScenes=async()=>{const value=await api.request<SceneListEntry[]>("scenes");if(currentAPI())setScenes(value);return value}
  // 打开「场景」面板就重读一次场景清单。
  // 为什么需要：agent 会用 `scene_open` / `scene_create` 建出新场景，而清单此前只在挂载与手动点「刷新」时读，
  // 于是出现**它说"导入成功 283 实体"、面板里却只有占位项**——实测连续两次（tiananmen、tiananmen-v6）。
@@ -602,24 +800,46 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 日常工作台不拉取/显示内部路由诊断；Host实际判定与system/skill注入保持。
  const refreshHistory=async(sceneId=sceneRef.current?.sceneId):Promise<SceneVersion[]>=>{
   // 官方世界的派生 Scene 没有普通版本历史；活动官方世界期间不查 scene-history。
-  if(!sceneId||worldRef.current?.engineId==="official-suite")return []
+  if(!currentAPI()||!sceneId||worldRef.current?.engineId==="official-suite")return []
   setHistoryLoading(true)
-  try{const value=await api.request<SceneVersion[]>("scene-history?sceneId="+encodeURIComponent(sceneId));if(sceneRef.current?.sceneId===sceneId)setVersions(value);return value}
-  finally{setHistoryLoading(false)}
+  try{const value=await api.request<SceneVersion[]>("scene-history?sceneId="+encodeURIComponent(sceneId));if(currentAPI()&&sceneRef.current?.sceneId===sceneId)setVersions(value);return value}
+  finally{if(currentAPI())setHistoryLoading(false)}
  }
  const refreshAssets=async(query=assetQuery,include=includeDeleted):Promise<AssetRecord[]>=>{
   setAssetsLoading(true)
-  try{const value=await api.request<AssetRecord[]>("assets?"+new URLSearchParams({query,includeDeleted:String(include)}));if(apiRef.current===api)setAssets(value);return value}
-  finally{if(apiRef.current===api)setAssetsLoading(false)}
+  try{const value=await api.request<AssetRecord[]>("assets?"+new URLSearchParams({query,includeDeleted:String(include)}));if(currentAPI())setAssets(value);return value}
+  finally{if(currentAPI())setAssetsLoading(false)}
  }
  const refreshMissingAssets=async():Promise<MissingAssetRecord[]>=>{
   setMissingAssetsLoading(true)
-  try{const value=await api.request<MissingAssetRecord[]>("missing-assets");setMissingAssets(value);return value}
-  finally{setMissingAssetsLoading(false)}
+  try{const value=await api.request<MissingAssetRecord[]>("missing-assets");if(currentAPI())setMissingAssets(value);return value}
+  finally{if(currentAPI())setMissingAssetsLoading(false)}
  }
  const refreshBuiltinAssets=async():Promise<BuiltinAssetRecord[]>=>{
-  const value=await api.request<{resources:BuiltinAssetRecord[]}>("builtin-assets");setBuiltinAssets(value.resources);return value.resources
+  const value=await api.request<{resources:BuiltinAssetRecord[]}>("builtin-assets");if(currentAPI())setBuiltinAssets(value.resources);return value.resources
  }
+ /**
+  * R-004：机器人库读的是既有 `robot-library` 投影（pack/T0/ResourceLibrary 的薄投影）。
+  * `register=true` 复用 POST 的既有 scene.initializeDefaults 登记随包模型；幂等，已登记的不会重复导入。
+  * 只有真实回执才更新界面；失败带原码，不伪造已安装行。
+  */
+ const refreshRobotLibrary=async(register=false):Promise<{value:{models:RobotLibraryRow[];blocked?:Array<{packId:string;detail:string}>;registered?:string[];status?:string;code?:string};assets:AssetRecord[]}|undefined>=>{
+  if(!sessionId)return
+  const requestAPI=api
+  // 只投影已知状态码并把宿主路径折成"…"：库错误也不在客户面暴露内部源码路径。
+  const publicDetail=(value:string)=>robotLibraryText(value,tr).replace(/(?:\/[\w.\-]+){2,}/g,'…')
+  setRobotLibraryBusy(true);setRobotLibraryError('')
+  try{
+   const value=await requestAPI.request<{models:RobotLibraryRow[];blocked?:Array<{packId:string;detail:string}>;registered?:string[];status?:string;code?:string}>("robot-library",register?{method:"POST"}:undefined)
+   if(apiRef.current!==requestAPI)return
+   setRobotLibrary(value)
+   if(value.blocked?.length)setRobotLibraryError(value.blocked.map(row=>`${row.packId}: ${publicDetail(row.detail)}`).join(' · '))
+   const list=register&&value.registered?.length?await refreshAssets():assets
+   return {value,assets:list}
+  }catch(error){if(apiRef.current===requestAPI)setRobotLibraryError(publicDetail(error instanceof Error?error.message:String(error)))}
+  finally{if(apiRef.current===requestAPI)setRobotLibraryBusy(false)}
+ }
+ useEffect(()=>{if(uiState.tool!=="robot"||!sessionId)return;void refreshRobotLibrary(true)},[uiState.tool,sessionId,scene?.sceneId])
  const submitRename=async()=>{
   const pending=renameAsset
   if(!pending)return
@@ -683,7 +903,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
     const directedClient=typeof item.args.clientId==="string"?item.args.clientId:undefined
     if(directedClient&&directedClient!==api.clientId)continue
     const tool=item.args.tool as ToolId|undefined,entityId=item.args.entityId as string|undefined,sceneId=item.args.sceneId as string|undefined
-    if(item.action==="openTool"&&tool){ui.openTool(tool);ui.showCentre("canvas")}
+    if(item.action==="openTool"&&tool){const migrated=migrateToolId(tool);if(migrated){if(migrated==="object")setObjectInspector(false);ui.openTool(migrated);ui.showCentre("canvas")}}
     else if(item.action==="openFiles")openFiles?.()
     else if(item.action==="openTerminal")openTerminal?.()
     else if(item.action==="openResource"){
@@ -800,7 +1020,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 官方 Scene 随 world 关闭而消失。先发现世界，避免轮询已失效 Scene 时一直报错，
   // 导致下面负责清除只读投影的 effect 永远收不到 worlds=[]。
   let value=await api.state(stateQuery(projectedScene.current===target?undefined:target))
-  if(apiRef.current!==api)return value
+  if(!currentAPI())return value
   if(value?.uiActions?.length)void drainUiActions(value.uiActions)
   // 后台响应归属：await 之后按“落地时刻”重新核对（在途目标/当前视图/版本单调）。
   // 过时响应不得写场景、world、缓存与官方投影——只把连接状态收敛回去；
@@ -830,6 +1050,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
     // 在途期间用户可能已经切走场景（关闭官方 world 后的 fallback、显式选择）、world 代际或已应用版本
     // 可能已经前进、Host 也可能已经换掉——旧的 world 列表会把已消失的 world 与投影一起挂回视图与缓存。
     const live=await api.state(stateQuery())
+    if(!currentAPI())return value
     const landed=live.worlds.find(item=>item.worldId===activeOfficial.worldId&&item.status!=="closed")
     // ① 这次投影必须仍属于发起时那个 world 身份：仍在列、代际未前进、已应用版本正是这次取到的投影版本。
     //    已前进说明投影已过时——丢弃本次投影，由下一轮按新事实重新取值，不在这里抢写（projectionWorldLanded）。
@@ -842,17 +1063,17 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    }
    value={...value,scene:projection}
   }
-  if(apiRef.current!==api)return value
+  if(!currentAPI())return value
   const previous=hostId.current??readCache(cacheKey).hostInstanceId,changed=Boolean(previous&&previous!==value.hostInstanceId)
   setAdministrator(value.modelBilling==="own-key"?value.administrator:undefined)
-  hostId.current=value.hostInstanceId;setWorldHostEpoch(value.hostInstanceId);setProviderAvailable(value.providerAvailable);setWorlds(value.worlds);setCaptures(value.captures??[]);setComputerUse(value.computerUse)
+  hostId.current=value.hostInstanceId;setWorldHostEpoch(value.hostInstanceId);setProviderAvailable(value.providerAvailable);setWorlds(value.worlds);setCaptures(value.captures??[]);setVideos(value.videos??[]);setComputerUse(value.computerUse)
   if(value.recentActions)setActions(value.recentActions)
   if(value.scene){if(selectedRef.current&&!value.scene.entities.some(e=>e.entityId===selectedRef.current)){selectedRef.current=undefined;setSelected(undefined)}setScene(old=>old?.sceneId===value.scene!.sceneId&&old.revision===value.scene!.revision?old:value.scene);sceneRef.current=value.scene}
   if(changed){setWorld(undefined);worldRef.current=undefined;setFrame(undefined);setDescriptions({});setTargets({});projectedScene.current=undefined;viewer.current?.setWorld(undefined);setNotice(tr("Host 已重启，旧世界句柄已清除；正在按当前场景恢复物理世界。","Host restarted; old world handles were cleared. Restoring physics for the current scene."));persist(value.scene,undefined)}
   else{const desired=worldRef.current?.worldId??readCache(cacheKey).worldId,same=value.worlds.filter(item=>item.sceneId===(value.scene?.sceneId??target)&&item.status!=="closed"),current=adoptWorldHandle(same.find(item=>item.worldId===desired)??(same.length===1?same[0]:undefined),worldRef.current);setWorld(current);worldRef.current=current;if(!current)setFrame(undefined);persist(value.scene,current)}
   setReconnecting(false);return value
  }
- const loadScene=async(id:string)=>{nativeControlCancel.current?.();sceneIntent.current=id;const seq=++sceneLoadSeq.current;pendingFocus.current=undefined;++loadVersion.current;viewState.current=undefined;projectedScene.current=undefined;selectedRef.current=undefined;setSelected(undefined);setBatchIds([]);setDescriptions({});setTargets({});setFrame(undefined);setWorld(undefined);worldRef.current=undefined;const value=await refreshState(id,seq);if(value.worlds.some(item=>item.engineId==="official-suite"&&item.sceneId===id))setVersions([]);else await refreshHistory(id);return value}
+ const loadScene=async(id:string)=>{nativeControlCancel.current?.();sceneIntent.current=id;const seq=++sceneLoadSeq.current;pendingFocus.current=undefined;++loadVersion.current;viewState.current=undefined;projectedScene.current=undefined;selectedRef.current=undefined;setSelected(undefined);setBatchIds([]);setDescriptions({});setTargets({});setFrame(undefined);setWorld(undefined);worldRef.current=undefined;closedWorldsRef.current.clear();const value=await refreshState(id,seq);if(value.worlds.some(item=>item.engineId==="official-suite"&&item.sceneId===id))setVersions([]);else await refreshHistory(id);return value}
  const createScene=useMemo(()=>createSceneCreationAction(async(template:SceneCreationTemplate)=>{
   if(!sessionId||readOnlyRef.current)throw Error('SCENE_CREATION_UNAVAILABLE: 先选择可编辑工作区')
   setSceneCreating(template);setNotice('');setError('')
@@ -865,9 +1086,9 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const describe=async(entityId:string)=>{
   const w=worldRef.current;if(!w)return
   const result=await api.request<RobotDescription>("robot-description?"+new URLSearchParams({worldId:w.worldId,entityId}))
-  if(!sameWorldBinding(w,worldRef.current)||result.expectedGeneration!==w.worldGeneration)return
+  if(!currentAPI()||!sameWorldBinding(w,worldRef.current)||result.expectedGeneration!==w.worldGeneration)return
   setDescriptions(old=>({...old,[entityId]:result}));descriptionsRef.current={...descriptionsRef.current,[entityId]:result}
-  const current=await api.frame(w.worldId);if(!sameWorldBinding(w,worldRef.current)||current.generation!==w.worldGeneration)return
+  const current=await api.frame(w.worldId);if(!currentAPI()||!sameWorldBinding(w,worldRef.current)||current.generation!==w.worldGeneration)return
   const values=measuredJointTargets(result,current,entityId)
   setTargets(old=>({...old,[entityId]:old[entityId]??values}));targetsRef.current={...targetsRef.current,[entityId]:targetsRef.current[entityId]??values};return result
  }
@@ -882,14 +1103,14 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   void assert.catch(value=>{if(alive)setError(String(value))});return()=>{alive=false;api.clearControlSelection()}
  },[open,scene?.sceneId,scene?.revision,selected,world?.worldId,world?.worldGeneration,sessionId])
  useEffect(()=>{if(!open||!sessionId)return;let alive=true,busy=false
-  perform(async()=>{const list=await refreshScenes();const initial=await api.state();if(alive){
+  perform(async()=>{const list=await refreshScenes();if(!alive||!currentAPI())return;const initial=await api.state();if(alive&&currentAPI()){
    const saved=sceneRef.current?.sceneId??readCache(cacheKey).sceneId??initial.lastSceneId
    const id=saved?(list.some(item=>item.sceneId===saved)||initial.worlds.some(item=>item.sceneId===saved)?saved:undefined):list[0]?.sceneId
-   if(id){sceneIntent.current=id;await refreshState(id);await refreshHistory(id)}
+   if(id){sceneIntent.current=id;await refreshState(id);if(alive&&currentAPI())await refreshHistory(id)}
   }})
   // 每次状态轮询顺带重读环境光照读数：读的是 Viewer 自己的解析结果（无渲染、无网络），
   // 因此 Agent 用 scene_edit 改了环境、或场景版本回退时，面板会跟着变——面板不自己算一套。
-  const timer=setInterval(async()=>{if(busy)return;busy=true;try{await refreshState(sceneRef.current?.sceneId);readEnvironmentStatus()}catch(value){if(alive){setReconnecting(true);setError(String(value))}}finally{busy=false}},WORKBENCH_STATE_POLL_MS)
+  const timer=setInterval(async()=>{if(busy)return;busy=true;try{await refreshState(sceneRef.current?.sceneId);if(alive&&currentAPI())readEnvironmentStatus()}catch(value){if(alive&&currentAPI()){setReconnecting(true);setError(String(value))}}finally{busy=false}},WORKBENCH_STATE_POLL_MS)
   return()=>{alive=false;clearInterval(timer)}
  },[open,sessionId])
  useEffect(()=>{if(!open||!viewerVisible)return
@@ -905,12 +1126,12 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 资源也按会话取（`api.mediaURL` 会带上本窗口的会话标识）：同一个 sceneId/uri 在两个会话里
   // 指向各自那份存储，Viewer 不会用别的会话的资源字节拼这一版场景。走 apiRef 是因为这个
   // 效应不随 api 重建，闭包里直接捕 api 会在换会话后继续用旧身份。
-  instance=createViewer({container:host,translate:(zh,en)=>cameraTranslateRef.current(zh,en),splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,...{onContextMenu:(input:ViewerContextRequest)=>setViewerMenu(input)},onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>setPlacingPoint(point),onError:value=>setError(String(value)),
+  instance=createViewer({container:host,translate:(zh,en)=>cameraTranslateRef.current(zh,en),splatRetentionScope:sessionId&&hostId.current?{hostInstanceId:hostId.current,sessionId}:undefined,resolveResource:uri=>apiRef.current.mediaURL("resource",{sceneId:sceneRef.current?.sceneId??"",uri:viewerResourceURI(uri)}),onSelection:setSelected,onPartSelect:selection=>setPartSelection(selection&&{entityId:selection.entityId,partId:selection.partId}),...{onContextMenu:(input:ViewerContextRequest)=>{viewerMenuSession.current=sessionId;setViewerMenu(input)}},onRobotAnchorSelect:()=>ui.openTool('robot'),onPlacePoint:point=>{const controller=parkingPickControllerRef.current;if(parkingPickRef.current&&controller){const picked:[number,number,number]=[point[0],point[1],point[2]];setParkingPickPoint(picked);controller.setPoint(picked)}else placePointRef.current(point)},onMountPick:pick=>{setPickedSourceMount({kind:"pose",pose:{positionM:[...pick.positionM],quaternionXyzw:[...pick.quaternionXyzw]}});setAttachPick(false);viewer.current?.setMountPickMode(undefined)},onError:value=>setError(String(value)),
    // 新批注只在这里生成 id/编号：编号是显示序号（面板、标记、截图三处必须同一个），身份始终是 annotationId。
-   onAnnotationCreate:anchor=>{const created=createAnnotation(anchor,annotationIds.current.length+1,new Date().toISOString());setAnnotations(old=>[...old,created]);setActiveAnnotation(created.annotationId)},
-   onAnnotationSelect:annotationId=>setActiveAnnotation(annotationId),
+   onAnnotationCreate:anchor=>{const created=createAnnotation(anchor,annotationIds.current.length+1,new Date().toISOString());setAnnotations(old=>[...old,created]);requestAnnotationFocus(created.annotationId)},
+   onAnnotationSelect:annotationId=>requestAnnotationFocus(annotationId),
    commitEdit:input=>{const commit=commitEditRef.current;if(!commit)throw new Error("SCENE_EDIT_UNAVAILABLE");return commit(input)}})
-  viewer.current=instance;setObserverOwner(instance as unknown as CameraAuthoringViewer);instance.setDisplaySettings(display);instance.setSceneLights(sceneLights);instance.setAnimationsPlaying(animationsPlaying);instance.setGizmoMode(gizmo);instance.setEditCommit(readOnlyRef.current?undefined:commitEditRef.current)
+  viewer.current=instance;setObserverOwner(instance as unknown as CameraAuthoringViewer);instance.setDisplaySettings(display);instance.setSceneLights(sceneLights);instance.setAnimationsPlaying(animationsPlaying);instance.setGizmoMode(gizmo);instance.setTransformEditing(false);instance.setEditCommit(readOnlyRef.current?undefined:commitEditRef.current)
   // 新实例必须立刻拿到当前批注（否则切回画布时标记短暂消失），模式同样同步。
   instance.setAnnotations(annotationsRef.current)
   instance.setAnnotationMode(annotatingRef.current)
@@ -940,10 +1161,13 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   setRenderLoading(true)
   const loaded=instance.setScene(prepared.scene),ready={instance,sceneId:scene.sceneId,revision:scene.revision,settled:false,failed:false}
   readyScene.current=ready
-  void loaded.then(()=>{ready.settled=true;if(version===loadVersion.current)setRenderLoading(false)},()=>{ready.failed=true;if(version===loadVersion.current)setRenderLoading(false)})
-  void loaded.then(()=>{if(version!==loadVersion.current||viewer.current!==instance)return;settleSceneCameraLoad(instance,sameScene,camera);if(worldRef.current?.sceneId===scene.sceneId)instance.setWorld(worldRef.current);if(selectedRef.current)instance.select(selectedRef.current);setCollisionStatus(instance.collisionStatus());const focus=pendingFocus.current;if(focus?.sceneId===scene.sceneId){instance.openDefaultView(focus.entityId);pendingFocus.current=undefined}}).catch(value=>setError(String(value)))
+  let active=true
+  const isCurrent=()=>active&&mounted.current&&version===loadVersion.current&&viewer.current===instance
+  void loaded.then(()=>{ready.settled=true;if(isCurrent())setRenderLoading(false)},()=>{ready.failed=true;if(isCurrent())setRenderLoading(false)})
+  void loaded.then(()=>{if(!isCurrent())return;settleSceneCameraLoad(instance,sameScene,camera);if(worldRef.current?.sceneId===scene.sceneId)instance.setWorld(worldRef.current);if(selectedRef.current)instance.select(selectedRef.current);setCollisionStatus(instance.collisionStatus());const focus=pendingFocus.current;if(focus?.sceneId===scene.sceneId){instance.openDefaultView(focus.entityId);pendingFocus.current=undefined}}).catch(value=>{if(isCurrent())setError(String(value))})
  // 这一版 setScene 落定（含 HDRI 加载）之后再读一次环境读数：面板显示的是画面真正生效的那一份。
- void loaded.then(()=>{if(viewer.current===instance)readEnvironmentStatus()}).catch(()=>undefined)
+ void loaded.then(()=>{if(isCurrent())readEnvironmentStatus()}).catch(()=>undefined)
+ return()=>{active=false}
  },[open,viewerVisible,scene,readOnly,observerOwner])
  // 批注按场景装载/落盘：换场景换一份，刷新/重开工作台后回来；只在 sceneId 变化时重读，编辑不反复读盘。
  useEffect(()=>{setAnnotations(readAnnotations(scene?.sceneId));setActiveAnnotation(undefined)},[scene?.sceneId])
@@ -956,6 +1180,17 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 每次批注或模式变化都把最新一份推给 viewer：锚点与世界位置的重算只发生在 viewer 内部。
  useEffect(()=>{viewer.current?.setAnnotations(annotations)},[annotations,open,viewerVisible,annotationSceneId])
  useEffect(()=>{viewer.current?.setAnnotationMode(annotating);viewer.current?.selectAnnotation(activeAnnotation)},[annotating,activeAnnotation,open,viewerVisible,annotationSceneId])
+ // Notes 的"进入落点模式"由工具入口唯一决定：点 Notes / 右键 Annotate 打开工具即进入，
+ // 关闭工具就停止落点；已写内容仍留在 annotations 里，切工具/Session/Scene 都不重建 Chat/Viewer/草稿/PTY。
+ useEffect(()=>{setAnnotating(uiState.tool==='annotation'&&viewerVisible&&!readOnly&&!replayActive)},[uiState.tool,viewerVisible,readOnly,replayActive])
+ // 进入 Notes 且还没有选中标记时，把焦点交给画布（已有标记则由浮条的输入框自己接管）。
+ useEffect(()=>{
+  if(uiState.tool!=='annotation'||activeAnnotation||!viewerVisible||readOnly||replayActive)return
+  container.current?.focus?.({preventScroll:true})
+ },[uiState.tool,activeAnnotation,viewerVisible,readOnly,replayActive])
+ // 切工具/换场景/换会话/关 Viewer/只读回放：作废还没被正文消费的编辑焦点请求。
+ // 请求不是定时器也不是轮询，这里只是把身份清掉，保证迟到的一律不再抢 Chat/文件/终端的焦点。
+ useEffect(()=>{setAnnotationFocusRequest(undefined)},[uiState.tool,scene?.sceneId,sessionId,viewerVisible,readOnly,replayActive])
  // 附着性自述（验收门读的就是它）：屏幕位置与锚点都来自 viewer 自己的投影，门不另算一套相机数学。
  // 只在浏览器里挂一个只读全局，不参与产品逻辑；没有批注时清空，避免残留上一次的读数骗过验收。
  useEffect(()=>{
@@ -984,7 +1219,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    const topology=current.collisionTopology
    if(topology?.geometryIncluded&&topology.source===`${world.engineId}-compiled`&&topology.worldId===world.worldId&&topology.generation===worldRef.current.worldGeneration&&topology.sceneRevision===sceneRef.current?.revision)geometryReceived=true
    if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())
-  }catch(value){if(alive&&worldRef.current?.worldId===world.worldId){setReconnecting(true);setError(String(value));try{const refreshed=await refreshState(sceneRef.current?.sceneId);if(!refreshed.worlds.some(item=>item.worldId===world.worldId)){setReconnecting(false);setError("")}}catch{}}}finally{busy=false}}
+  }catch(value){if(alive&&currentAPI()&&worldRef.current?.worldId===world.worldId){setReconnecting(true);setError(String(value));try{const refreshed=await refreshState(sceneRef.current?.sceneId);if(!alive||apiRef.current!==api||worldRef.current?.worldId!==world.worldId)return;if(!refreshed.worlds.some(item=>item.worldId===world.worldId)){setReconnecting(false);setError("")}}catch{}}}finally{busy=false}}
   void poll();const timer=setInterval(poll,120);return()=>{alive=false;clearInterval(timer)}
  },[open,viewerVisible,renderRetry,world?.worldId,world?.engineId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady,sessionId,selected,scene?.sceneId,scene?.revision,display.collision,uiState.tool,annotating,observerState?.mode])
  // 未装配世界的派生件只读加载也要更新状态；不发送 Frame、Commands 或另一份物理状态。
@@ -992,9 +1227,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const read=()=>{const current=viewer.current?.collisionStatus();if(current)setCollisionStatus(previous=>JSON.stringify(previous)===JSON.stringify(current)?previous:current)}
   read();const timer=setInterval(read,250);return()=>clearInterval(timer)
  },[open,viewerVisible,selected,scene?.sceneId,scene?.revision,display.collision,frameWorldReady])
- useEffect(()=>{if(selected)setDisplay(value=>value.collision?value:{...value,collision:true})},[selected,scene?.sceneId])
- useEffect(()=>{viewer.current?.select(selected);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus());const e=sceneRef.current?.entities.find(e=>e.entityId===selected);if(selected&&world&&e&&robotEntity(e))perform(()=>describe(selected))},[selected,world?.worldId,world?.worldGeneration,world?.appliedSceneRevision])
- useEffect(()=>{viewer.current?.setDisplaySettings(display);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())},[display]);useEffect(()=>{viewer.current?.setSceneLights(sceneLights)},[sceneLights]);useEffect(()=>{if(viewer.current)setAnimationSummary(applyAnimationDisplay(viewer.current,animationsPlaying))},[animationsPlaying]);useEffect(()=>{viewer.current?.setGizmoMode(gizmo)},[gizmo])
+  useEffect(()=>{viewer.current?.select(selected);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus());const e=sceneRef.current?.entities.find(e=>e.entityId===selected);if(selected&&world&&e&&robotEntity(e))perform(()=>describe(selected))},[selected,world?.worldId,world?.worldGeneration,world?.appliedSceneRevision])
+ useEffect(()=>{viewer.current?.setDisplaySettings(display);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())},[display]);useEffect(()=>{viewer.current?.setSceneLights(sceneLights)},[sceneLights]);useEffect(()=>{if(viewer.current)setAnimationSummary(applyAnimationDisplay(viewer.current,animationsPlaying))},[animationsPlaying]);useEffect(()=>{viewer.current?.setGizmoMode(gizmo)},[gizmo]);useEffect(()=>{viewer.current?.setTransformEditing(transformEditing)},[transformEditing]);useEffect(()=>{setTransformEditing(false)},[selected])
  // 同一 Viewer 的只读回执；异步载入/世界变化清授权后，控件不能仍假显示为播放中。
  useEffect(()=>{if(!open||!viewerVisible){setAnimationSummary(undefined);return}
   const read=()=>{const instance=viewer.current;if(!instance)return;const next=instance.animationSummary();setAnimationSummary(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next)}
@@ -1026,7 +1260,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 素材与内置库是四个域面板（机器人/物件/环境/素材）的共同数据源：任一面板打开都刷新同一份状态，
  // 域面板不另取一份。素材面板按自己的搜索词取列表；机器人/物件/环境面板始终取未过滤列表，
  // 否则素材面板的一次搜索会把域面板切成同一个子集。
- useEffect(()=>{if(!open||!sessionId)return;const tool=uiState.tool;if(tool!=="asset"&&tool!=="environment"&&tool!=="robot"&&tool!=="object"&&tool!=="scene")return;void Promise.all([refreshAssets(tool==="asset"?assetQuery:"",includeDeleted),refreshMissingAssets(),refreshBuiltinAssets()]).catch(value=>setError(String(value)))},[open,sessionId,uiState.tool,includeDeleted])
+ useEffect(()=>{if(!open||!sessionId)return;const tool=uiState.tool;if(tool!=="environment"&&tool!=="robot"&&tool!=="object"&&tool!=="scene")return;void Promise.all([refreshAssets(""),refreshMissingAssets(),refreshBuiltinAssets()]).catch(value=>setError(String(value)))},[open,sessionId,uiState.tool,includeDeleted])
  const updateScene=async(input:SceneCommit)=>{
   // 官方派生 Scene 只读：不把编辑写进任何 Scene owner。
   if(worldRef.current?.engineId==="official-suite")throw new Error(tr("官方世界的场景是只读投影，不能编辑。","The official world's scene is a read-only projection and cannot be edited."))
@@ -1060,15 +1294,20 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   * 组件已经在某个实体上就改它（承载实体由文档自己决定）；没有就新加一条只带这个组件的实体。
   * 空表也照写：它表示"这个场景现在没有命名相机"，不是错误。
   */
- const writeNamedCameras=async(sceneId:string,expectedRevision:number,next:readonly NamedCamera[]):Promise<SceneSnapshot>=>{
+ const writeViewerCameraComponent=async(sceneId:string,expectedRevision:number,input:{cameras?:readonly NamedCamera[];routes?:readonly CaptureRoute[]}):Promise<SceneSnapshot>=>{
   const entities=sceneRef.current?.sceneId===sceneId?sceneRef.current.entities:undefined
   const carrierId=namedCamerasOfScene(entities).carrier
   const carrier=carrierId?entities?.find(entity=>entity.entityId===carrierId):undefined
-  const component=composeViewerCameraComponent(next)
+  const existing=carrier?.components.viewerCamera
+  const cameras=input.cameras??namedCamerasOfScene(entities).cameras
+  // 机位与路线在**同一份** `viewerCamera` 组件里：写机位时保留路线，写路线时保留机位，绝不各存一份机位。
+  const routes=input.routes??parseCaptureRoutes(existing).routes
+  const component={...composeViewerCameraComponent(cameras),...(routes.length?{routes}:{})}
   if(carrier)return await updateScene({sceneId,expectedRevision,patch:[{op:"update",entityId:carrier.entityId,changes:{components:{...carrier.components,viewerCamera:component}}}]})
   const entity:Entity={entityId:crypto.randomUUID(),name:tr("命名相机","Named cameras"),transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{viewerCamera:component}}
   return await updateScene({sceneId,expectedRevision,patch:[{op:"add",entity}]})
  }
+ const writeNamedCameras=(sceneId:string,expectedRevision:number,next:readonly NamedCamera[])=>writeViewerCameraComponent(sceneId,expectedRevision,{cameras:next})
  const restoreVersion=async(revision:number)=>{
   const current=sceneRef.current
   if(!current||revision===current.revision)return
@@ -1129,6 +1368,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  }
  const closePhysicsWorld=async()=>{
   const closing=worldRef.current;if(!closing)return;automaticWorld.markClosed()
+  closedWorldsRef.current.add(closing.worldId)
   await api.command('sim_close',{worldId:closing.worldId},{sceneId:sceneRef.current?.sceneId,worldId:closing.worldId})
   if(worldRef.current?.worldId===closing.worldId){setWorld(undefined);worldRef.current=undefined;setFrame(undefined)}
   await refreshState(sceneRef.current?.sceneId);setError('')
@@ -1148,21 +1388,306 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   setNotice(result.synced?tr('物理配置已保存并同步，已读取当前版本的原生物理帧。','Physics configuration saved and synchronized; a native frame for the current revision was read.'):tr('物理配置已保存；物理世界尚未就绪，请查看世界状态。','Physics configuration saved; the physics world is not ready. Check its status.'))
   return result
  }
- const applyRobotConfiguration=async(name:'robot_set_tcp'|'robot_set_base'|'sim_reset',input:RobotSetTcpInput|RobotSetBaseInput|{worldId:string;sceneId:string;expectedRevision:number;expectedGeneration:number})=>{
-  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
-  nativeControlCancel.current?.()
-  const requestAPI=api,bound=worldRef.current,selection=selectedRef.current
-  const result=await api.command<{snapshot:SceneSnapshot;world:WorldHandle;frame:Frame;robot?:RobotDescription}>(name,input,{sceneId:input.sceneId,worldId:input.worldId})
-  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==input.sceneId||worldRef.current?.worldId!==bound?.worldId||selectedRef.current!==selection)return result
-  if(result.snapshot.sceneId!==input.sceneId||result.world.worldId!==input.worldId||result.world.appliedSceneRevision!==result.snapshot.revision||result.frame.worldId!==input.worldId||result.frame.generation!==result.world.worldGeneration||result.frame.sceneRevision!==result.snapshot.revision)throw Error('ROBOT_CONFIGURATION_FRAME_STALE')
-  if(sceneRef.current.revision>result.snapshot.revision||(worldRef.current?.worldGeneration??0)>result.world.worldGeneration)return result
-  applySceneIfCurrent(sceneWritePort,input.sceneId,result.snapshot)
+ /** R-014：保存即采用。物理待同步时也把已落盘的 Scene 声明放进当前视图，但不冒称已同步、不采用旧 Frame。 */
+ const adoptRobotConfiguration=(result:RobotConfigurationReceipt&{robot?:RobotDescription},input:{sceneId:string;worldId?:string},selection:string|undefined)=>{
+  if(result.snapshot.sceneId!==input.sceneId)throw Error('ROBOT_CONFIGURATION_SCENE_MISMATCH')
+  const currentScene=sceneRef.current
+  if(!currentScene||currentScene.sceneId!==input.sceneId)return result
+  if(result.snapshot.revision>=currentScene.revision)applySceneIfCurrent(sceneWritePort,input.sceneId,result.snapshot)
+  // syncRequired：声明已保存，但物理尚未应用；不更新 world/frame，也不启动别的 world。
+  if(result.syncRequired||!result.world||!result.frame)return result
+  if(result.world.appliedSceneRevision!==result.snapshot.revision)throw Error('ROBOT_CONFIGURATION_FRAME_STALE')
   const adopted=adoptWorldHandle(result.world,worldRef.current)!
   setWorld(adopted);worldRef.current=adopted;setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,adopted)
   viewer.current?.setWorld(adopted);setFrame(result.frame);viewer.current?.pushFrame(result.frame);setWorldLifecycle(worldLifecycleState(adopted,result.frame))
   if(result.robot){setDescriptions({[result.robot.entityId]:result.robot});descriptionsRef.current={[result.robot.entityId]:result.robot}}
-  else if(selection)await describe(selection)
+  // 详情读回只是补充：已保存/已同步结果不能因为 fallback describe 失败而丢失。
+  else if(selection)void describe(selection).catch(()=>{})
   return result
+ }
+ const applyRobotConfiguration=async(name:'robot_set_tcp'|'robot_set_base'|'sim_reset',input:RobotSetTcpInput|RobotSetBaseInput|{worldId:string;sceneId:string;expectedRevision:number;expectedGeneration:number})=>{
+  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
+  nativeControlCancel.current?.()
+  const requestAPI=api,bound=worldRef.current,selection=selectedRef.current
+  const result=await api.command<RobotConfigurationReceipt&{snapshot:SceneSnapshot;world:WorldHandle;frame:Frame;robot?:RobotDescription}>(name,input,{sceneId:input.sceneId,worldId:input.worldId})
+  // 迟到结果的归属核对锚在发出时的 Scene / 选择：任一变了就丢弃。world 这一项只拦真实的世界
+  // 更换/关闭：发出时绑定的 world 若已被用户显式关闭，或当前句柄已变成另一个 world，都不回写视图。
+  // 后台轮询在同一 world 上的代次短暂落后（回执代次领先）仍然是合法正例，不据瞬时值否掉已同步回执。
+  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==input.sceneId||selectedRef.current!==selection)return result
+  if(bound?.worldId&&(closedWorldsRef.current.has(bound.worldId)||worldRef.current?.worldId!==bound.worldId))return result
+  if(name==='sim_reset'){
+   if(!result.world||!result.frame||result.world.appliedSceneRevision!==result.snapshot.revision||result.frame.generation!==result.world.worldGeneration||result.frame.sceneRevision!==result.snapshot.revision)throw Error('ROBOT_CONFIGURATION_FRAME_STALE')
+   applySceneIfCurrent(sceneWritePort,input.sceneId,result.snapshot)
+   const adopted=adoptWorldHandle(result.world,worldRef.current)!
+   setWorld(adopted);worldRef.current=adopted;setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,adopted)
+   viewer.current?.setWorld(adopted);setFrame(result.frame);viewer.current?.pushFrame(result.frame);setWorldLifecycle(worldLifecycleState(adopted,result.frame))
+   // 复位已保存/已同步；详情读回失败只补警告，不能把这份结果抛掉。
+   if(selection)try{await describe(selection)}catch{}
+   return result
+  }
+  return adoptRobotConfiguration(result,input,selection)
+ }
+ /** R-014：只读既有 Scene 历史，返回可撤销的装配绑定变化（有界）。 */
+ const robotAssemblyHistory=async():Promise<RobotAssemblyHistoryResult>=>{
+  const current=sceneRef.current,entityId=selectedRef.current
+  if(!current||!entityId)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  return api.command<RobotAssemblyHistoryResult>('robot_assembly_history',{sceneId:current.sceneId,entityId,limit:10})
+ }
+ /** R-014：受保护的局部 Undo。只依赖 Scene 历史与当前 revision CAS；world 不可用时恢复声明并如实报待同步。 */
+ const robotAssemblyUndo=async(change:RobotAssemblyChange)=>{
+  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
+  const current=sceneRef.current,entityId=selectedRef.current,bound=worldRef.current,requestAPI=api,selection=selectedRef.current
+  if(!current||!entityId)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const input={sceneId:current.sceneId,entityId,expectedRevision:current.revision,field:change.field,beforeRevision:change.beforeRevision,afterRevision:change.afterRevision,...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})}
+  const result=await api.command<RobotConfigurationReceipt&{robot?:RobotDescription}>('robot_assembly_undo',input,{sceneId:current.sceneId,worldId:input.worldId})
+  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==current.sceneId||selectedRef.current!==selection)return result
+  return adoptRobotConfiguration(result,{sceneId:current.sceneId,worldId:input.worldId},selection)
+ }
+ /** Replace 成组 Undo：同一次 CAS 的新旧双方一起恢复；任一方被后续编辑由后端整组拒绝。 */
+ const robotAssemblyUndoGroup=async(group:RobotAssemblyReplacementGroup)=>{
+  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
+  const current=sceneRef.current,bound=worldRef.current,requestAPI=api,selection=selectedRef.current
+  if(!current)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const entityId=group.members[0]?.entityId??selectedRef.current
+  if(!entityId)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const input={sceneId:current.sceneId,entityId,expectedRevision:current.revision,changes:group.members.map(member=>({entityId:member.entityId,field:member.field,beforeRevision:group.beforeRevision,afterRevision:group.afterRevision})),...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})}
+  const result=await api.command<RobotConfigurationReceipt&{robot?:RobotDescription}>('robot_assembly_undo',input,{sceneId:current.sceneId,...(input.worldId?{worldId:input.worldId}:{})})
+  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==current.sceneId||selectedRef.current!==selection)return result
+  return adoptRobotConfiguration(result,{sceneId:current.sceneId,...(input.worldId?{worldId:input.worldId}:{})},selection)
+ }
+ /** R-013：成对拆分的局部 Undo。按既有 Scene 历史过渡同时核对 remaining/part，只回填这次拆分/重组触达的字段与实体。 */
+ const robotAssemblyUndoSubtree=async(group:RobotSubtreePartitionGroup)=>{
+  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
+  const current=sceneRef.current,bound=worldRef.current,requestAPI=api,selection=selectedRef.current
+  if(!current)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const entityId=group.remainingEntityId||selectedRef.current
+  if(!entityId)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const input={sceneId:current.sceneId,entityId,expectedRevision:current.revision,subtree:{operationId:group.operationId,beforeRevision:group.beforeRevision,afterRevision:group.afterRevision},...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})}
+  const result=await api.command<RobotConfigurationReceipt&{robot?:RobotDescription}>('robot_assembly_undo',input,{sceneId:current.sceneId,...(input.worldId?{worldId:input.worldId}:{})})
+  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==current.sceneId||selectedRef.current!==selection)return result
+  return adoptRobotConfiguration(result,{sceneId:current.sceneId,...(input.worldId?{worldId:input.worldId}:{})},selection)
+ }
+ /** V8-34：Attach 结果页的直接 Undo；复用同一份 robot_assembly_history / robot_assembly_undo。 */
+ const undoAttachLast=async(entityId:string)=>{
+  if(readOnly||replayActive)throw Error('ROBOT_CONFIGURATION_READ_ONLY')
+  const current=sceneRef.current,bound=worldRef.current,requestAPI=api
+  if(!current)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择机器人实体')
+  const history=await api.command<RobotAssemblyHistoryResult>('robot_assembly_history',{sceneId:current.sceneId,entityId,limit:10})
+  const change=history.entries?.find(entry=>entry.undoable)
+  const replacement=history.replacements?.find(group=>group.undoable)
+  const subtree=history.subtreePartitions?.find(group=>group.undoable)
+  let input:Record<string,unknown>|undefined
+  if(change)input={sceneId:current.sceneId,entityId,expectedRevision:current.revision,field:change.field,beforeRevision:change.beforeRevision,afterRevision:change.afterRevision}
+  else if(replacement)input={sceneId:current.sceneId,entityId:replacement.members[0]?.entityId??entityId,expectedRevision:current.revision,changes:replacement.members.map(member=>({entityId:member.entityId,field:member.field,beforeRevision:replacement.beforeRevision,afterRevision:replacement.afterRevision}))}
+  else if(subtree)input={sceneId:current.sceneId,entityId:subtree.remainingEntityId||entityId,expectedRevision:current.revision,subtree:{operationId:subtree.operationId,beforeRevision:subtree.beforeRevision,afterRevision:subtree.afterRevision}}
+  if(!input)throw Error('ROBOT_ASSEMBLY_HISTORY_EMPTY: 当前装配历史没有可撤销的变化')
+  if(bound&&bound.sceneId===current.sceneId)input={...input,worldId:bound.worldId,expectedGeneration:bound.worldGeneration}
+  const result=await api.command<RobotConfigurationReceipt&{robot?:RobotDescription}>('robot_assembly_undo',input,{sceneId:current.sceneId,...(typeof input.worldId==='string'?{worldId:input.worldId}:{})})
+  if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==current.sceneId)return result
+  return adoptRobotConfiguration(result,{sceneId:current.sceneId,...(typeof input.worldId==='string'?{worldId:input.worldId}:{})},entityId)
+ }
+ /** R-014：保存后物理待同步的重试入口，走现有 world owner；不新开世界。 */
+ const retryAssemblySync=async()=>{
+  const w=await sync()
+  if(!w)throw Error('WORLD_SYNC_NOT_READY: 当前场景尚未与原生世界完成同步；请查看物理状态中的具体原因后重试。')
+  const source=sceneRef.current
+  const synced=Boolean(source&&w.sceneId===source.sceneId&&w.appliedSceneRevision===source.revision)
+  return {saved:true,sync:synced?'SYNCED':'REQUIRED',syncRequired:!synced,sceneId:source?.sceneId,revision:source?.revision,worldId:w.worldId,worldGeneration:w.worldGeneration,appliedSceneRevision:w.appliedSceneRevision,...(synced?{}:{reason:'ROBOT_CONFIGURATION_FRAME_STALE: 同步后世界仍未应用当前场景版本。'})}
+ }
+ /** R-012：Attach to 的真实身份收口与只读预览/提交接线；手动与 LLM 共用同一条预览 + `robot_set_base`。 */
+ const attachIdentity=()=>{
+  const w=worldRef.current,s=sceneRef.current
+  if(!w||!s)throw Error(tr('先启动或同步物理世界，读取真实 body/site 后再装配。','Start or sync a physics world to read real bodies/sites before attaching.'))
+  return {worldId:w.worldId,sceneId:s.sceneId,expectedRevision:s.revision,expectedGeneration:w.worldGeneration}
+ }
+ const attachDescribe=async(entityId:string)=>{
+  const value=await describe(entityId)
+  if(!value)throw Error('ROBOT_DESCRIBE_UNAVAILABLE: 当前没有可读取的真实机器人描述')
+  return {bodies:(value.nativeBodies??[]).map(body=>({name:body.name,root:body.root})),sites:(value.nativeSites??[]).map(site=>({name:site.name,bodyName:site.bodyName}))}
+ }
+ const attachPreview=(selection:AssemblyAttachSelection)=>{
+  const identity=attachIdentity()
+  return api.command<RobotAssemblyPreviewResult>('robot_assembly_preview',{...selection,...identity},{sceneId:identity.sceneId,worldId:identity.worldId})
+ }
+ // 预览/取消都只驱动 Viewer 的临时 ghost；真实绑定只由 `robot_set_base`（Apply/LLM）提交。
+ const attachGhost=(result:RobotAssemblyPreviewResult|null)=>{
+  const view=viewer.current
+  if(!view)return
+  if(result){
+   if(!attachPreviewView.current)attachPreviewView.current=view.getViewState()
+   view.previewAssemblyGhost({sourceEntityId:result.source.entityId,targetEntityId:result.target.entityId,targetBodyName:result.target.bodyName,targetBodyFromSourceRoot:result.targetBodyFromSourceRoot,worldId:result.worldId,sceneId:result.sceneId,sceneRevision:result.frame.sceneRevision,generation:result.frame.generation,sourceRootBodyName:result.source.rootBodyName})
+  }else{
+   view.clearAssemblyPreview()
+   if(attachPreviewView.current){view.setViewState(attachPreviewView.current,{focus:false});attachPreviewView.current=undefined}
+  }
+ }
+ const attachFramePreview=()=>{viewer.current?.frameAssemblyPreview()}
+ const attachRootBody=async(entityId:string)=>{
+  const value=await describe(entityId)
+  const root=value?.nativeBodies?.find(body=>body.root)
+  if(!root)throw Error('ROBOT_ASSEMBLY_SOURCE_ROOT_MISSING: 该实体没有可识别的真实根 body')
+  return root.name
+ }
+ /** R-013：Components 内部部件提取/重组的真实接线。预检只读；提取/重组各走一次 Scene CAS + 一次 sync。 */
+ const subtreeBodies=async(entityId:string)=>{
+  const value=await describe(entityId)
+  return (value?.nativeBodies??[]).map(body=>({name:body.name,root:body.root,...(body.parentName?{parentName:body.parentName}:{})}))
+ }
+ const subtreePairing=(entityId:string)=>{
+  const entity=sceneRef.current?.entities.find(candidate=>candidate.entityId===entityId)
+  const marker=entity?.components.subtreeExtract as {operationId?:string;role?:string;peerEntityId?:string}|undefined
+  if(!marker||marker.role!=='remaining'||typeof marker.operationId!=='string'||typeof marker.peerEntityId!=='string')return undefined
+  return {operationId:marker.operationId,partEntityId:marker.peerEntityId}
+ }
+ const subtreePrecheck=(entityId:string,bodyName:string)=>{
+  const current=sceneRef.current
+  if(!current)throw Error('SCENE_NOT_READY: 当前没有打开的 Scene')
+  return api.command<RobotSubtreePrecheckResult>('robot_assembly_extract_precheck',{sceneId:current.sceneId,entityId,bodyName},{sceneId:current.sceneId})
+ }
+ const subtreeExtract=async(entityId:string,bodyName:string)=>{
+  const identity=attachIdentity()
+  const result=await api.command<RobotSubtreeExtractResult>('robot_assembly_extract',{...identity,entityId,bodyName},{sceneId:identity.sceneId,worldId:identity.worldId})
+  applySceneIfCurrent(sceneWritePort,identity.sceneId,result.snapshot)
+  return {remainingEntityId:result.remainingEntityId,partEntityId:result.partEntityId,sync:result.sync,syncRequired:result.syncRequired,reason:result.reason}
+ }
+ const subtreeReassemble=async(entityId:string)=>{
+  const current=sceneRef.current
+  if(!current)throw Error('SCENE_NOT_READY: 当前没有打开的 Scene')
+  const bound=worldRef.current
+  const result=await api.command<RobotSubtreeReassembleResult>('robot_assembly_reassemble',{sceneId:current.sceneId,entityId,expectedRevision:current.revision,...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})},{sceneId:current.sceneId,...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})})
+  applySceneIfCurrent(sceneWritePort,current.sceneId,result.snapshot)
+  return {partEntityId:result.partEntityId,sync:result.sync,syncRequired:result.syncRequired,reason:result.reason}
+ }
+ // 端口身份必须稳定：`describe` 会 setState 触发 Workbench 重渲染；若每次渲染都换新 port，
+ // ComponentsPanel 的按需预检 effect（依赖 extraction）会在 cleanup 里把请求取消，反复清空
+ // bodies，真机上内部 body 选择框永远不出现。`useStableExtractionPort` 只在挂载时创建一次
+ // port、内部取最新实现；换实体仍由 ComponentsPanel 的 key={entityId} 卸载并触发身份清理。
+ const extractionPort=useStableExtractionPort({bodies:subtreeBodies,pairing:subtreePairing,precheck:subtreePrecheck,extract:subtreeExtract,reassemble:subtreeReassemble})
+ // Components 的真实上下文身份：只在 scene/revision/world generation 变化时刷新内部 body 与预检；
+ // 普通 Frame 轮询（stepIndex/simTime）不进入这里，因此不会重置用户选中的内部 body。
+ const componentsIdentity=`${scene?.sceneId??''}:${scene?.revision??''}:${world&&scene&&world.sceneId===scene.sceneId?world.worldGeneration:'-'}`
+ // 表面拾取：进入 Viewer 的只读拾取模式；面板临时收起，返回上下文保留。
+ const attachStartPick=async(sourceEntity:{entityId:string})=>{
+  const rootBodyName=await attachRootBody(sourceEntity.entityId)
+  setAttachPick(true)
+  viewer.current?.setMountPickMode({entityId:sourceEntity.entityId,rootBodyName})
+ }
+ const attachCancelPick=()=>{setAttachPick(false);viewer.current?.setMountPickMode(undefined)}
+ // 停放位置拾取：复用 Viewer 现有放置/平面拾取（不调用 scene_mount，不复制旧件）。只选位置，
+ // 面板方向保持不变；进入时暂时收起右栏，画布浮条确认/取消，Escape 也取消。
+ const enterParkingPick=()=>{
+  if(attachPick)return
+  setParkingPickPoint(undefined)
+  setParkingPickActive(true)
+  viewer.current?.setPlacementMode(true)
+ }
+ const exitParkingPick=()=>{setParkingPickActive(false);setParkingPickPoint(undefined);viewer.current?.setPlacementMode(false)}
+ const attachParkingPickController=useCallback((controller:AssemblyParkingPickController|undefined)=>{parkingPickControllerRef.current=controller},[])
+ const confirmParkingPick=()=>{const controller=parkingPickControllerRef.current;if(controller)controller.confirm();else exitParkingPick()}
+ const cancelParkingPick=()=>{const controller=parkingPickControllerRef.current;if(controller)controller.cancel();else exitParkingPick()}
+ // Escape 取消本次临时拾取/放置并同步 React/Viewer 模式；不写 Scene，也不假装回滚已准备的 world。
+ useEffect(()=>{
+  if(!attachPick&&!parkingPickActive&&!placingAsset)return
+  const cancel=(event:KeyboardEvent)=>{
+   if(event.key!=='Escape'||event.ctrlKey||event.altKey||event.metaKey)return
+   event.preventDefault();event.stopPropagation()
+   if(parkingPickActive)cancelParkingPick();else if(attachPick)attachCancelPick();else exitPlacement()
+  }
+  document.addEventListener('keydown',cancel,true)
+  return()=>document.removeEventListener('keydown',cancel,true)
+ },[attachPick,parkingPickActive,placingAsset])
+ // Apply 与 LLM 共用同一条 robot_set_base。成功后按**回执自身携带的** world 代次做原生读回：
+ // 后台 250ms state 轮询可能还没把同一个 world 的新代际采纳进 worldRef，若改用 worldRef 的旧代次，
+ // 已经 SYNCED 的装配会被后端按严格世代检查判成 STALE。回执的 worldId/worldGeneration 就是这次命令
+ // 的原生身份；只有保存成功但物理待同步（回执无可用 world/frame）才登记 pending，由 world owner 采纳后收口。
+ const attachApply=async(input:RobotSetBaseInput)=>{
+  const receipt=await applyRobotConfiguration('robot_set_base',input)
+  const scene=sceneRef.current
+  if(!scene||scene.sceneId!==input.sceneId||receipt?.saved!==true)return receipt
+  const identity=assemblyReadbackIdentity(receipt,input.sceneId)
+  if(identity)await attachRunCheck(input.entityId,identity).catch(()=>undefined)
+  else setAttachPending({sceneId:input.sceneId,entityId:input.entityId,...(typeof receipt.worldId==='string'?{worldId:receipt.worldId}:{}),generation:Number.isInteger(receipt.worldGeneration)?receipt.worldGeneration!:0})
+  return receipt
+ }
+ // 保存安装点走窄元数据 CAS；返回新 revision 收口，不建点数据库。
+ const attachSaveMount=async(mount:RobotSourceMount)=>{
+  const current=sceneRef.current,entityId=attachSourceId??selectedRef.current
+  if(!current||!entityId)throw Error('ROBOT_ASSEMBLY_SELECTION_REQUIRED: 先选择源实体')
+  const bound=worldRef.current
+  const rootBodyName=await attachRootBody(entityId)
+  const result=await api.command<RobotAssemblyMountResult>('robot_assembly_mount',{sceneId:current.sceneId,entityId,expectedRevision:current.revision,save:mount,rootBodyName,...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})},{sceneId:current.sceneId,...(bound&&bound.sceneId===current.sceneId?{worldId:bound.worldId,expectedGeneration:bound.worldGeneration}:{})})
+  if(result.snapshot)applySceneIfCurrent(sceneWritePort,current.sceneId,result.snapshot)
+  return result
+ }
+ /**
+  * 真实原生读回。`identity` 是发起读写的那条命令自己的 world 身份（优先于并发 state 轮询的 worldRef），
+  * 使同一次 Apply/Replace 的同步回执与其读回严格同代；只有 worldId+代次齐全才带 `expectedGeneration`，
+  * 不把缺代次的句柄当作"可读回"的依据。迟到回执只落回同一 Scene 与同一面板源实体。
+  */
+ const attachRunCheck=async(entityId:string,identity?:{worldId?:string;generation?:number})=>{
+  const current=sceneRef.current
+  if(!current)throw Error('SCENE_MISSING')
+  const requestAPI=api
+  const bound=worldRef.current,boundHere=bound&&bound.sceneId===current.sceneId?bound:undefined
+  const worldId=identity?.worldId??boundHere?.worldId
+  const generation=identity?.generation??boundHere?.worldGeneration
+  const sceneId=current.sceneId,sceneRevision=current.revision
+  const sourceEntityId=attachSourceIdRef.current??selectedRef.current
+  const result=await api.command<RobotAssemblyCheckResult>('robot_assembly_check',{sceneId,entityId,...(worldId&&Number.isInteger(generation)?{worldId,expectedGeneration:generation,contacts:true}:{})},{sceneId,...(worldId?{worldId}:{})})
+  // 落地核对：迟到的原生读回只有仍属于发起时的 API、Scene 版本、面板源实体与同一个 world 才算当前事实。
+  //  · Scene 版本前进、world 关闭/换成另一个 world、API 会话变化 → 旧 frame 不得落回当前面板；
+  //  · 代次只拦「已前进到请求代次之后」：回执自己的代次领先尚未采纳的轮询句柄，是必须保留的合法正例。
+  const liveWorld=worldRef.current
+  const liveRevision=sceneRef.current?.revision
+  const sameAPI=apiRef.current===requestAPI
+  const sameScene=sceneRef.current?.sceneId===sceneId&&liveRevision===sceneRevision
+  const sameSource=entityId===sourceEntityId&&(attachSourceIdRef.current??selectedRef.current)===sourceEntityId
+  const sameWorld=worldId===undefined?true:Boolean(liveWorld&&liveWorld.worldId===worldId&&(!Number.isInteger(generation)||liveWorld.worldGeneration<=generation!))
+  if(sameAPI&&sameScene&&sameSource&&sameWorld)setAttachCheck(result)
+  return result
+ }
+ const attachDetach=async(entityId:string)=>{
+  const current=sceneRef.current,bound=worldRef.current
+  if(!current||!bound)throw Error('ROBOT_ASSEMBLY_WORLD_REQUIRED: 先准备物理世界再解绑')
+  const rootBodyName=await attachRootBody(entityId)
+  return applyRobotConfiguration('robot_set_base',{worldId:bound.worldId,sceneId:current.sceneId,entityId,expectedRevision:current.revision,expectedGeneration:bound.worldGeneration,base:{mode:'free',bodyName:rootBodyName}})
+ }
+ // Replace：确认面板预览算出的 newBase（新件自己的 sourceMount 参与）与用户明确的旧件停放 pose，
+ // 一次 CAS + 一次 sync；旧件离开挂载位，不在安装位叠件。读回与 Attach 共用同一条同代身份规则。
+ const attachReplace=async(submit:AssemblyReplaceSubmit)=>{
+  const current=sceneRef.current,bound=worldRef.current
+  if(!current||!bound)throw Error('ROBOT_ASSEMBLY_WORLD_REQUIRED: 先准备物理世界再换挂')
+  const result=await api.command<RobotAssemblyReplaceResult>('robot_assembly_replace',{sceneId:current.sceneId,worldId:bound.worldId,expectedRevision:current.revision,expectedGeneration:bound.worldGeneration,newEntityId:submit.newEntityId,newBase:submit.newBase,oldEntityId:submit.oldEntityId,oldParkingPose:submit.oldParkingPose,oldFree:submit.oldFree},{sceneId:current.sceneId,worldId:bound.worldId})
+  if(result.snapshot)applySceneIfCurrent(sceneWritePort,current.sceneId,result.snapshot)
+  if(result.world){const adopted=adoptWorldHandle(result.world,worldRef.current);if(adopted){setWorld(adopted);worldRef.current=adopted;viewer.current?.setWorld(adopted)}}
+  if(result.frame){setFrame(result.frame);viewer.current?.pushFrame(result.frame)}
+  setReplaceDraft(undefined);setReplacePick({});viewer.current?.clearParkingGhost()
+  if(sceneRef.current?.sceneId!==current.sceneId||result.saved!==true)return result
+  const identity=assemblyReadbackIdentity(result,current.sceneId)
+  if(identity)await attachRunCheck(submit.newEntityId,identity).catch(()=>undefined)
+  else setAttachPending({sceneId:current.sceneId,entityId:submit.newEntityId,...(typeof result.worldId==='string'?{worldId:result.worldId}:{}),generation:Number.isInteger(result.worldGeneration)?result.worldGeneration!:0})
+  return result
+ }
+ // Apply 后物理待同步的自动收口：world owner 采纳当前场景版本（同 Scene、appliedRevision 对齐、代次不落后）
+ // 的下一刻就用当前身份做原生读回。不做固定延时、不无限重试；切场景/换源时丢弃登记。
+ useEffect(()=>{
+  if(!attachPending)return
+  const sceneNow=sceneRef.current,worldNow=worldRef.current
+  if(!sceneNow||sceneNow.sceneId!==attachPending.sceneId){setAttachPending(undefined);return}
+  // 登记绑定的 world 已被关闭/重建：登记随旧 world 作废，不把它带到新 world，也不无限等待别的高代次。
+  if(attachPending.worldId&&(!worldNow||worldNow.worldId!==attachPending.worldId)){setAttachPending(undefined);return}
+  if(!worldNow||worldNow.sceneId!==sceneNow.sceneId||worldNow.appliedSceneRevision!==sceneNow.revision)return
+  if(attachPending.generation>0&&worldNow.worldGeneration<attachPending.generation)return
+  const pending=attachPending
+  setAttachPending(undefined)
+  void attachRunCheck(pending.entityId).catch(()=>undefined)
+ },[attachPending,world?.sceneId,world?.worldGeneration,world?.appliedSceneRevision,scene?.sceneId,scene?.revision])
+ // 旧件停放 ghost：只把明确的世界停放位姿显示出来；null 清理。真实停放只由 attachReplace 提交。
+ const attachParkingGhost=(pose:{positionM:number[];quaternionXyzw:number[]}|null,entityId:string)=>{
+  const view=viewer.current,bound=worldRef.current,current=sceneRef.current
+  if(!view)return
+  if(!pose){view.clearParkingGhost();return}
+  view.previewParkingGhost({entityId,worldPose:{positionM:[...pose.positionM],quaternionXyzw:[...pose.quaternionXyzw]},...(bound&&current&&bound.sceneId===current.sceneId?{worldId:bound.worldId,sceneId:current.sceneId,sceneRevision:current.revision,generation:bound.worldGeneration}:{})})
  }
  const manualTcpMove=async(deltaM:Vec3)=>{
   const bound=worldRef.current,current=sceneRef.current,entityId=selectedRef.current,requestAPI=api
@@ -1182,6 +1707,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(!current||!physicalTestSpaceOf(current))return
   const oldWorld=worldRef.current
   if(oldWorld){
+   closedWorldsRef.current.add(oldWorld.worldId)
    await api.command("sim_stop",{worldId:oldWorld.worldId,expectedGeneration:oldWorld.worldGeneration},{sceneId:current.sceneId,worldId:oldWorld.worldId})
    await api.command("sim_close",{worldId:oldWorld.worldId},{sceneId:current.sceneId,worldId:oldWorld.worldId})
    if(worldRef.current?.worldId!==oldWorld.worldId||sceneRef.current?.sceneId!==current.sceneId)return
@@ -1219,9 +1745,55 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  }
 
  const move=async(name:string,motion:EntityMotion|{kind:"batch";motions:EntityMotion[]},label:string,bound?:WorldHandle,display?:ControlGestureDisplay,signal?:AbortSignal)=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_READ_ONLY");const w=bound??worldRef.current;if(!w)return;const actionId=crypto.randomUUID(),id=display?"gesture:"+controlGestureKey({...display,clientId:api.clientId}):actionId;setActions(old=>upsertControlActionRow(old,{id,label,waiting:true,...display?{display}:{}}));setError("")
-  try{const receipt=await api.command<ActionReceipt>(name,{worldId:w.worldId,action:{...motion,actionId,expectedGeneration:w.worldGeneration}},{sceneId:w.sceneId,worldId:w.worldId},signal,display);setActions(old=>old.map(item=>item.id===id&&(!display||item.display?.sequence===display.sequence)?{...item,waiting:false,receipt}:item));if(name==="robot_move"&&motion.kind==="joint")manualDrafts.current.delete(motion.entityId);return receipt}catch(value){setActions(old=>old.map(item=>item.id===id&&(!display||item.display?.sequence===display.sequence)?{...item,waiting:false,error:String(value)}:item));throw value}
+  try{const receipt=await api.command<ActionReceipt>(name,{worldId:w.worldId,action:{...motion,actionId,expectedGeneration:w.worldGeneration}},{sceneId:w.sceneId,worldId:w.worldId},signal,display);setActions(old=>old.map(item=>item.id===id&&(!display||item.display?.sequence===display.sequence)?{...item,waiting:false,receipt}:item));if(name==="robot_move"&&motion.kind==="joint"){manualDrafts.current.delete(motion.entityId);setLastRecipes(old=>({...old,[motion.entityId]:{jointNames:[...motion.jointNames],positions:[...motion.positions],durationS:motion.durationS}}))}else if(name==="robot_move"&&motion.kind==="trajectory"){const lastPoint=motion.points[motion.points.length-1];setLastRecipes(old=>({...old,[motion.entityId]:{jointNames:[...motion.jointNames],positions:lastPoint?[...lastPoint.positions]:[],durationS:lastPoint?lastPoint.timeS:0}}))}return receipt}catch(value){setActions(old=>old.map(item=>item.id===id&&(!display||item.display?.sequence===display.sequence)?{...item,waiting:false,error:String(value)}:item));throw value}
  }
  const fullMotion=(id:string):EntityMotion=>{const d=descriptionsRef.current[id];if(!d?.controlledJointNames.length)throw new Error(tr("该实体没有可控制关节。","No controlled joints are available."));const jointNames=d.controlledJointNames,positions=requireFullJointTargets(d,targetsRef.current[id]??{});if(!Number.isFinite(duration)||duration<=0)throw Error("CONTROL_DURATION_INVALID");return {kind:"joint",entityId:id,jointNames,positions:positions as number[],durationS:duration}}
+ /** R-004 Start：只执行当前已配置的完整关节目标或最后有效 recipe（同一 robot_move execute 路径），不重建 world。 */
+ const atomicStart=async()=>{
+  const id=selectedRef.current
+  if(!id)throw new Error(tr('请先选择机器人。','Select a robot first.'))
+  const recipe=lastRecipes[id]
+  let motion:EntityMotion
+  try{motion=fullMotion(id)}catch(error){
+   if(!recipe||!recipe.positions.length)throw new Error(tr('未配置动作：先在机器人控制里设置完整关节目标，或先执行一次动作。','No configured action: set a full joint target in robot control, or run one action first.'))
+   motion={kind:'joint',entityId:id,jointNames:recipe.jointNames,positions:recipe.positions,durationS:recipe.durationS||duration}
+  }
+  return move('robot_move',motion,tr('开始所选机器人动作','Start selected robot action'))
+ }
+ /** 用真实 description.base.freeze 核对冻结态（不靠本地 map 猜）；只在发起身份仍成立时落地。 */
+ const resyncFreezeState=async(id:string,bound:{worldId:string;worldGeneration:number},expectedRevision:number)=>{
+  const requestAPI=apiRef.current
+  let result:RobotDescription|undefined
+  try{result=await describe(id)}catch{return}
+  if(!result||apiRef.current!==requestAPI||!sameWorldBinding(bound,worldRef.current)||sceneRef.current?.revision!==expectedRevision)return
+  const freeze=result.base?.freeze
+  if(freeze?.frozen)setFreezeReceipts(old=>({...old,[id]:{worldId:bound.worldId,generation:bound.worldGeneration,freezeId:freeze.freezeId,status:'frozen',entityIds:[id],frozenEntityIds:freeze.scope??[id],scope:freeze.scope??[id],...(freeze.rootHeld===undefined?{}:{rootHeld:{[id]:freeze.rootHeld}}),...(freeze.jointLocks===undefined?{}:{jointLocks:{[id]:freeze.jointLocks}}),...(freeze.holdPose?{holdPose:{[id]:freeze.holdPose}}:{}),stillActiveActions:[],controlConfigPreserved:true}}))
+  else setFreezeReceipts(old=>{const next={...old};delete next[id];return next})
+ }
+ /** R-004 Freeze：只停止本实例动作并按当前 pose 启用原生约束/关节锁；不暂停整 world。 */
+ const atomicFreeze=async()=>{
+  const bound=worldRef.current,current=sceneRef.current,id=selectedRef.current,requestAPI=api
+  if(!bound||!current||!id)throw new Error(tr('请先准备物理世界并选择机器人。','Prepare a physics world and select a robot first.'))
+  const receipt=await api.command<FreezeReceipt>('robot_freeze',{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[id]},{sceneId:current.sceneId,worldId:bound.worldId})
+  // 迟到 Freeze 回执归属：API 会话、world 句柄代次、场景版本都须与发起时一致才落地；后端拒绝
+  // （not-found 等）不能当作已冻结。
+  if(apiRef.current!==requestAPI||!sameWorldBinding(bound,worldRef.current)||sceneRef.current?.revision!==current.revision)return receipt
+  if(freezeReceiptIsFrozen(receipt))setFreezeReceipts(old=>({...old,[id]:receipt}))
+  else{setFreezeReceipts(old=>{const next={...old};delete next[id];return next});await resyncFreezeState(id,bound,current.revision)}
+  return receipt
+ }
+ /** R-004 Restore：只解除本次原生保持；不自动继续旧动作/旧速度。 */
+ const atomicRestore=async()=>{
+  const bound=worldRef.current,current=sceneRef.current,id=selectedRef.current,requestAPI=api
+  if(!bound||!current||!id)throw new Error(tr('请先准备物理世界并选择机器人。','Prepare a physics world and select a robot first.'))
+  const freezeId=freezeReceipts[id]?.freezeId
+  const receipt=await api.command<FreezeReceipt>('robot_restore',{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[id],...(freezeId?{freezeId}:{})},{sceneId:current.sceneId,worldId:bound.worldId})
+  if(apiRef.current!==requestAPI||!sameWorldBinding(bound,worldRef.current)||sceneRef.current?.revision!==current.revision)return receipt
+  // 只有真实 restored 才清本地冻结态；mismatched/not-frozen 不能被当成“已恢复”，按真实 description 核对。
+  if(restoreReceiptCleared(receipt))setFreezeReceipts(old=>{const next={...old};delete next[id];return next})
+  await resyncFreezeState(id,bound,current.revision)
+  return receipt
+ }
  const nativeJointMove=async(motion:EntityMotion,display?:ControlGestureDisplay,signal?:AbortSignal):Promise<NativeJointResult>=>{
   const bound=worldRef.current,current=sceneRef.current,requestAPI=api
   if(apiRef.current!==requestAPI||!bound||!current||readOnly||replayActive||bound.appliedSceneRevision!==current.revision||motion.kind!=="joint"||motion.entityId!==selectedRef.current||motion.jointNames.length!==1)throw new Error("NATIVE_CONTROL_SELECTION_CHANGED: 原生手调只控制当前已同步选中的单关节")
@@ -1261,7 +1833,11 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   })
   return()=>{removeParticipant?.();removeState()}
  },[api])
- const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_READ_ONLY");if(!viewer.current)return;const value=await api.capture(viewer.current.capture());setCaptures(old=>[value,...old]);setCapture(value);ui.openTool("camera");return value}
+ // 自由 Capture 拍照：结果留在当前工具（Capture）里，用户可以接着查看/继续录像；
+// 不把拍照导航到 Robot Camera（那是**机器人挂载**采集来源，入口与结果都不同）。
+const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_READ_ONLY");if(!viewer.current)return;const value=await api.capture(viewer.current.capture());setCaptures(old=>[value,...old]);setCapture(value);return value}
+ /** 首屏 Take image 的忙碌闸：同一时刻只发一次真实 capture，失败由既有 perform 错误通路显示。 */
+ const takeImage=async()=>{if(takingCapture)return undefined;setTakingCapture(true);try{return await takeCapture()}finally{setTakingCapture(false)}}
  /**
   * 批注专有动作：落盘与"交给模型"都只发生在这一次收集里，不随每次落点往返 host。
   *
@@ -1270,12 +1846,13 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   * 编号在面板、标记、截图三处同源；这里传出去的 rows 就是三处共用的那一份。
   */
  const annotationActions={
-  toggleMode:()=>setAnnotating(value=>!value),
-  select:(annotationId:string)=>setActiveAnnotation(annotationId),
+  // Notes 浮条的结束按钮：关闭工具即退出落点模式，annotating 由工具入口的唯一 effect 收口。
+  toggleMode:()=>{if(ui.getSnapshot().tool==='annotation')ui.closeTool();else ui.openTool('annotation')},
+  select:(annotationId:string)=>requestAnnotationFocus(annotationId),
   text:(annotationId:string,text:string)=>setAnnotations(old=>old.map(item=>item.annotationId===annotationId?{...item,text}:item)),
   // 删除后立刻重排编号：编号是**显示序号**，面板/标记/截图三处必须同一个，
   // 不能等下一次从 localStorage 读回来才对齐（那中间会短暂出现 1,2,4 这样的断号）。
-  remove:(annotationId:string)=>{setAnnotations(old=>old.filter(item=>item.annotationId!==annotationId).map((item,index)=>({...item,index:index+1})));setActiveAnnotation(current=>current===annotationId?undefined:current)},
+  remove:(annotationId:string)=>{setAnnotations(old=>old.filter(item=>item.annotationId!==annotationId).map((item,index)=>({...item,index:index+1})));setActiveAnnotation(current=>current===annotationId?undefined:current);setAnnotationFocusRequest(current=>current?.annotationId===annotationId?undefined:current)},
   capture:async()=>{
    const instance=viewer.current
    if(!instance)throw new Error("VIEWER_UNAVAILABLE")
@@ -1314,9 +1891,19 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    return record
   },
  }
+ // 浮条的发送按钮要能显示"正在等待真实回执"并区分失败：这里把同一 capture 链包成可 await 的函数，
+ // 失败原因仍写进状态栏；草稿（annotations）不动，浮条据此收起 loading。
+ const captureAnnotations=async()=>{setError("");try{return await annotationActions.capture()}catch(value){if(apiRef.current===api)setError(value instanceof Error?value.message:String(value));throw value}}
  const chooseSceneEntity=(id:string)=>{const current=sceneRef.current;if(!current)return;if(!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);ui.showCentre('canvas')}
- const nodeRoleLabel=(item:Entity)=>infiniteGround(item)?tr('无限碰撞平面 · 零厚度','Infinite collider · Zero thickness'):({robot:tr('机器人装配','Robot assembly'),animated:tr('动画装配','Animated assembly'),physics:tr('物理实例','Physics instance'),group:tr('组','Group'),child:tr('子节点','Child node'),entity:tr('独立实体','Entity')}[sceneNodeRole(item)])
- const tree=(parent?:string,depth=0):any=>scene?.entities.filter(item=>item.parentId===parent).map(item=>{const children=scene.entities.some(child=>child.parentId===item.entityId),robot=robotEntity(item);return <div key={item.entityId}><div className="lya-tree-row" aria-selected={selected===item.entityId} style={{paddingLeft:depth*12}}><button aria-label={tr("展开或收起 ","Expand or collapse ")+sceneNodeName(item,tr)} onClick={()=>setCollapsed(old=>{const next=new Set(old);next.has(item.entityId)?next.delete(item.entityId):next.add(item.entityId);return next})}>{children?(collapsed.has(item.entityId)?"▸":"▾"):"·"}</button><button className="lya-tree-name" title={item.entityId} onClick={()=>chooseSceneEntity(item.entityId)}>{robot?"⚙ ":""}{sceneNodeName(item,tr)}</button><small>{nodeRoleLabel(item)}{children?` · ${scene.entities.filter(child=>child.parentId===item.entityId).length} ${tr('子节点','children')}`:''}</small><SceneNodeLock entity={item} tr={tr} disabled={readOnly||removing} onChange={locked=>perform(()=>setNodeLock(item.entityId,locked))}/><SceneNodeVisibility entity={item} scene={scene} tr={tr} disabled={readOnly||removing} onChange={visible=>perform(()=>setNodeVisibility(item.entityId,visible))}/><button type="button" className="lya-icon-button" disabled={readOnly||removing} aria-label={tr("移除节点 ","Remove node ")+sceneNodeName(item,tr)} title={tr("移除当前场景实例；素材与原文件保留。","Remove this scene instance; library assets and originals remain.")} onClick={()=>requestRemoval(item.entityId)}>×</button>{robot&&<input type="checkbox" aria-label={tr("批量选择 ","Batch select ")+sceneNodeName(item,tr)} checked={batchIds.includes(item.entityId)} onChange={event=>{setBatchIds(old=>event.target.checked?[...old,item.entityId]:old.filter(id=>id!==item.entityId));if(event.target.checked&&world)perform(()=>describe(item.entityId))}}/>}</div>{children&&!collapsed.has(item.entityId)&&tree(item.entityId,depth+1)}</div>})
+ /** 进入 Objects 的同栏二级 Inspector（R-002）：选中目标 + 打开 Objects 面板，不新建第二个选择 owner。 */
+ const openObjectInspector=(id?:string)=>{if(id){const current=sceneRef.current;if(!current||!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id)}setObjectAdd(false);setObjectInspector(true);ui.openTool('object');ui.showCentre('canvas')}
+ const openObjectAdd=()=>{setObjectInspector(false);setObjectAdd(true);ui.openTool('object');ui.showCentre('canvas')}
+ const backToObjectList=()=>{setObjectInspector(false);setObjectAdd(false)}
+ // 从对象/机器人二级详情进入 Components（R-011）：选中的实体仍是同一个 owner，只切子视图；关闭时显式合拢展开。
+ const openComponents=(id?:string)=>{if(id){const current=sceneRef.current;if(!current||!current.entities.some(entity=>entity.entityId===id))return;selectedRef.current=id;setSelected(id)}setComponentsView(true)}
+ const closeComponents=()=>{viewer.current?.restorePartExplode();setPartSelection(undefined);setComponentsView(false);setRobotSection('root')}
+ const nodeRoleLabel=(item:Entity)=>infiniteGround(item)?tr('无限碰撞平面','Infinite collider'):({robot:tr('机器人装配','Robot assembly'),animated:tr('动画装配','Animated assembly'),physics:tr('物理实例','Physics instance'),group:tr('组','Group'),child:tr('子节点','Child node'),entity:tr('独立实体','Entity')}[sceneNodeRole(item)])
+ const tree=(parent?:string,depth=0,detail?:boolean,roots?:Entity[]):any=>(roots??scene?.entities.filter(item=>item.parentId===parent)??[]).map(item=>{const children=scene!.entities.some(child=>child.parentId===item.entityId),robot=robotEntity(item),isCamera=Boolean(item.components.camera),isEnvironment=Boolean(item.components.environment),isLight=Boolean(item.components.light),icon=robot?"robot":isCamera?"camera":isEnvironment?"environment":"object";return <div key={item.entityId}><div className="lya-list-row lya-tree-row" data-selected={selected===item.entityId||undefined} style={{paddingLeft:6+depth*12}}><button type="button" className="lya-tree-toggle" aria-label={tr("展开或收起 ","Expand or collapse ")+sceneNodeName(item,tr)} onClick={()=>setCollapsed(old=>{const next=new Set(old);next.has(item.entityId)?next.delete(item.entityId):next.add(item.entityId);return next})}>{children?(collapsed.has(item.entityId)?"▸":"▾"):""}</button><span className="lya-row-icon" aria-hidden="true"><WorkbenchIcon id={icon} size={14}/></span><button type="button" className="lya-row-main lya-tree-name" title={sceneNodeName(item,tr)} onClick={()=>robot?openRobotDetail(item.entityId):chooseSceneEntity(item.entityId)}><span className="lya-row-title">{sceneNodeName(item,tr)}</span><span className="lya-row-subtitle">{isCamera?tr("相机","Camera"):robot?tr("机器人","Robot"):isLight?tr("灯光","Light"):isEnvironment?tr("环境","Environment"):nodeRoleLabel(item)}</span></button><span className="lya-scene-row-actions"><SceneNodeLock entity={item} tr={tr} disabled={readOnly||removing} onChange={locked=>perform(()=>setNodeLock(item.entityId,locked))}/><SceneNodeVisibility entity={item} scene={scene!} tr={tr} disabled={readOnly||removing} onChange={visible=>perform(()=>setNodeVisibility(item.entityId,visible))}/><button type="button" className="lya-icon-button" disabled={readOnly||removing} aria-label={tr("移除节点 ","Remove node ")+sceneNodeName(item,tr)} title={tr("移除当前场景实例；素材与原文件保留。","Remove this scene instance; library assets and originals remain.")} onClick={()=>requestRemoval(item.entityId)}>×</button>{detail&&<button type="button" className="lya-icon-button lya-tree-detail" disabled={readOnly} aria-label={tr("打开属性 ","Open properties ")+sceneNodeName(item,tr)} title={readOnly?tr("只读投影下不能编辑属性","This is a read-only projection; properties cannot be edited."):tr("属性","Properties")} onClick={()=>openObjectInspector(item.entityId)}>›</button>}{robot&&<input type="checkbox" aria-label={tr("批量选择 ","Batch select ")+sceneNodeName(item,tr)} checked={batchIds.includes(item.entityId)} onChange={event=>{setBatchIds(old=>event.target.checked?[...old,item.entityId]:old.filter(id=>id!==item.entityId));if(event.target.checked&&world)perform(()=>describe(item.entityId))}}/>}</span></div>{children&&!collapsed.has(item.entityId)&&tree(item.entityId,depth+1,detail)}</div>})
 
  // ---- 环境面板：检索 → 核对 → 下载导入。面板**不提供生成入口**：生成由域指针（router）命中后走 asset-generation 技能选路。 ----
  const searchEnvironment=async()=>{
@@ -1395,7 +1982,12 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   await refreshAssets()
   if(apiRef.current===api)setNotice(asset.deletedAt?tr("素材已恢复；原有场景实例保持原版本。","Asset restored; existing scene instances keep their original versions."):tr("素材已移入回收站；场景实例与原文件保留。要移除画面中的对象，请使用“从场景移除”。","Asset moved to trash; scene instances and original files remain. Use Remove from scene to remove an object from the view."))
  }
- const exitPlacement=()=>{setPlacingAsset(undefined);setPlacingPoint(undefined);viewer.current?.setPlacementMode(false)}
+ const exitPlacement=()=>{
+  placingTokenRef.current='';placingRequestRef.current+=1;placingBusyRef.current=false
+  placingAssetRef.current=undefined;placingPointRef.current=undefined;placingPreviewRef.current={status:'idle'}
+  setPlacingAsset(undefined);setPlacingPoint(undefined);setPlacingPreview({status:'idle'});setPlacingConfirming(false)
+  viewer.current?.clearPlacementPreview();viewer.current?.setPlacementMode(false)
+ }
  // ---- 环境光照（Scene 的 environment 组件）：面板读 Viewer 的读数，写回走既有 scene_edit/scene_mount ----
  // 读数由 Viewer 出（格式 owner），这里只做三件事：轮询取回、补丁提交、资源引用准备。
  // 本文件不解析环境组件的字段，也不保存第二份环境状态（面板渲染的就是 Viewer 的读数）。
@@ -1454,7 +2046,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const current=sceneRef.current;if(!current)return
   const light:Entity={entityId:crypto.randomUUID(),name:tr("面积灯","Area light"),transform:{position:[0,0,4],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{light:{kind:"area",color:[1,1,1],energy:500,widthM:2,heightM:2,direction:[0,0,-1]}}}
   await updateScene({sceneId:current.sceneId,expectedRevision:current.revision,patch:[{op:"add",entity:light}]})
-  selectedRef.current=light.entityId;setSelected(light.entityId);ui.openTool("object")
+  selectedRef.current=light.entityId;setSelected(light.entityId);openObjectInspector(light.entityId)
  }
  /** 选中视觉实体的普通 Scene 组件，沿原 CAS/history/save/reopen 链路写入；null 恢复原材质。 */
  const applyMaterialPatch=async(patch:MaterialPatch|null)=>{
@@ -1487,27 +2079,88 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   readEnvironmentStatus()
   setNotice(result?.playing?tr("昼夜播放中：只推进渲染时间，物理时间与场景版本不变。","Day/night playing: only render time advances; physics time and the scene revision stay put."):result?tr("昼夜播放已停止。","Day/night playback stopped."):tr("当前没有启用昼夜，没有开始播放。","Day/night is not enabled, so nothing started playing."))
  }
+ const placePointRef=useRef<(point:Vec3)=>void>(()=>{})
+ /**
+  * 真实放置预览：服务端只读命令与确认共用同一份落点/底面对齐；Viewer 用同一批临时 Entity
+  * 在独立 authoring 子树加载真实 mesh/robot。token+请求序号把迟到/旧资源/旧落点结果全部作废。
+  */
+ async function requestPlacementPreview(asset:AssetPlacement,point:Vec3){
+  const current=sceneRef.current,placementToken=placingTokenRef.current,request=++placingRequestRef.current
+  if(!current||!placementToken)return
+  const token=`${placementToken}:${request}`
+  placingPointRef.current=[...point];placingPreviewRef.current={status:'loading'};setPlacingPoint([...point]);setPlacingPreview({status:'loading'})
+  viewer.current?.clearPlacementPreview()
+  try{
+   const result=await apiRef.current.command<any>("asset_placement_preview",{sceneId:current.sceneId,resourceId:asset.resourceId,version:asset.version,token,alignBottomToSurface:asset.alignBottomToSurface,transform:{position:[...point],quaternion:[0,0,0,1],scale:[1,1,1]}})
+   if(placingTokenRef.current!==placementToken||placingRequestRef.current!==request||sceneRef.current?.sceneId!==current.sceneId)return
+   if(result?.status!=='PREVIEW'||!Array.isArray(result.entities)||!result.entities.length){
+    placingPreviewRef.current={status:'unavailable',reason:result?.reason??tr('这个资源类型没有可显示的预览。','This asset type has no displayable preview.'),resourceId:asset.resourceId,version:asset.version,token};setPlacingPreview(placingPreviewRef.current)
+    return
+   }
+   const instance=viewer.current
+   if(!instance?.previewPlacement){placingPreviewRef.current={status:'unavailable',reason:tr('Viewer 不可用，未生成预览。','The Viewer is unavailable; no preview was generated.'),resourceId:asset.resourceId,version:asset.version,token};setPlacingPreview(placingPreviewRef.current);return}
+   const outcome=await instance.previewPlacement({token,sceneId:result.sceneId,resourceId:result.resourceId,version:result.version,entities:result.entities,resolveResource:uri=>apiRef.current.mediaURL("asset-preview-resource",{resourceId:result.resourceId,version:result.version,uri:viewerResourceURI(uri)})})
+   if(placingTokenRef.current!==placementToken||placingRequestRef.current!==request||sceneRef.current?.sceneId!==current.sceneId){clearPlacementPreviewIfOwned(instance,token);return}
+   if(outcome?.status!=='PREVIEW'){placingPreviewRef.current={status:'unavailable',reason:outcome?.reason??tr('真实几何没有加载出来。','The real geometry did not load.'),resourceId:asset.resourceId,version:asset.version,token};setPlacingPreview(placingPreviewRef.current);return}
+   placingPreviewRef.current={status:'ready',transform:result.transform,resourceId:result.resourceId,version:result.version,token};setPlacingPreview(placingPreviewRef.current)
+  }catch(error){
+   if(placingTokenRef.current!==placementToken||placingRequestRef.current!==request||sceneRef.current?.sceneId!==current.sceneId){clearPlacementPreviewIfOwned(viewer.current,token);return}
+   clearPlacementPreviewIfOwned(viewer.current,token)
+   placingPreviewRef.current={status:'unavailable',reason:error instanceof Error?error.message:String(error),resourceId:asset.resourceId,version:asset.version,token};setPlacingPreview(placingPreviewRef.current)
+  }
+ }
+ placePointRef.current=point=>{const asset=placingAssetRef.current;if(asset)void requestPlacementPreview(asset,point)}
  const mountAsset=(asset:AssetRecord)=>{
   if(!sceneRef.current)return
-  setPlacingAsset(assetPlacementOf(asset));setPlacingPoint(undefined)
+  const placement=assetPlacementOf(asset)
+  placingTokenRef.current=`placement-${crypto.randomUUID()}`
+  placingRequestRef.current+=1
+  placingAssetRef.current=placement;placingPointRef.current=undefined;placingPreviewRef.current={status:'idle'}
+  setPlacingAsset(placement);setPlacingPoint(undefined);setPlacingPreview({status:'idle'})
+  viewer.current?.clearPlacementPreview()
   ui.showCentre("canvas");viewer.current?.setPlacementMode(true)
  }
  const confirmPlacement=async()=>{
-  const current=sceneRef.current,asset=placingAsset,point=placingPoint
-  if(!current||!asset||!point)return
-  const value=await api.command<{snapshot:SceneSnapshot;entityId:string}>("scene_mount",assetPlacementInput(current.sceneId,asset,point))
-  exitPlacement()
-  const adoption=applySceneIfCurrent(sceneWritePort,current.sceneId,value.snapshot)
-  if(adoption!=="applied"){setNotice(adoption==="superseded"?tr("加入操作已完成，场景随后又有更新；继续显示当前版本。","The asset was added, then the scene changed again. Keeping the current version."):tr(`素材已加入场景 ${current.sceneId}。`, `Asset added to scene ${current.sceneId}.`));return}
-  pendingFocus.current={sceneId:current.sceneId,entityId:value.entityId}
-  setSelected(value.entityId);ui.showCentre("canvas");ui.closeTool()
-  setNotice(tr(`「${asset.name}」已加入当前场景。`,`${asset.name} added to this scene.`))
+  const current=sceneRef.current,asset=placingAssetRef.current,point=placingPointRef.current,preview=placingPreviewRef.current
+  if(!current||!asset||!point||placingBusyRef.current)return
+  // 预览成功后确认使用**同一份**最终 transform；预览失败时仍允许明确按所选基准放置，但不冒充预览成功。
+  const resolved=preview.status==='ready'&&preview.resourceId===asset.resourceId&&preview.version===asset.version?preview.transform:undefined
+  placingBusyRef.current=true;setPlacingConfirming(true)
+  try{
+   const value=await apiRef.current.command<{snapshot:SceneSnapshot;entityId:string}>("scene_mount",assetPlacementInput(current.sceneId,asset,point,resolved))
+   exitPlacement()
+   const adoption=applySceneIfCurrent(sceneWritePort,current.sceneId,value.snapshot)
+   if(adoption!=="applied"){setNotice(adoption==="superseded"?tr("加入操作已完成，场景随后又有更新；继续显示当前版本。","The asset was added, then the scene changed again. Keeping the current version."):tr(`素材已加入场景 ${current.sceneId}。`, `Asset added to scene ${current.sceneId}.`));return}
+   pendingFocus.current={sceneId:current.sceneId,entityId:value.entityId}
+   setSelected(value.entityId);ui.showCentre("canvas");ui.closeTool()
+   setNotice(tr(`「${asset.name}」已加入当前场景。`,`${asset.name} added to this scene.`))
+  }finally{placingBusyRef.current=false;setPlacingConfirming(false)}
  }
+ // R-004：库条目 → 真实资源 → 既有放置链。已登记但资源列表暂未出现时先重新读取（不伪造已安装）。
+ const mountLibraryRow=async(row:RobotLibraryRow)=>{
+  const assetOf=(list:AssetRecord[])=>row.resourceId?list.find(asset=>asset.ref.resourceId===row.resourceId):undefined
+  let asset=assetOf(assets)
+  if(!asset&&!row.installed&&row.modelPath){
+   const refreshed=await refreshRobotLibrary(true)
+   const resourceId=refreshed?.value.models.find(model=>model.packId===row.packId)?.resourceId
+   asset=resourceId?refreshed?.assets.find(item=>item.ref.resourceId===resourceId):undefined
+  }
+  if(asset)mountAsset(asset)
+  else setNotice(tr('该模型已登记，但当前资源记录还不可用；请刷新机器人库后重试。','The model is registered but its resource record is not available yet; refresh the robot library and retry.'))
+ }
+ const openRobotDetail=(id:string)=>{
+  const current=sceneRef.current
+  if(!current||!current.entities.some(item=>item.entityId===id))return
+  nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);setRobotView('detail');setRobotSection('root');ui.showCentre('canvas');ui.openTool('robot')
+ }
+ const backToRobotLibrary=()=>{setRobotView('library');setRobotHomeTab('library');setRobotSection('root')}
+ /** Recording 无 Robot 的下一步：直达 Robot Library（不经过 Camera 的“先加机器人”空态）。 */
+ const openRobotLibrary=()=>{setRobotView('library');setRobotHomeTab('library');setRobotSection('root');ui.openTool('robot')}
  // 放置模式只在画布可见且仍处于能发起放置的域面板时成立；切场景/会话/面板或离开画布即退出。
  // 能发起「加入当前场景」的面板是四个域面板：素材（聚合）与机器人/物件/环境（各自域列表）。
  useEffect(()=>{viewer.current?.setPlacementMode(Boolean(placingAsset))},[open,viewerVisible,readOnly,Boolean(scene),placingAsset])
  useEffect(()=>{exitPlacement()},[sessionId,scene?.sceneId])
- useEffect(()=>{if(placingAsset&&(uiState.tool!=="asset"&&uiState.tool!=="robot"&&uiState.tool!=="object"&&uiState.tool!=="environment"||uiState.centre!=="canvas"||mode==="chat"||!viewerVisible))exitPlacement()},[placingAsset,uiState.tool,uiState.centre,mode,viewerVisible])
+ useEffect(()=>{if(placingAsset&&(uiState.tool!=="robot"&&uiState.tool!=="object"&&uiState.tool!=="environment"||uiState.centre!=="canvas"||mode==="chat"||!viewerVisible))exitPlacement()},[placingAsset,uiState.tool,uiState.centre,mode,viewerVisible])
  const status=replayActive?tr("录制回放","Recorded replay"):official?tr("官方环境","Official environment"):world?sceneWorldPhaseLabel(worldLifecycle.phase,tr):tr("场景视图","Scene view")
  // 运行状态只表达状态：点开场景面板的动作归场景按钮，不在顶栏重复铺第二个入口。
  const statusState=replayActive?"replay":official?"official":world?worldLifecycle.phase:"idle"
@@ -1537,7 +2190,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   {historyNotice&&<p className="lya-help" data-lane="dev031-history">{historyNotice}</p>}
  </details>
  const sceneHistory=<details><summary>{tr("场景版本","Scene versions")} {scene?`· rev ${scene.revision}`:""}</summary><div className="lya-row"><span className="lya-help">{scene?tr(`${scene.sceneId} 的完整快照版本；恢复使用当前版本校验。`,`Complete snapshots for ${scene.sceneId}; restore checks the current revision.`):tr("先选择场景。","Select a scene first.")}</span><button disabled={!scene||historyLoading} onClick={()=>perform(()=>refreshHistory(scene?.sceneId))}>{historyLoading?tr("读取中…","Loading…"):tr("刷新历史","Refresh history")}</button></div>{versions.length===0&&<p className="lya-help">{tr("暂无可读历史版本。","No readable history versions yet.")}</p>}{versions.map(version=><div className="lya-row" key={`${version.sceneId}-${version.revision}`}><span className={version.current?"lya-badge lya-live":"lya-badge"}>{`rev ${version.revision} · ${version.entityCount} ${tr("个实体","entities")}`}{version.current?` · ${tr("当前","current")}`:""}</span><button disabled={readOnly||!scene||version.current||historyLoading} onClick={()=>perform(()=>restoreVersion(version.revision))}>{tr("恢复","Restore")}</button></div>)}</details>
- const importUsage=importUsageChoice??localImportUsageDefault(uiState.tool==='object'||uiState.tool==='asset'?'object':'environment')
+ const importUsage=importUsageChoice??localImportUsageDefault(uiState.tool==='object'?'object':'environment')
  const importPurposeControl=<ImportPurposeChoice value={importUsage} disabled={importBusy} onChange={setImportUsageChoice} tr={tr}/>
  const importLocalPaths=async(paths:string[],target:"scene"|"library")=>{
   if(!sessionId)throw new Error("先选择一个任务，再导入本地文件。")
@@ -1664,6 +2317,17 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(!sessionId||!assetPath.trim()||importBusy)return
   await importLocalPaths([assetPath.trim()],"library")
  }
+ /**
+  * 域内本地导入（R-008）：全局素材库退出一级轨后，Objects/Environment/Robots 各自提供入口。
+  * 登记仍走同一条 `scene_import`（library 目标），导入后按解析 kind/origin 出现在对应域列表里，
+  * 因此各域不会串到别的域；原件保留，随后由用户显式“加入场景”。
+  */
+ const domainImportControl=assetImportOpen&&<form className="lya-library-import-section" data-testid="domain-import" onSubmit={event=>{event.preventDefault();perform(importToLibrary)}}>
+  <label className="lya-field-label">{tr("本地模型路径","Local model path")}<input autoFocus className="lya-wide" aria-label={tr("导入素材路径","Asset import path")} placeholder="/path/to/model.glb" value={assetPath} onChange={event=>setAssetPath(event.target.value)}/></label>
+  <p className="lya-help">{tr("导入后进入本类资源列表，原件保留；再点“加入场景”放置。","The asset is added to this category's list and the original is preserved; use Add to scene to place it.")}</p>
+  <div className="lya-row"><button className="lya-primary" type="submit" disabled={importBusy||!assetPath.trim()}>{importBusy?tr("导入中…","Importing…"):tr("导入素材","Import asset")}</button><button type="button" onClick={()=>setAssetImportOpen(false)}>{tr("取消","Cancel")}</button></div>
+ </form>
+ const openDomainImport=()=>{if(window.lyapunovDesktop)perform(async()=>{const paths=await window.lyapunovDesktop!.selectFiles();if(paths.length)await importLocalPaths(paths,"library")});else setAssetImportOpen(true)}
  // 内置素材按 assetId 登记 resourceId：同内容重复导入复用已存在记录（UI 侧同时按 asset_list 置灰）。
  const importBuiltin=async(item:BuiltinAssetRecord)=>{
   if(!sessionId||importBusy)return
@@ -1695,93 +2359,351 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   recoverPhysics:(asset:AssetRecord)=>{
    const instance=assetSceneInstances(sceneRef.current,asset.ref.resourceId).find(entity=>entity.resources.some(ref=>ref.resourceId===asset.ref.resourceId&&ref.version===asset.ref.version))
    if(!instance)return
-   nativeControlCancel.current?.();selectedRef.current=instance.entityId;setSelected(instance.entityId);ui.openTool('object')
+   nativeControlCancel.current?.();selectedRef.current=instance.entityId;setSelected(instance.entityId);openObjectInspector(instance.entityId)
   },
   selectInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId);ui.showCentre("canvas")},
   focusInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId);ui.showCentre("canvas");viewer.current?.focus(entityId)},
   setInstanceVisible:(entityId:string,visible:boolean)=>perform(()=>setNodeVisibility(entityId,visible)),removeInstance:requestRemoval}
- const scenePanel=<>
+ /**
+  * 类别内的资源管理（R-008）：来源/版本/检查文件/回收恢复仍可从具名二级入口发现。
+  * 复用同一份 AssetRecord/ResourceLibrary，只按 domain 限定显示（不新建第二份库）。
+  */
+ const libraryManagement=(domain:AssetDomain)=><>
+  <AssetLibraryPanel domain={domain} assets={assets} builtin={builtinAssets} builtinBusy={importBusy} query={assetQuery} loading={assetsLoading} includeDeleted={includeDeleted} canMount={canMountAsset} available={Boolean(sessionId)} tr={tr} {...assetInstanceControls}
+   setQuery={setAssetQuery} setIncludeDeleted={setIncludeDeleted} search={()=>perform(()=>refreshAssets(assetQuery))} refresh={()=>perform(()=>refreshAssets())}
+   mount={mountAsset} rename={asset=>setRenameAsset({resourceId:asset.ref.resourceId,original:asset.name,value:asset.name})}
+   verify={asset=>perform(async()=>{const result=await api.command<{valid:boolean;missing:string[];changed:string[]}>("asset_verify",{resourceId:asset.ref.resourceId,version:asset.ref.version});setNotice(result.valid?tr(`${asset.name} 的文件可用。`,`${asset.name} files are available.`):tr(`${asset.name} 有 ${result.missing.length+result.changed.length} 个文件需要处理。`,`${asset.name} has ${result.missing.length+result.changed.length} file issues.`))})}
+   toggleDeleted={asset=>perform(()=>toggleAssetDeleted(asset))}
+   importFile={openDomainImport} importBuiltin={item=>perform(()=>importBuiltin(item))} browseEnvironment={()=>ui.openTool("environment")}
+   importPanel={domainImportControl}/>
+  {missingAssets.length>0&&<section className="lya-asset-library" data-testid="missing-originals" aria-label={tr("待恢复原件","Missing originals")}>
+   <div className="lya-panel-title"><strong>{tr("待恢复原件","Missing originals")} {missingAssets.length}</strong><span><button disabled={missingAssetsLoading} onClick={()=>perform(refreshMissingAssets)}>{missingAssetsLoading?"…":tr("刷新","Refresh")}</button><button disabled={missingAssetsLoading} onClick={()=>perform(rescanMissingAssets)}>{missingAssetsLoading?"…":tr("重扫原件","Rescan originals")}</button></span></div>
+   {missingAssets.map(asset=><div className="lya-row" key={asset.resourceId}><span className="lya-help" title={asset.legacyPath??asset.resourceId}><span className="lya-badge lya-warning">BLOCKED</span> {asset.displayName??asset.resourceId}{asset.legacyPath?` · ${asset.legacyPath}`:""}</span><span className="lya-help">{tr("请放回同一路径后重新迁移。重扫只检查，不会自动替换。","Restore the original at this path and rerun migration. Rescan only checks; it never replaces files.")}</span></div>)}
+  </section>}
+ </>
+ const openWorldSettings=()=>{setEnvironmentView("world");ui.openTool("environment")}
+ // Scene 总览只做既有一份 parentId 关系的分组：世界（含环境/灯光根）、机器人根实例、其余物件根。
+ // 子节点仍由同一棵 tree 递归显示，不复制实体、不新建 Scene owner。
+ const sceneRoots=scene?.entities.filter(item=>!item.parentId)??[]
+ const sceneWorldRoots=sceneRoots.filter(item=>!robotEntity(item)&&Boolean(item.components.environment||item.components.light))
+ const sceneRobotRoots=sceneRoots.filter(robotEntity)
+ const sceneObjectRoots=sceneRoots.filter(item=>!robotEntity(item)&&!item.components.environment&&!item.components.light)
+ const sceneEnvironmentPresent=Boolean(environmentStatus?.component)
+ const sceneWorldRow=<ListRow icon="environment" title={tr("世界","World")} subtitle={sceneEnvironmentPresent?(environmentStatus!.environmentSource==='hdri'?tr('HDRI','HDRI'):tr('Custom','Custom')):tr('Built-in','Built-in')} onClick={openWorldSettings}/>
+ const sceneRootLabel=(()=>{const index=scenes.findIndex(item=>item.sceneId===scene?.sceneId);return index>=0?sceneListEntryLabel(scenes[index]!,index):tr('Scene','Scene')})()
+ const scenePanel=<PanelPage title={tr("场景","Scene")}>
   {!sessionId&&<p className="lya-help">{tr("先在左侧添加或选择工作区，再创建和编辑场景。","Add or choose a workspace on the left before creating or editing a scene.")}</p>}
-  <div className="lya-row"><select className="lya-wide" data-testid="lyapunov-scene-select" aria-label={tr("场景","Scene")} disabled={readOnly} value={scene?.sceneId??""} onChange={event=>perform(()=>loadScene(event.target.value))}><option value="">{tr("选择场景","Select a scene")}</option>{scenes.map(item=><option key={item.sceneId} value={item.sceneId}>{item.sceneId}</option>)}</select></div>
-  <SceneCreationActions disabled={readOnly||!sessionId} busy={sceneCreating} tr={tr} create={template=>perform(()=>createScene(template))}/><button onClick={()=>perform(refreshScenes)}>{tr("刷新","Refresh")}</button>
-  {projectFiles}
-  <div className="lya-panel-title"><strong>{tr("场景中的对象","Objects in this scene")} {scene?.entities.length??0}</strong></div>
- <div className="lya-tree">{tree()}</div>
- {importPurposeControl}
- <DomainAssetList domain="scene" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} instanceControls={assetInstanceControls}/>
-  {physicalTestSpaceOf(scene)&&<div data-testid="lyapunov-physical-test-space">
-   <div className="lya-panel-title"><strong>{tr("机械臂与动态方块 · 物理交互测试","Robot and dynamic cubes · physics test")}</strong></div>
-   <p className="lya-help">{tr("物理世界按当前引擎偏好自动初始化，就绪后直接在对话中提出动作；画面与真实物理状态同步。末端下降使用IK，推箱成功以动态物体位移和接触力判断。","Physics initializes with your current engine preference. Once ready, ask for actions in the conversation; IK and real contact measurements determine success.")}</p>
-   {physicalTestSpaceOf(scene)!.tasks.map(task=><p className="lya-help" key={task}>{task}</p>)}
-   <p className="lya-help">{world?`${world.engineId} ${world.engineVersion} · ${world.clock??"—"} · step ${frame?.stepIndex??"—"} · ${frame?.simTime?.toFixed(2)??"—"}s`:tr("正在按实际provider核验实时钟、关节、末端和接触能力；使用包内地板。","Checking the actual provider's realtime clock, joints, end effector and contacts; this package includes its own floor.")}</p>
-   <div className="lya-row"><button disabled={readOnly||!providerAvailable||Boolean(world)||worldLifecycle.phase==='initializing'} onClick={()=>perform(startWorld)}>{tr("启动物理测试","Start physics test")}</button><button className="lya-stop" disabled={!world} onClick={()=>perform(()=>stop(true))}>{tr("停止动作","Stop actions")}</button><button disabled={readOnly} onClick={()=>perform(resetPhysicalTest)}>{tr("恢复初始测试","Reset physics test")}</button></div>
-  </div>}
-  {!scene&&<p className="lya-help">{tr("还没有场景：在对话中描述你要构建的世界，或先新建/打开一个场景。","No scene yet: describe your world in the conversation, or create/open one.")}</p>}
-  <WorldPhysicsPanel scene={scene} world={world} frame={frame} state={worldLifecycle} worlds={worlds.filter(item=>item.status!=="closed"&&item.sceneId===scene?.sceneId)} disabled={readOnly||!providerAvailable} tr={tr} diagnostics={<WorldFacts world={world} tr={tr}/>}
-   start={()=>perform(startWorld)} sync={()=>perform(sync)} pause={paused=>perform(()=>setWorldPaused(paused))} stop={()=>perform(()=>stop(true))} close={()=>perform(closePhysicsWorld)} prepare={()=>perform(preparePhysicsWorkspace)} saveGravity={gravity=>perform(()=>configureWorldGravity(gravity))} cancel={()=>automaticWorld.cancel()}
-   selectWorld={chosen=>{setWorld(chosen);worldRef.current=chosen;setFrame(undefined);persist(scene,chosen)}}/>
-  <details><summary>{tr("高级运行信息","Advanced runtime information")}</summary><WorldFacts world={world} tr={tr}/><ComputerUseFacts computerUse={computerUse} tr={tr} place="settings"/></details>
-  {!readOnly&&(scene?.entities.filter(e=>e.components.mujoco||e.components.isaac||e.components.articulation||e.components.controller).length??0)>=2&&<details><summary>{tr("多机器人同时执行","Run robots together")} ({batchIds.length})</summary><p className="lya-help">{tr("勾选机器人后，每台使用自己的完整目标，同一步开始。","Select robots; each uses its own complete target and starts at the same step.")}</p><div className="lya-help">{batchIds.join(" · ")}</div><button className="lya-primary lya-wide" disabled={!ready||batchIds.length<2} onClick={()=>perform(batch)}>{tr(`同步执行 ${batchIds.length} 台机器人`,`Execute ${batchIds.length} robots together`)}</button></details>}
-  {sessionHistory}
-  {sceneHistory}
- </>
-
+  <select className="lya-wide" data-testid="lyapunov-scene-select" aria-label={tr("场景","Scene")} title={scene?.sceneId} disabled={readOnly} value={scene?.sceneId??""} onChange={event=>perform(()=>loadScene(event.target.value))}><option value="">{tr("选择场景","Select a scene")}</option>{scenes.map((item,index)=><option key={item.sceneId} value={item.sceneId} title={item.sceneId}>{sceneListEntryLabel(item,index)}</option>)}</select>
+  {scene
+   ? <>
+     {scene.entities.length===0
+      ? <div className="lya-list" data-testid="scene-layer-list">
+         <ListRow icon="scene" title={sceneRootLabel} subtitle={tr("内置世界","Built-in world")} side={0}/>
+         <EmptyState icon="object" title={tr("还没有物件","No objects yet")}/>
+         <ListRow icon="object" title={tr("添加对象","Add object")} onClick={openObjectAdd} testId="scene-add-object"/>
+        </div>
+      : <div className="lya-list lya-scene-groups" data-testid="scene-layer-list">
+         <ListRow icon="scene" title={sceneRootLabel}/>
+         <div className="lya-scene-group" data-testid="scene-group-world" data-count={1+sceneWorldRoots.length}>          <div className="lya-list">{sceneWorldRow}{tree(undefined,0,false,sceneWorldRoots)}</div>
+         </div>
+         <div className="lya-scene-group" data-testid="scene-group-robots" data-count={sceneRobotRoots.length}>          <div className="lya-list">{tree(undefined,0,false,sceneRobotRoots)}</div>
+         </div>
+         <div className="lya-scene-group" data-testid="scene-group-objects" data-count={sceneObjectRoots.length}>          <div className="lya-list">{tree(undefined,0,false,sceneObjectRoots)}</div>
+         </div>
+        </div>}
+     <details className="lya-advanced" data-testid="scene-open"><summary>{tr("打开场景","Open scene")}</summary>
+      <p className="lya-help">{tr("从已有工程文件打开或保存当前场景。","Open an existing project file or save this scene.")}</p>
+      {projectFiles}
+     </details>
+     <details className="lya-advanced" data-testid="scene-details"><summary>{tr("场景详情","Scene details")}</summary>
+      <dl className="lya-kv">
+       <dt>{tr("场景 ID","Scene ID")}</dt><dd><code title={scene.sceneId}>{scene.sceneId}</code></dd>
+       <dt>{tr("版本","Revision")}</dt><dd>{scene.revision}</dd>
+       <dt>{tr("物理世界","Physics world")}</dt><dd>{world?`${world.engineId} · ${sceneWorldPhaseLabel(worldLifecycle.phase,tr)}` : sceneWorldPhaseLabel(worldLifecycle.phase,tr)}</dd>
+       <dt>{tr("环境","Environment")}</dt><dd>{sceneEnvironmentPresent?(environmentStatus!.environmentSource==='hdri'?tr('HDRI 环境光','HDRI environment lighting'):tr('自定义环境光照','Custom environment lighting')):tr('内置世界 · 未启用环境组件','Built-in world · no environment component')}</dd>
+      </dl>
+     </details>
+     <details className="lya-advanced" data-testid="scene-actions"><summary>{tr("场景操作","Scene actions")}</summary>
+      <SceneCreationActions disabled={readOnly||!sessionId} busy={sceneCreating} tr={tr} create={template=>perform(()=>createScene(template))}/>
+      <button type="button" className="lya-chip" onClick={()=>perform(refreshScenes)}>{tr("刷新场景列表","Refresh scenes")}</button>
+      <details className="lya-advanced"><summary>{tr("场景资源","Scene resources")}</summary>
+       {importPurposeControl}
+       <DomainAssetList domain="scene" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} instanceControls={assetInstanceControls}/>
+      </details>
+      {physicalTestSpaceOf(scene)&&<details data-testid="lyapunov-physical-test-space"><summary>{tr("机械臂与动态方块 · 物理交互测试","Robot and dynamic cubes · physics test")}</summary>
+       <p className="lya-help">{tr("物理世界按当前引擎偏好自动初始化，就绪后直接在对话中提出动作；画面与真实物理状态同步。末端下降使用IK，推箱成功以动态物体位移和接触力判断。","Physics initializes with your current engine preference. Once ready, ask for actions in the conversation; IK and real contact measurements determine success.")}</p>
+       {physicalTestSpaceOf(scene)!.tasks.map(task=><p className="lya-help" key={task}>{task}</p>)}
+       <p className="lya-help">{world?`${world.engineId} ${world.engineVersion} · ${world.clock??"—"} · step ${frame?.stepIndex??"—"} · ${frame?.simTime?.toFixed(2)??"—"}s`:tr("正在按实际provider核验实时钟、关节、末端和接触能力；使用包内地板。","Checking the actual provider's realtime clock, joints, end effector and contacts; this package includes its own floor.")}</p>
+       <div className="lya-row"><button disabled={readOnly||!providerAvailable||Boolean(world)||worldLifecycle.phase==='initializing'} onClick={()=>perform(startWorld)}>{tr("启动物理测试","Start physics test")}</button><button className="lya-stop" disabled={!world} onClick={()=>perform(()=>stop(true))}>{tr("停止动作","Stop actions")}</button><button disabled={readOnly} onClick={()=>perform(resetPhysicalTest)}>{tr("恢复初始测试","Reset physics test")}</button></div>
+      </details>}
+      <details className="lya-advanced"><summary>{tr("高级运行信息","Advanced runtime information")}</summary><WorldFacts world={world} tr={tr}/><ComputerUseFacts computerUse={computerUse} tr={tr} place="settings"/></details>
+      {!readOnly&&(scene?.entities.filter(e=>e.components.mujoco||e.components.isaac||e.components.articulation||e.components.controller).length??0)>=2&&<details><summary>{tr("多机器人同时执行","Run robots together")} ({batchIds.length})</summary><p className="lya-help">{tr("勾选机器人后，每台使用自己的完整目标，同一步开始。","Select robots; each uses its own complete target and starts at the same step.")}</p><div className="lya-help">{batchIds.join(" · ")}</div><button className="lya-primary lya-wide" disabled={!ready||batchIds.length<2} onClick={()=>perform(batch)}>{tr(`同步执行 ${batchIds.length} 台机器人`,`Execute ${batchIds.length} robots together`)}</button></details>}
+      {sessionHistory}
+      {sceneHistory}
+     </details>
+    </>
+   : <EmptyState icon="scene" title={tr("还没有场景","No scene yet")} detail={tr("新建一个场景，或在对话中描述你要构建的世界。","Create a scene, or describe the world you want in the conversation.")}>
+      <SceneCreationActions disabled={readOnly||!sessionId} busy={sceneCreating} tr={tr} create={template=>perform(()=>createScene(template))}/>
+     </EmptyState>}
+ </PanelPage>
  const editableEntity=scene&&selected?sceneEditTarget(scene,selected):undefined
- const objectInfo=entity&&scene&&<div className="lya-help" data-testid="scene-edit-target"><strong>{sceneNodeName(entity,tr)}</strong> · {nodeRoleLabel(entity)}{editableEntity&&editableEntity.entityId!==entity.entityId&&<span> · {tr('编辑实例：','Editing instance: ')}{editableEntity.name} <button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('选择编辑实例','Select editing instance')}</button></span>}{entity.parentId&&<span> · {tr('父节点：','Parent: ')}{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId} <button type="button" onClick={()=>chooseSceneEntity(entity.parentId!)}>{tr('选择父实例','Select parent instance')}</button></span>}<button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button></div>
- const objectEditor=entity&&scene&&!readOnly?<>{objectInfo}<EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/><NativePhysicsPanel sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} observation={ready&&frame?.worldId===world?.worldId&&frame?.generation===world?.worldGeneration&&frame?.sceneRevision===scene.revision?frame.entities.find(row=>row.entityId===(editableEntity??entity).entityId):undefined} readOnly={readOnly||replayActive} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'native-physics:'+api.clientId}/>{entity.components.light&&<SceneLightPanel key={scene.sceneId+':light:'+entity.entityId} light={entity.components.light as SceneLight} disabled={readOnly||replayActive} apply={light=>perform(()=>applySceneLight(light))} tr={tr}/>}<MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/></>:undefined
- const objectPanel=<>
-  {!objectEditor&&objectInfo}
-  {!objectEditor&&<p className="lya-help">{!sessionId?tr("先在左侧选择工作区，再编辑对象。","Choose a workspace on the left to edit objects."):readOnly?tr("当前世界是只读投影，不能编辑。","The current world is a read-only projection."):tr("先选择一个对象：在场景层级里点它的名字，或在画布上点它。","Select an object first: click its name in the scene tree or click it on the canvas.")}</p>}
-  {entity&&scene&&<PhysicsControls key={`${scene.sceneId}:${entity.entityId}`} scene={scene} selected={entity.entityId} resource={assets.find(asset=>asset.ref.resourceId===entity.resources[0]?.resourceId&&asset.ref.version===entity.resources[0]?.version)} world={world} frame={frame} tr={tr} disabled={readOnly||replayActive} update={input=>changePhysics('scene_physics_update',input)} bind={(input,signal)=>changePhysics('scene_bind_physics',input,signal)} progressIdentity={`${worldHostEpoch}:${sessionId}:${api.clientId}`} readProgress={async(resourceId,version,signal)=>(await api.request<{physicalization?:ResourcePhysicsProgress}>(`resource-physics?resourceId=${encodeURIComponent(resourceId)}&version=${version}`,{signal})).physicalization} openLibrary={()=>ui.openTool('asset')}/>}
-  <fieldset className="lya-property-editor"><legend>{tr("变换","Transform")}</legend>
-   <div className="lya-segment">{(["translate","rotate","scale"] as const).map((value,index)=><button key={value} type="button" aria-pressed={gizmo===value} disabled={readOnly||!selected} onClick={()=>setGizmo(value)}>{[tr("移动","Move"),tr("旋转","Rotate"),tr("缩放","Scale")][index]}</button>)}</div>
-   <p className="lya-help">{tr("逐个选择实例后拖动手柄，或填写位置、方向与比例；提交后自动同步物理世界。","Select an instance, then drag its gizmo or edit position, orientation and scale. Physics synchronizes after the edit.")}</p>
-   <div className="lya-row"><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("进入场景中心","Enter scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦","Focus")}</button></div>
-  </fieldset>
-  <fieldset className="lya-property-editor"><legend>{tr("碰撞拓扑","Collision topology")}</legend>
-   <label className="lya-field-label"><input type="checkbox" checked={display.collision===true} onChange={event=>setDisplay(value=>({...value,collision:event.target.checked}))}/>{tr("显示所选实例的碰撞表面与边","Show collision surfaces and edges of the selection")}</label>
-   <p className="lya-help" data-testid="collision-display-status" data-collision-status={collisionStatus.status} data-collision-source={collisionStatus.source??''} data-collision-drawn={collisionStatus.drawn??0}>{collisionStatus.status==="ready"?tr(`${world?.engineId??''} 实际碰撞体：${collisionStatus.geoms} 个，已绘制 ${collisionStatus.drawn??0} 个；表面与边按当前物理帧显示。`,`${world?.engineId??''} compiled colliders: ${collisionStatus.geoms}, drawn: ${collisionStatus.drawn??0}; surfaces and edges follow the current physics frame.`):collisionStatus.status==="preview"?tr(`待引擎装配的碰撞预览：${collisionStatus.geoms} 个同版本已绑定派生形状；尚未读回引擎实际碰撞或接触。`,`Collision preview awaiting engine assembly: ${collisionStatus.geoms} derived shapes bound to this resource version; compiled colliders and contacts have not been observed.`):collisionStatus.status==="preview-waiting"?tr("正在读取同版本已绑定派生件，准备待引擎装配的碰撞预览…","Reading bound derived geometry for a collision preview awaiting engine assembly…"):collisionStatus.status==="generating"?tr("该实例的碰撞派生正在进行；完成绑定后显示真实形状。","Collision derivation is in progress; shapes will appear after binding completes."):collisionStatus.status==="disabled"?tr("碰撞表面与边已隐藏；碰撞参与仍由物理配置决定。","Collision surfaces and edges are hidden; physics configuration still controls collision participation."):collisionStatus.status==="unselected"?tr("选择实例根或任意视觉节点，即显示所属实例的碰撞体。","Select an instance root or visual node to display that instance's colliders."):collisionStatus.status==="stale-world"?tr("物理世界尚未应用当前场景。同步后读取实际碰撞体。","The physics world has not applied this scene revision. Sync to read compiled colliders."):collisionStatus.status==="no-world"?tr("已声明碰撞，等待物理世界装配后读取实际形状；当前没有可核的同版本派生预览。","Collision is declared. Waiting for engine assembly to read its compiled shapes; no verified derived preview is available for this version."):collisionStatus.status==="no-collider"?tr("这个实例尚无实际碰撞体。使用上方“生成并绑定真实碰撞”，再同步物理世界。","This instance has no compiled collider. Use Generate and bind colliders above, then synchronize physics."):collisionStatus.status==="unavailable"?tr("当前引擎未提供可绘制的实际形状；请查看下方缺项说明。","The engine has not provided drawable compiled shapes; see the missing items below."):tr("正在读取所选实例的实际碰撞表面与边…","Reading compiled collision surfaces and edges of the selection…")}</p>
-   {(collisionStatus.inactive??0)>0&&<p className="lya-help">{tr(`${collisionStatus.inactive} 个形状未参与碰撞，以灰色边线显示。`,`${collisionStatus.inactive} shapes do not participate in collisions and are shown with gray edges.`)}</p>}
-   {collisionStatus.infinitePlanes>0&&<p className="lya-help">{tr("地面为无限碰撞平面；画出的有限参考范围不是碰撞边界。","The ground is an infinite collision plane; its finite reference outline is not a collision boundary.")}</p>}
-   {(collisionStatus.selectionOmitted??0)>0&&<p className="lya-help">{tr(`另有 ${collisionStatus.selectionOmitted} 个物理声明实体超出本次选择预算，请选择较小子树查看。`,`${collisionStatus.selectionOmitted} declared physics entities exceed this selection budget; select a smaller subtree to inspect them.`)}</p>}
-   {(collisionStatus.unsupported>0||collisionStatus.omitted>0)&&<p className="lya-help">{tr(`未绘制：${collisionStatus.unsupported} 个不支持的形状、${collisionStatus.omitted} 个超预算形状。`,`Not drawn: ${collisionStatus.unsupported} unsupported shapes, ${collisionStatus.omitted} shapes beyond the preview budget.`)} {collisionStatus.reasons.join(" ")}</p>}
-   {collisionStatus.status==="no-collider"&&<p className="lya-help">{tr('当前引擎未读到这个实例的碰撞体。上方“物理状态与操作”显示声明、同步状态及生成绑定入口。','No collider for this instance was read from the engine. Physics state and controls above show the declaration, synchronization status and binding entry.')}</p>}
-  </fieldset>
-  <fieldset className="lya-property-editor"><legend>{tr("添加与删除","Add and remove")}</legend>
+ const objectInfo=entity&&scene&&<details className="lya-advanced" data-testid="scene-edit-target"><summary>{tr('实例详情','Instance details')}</summary><dl className="lya-kv">
+   <dt>{tr('名称','Name')}</dt><dd>{sceneNodeName(entity,tr)}</dd>
+   <dt>{tr('角色','Role')}</dt><dd>{nodeRoleLabel(entity)}</dd>
+   {entity.parentId&&<><dt>{tr('父节点','Parent')}</dt><dd>{scene.entities.find(item=>item.entityId===entity.parentId)?.name??entity.parentId}</dd></>}
+   <dt>{tr('实体 ID','Entity ID')}</dt><dd><code title={entity.entityId}>{entity.entityId}</code></dd>
+   <dt>{tr('资源','Resources')}</dt><dd>{entity.resources.map(ref=>`${ref.resourceId}@${ref.version}`).join(' · ')||tr('无','None')}</dd>
+  </dl><div className="lya-row"><button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button>{editableEntity&&editableEntity.entityId!==entity.entityId&&<button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('编辑实例：','Editing instance: ')}{editableEntity.name}</button>}</div></details>
+ const objectEditor=entity&&scene&&!readOnly?<div className="lya-panel-seat" data-testid="object-inspector-header"><PanelPage title={sceneNodeName(entity,tr)} back={tr('‹ 物件','‹ Objects')} onBack={backToObjectList} actions={<details className="lya-advanced" data-testid="object-header-more"><summary className="lya-chip" aria-label={tr('更多操作','More actions')} title={tr('更多操作','More actions')}>⋯</summary><div className="lya-row"><button type="button" className="lya-chip" data-testid="open-components" disabled={!viewerVisible} onClick={()=>openComponents(entity.entityId)}>{tr('部件','Components')}</button></div></details>}>
+  <EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/>
+  <details className="lya-advanced" data-testid="object-material"><summary>{tr('材质与灯光','Material and light')} · {entity.components.material?tr('已设置','Set'):tr('默认','Default')}</summary>
+   <MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/>
+   {Boolean(entity.components.light)&&<SceneLightPanel key={scene.sceneId+':light:'+entity.entityId} light={entity.components.light as SceneLight} disabled={readOnly||replayActive} apply={light=>perform(()=>applySceneLight(light))} tr={tr}/>}
+  </details>
+  <details className="lya-advanced" data-testid="object-physics"><summary>{tr('物理','Physics')} · {entity.components.rigidBody?tr('刚体','Rigid body'):entity.components.mujoco?tr('原生刚体','Native body'):tr('未设置','Not set')}</summary>
+   <PhysicsControls key={`${scene.sceneId}:${entity.entityId}`} scene={scene} selected={entity.entityId} resource={assets.find(asset=>asset.ref.resourceId===entity.resources[0]?.resourceId&&asset.ref.version===entity.resources[0]?.version)} world={world} frame={frame} tr={tr} disabled={readOnly||replayActive} update={input=>changePhysics('scene_physics_update',input)} bind={(input,signal)=>changePhysics('scene_bind_physics',input,signal)} progressIdentity={`${worldHostEpoch}:${sessionId}:${api.clientId}`} readProgress={async(resourceId,version,signal)=>(await api.request<{physicalization?:ResourcePhysicsProgress}>(`resource-physics?resourceId=${encodeURIComponent(resourceId)}&version=${version}`,{signal})).physicalization} openLibrary={()=>openObjectInspector(entity.entityId)}/>
+   <NativePhysicsPanel sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} observation={ready&&frame?.worldId===world?.worldId&&frame?.generation===world?.worldGeneration&&frame?.sceneRevision===scene.revision?frame.entities.find(row=>row.entityId===(editableEntity??entity).entityId):undefined} readOnly={readOnly||replayActive} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'native-physics:'+api.clientId}/>
+  </details>
+  {/* 设计稿 object-properties 只保留 Material/Physics 等六行；变换/碰撞/增删收进一个“更多”折叠。 */}
+  <details className="lya-advanced" data-testid="object-more-advanced"><summary>{tr('高级','Advanced')}</summary>
+  <details className="lya-advanced" data-testid="object-transform-tools"><summary>{tr('变换工具','Transform tools')}</summary>
+   <div className="lya-row"><button type="button" className="lya-chip" data-testid="object-transform-toggle" aria-pressed={transformEditing} disabled={readOnly||!selected} onClick={()=>setTransformEditing(value=>!value)}>{transformEditing?tr('隐藏手柄','Hide handles'):tr('显示手柄','Show handles')}</button><span className="lya-help">{tr('默认只显示细轮廓；需要手动变换时再显示手柄。','Selection stays a thin outline; show handles only when you need a manual transform.')}</span></div>
+   <div className="lya-segment">{(["translate","rotate","scale"] as const).map((value,index)=><button key={value} type="button" aria-pressed={gizmo===value&&transformEditing} disabled={readOnly||!selected} onClick={()=>{setGizmo(value);setTransformEditing(true)}}>{[tr("移动","Move"),tr("旋转","Rotate"),tr("缩放","Scale")][index]}</button>)}</div>
+   <p className="lya-help">{tr("拖动手柄，或在上方填写位置、方向与比例；提交后自动同步物理世界。","Drag the gizmo, or edit position, orientation and scale above; physics synchronizes after the edit.")}</p>
+   <div className="lya-row"><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("场景中心","Scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦","Focus")}</button></div>
+  </details>
+  <details className="lya-advanced" data-testid="object-collision"><summary>{tr("碰撞","Collision")}</summary>
+   <label className="lya-field-label"><input type="checkbox" checked={display.collision===true} onChange={event=>setDisplay(value=>({...value,collision:event.target.checked}))}/>{tr("显示碰撞表面与边","Show collision surfaces and edges")}</label>
+   <p className="lya-help" data-testid="collision-display-status" data-collision-status={collisionStatus.status} data-collision-source={collisionStatus.source??''} data-collision-drawn={collisionStatus.drawn??0}>{collisionStatus.status==="ready"?tr(`${world?.engineId??''} 实际碰撞体：${collisionStatus.geoms} 个，已绘制 ${collisionStatus.drawn??0} 个。`,`${world?.engineId??''} compiled colliders: ${collisionStatus.geoms}, drawn: ${collisionStatus.drawn??0}.`):collisionStatus.status==="preview"?tr(`待引擎装配的碰撞预览：${collisionStatus.geoms} 个同版本已绑定派生形状。`,`Collision preview awaiting engine assembly: ${collisionStatus.geoms} derived shapes bound to this resource version.`):collisionStatus.status==="disabled"?tr("碰撞表面与边已隐藏。","Collision surfaces and edges are hidden."):collisionStatus.status==="no-collider"?tr("这个实例尚无实际碰撞体。使用物理设置生成并绑定后再同步。","This instance has no compiled collider. Generate and bind colliders in Physics, then synchronize."):tr("正在读取所选实例的实际碰撞表面与边…","Reading compiled collision surfaces and edges of the selection…")}</p>
+   {(collisionStatus.inactive??0)>0&&<p className="lya-help">{tr(`${collisionStatus.inactive} 个形状未参与碰撞。`,`${collisionStatus.inactive} shapes do not participate in collisions.`)}</p>}
+   {collisionStatus.infinitePlanes>0&&<p className="lya-help">{tr("地面为无限碰撞平面。","The ground is an infinite collision plane.")}</p>}
+   {(collisionStatus.selectionOmitted??0)>0&&<p className="lya-help">{tr(`另有 ${collisionStatus.selectionOmitted} 个实体超出本次选择预算。`,`${collisionStatus.selectionOmitted} declared physics entities exceed this selection budget.`)}</p>}
+   {(collisionStatus.unsupported>0||collisionStatus.omitted>0)&&<p className="lya-help">{tr(`未绘制：${collisionStatus.unsupported} 个不支持、${collisionStatus.omitted} 个超预算。`,`Not drawn: ${collisionStatus.unsupported} unsupported, ${collisionStatus.omitted} beyond budget.`)}</p>}
+  </details>
+  <details className="lya-advanced" data-testid="object-add-remove"><summary>{tr("添加与删除","Add and remove")}</summary>
    <label className="lya-field-label">{tr("新实体名称","New entity name")}<input className="lya-wide" aria-label={tr("新实体名称","New entity name")} value={newEntity} disabled={readOnly||!scene} onChange={event=>setNewEntity(event.target.value)}/></label>
-   <div className="lya-row"><button className="lya-primary" disabled={readOnly||!scene||!newEntity.trim()} onClick={()=>perform(addEntity)}>{tr("添加空实体","Add empty entity")}</button><button className="lya-stop" disabled={readOnly||!selected||removing} onClick={()=>selected&&requestRemoval(selected)}>{tr("从场景移除选中","Remove selected from scene")}</button></div>
-   <p className="lya-help">{tr("空对象用于组织场景。要添加可见模型，从下方“小物件库”加入已导入素材，或在素材库导入本地文件。","Empty objects help organize the scene. Add an imported model from the object library below, or import a local file in the library.")}</p>
-  </fieldset>
-  {importPurposeControl}
-  <DomainAssetList domain="object" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} openLibrary={()=>{setImportUsageChoice(importUsage);ui.openTool("asset")}} instanceControls={assetInstanceControls}/>
- </>
+   <div className="lya-row"><button disabled={readOnly||!scene||!newEntity.trim()} onClick={()=>perform(addEntity)}>{tr("添加空实体","Add empty entity")}</button><button className="lya-stop" disabled={readOnly||!selected||removing} onClick={()=>selected&&requestRemoval(selected)}>{tr("移除选中","Remove selected")}</button>{world&&<button disabled={!sessionId} onClick={()=>perform(()=>stop(false))}>{tr("停止选中对象","Stop selected")}</button>}</div>
+   {objectInfo}
+  </details>
+  </details>
+ </PanelPage></div>:undefined
+ const objectMatches=sceneObjectRoots.filter(item=>sceneNodeName(item,tr).toLowerCase().includes(objectQuery.trim().toLowerCase()))
+ const objectAddSelected=assets.find(asset=>!asset.deletedAt&&`${asset.ref.resourceId}:${asset.ref.version}`===objectAddSelection&&inAssetDomain('object',asset))
+ // V8-07 次序：DomainAssetList 自带 Search assets（选择模式）且必须是第一个可聚焦控件；导入/高级项放到
+ // 资产列表之后、导入设置折叠内，避免 Import 抢在搜索与资源列表之前。搜索、过滤与选择仍由
+ // asset-library-panel 的同一份实现持有，本页不复制第二套搜索状态。
+ const objectAddPanel=<PanelPage className="lya-object-add" title={tr("添加对象","Add object")} back={tr("‹ 物件","‹ Objects")} onBack={backToObjectList}>
+  <DomainAssetList domain="object" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} instanceControls={assetInstanceControls} selectionMode selectedKey={objectAddSelection} onSelect={asset=>setObjectAddSelection(`${asset.ref.resourceId}:${asset.ref.version}`)}
+   selectionHeader={<div className="lya-row" data-testid="object-import-entry"><button type="button" data-testid="object-add-import" disabled={!sessionId||readOnly||importBusy} onClick={openDomainImport}>{tr("导入文件","Import file")}</button></div>}/>
+  <details className="lya-advanced" data-testid="object-import-settings"><summary>{tr("导入设置","Import settings")}</summary>{importPurposeControl}</details>
+  {assetImportOpen&&domainImportControl}
+  <details className="lya-advanced" data-testid="object-create-empty"><summary>{tr("创建空实体","Create an empty entity")}</summary>
+   <label className="lya-field-label">{tr("新实体名称","New entity name")}<input className="lya-wide" aria-label={tr("新实体名称","New entity name")} value={newEntity} disabled={readOnly||!scene} onChange={event=>setNewEntity(event.target.value)}/></label>
+   <div className="lya-row"><button disabled={readOnly||!scene||!newEntity.trim()} onClick={()=>perform(addEntity)}>{tr("添加空实体","Add empty entity")}</button></div>
+  </details>
+  <details className="lya-advanced" data-testid="domain-asset-management"><summary title={tr("版本、检查与回收","Versions, checks and trash")}>{tr("资源管理","Asset management")}</summary>{libraryManagement('object')}</details>
+  <FooterActions note={objectAddSelected?tr(`已选中 ${objectAddSelected.name}` ,`Selected ${objectAddSelected.name}`):tr("先选择一个资源","Select a resource first")} primary={<button type="button" className="lya-primary" data-testid="object-add-place" disabled={!objectAddSelected||!canMountAsset} onClick={()=>{if(objectAddSelected){mountAsset(objectAddSelected);backToObjectList()}}}>{tr("放置到场景","Place in scene")}</button>}/>
+ </PanelPage>
+ const objectPanel=componentsView&&entity
+  ? <ComponentsPanel key={entity.entityId} viewer={viewer.current} entityId={entity.entityId} entityName={sceneNodeName(entity,tr)} selectedPart={partSelection} tr={tr} viewerVisible={viewerVisible} extraction={extractionPort} identity={componentsIdentity} onBack={closeComponents}/>
+  : objectAdd&&!componentsView
+   ? objectAddPanel
+   : !objectInspector
+    ? <PanelPage title={tr("物件","Objects")}>
+      {/* 设计稿 objects-list：搜索框与「＋」同一行；计数不摆首屏，标题行只留关闭。 */}
+      <div className="lya-row" data-testid="object-search-row" style={{flexWrap:"nowrap",alignItems:"center"}}><input type="search" style={{flex:1,minWidth:0}} data-testid="object-search" aria-label={tr("搜索物件","Search objects")} placeholder={tr("搜索物件","Search objects")} value={objectQuery} onChange={event=>setObjectQuery(event.target.value)}/><button type="button" className="lya-chip" data-testid="object-add-primary" aria-label={tr("添加对象","Add object")} title={tr("添加对象","Add object")} disabled={!scene||readOnly} onClick={openObjectAdd}>＋</button></div>
+      {scene&&<div className="lya-tree lya-list" data-testid="object-list">{objectQuery.trim()?objectMatches.map(item=><ListRow key={item.entityId} icon="object" title={sceneNodeName(item,tr)} subtitle={nodeRoleLabel(item)} selected={selected===item.entityId} onClick={()=>openObjectInspector(item.entityId)}/>):<><div className="lya-row lya-section" data-testid="object-scene-group"><span>▾ {tr("场景","Scene")} 01</span></div>{tree(undefined,0,true,sceneObjectRoots)}</>}</div>}
+      {(!scene||sceneObjectRoots.length===0)&&<EmptyState icon="object" title={tr("还没有物件","No objects")} detail={!sessionId?tr("先在左侧选择工作区，再添加物件。","Choose a workspace on the left to add objects."):tr("添加或导入一个对象。","Add or import an object.")}/>}
+      {scene&&sceneObjectRoots.length>0&&objectQuery.trim()&&objectMatches.length===0&&<EmptyState icon="object" title={tr("没有匹配的物件","No matching objects")} detail={tr("换一个名称再试。","Try another name.")}/>}
+     </PanelPage>
+    : <div className="lya-panel-page" data-testid="object-inspector-page">{!entity&&<p className="lya-help">{!sessionId?tr("先在左侧选择工作区，再编辑对象。","Choose a workspace on the left to edit objects."):readOnly?tr("当前世界是只读投影，不能编辑。","The current world is a read-only projection."):tr("先选择一个对象：在场景层级里点它的名字，或在画布上点它。","Select an object first: click its name in the scene tree or click it on the canvas.")}</p>}</div>
 
  const robotSelected=Boolean(entity&&robotEntity(entity))
- const robotPanel=<>
-  <div className="lya-section"><span>{tr("机器人","Robot")}</span><span className={ready?"lya-badge lya-badge-ok":robotSelected?"lya-badge lya-badge-accent":"lya-badge"}>{world?sceneWorldPhaseLabel(worldLifecycle.phase,tr):robotSelected?tr("已选中","Selected"):tr("未选中","None selected")}</span></div>
-  <div data-testid="current-scene-robot-instances">
-   <div className="lya-panel-title"><strong>{tr("当前场景机器人实例","Robot instances in this scene")}</strong></div>
-   {(scene?.entities.filter(robotEntity)??[]).map(instance=><div className="lya-tree-row" key={instance.entityId} aria-selected={selected===instance.entityId}><button className="lya-tree-name" onClick={()=>{nativeControlCancel.current?.();selectedRef.current=instance.entityId;setSelected(instance.entityId);ui.showCentre("canvas")}}>⚙ {instance.name}</button><small>{instance.resources.map(ref=>`v${ref.version}`).join(" · ")} · {world&&world.sceneId===scene?.sceneId?tr("已绑定世界","World bound"):tr("未启动世界","World not started")}</small></div>)}
-   {!scene?.entities.some(robotEntity)&&<p className="lya-help">{tr("当前场景没有机器人实例。下方机器人库保存的是素材，加入场景后才有可控制的实例。","No robot instance in the current scene. Library assets become controllable instances after mounting in a scene.")}</p>}
+ // R-004 目标级按钮的真实可用性/短原因：Start 需要完整已配置目标或最后有效 recipe；Freeze 需要已同步世界；
+ // Restore 只在当前有本次 Freeze 时可用。都只读当前 world/实例身份，不新增全局控制状态。
+ const atomicEntityId=entity?.entityId
+ const atomicDescription=atomicEntityId?descriptions[atomicEntityId]:undefined
+ const atomicTargets=atomicEntityId?(targets[atomicEntityId]??{}):{}
+ const atomicTargetsComplete=Boolean(atomicDescription?.controlledJointNames.length)&&atomicDescription!.controlledJointNames.every(name=>Number.isFinite(atomicTargets[name]))
+ const atomicHasRecipe=Boolean(atomicEntityId&&lastRecipes[atomicEntityId]?.positions.length)
+ const atomicFreezeRecord=atomicEntityId?freezeReceipts[atomicEntityId]:undefined
+ // 冻结态优先按真实 description 的 base.freeze，回执作为刚落地的即时事实；两者都必须属于当前 world/代次，
+ // 防止旧 world/旧代次的回执或描述把新上下文误显示为已冻结。
+ const atomicFrozen=Boolean(atomicEntityId&&((atomicFreezeRecord?.status==='frozen'&&atomicFreezeRecord.worldId===world?.worldId&&atomicFreezeRecord.generation===world?.worldGeneration)||(atomicDescription?.base?.freeze?.frozen===true&&atomicDescription?.expectedGeneration===world?.worldGeneration)))
+ const atomicStartAvailable=Boolean(entity&&world&&(atomicTargetsComplete||atomicHasRecipe)&&!readOnly&&!replayActive)
+ const atomicStartReason=!entity?undefined:!world?tr('先准备物理世界。','Prepare a physics world first.'):atomicStartAvailable?undefined:tr('未配置动作','No configured action')
+ const robotPrepareNeeded=Boolean(scene&&!readOnly&&!replayActive&&(!world||world.sceneId!==scene.sceneId||world.appliedSceneRevision!==scene.revision||!['ready','running','paused'].includes(world.status)||worldLifecycle.phase==='syncing'))
+ const atomicFreezeAvailable=Boolean(entity&&world&&!atomicFrozen&&!readOnly&&!replayActive)
+ const atomicRestoreAvailable=Boolean(entity&&world&&atomicFrozen)
+ const atomicFreezeDetail=atomicFrozen?tr('已冻结：原生约束/关节锁保持当前姿态，无关机器人继续运行；恢复后需重新Start。','Frozen: native constraints hold the current pose; other robots keep running. Start again after restore.'):undefined
+ const robotInstances=scene?.entities.filter(robotEntity)??[]
+ // 独立 Attach/Replace 页面自己的世界就绪事实与"准备/同步并预览"入口：沿用既有 world 生命周期，
+ // 不依赖被隐藏概览里的那枚 Prepare physics；失败照实抛给页面显示并允许重试。
+ const attachWorld=()=>({
+  ready:Boolean(world&&world.sceneId===scene?.sceneId&&world.appliedSceneRevision===scene?.revision&&['ready','running','paused'].includes(world.status)),
+  phase:String(worldLifecycle.phase),
+  ...(worldLifecycle.code?{code:worldLifecycle.code}:{}),
+  ...(worldLifecycle.detail?{detail:worldLifecycle.detail}:{}),
+  ...(scene?.revision!==undefined?{sceneRevision:scene.revision}:{}),
+  ...(world?.appliedSceneRevision!==undefined?{appliedRevision:world.appliedSceneRevision}:{}),
+  ...(world?.worldGeneration!==undefined?{generation:world.worldGeneration}:{}),
+ })
+ const prepareAttachWorld=async()=>{
+  const bound=worldRef.current,current=sceneRef.current
+  const prepared=bound&&current&&bound.sceneId===current.sceneId?await sync():await startWorld()
+  if(!prepared)throw Error(tr('ATTACH_WORLD_NOT_READY: 物理世界仍未就绪；请查看物理状态后重试。','ATTACH_WORLD_NOT_READY: the physics world is still not ready; check physics status and retry.'))
+  return prepared
+ }
+ // R-012：Attach to 在实例详情与 Components 两处都可发现；无其它机器人实例时不铺空面板。
+ const attachSectionFor=(sourceEntity:Entity)=>{
+  const candidates=robotInstances.filter(item=>item.entityId!==sourceEntity.entityId)
+  if(candidates.length===0||attachOpen)return null
+  return <div className="lya-row" data-testid="robot-attach-entry"><button type="button" className="lya-chip" data-testid="robot-attach-open" title={tr('装配到…（外部手/工具 → 目标腕部）','Attach to… (external hand/tool → target wrist)')} disabled={!viewerVisible} onClick={()=>{setAttachSourceId(undefined);setReplaceDraft(undefined);setPickedSourceMount(undefined);setAttachCheck(undefined);setAttachOpen(true)}}>{tr('装配到…','Attach to…')}</button></div>
+ }
+ // 独立二级页面：右栏只呈现本任务；原概览（Native/Policy/配置/Atomic）由调用方保留在隐藏容器里。
+ const attachPageFor=(sourceEntity:Entity)=>{
+  const candidates=robotInstances.filter(item=>item.entityId!==sourceEntity.entityId)
+  if(candidates.length===0)return null
+  const panelEntity=robotInstances.find(item=>item.entityId===(attachSourceId??sourceEntity.entityId))??sourceEntity
+  const storedMount=panelEntity.components.assemblyMount as {mount?:RobotSourceMount;rootBodyName?:string;resourceVersion?:number}|undefined
+  const resourceVersion=panelEntity.resources[0]?.version
+  const savedMount=storedMount?.mount&&(storedMount.resourceVersion===resourceVersion)?storedMount.mount:undefined
+  const partCatalog=viewer.current?.listParts(panelEntity.entityId)??[]
+  const selectedPart=partSelection?.entityId===panelEntity.entityId?partCatalog.find(part=>part.partId===partSelection.partId):undefined
+  const rootName=descriptions[panelEntity.entityId]?.nativeBodies?.find(body=>body.root)?.name
+  const sourcePart=selectedPart?{name:selectedPart.name,root:Boolean(rootName&&selectedPart.name===rootName)}:undefined
+  const panelCheck=!attachSourceId||attachSourceId===panelEntity.entityId?attachCheck:undefined
+  // Replace 草稿：新件即当前面板源时，目标=旧件安装位（旧 baseBinding.target）；默认停放=旧件当前真实根 world pose + 0.3m。
+  const replaceOld=replaceDraft&&replaceDraft.newEntityId===panelEntity.entityId?(scene?.entities??[]).find(item=>item.entityId===replaceDraft.oldEntityId):undefined
+  const replaceBinding=replaceOld?.components.baseBinding as {bodyName?:string;target?:{entityId?:string;bodyName?:string;positionM?:number[];quaternionXyzw?:number[]}}|undefined
+  const replaceTarget=replaceBinding?.target
+  const replaceRequest:AssemblyReplaceRequest|undefined=replaceOld&&replaceTarget?.entityId&&replaceTarget.bodyName&&replaceTarget.positionM?(()=>{
+   const observed=(frame?.entities.find(row=>row.entityId===replaceOld.entityId)?.sensors?.bodyWorldPoses??{}) as Record<string,{positionM:number[];quaternionXyzw:number[]}>
+   const observedWorld=replaceBinding?.bodyName?observed[replaceBinding.bodyName]:undefined
+   const basePose=validRobotPose(observedWorld)?observedWorld:{positionM:[...replaceTarget.positionM] as [number,number,number],quaternionXyzw:[...(replaceTarget.quaternionXyzw??[0,0,0,1])] as [number,number,number,number]}
+   return {oldEntityId:replaceOld.entityId,oldName:sceneNodeName(replaceOld,tr),targetEntityId:replaceTarget.entityId,targetBodyName:replaceTarget.bodyName,targetMountPose:{positionM:[...replaceTarget.positionM] as [number,number,number],quaternionXyzw:[...(replaceTarget.quaternionXyzw??[0,0,0,1])] as [number,number,number,number]},defaultParkingPose:{positionM:[basePose.positionM[0]+0.3,basePose.positionM[1],basePose.positionM[2]] as [number,number,number],quaternionXyzw:[...basePose.quaternionXyzw] as [number,number,number,number]}}
+  })():undefined
+  return <div className="lya-panel-seat" data-testid="robot-attach-section">
+   <AssemblyAttachPanel key={panelEntity.entityId} tr={tr} source={{entityId:panelEntity.entityId,name:sceneNodeName(panelEntity,tr)}} targetCandidates={robotInstances.filter(item=>item.entityId!==panelEntity.entityId).map(item=>({entityId:item.entityId,name:sceneNodeName(item,tr)}))} describeTarget={attachDescribe} describeSource={()=>attachDescribe(panelEntity.entityId)} preview={attachPreview} apply={attachApply} onGhost={attachGhost} savedSourceMount={savedMount} pickedSourceMount={pickedSourceMount} onRequestPick={attachPick?undefined:()=>void attachStartPick(panelEntity)} sourcePart={sourcePart} onSaveMount={async mount=>{await attachSaveMount(mount)}} onClearMount={async()=>{const current=sceneRef.current;if(!current)return;const result=await api.command<RobotAssemblyMountResult>('robot_assembly_mount',{sceneId:current.sceneId,entityId:panelEntity.entityId,expectedRevision:current.revision,clear:true},{sceneId:current.sceneId});if(result.snapshot)applySceneIfCurrent(sceneWritePort,current.sceneId,result.snapshot)}} onCheck={()=>attachRunCheck(panelEntity.entityId)} check={panelCheck} world={attachWorld()} prepareWorld={prepareAttachWorld} onRequestParkingPick={enterParkingPick} onParkingPickEnd={exitParkingPick} onParkingPickController={attachParkingPickController} {...replaceRequest?{replace:replaceRequest,onReplace:submit=>attachReplace(submit),onParkingGhost:pose=>attachParkingGhost(pose,replaceRequest.oldEntityId)}:{}} onBack={()=>{setAttachOpen(false);setAttachSourceId(undefined);setReplaceDraft(undefined);attachCancelPick();exitParkingPick();attachGhost(null);viewer.current?.clearParkingGhost()}} onFramePreview={attachFramePreview} onUndoLast={()=>undoAttachLast(panelEntity.entityId)}/>
   </div>
-  {entity&&robotSelected&&<RobotAuthoringPanel entity={entity} scene={scene} world={world} frame={frame} description={description} ready={ready&&!readOnly&&!replayActive} tr={tr} configure={applyRobotConfiguration} moveTcp={manualTcpMove} stop={()=>perform(()=>stop(false))} sync={()=>perform(()=>worldRef.current?sync():startWorld())} reset={()=>{const w=worldRef.current,s=sceneRef.current;if(w&&s)perform(()=>applyRobotConfiguration('sim_reset',{worldId:w.worldId,sceneId:s.sceneId,expectedRevision:s.revision,expectedGeneration:w.worldGeneration}))}} editPosition={()=>ui.openTool('object')} locate={kind=>locateRobotAnchor(entity.entityId,kind)}/>}
-  {entity&&world&&robotSelected
-   ?<>{entity.components.controller?.type==="drone"?<FlightControlPanel entity={entity} description={description} observation={observation} world={world} ready={ready} command={(name,input)=>api.command<any>(name,input)} tr={tr} describe={()=>perform(()=>describe(entity.entityId))} onWorldReset={next=>{setWorld(next);worldRef.current=next;setFrame(undefined);void refreshState(next.sceneId)}}/>:<RobotControlPanel key={`${scene?.sceneId}:${world.worldId}:${world.worldGeneration}:${entity.entityId}`} entity={entity} description={description} observation={observation} targets={targets[entity.entityId]??{}} controlBlocked={manualControlBlocked} setTargets={(values,draft)=>{if(api.areControlsBlocked())return;setTargets(old=>({...old,[entity.entityId]:values}));targetsRef.current={...targetsRef.current,[entity.entityId]:values};if(draft===true)manualDrafts.current.add(entity.entityId);else if(draft===false)manualDrafts.current.delete(entity.entityId)}} ready={ready} duration={duration} setDuration={setDuration} describe={()=>perform(()=>describe(entity.entityId))} move={(name,motion,label)=>perform(()=>move(name,motion,label))} fullMotion={()=>fullMotion(entity.entityId)} tr={tr} controlKey={`${world.worldId}:${world.worldGeneration}`} controlScope={{worldId:world.worldId,generation:world.worldGeneration}} liveMove={nativeJointMove} registerLiveCancel={cancel=>{nativeControlCancel.current=cancel}} cancelLive={display=>{const bound=world;void api.command("sim_stop",{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[entity.entityId]},{sceneId:bound.sceneId,worldId:bound.worldId},undefined,display).catch(value=>setError(String(value)))}}/>}
-    <details className="lya-advanced"><summary>{tr("动作结果","Action results")} ({actions.length})</summary><ActionCards actions={actions} tr={tr}/></details></>
-   :robotSelected&&entity
-    ?<p className="lya-help">{tr(`已选中机器人「${entity.name}」。启动模拟后即可调整关节与执行动作。`,`${entity.name} selected. Start simulation to adjust its joints and run actions.`)}</p>
-    :<p className="lya-help">{tr("在场景中选择一个机器人，启动模拟后即可调整关节与执行动作；也可以从下方机器人库把它加入当前场景。","Select a robot in the scene and start simulation to use its controls; or add one from the robot library below.")}</p>}
-  <PolicyLibraryPanel key={`${worldHostEpoch}:${scene?.sceneId}:${selected}`} available={Boolean(sessionId)} canLoad={!readOnly&&robotSelected} canRegister={!readOnly&&!replayActive} canLoadAsset={!readOnly&&Boolean(scene?.sceneId)} onAssetLoaded={(modelPath,downloadModelId,provenance)=>loadPackModel(modelPath,downloadModelId,provenance)} importReceipt={localPolicyImport&&localPolicyImport.sessionId===sessionId?localPolicyImport.receipt:undefined} sceneId={scene?.sceneId} expectedRevision={scene?.revision} entityId={robotSelected?entity?.entityId:undefined} worldId={world?.worldId} worldStatus={world?.status} expectedGeneration={world?.worldGeneration} command={(name,input)=>api.command<any>(name,input)} onActivated={result=>{if(sceneRef.current?.sceneId!==result.snapshot.sceneId)return;applySceneIfCurrent(sceneWritePort,result.snapshot.sceneId,result.snapshot);setWorld(result.world);worldRef.current=result.world;setFrame(undefined);setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,result.world);setNotice(tr('所选实例已应用策略映射并建立固定步长世界；实际行走还需执行与回执。','Policy mapping applied and a fixed-step world created; walking still needs an execution receipt.'))}} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/>
-  <DomainAssetList domain="robot" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} openLibrary={()=>ui.openTool("asset")} instanceControls={assetInstanceControls}/>
-  <PackLibraryPanel scene={scene} available={Boolean(sessionId)} canLoad={!readOnly} busy={importBusy} tr={tr} command={(name,args)=>api.command<any>(name,args)} load={(modelPath,packId,provenance)=>loadPackModel(modelPath,packId,provenance)}/>
+ }
+ const attachmentsSectionFor=(targetEntity:Entity)=>{
+  const attachments=(scene?.entities??[]).filter(item=>{const value=item.components.baseBinding as {target?:{entityId?:string}}|undefined;return value?.target?.entityId===targetEntity.entityId})
+  if(attachments.length===0)return null
+  return <details className="lya-advanced" data-testid="robot-attachments"><summary>{tr('外部挂接','External attachments')} · {attachments.length}</summary><div className="lya-list">
+   {attachments.map(item=>{const binding=item.components.baseBinding as {bodyName?:string;target?:{entityId?:string;bodyName?:string}};const candidates=(scene?.entities??[]).filter(candidate=>robotEntity(candidate)&&candidate.entityId!==item.entityId&&candidate.entityId!==targetEntity.entityId&&!candidate.components.baseBinding);return <div className="lya-row" key={item.entityId} data-testid={`robot-attachment-${item.entityId}`}>
+    <span className="lya-help"><strong>{sceneNodeName(item,tr)}</strong> · {binding.bodyName} → {binding.target?.bodyName}</span>
+    <button type="button" className="lya-chip" data-testid={`attachment-move-${item.entityId}`} disabled={!viewerVisible} onClick={()=>{setAttachSourceId(item.entityId);setReplaceDraft(undefined);setPickedSourceMount(undefined);setAttachCheck(undefined);setAttachOpen(true)}}>{tr('换挂/移动','Move attachment')}</button>
+    <button type="button" className="lya-chip" data-testid={`attachment-detach-${item.entityId}`} disabled={!world} onClick={()=>void attachDetach(item.entityId).catch(value=>setError(String(value)))}>{tr('解绑留置','Detach')}</button>
+    {candidates.length>0&&<><select aria-label={tr('替换为','Replace with')} data-testid={`attachment-replace-select-${item.entityId}`} value={replacePick[item.entityId]??''} onChange={event=>setReplacePick(old=>({...old,[item.entityId]:event.target.value}))}><option value="">{tr('替换为…','Replace with…')}</option>{candidates.map(candidate=><option key={candidate.entityId} value={candidate.entityId}>{sceneNodeName(candidate,tr)}</option>)}</select><button type="button" className="lya-chip" data-testid={`attachment-replace-${item.entityId}`} disabled={!world||!viewerVisible||!replacePick[item.entityId]} onClick={()=>{const next=replacePick[item.entityId];if(!next)return;setAttachSourceId(next);setReplaceDraft({oldEntityId:item.entityId,newEntityId:next});setPickedSourceMount(undefined);setAttachCheck(undefined);setAttachOpen(true)}}>{tr('换装','Replace')}</button></>}
+   </div>})}
+  </div></details>
+ }
+ const robotWorldBound=Boolean(world&&world.sceneId===scene?.sceneId)
+ const robotDetailActive=robotView==='detail'&&robotSelected
+ const robotLibraryRows=robotLibrary?.models??[]
+ const robotWorldForScene=Boolean(world&&world.sceneId===scene?.sceneId)
+ const robotStatusLong=robotWorldForScene?`${sceneWorldPhaseLabel(worldLifecycle.phase,tr)}${worldLifecycle.code?` · ${worldLifecycle.code}`:''}${worldLifecycle.detail?` · ${worldLifecycle.detail}`:''}`:sceneWorldPhaseLabel(worldLifecycle.phase,tr)
+ const robotShortStatus=robotWorldForScene
+  ? world!.appliedSceneRevision!==scene?.revision||worldLifecycle.phase==='syncing'?'Pending sync'
+   :world!.status==='running'?'Running':world!.status==='ready'?'Ready':world!.status==='paused'?'Paused':world!.status==='unavailable'?'Failed':'Off'
+  :['initializing','syncing'].includes(worldLifecycle.phase)?'Pending sync':'Off'
+ const robotStatusFace=atomicFrozen?tr('已冻结','Frozen')
+  :robotShortStatus==='Running'?tr('物理运行中','Physics running')
+  :robotShortStatus==='Ready'?tr('物理就绪','Physics ready')
+  :robotShortStatus==='Paused'?tr('物理已暂停','Physics paused')
+  :robotShortStatus==='Off'?tr('物理未启动','Physics off')
+  :robotShortStatus==='Failed'?tr('物理不可用','Physics unavailable'):tr('物理待同步','Physics pending sync')
+ const importedRobotAssets=assets.filter(asset=>!asset.deletedAt&&inAssetDomain('robot',asset))
+ // 根页只留短任务名与已知当前值；没有读取当前实例机位清单时不拿自由机位数冒充。
+ const robotController=entity?.components.controller as {policyAdapter?:unknown;type?:unknown}|undefined
+ const robotPolicyName=robotPolicyCaption(robotController,tr)
+ const robotPartCount=(entity?viewer.current?.listParts(entity.entityId)?.length:0)||0
+ const robotDetailRoot=entity?<div className="lya-robot-detail-root" data-testid="robot-detail-root">
+  <div data-testid="robot-detail-header" className="lya-robot-detail-head">
+   <button type="button" className="lya-back" data-testid="robot-back" onClick={backToRobotLibrary}>{tr('‹ 机器人库','‹ Robot Library')}</button>
+   <div className="lya-page-head">
+    <div className="lya-page-heading"><h2 className="lya-page-title lya-robot-detail-title" data-testid="robot-name">{sceneNodeName(entity!,tr)}</h2><div className="lya-help" data-testid="robot-instance-subtitle">{tr('场景实例','Scene instance')}</div></div>
+    <span className={(robotShortStatus==='Running'||robotShortStatus==='Ready')?"lya-badge lya-badge-ok":robotShortStatus==='Pending sync'?"lya-badge lya-badge-accent":"lya-badge"} data-testid="robot-status" title={robotStatusLong}>{robotStatusFace}</span>
+   </div>
+  </div>
+  {['failed','blocked'].includes(worldLifecycle.phase)&&<div className="lya-robot-failure" role="alert" data-testid="robot-failure"><strong>{tr('物理世界未就绪','Physics world is not ready')}</strong><span>{tr('当前实例的控制与装配未生效。先检查原因，再重试或修正配置。','Controls and assembly for this instance are not active. Check the cause, then retry or correct the configuration.')}</span><div className="lya-row"><button type="button" onClick={()=>setRobotSection('configuration')}>{tr('打开配置','Open configuration')}</button><button type="button" onClick={()=>perform(startWorld)}>{tr('重试准备','Retry setup')}</button></div><details><summary>{tr('诊断详情','Diagnostic details')}</summary><span>{worldLifecycle.detail??worldLifecycle.code??tr('没有更多详情。','No further details.')}</span></details></div>}
+  <div className="lya-list" data-testid="robot-detail-rows">
+   <ListRow icon="object" title={tr('关节控制','Joint controls')} hint={tr('原生关节、夹爪与已配置动作。','Native joints, gripper and configured actions.')} onClick={()=>setRobotSection('joints')} testId="open-robot-joints"/>
+   <ListRow icon="robot" title={tr('Policy / VLA','Policy / VLA')} hint={tr('为此实例选择或检查策略','Select or inspect a policy for this instance')} side={<span title={robotPolicyName}>{robotPolicyName.length>18?robotPolicyName.slice(0,18)+'…':robotPolicyName}</span>} onClick={()=>setRobotSection('policy')} testId="open-robot-policy"/>
+   <ListRow icon="object" title={tr('部件','Components')} hint={tr('查看部件树与炸开显示；不改装配。','Inspect parts and exploded display; assembly is unchanged.')} side={robotPartCount} onClick={()=>entity&&openComponents(entity.entityId)} testId="open-components" disabled={!viewerVisible}/>
+   <ListRow icon="camera" title={tr('挂载机位','Mounted cameras')} hint={tr('查看此机器人的挂载相机','View cameras mounted on this robot')} onClick={()=>ui.openTool('camera')} testId="open-robot-camera"/>
+   <ListRow icon="environment" title={tr('配置','Configuration')} hint={tr('底座、TCP与装配设置','Base, TCP and assembly settings')} onClick={()=>setRobotSection('configuration')} testId="open-robot-configuration"/>
+  </div>
+  {attachSectionFor(entity!)}
+  {attachmentsSectionFor(entity!)}
+  <RobotAtomicActions tr={tr} entityName={sceneNodeName(entity!,tr)} canStart={atomicStartAvailable} startUnavailableReason={atomicStartReason} canStop={Boolean(world)} onStop={()=>perform(()=>stop(false))} canFreeze={atomicFreezeAvailable} onFreeze={()=>perform(()=>atomicFreeze())} canRestore={atomicRestoreAvailable} onRestore={()=>perform(()=>atomicRestore())} onStart={()=>perform(()=>atomicStart())} busy={worldLifecycle.phase==='initializing'} {...(atomicFreezeDetail?{freezeDetail:atomicFreezeDetail}:{})}/>
+ </div>:null
+ const robotPolicyPage=entity?<div className="lya-panel-seat" data-testid="robot-policy-page" hidden={componentsView||robotSection!=='policy'} aria-hidden={componentsView||robotSection!=='policy'} style={componentsView||robotSection!=='policy'?{display:'none'}:undefined}>
+  <PanelPage title={tr('Policy / VLA','Policy / VLA')} eyebrow={sceneNodeName(entity!,tr)} back={tr('‹ 实例','‹ Instance')} onBack={()=>setRobotSection('root')}>
+   <PolicyLibraryPanel key={`${worldHostEpoch}:${scene?.sceneId}:${selected}`} available={Boolean(sessionId)} canLoad={!readOnly&&robotSelected} canRegister={!readOnly&&!replayActive} canLoadAsset={!readOnly&&Boolean(scene?.sceneId)} targetLabel={sceneNodeName(entity!,tr)} onAssetLoaded={(modelPath,downloadModelId,provenance)=>loadPackModel(modelPath,downloadModelId,provenance)} importReceipt={localPolicyImport&&localPolicyImport.sessionId===sessionId?localPolicyImport.receipt:undefined} sceneId={scene?.sceneId} expectedRevision={scene?.revision} entityId={robotSelected?entity?.entityId:undefined} worldId={world?.worldId} worldStatus={world?.status} expectedGeneration={world?.worldGeneration} command={(name,input)=>api.command<any>(name,input)} onActivated={result=>{if(sceneRef.current?.sceneId!==result.snapshot.sceneId)return;applySceneIfCurrent(sceneWritePort,result.snapshot.sceneId,result.snapshot);setWorld(result.world);worldRef.current=result.world;setFrame(undefined);setDescriptions({});descriptionsRef.current={};setTargets({});targetsRef.current={};persist(result.snapshot,result.world);setNotice(tr('所选实例已应用策略映射并建立固定步长世界；实际行走还需执行与回执。','Policy mapping applied and a fixed-step world created; walking still needs an execution receipt.'))}} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} onOpenControls={()=>setRobotSection('root')} tr={tr}/>
+  </PanelPage>
+ </div>:null
+ const robotJointsPage=entity?<div className="lya-panel-seat" data-testid="robot-joints-page" hidden={componentsView||robotSection!=='joints'} aria-hidden={componentsView||robotSection!=='joints'} style={componentsView||robotSection!=='joints'?{display:'none'}:undefined}>
+  <PanelPage title={tr('关节控制','Joint controls')} eyebrow={sceneNodeName(entity!,tr)} back={tr('‹ 实例','‹ Instance')} onBack={()=>setRobotSection('root')}>
+   <div data-testid="robot-native-control">
+   {entity&&world&&robotSelected
+    ?<>{entity.components.controller?.type==="drone"?<FlightControlPanel entity={entity} description={description} observation={observation} world={world} ready={ready} command={(name,input)=>api.command<any>(name,input)} tr={tr} describe={()=>perform(()=>describe(entity.entityId))} onWorldReset={next=>{setWorld(next);worldRef.current=next;setFrame(undefined);void refreshState(next.sceneId)}}/>:<RobotControlPanel key={`${scene?.sceneId}:${world.worldId}:${world.worldGeneration}:${entity.entityId}`} entity={entity} description={description} observation={observation} targets={targets[entity.entityId]??{}} controlBlocked={manualControlBlocked} setTargets={(values,draft)=>{if(api.areControlsBlocked())return;setTargets(old=>({...old,[entity.entityId]:values}));targetsRef.current={...targetsRef.current,[entity.entityId]:values};if(draft===true)manualDrafts.current.add(entity.entityId);else if(draft===false)manualDrafts.current.delete(entity.entityId)}} ready={ready} duration={duration} setDuration={setDuration} describe={()=>perform(()=>describe(entity.entityId))} move={(name,motion,label)=>perform(()=>move(name,motion,label))} fullMotion={()=>fullMotion(entity.entityId)} tr={tr} controlKey={`${world.worldId}:${world.worldGeneration}`} controlScope={{worldId:world.worldId,generation:world.worldGeneration}} liveMove={nativeJointMove} registerLiveCancel={cancel=>{nativeControlCancel.current=cancel}} cancelLive={display=>{const bound=world;void api.command("sim_stop",{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[entity.entityId]},{sceneId:bound.sceneId,worldId:bound.worldId},undefined,display).catch(value=>setError(String(value)))}}/>}
+     <details className="lya-advanced"><summary>{tr("动作结果","Action results")} ({actions.length})</summary><ActionCards actions={actions} tr={tr}/></details></>
+    :<p className="lya-help" data-testid="robot-native-control-wait">{tr(`已选中机器人「${entity?.name??''}」。启动物理世界后即可调整关节与执行动作；原生控制不需要训练策略。`,`${entity?.name??''} selected. Start physics to adjust joints and run actions; native control needs no trained policy.`)}</p>}
+   </div>
+  </PanelPage>
+ </div>:null
+ const robotConfigurationPage=entity?<div className="lya-panel-seat" data-testid="robot-configuration-page" hidden={componentsView||robotSection!=='configuration'} aria-hidden={componentsView||robotSection!=='configuration'} style={componentsView||robotSection!=='configuration'?{display:'none'}:undefined}>
+  <PanelPage title={tr('配置','Configuration')} eyebrow={sceneNodeName(entity!,tr)} back={tr('‹ 实例','‹ Instance')} onBack={()=>setRobotSection('root')}>
+   <details data-testid="robot-technical-details" className="lya-advanced"><summary>{tr('实例详情','Instance details')}</summary><dl className="lya-kv">
+    <dt>{tr('实例 ID','Instance ID')}</dt><dd><code title={entity!.entityId}>{entity!.entityId}</code></dd>
+    <dt>{tr('资源版本','Resource version')}</dt><dd data-testid="robot-identity" className="lya-help lya-robot-identity-line">{entity!.resources.map(ref=>`v${ref.version}`).join(' · ')||tr('无版本引用','no resource version')}{Boolean(entity!.components.baseBinding)?` · ${tr('已装配','Attached')}`:''}</dd>
+    <dt>{tr('物理世界','Physics world')}</dt><dd>{world?`${world.engineId} · ${sceneWorldPhaseLabel(worldLifecycle.phase,tr)}` : tr('未启动','Not started')}</dd>
+   </dl></details>
+   <RobotAuthoringPanel entity={entity} scene={scene} world={world} frame={frame} description={description} ready={ready&&!readOnly&&!replayActive} tr={tr} configure={applyRobotConfiguration} history={robotAssemblyHistory} undo={robotAssemblyUndo} undoReplace={robotAssemblyUndoGroup} undoSubtree={robotAssemblyUndoSubtree} retrySync={retryAssemblySync} moveTcp={manualTcpMove} stop={()=>perform(()=>stop(false))} sync={()=>perform(()=>worldRef.current?sync():startWorld())} reset={()=>{const w=worldRef.current,s=sceneRef.current;if(w&&s)perform(()=>applyRobotConfiguration('sim_reset',{worldId:w.worldId,sceneId:s.sceneId,expectedRevision:s.revision,expectedGeneration:w.worldGeneration}))}} editPosition={()=>openObjectInspector(entity!.entityId)} locate={kind=>locateRobotAnchor(entity!.entityId,kind)}/>
+  </PanelPage>
+ </div>:null
+ const robotOverview=<>
+  {robotDetailActive&&entity
+   ?<>
+    <div className="lya-panel-seat" hidden={componentsView} aria-hidden={componentsView} style={componentsView?{display:'none'}:undefined}>
+     <div className="lya-panel-seat" hidden={robotSection!=='root'} aria-hidden={robotSection!=='root'} style={robotSection!=='root'?{display:'none'}:undefined}>{robotDetailRoot}</div>
+     {robotPolicyPage}
+     {robotJointsPage}
+     {robotConfigurationPage}
+    </div>
+    {componentsView&&<><ComponentsPanel key={entity.entityId} viewer={viewer.current} entityId={entity.entityId} entityName={sceneNodeName(entity,tr)} selectedPart={partSelection} tr={tr} viewerVisible={viewerVisible} extraction={extractionPort} identity={componentsIdentity} onBack={closeComponents}/>{attachSectionFor(entity)}
+      {attachmentsSectionFor(entity)}</>}
+   </>
+    :<PanelPage className="lya-robot-home" title={tr("机器人","Robots")}>
+     {/* V5 EN-25：默认先 Robot Library；场景实例是清楚的第二页签，0 个实例也不在库前铺两个标题。 */}
+     <div className="lya-segment" role="tablist" aria-label={tr("机器人首页","Robots home")}>
+      <button role="tab" aria-selected={robotHomeTab==='library'} onClick={()=>setRobotHomeTab('library')}>{tr("机器人库","Library")}</button>
+      <button role="tab" aria-selected={robotHomeTab==='instances'} onClick={()=>setRobotHomeTab('instances')}>{tr("场景内","In scene")} {robotInstances.length}</button>
+     </div>
+     {robotHomeTab==='library'
+      ? <RobotLibrarySection tr={tr} rows={robotLibraryRows} rowsBusy={robotLibraryBusy} rowsError={robotLibraryError} query={robotLibraryQuery} setQuery={setRobotLibraryQuery} tab={robotLibraryTab} setTab={setRobotLibraryTab} imported={importedRobotAssets} canMount={canMountAsset} available={Boolean(sessionId)} selectedPackId={robotLibraryPack} onSelectPack={setRobotLibraryPack} onAdd={row=>void mountLibraryRow(row)} onMount={mountAsset} onImport={openDomainImport} onRefresh={()=>void refreshRobotLibrary(true)} sessionId={sessionId} previewRequest={api.modelPreview} previewBytesURL={api.modelPreviewURL} previewHost={resourcePreviewHost} previewScope={`${sessionId??''}:${scene?.sceneId??''}`}/>
+      : <RobotInstanceList tr={tr} instances={robotInstances} selectedId={selected} worldBoundFor={()=>robotWorldBound} onOpen={openRobotDetail}/>}
+     <details className="lya-advanced" data-testid="domain-asset-management" title={tr("管理机器人资源（版本/检查/回收）","Manage robot assets (version/check/trash)")}><summary>{tr("资产管理","Asset management")}</summary>{libraryManagement('robot')}</details>
+     <details className="lya-advanced" data-testid="robot-pack-capabilities" title={tr("能力包与适配详情","Pack capabilities & adapters")}><summary>{tr("能力","Capabilities")}</summary><PackLibraryPanel scene={scene} available={Boolean(sessionId)} canLoad={!readOnly} busy={importBusy} tr={tr} command={(name,args)=>api.command<any>(name,args)} load={(modelPath,packId,provenance)=>loadPackModel(modelPath,packId,provenance)}/></details>
+     {domainImportControl}
+    </PanelPage>}
+
+ </>
+ // R-012 二级页面：进入 Attach/Replace 后右栏只显示该任务；原概览保持挂载但隐藏，返回后草稿与组件 owner 不丢。
+ const attachBase=entity&&robotEntity(entity)?entity:robotInstances[0]
+ const robotPanel=<>
+  <div className="lya-panel-seat" data-testid="robot-overview" hidden={attachOpen} {...attachOpen?{inert:''}:{}} style={attachOpen?{display:'none'}:undefined}>{robotOverview}</div>
+  {attachOpen&&attachBase&&<div className="lya-attach-page" data-testid="assembly-attach-page">{attachPageFor(attachBase)}</div>}
  </>
 
  // 命名相机（场景内容，`entity.components.viewerCamera`）：这里**不持有第二份状态**——
  // 读的就是场景快照里的那条组件（写回后下一轮轮询/提交返回的 rev 就是它），所以另一个窗口存的那台、
  // 或者用 scene_edit 直接改文档的，界面里立刻就是同一个列表；模型侧按名字应用它们走同一个读函数。
- const [rigSpec,setRigSpec]=useState<any>(),[rigVisible,setRigVisible]=useState(true),[lensFocal,setLensFocal]=useState("24"),[lensSensor,setLensSensor]=useState("36")
+ const [rigSpec,setRigSpec]=useState<any>(),[rigVisible,setRigVisible]=useState(false),[lensFocal,setLensFocal]=useState("24"),[lensSensor,setLensSensor]=useState("36"),[recordCameraKey,setRecordCameraKey]=useState<string|undefined>()
  const rigSpecRef=useRef<any>()
- const nativeCameras=useNativeCameraList({api,scene,world,active:open&&!replayActive&&uiState.tool==="camera"})
+ const nativeCameras=useNativeCameraList({api,scene,world,active:open&&!replayActive&&(uiState.tool==="camera"||uiState.tool==="recording")})
  const unavailableCameraNames:string[]=(nativeCameras.receipt?.cameras??[]).filter((row:any)=>row.available===false).map((row:any)=>row.cameraName)
  const cameraSpecs=projectSceneCameraRigs(scene,world,frame,cameraRigSpecs(nativeCameras.receipt?.cameras),unavailableCameraNames)
  useEffect(()=>{setRigSpec(undefined);rigSpecRef.current=undefined},[nativeCameras.key,api])
@@ -1789,15 +2711,20 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  useEffect(()=>{const instance=viewer.current;if(!instance)return;instance.onCameraRigSelect=spec=>{setRigSpec(spec);rigSpecRef.current=spec};instance.onCameraRigEdit=adjustRig;instance.setCameraRigs(cameraRigSpecs(nativeCameras.receipt?.cameras),{visible:rigVisible,unavailableCameraNames})},[nativeCameras.receipt,scene?.sceneId,scene?.revision,rigVisible])
  const sceneNamedCameras=namedCamerasOfScene(scene?.entities).cameras
  const cameraNames=sceneNamedCameras.map(row=>row.name)
- const [cameraName,setCameraName]=useState(""),[savingView,setSavingView]=useState(false),savingViewRef=useRef(false)
+ const sceneRoutes=captureRoutesOfScene(scene?.entities,scene?.sceneId).routes
+ const [savingView,setSavingView]=useState(false),savingViewRef=useRef(false),[takingCapture,setTakingCapture]=useState(false)
+ /** 路线与机位同写一份 `viewerCamera` 组件（见 `writeViewerCameraComponent`）；保存路线不复制机位。 */
+ const saveCaptureRoutes=(next:readonly CaptureRoute[])=>{const current=sceneRef.current;if(!current)throw new Error("SCENE_REQUIRED");return writeViewerCameraComponent(current.sceneId,current.revision,{routes:next})}
+ // 连续视频/A→B→C 会话在顶层只创建一次：切工具栏不重建 Viewer、不打断录制；窗口关闭时统一清理。
+ const captureSession=useContinuousCaptureSession({api,viewer:()=>viewer.current,viewerVisible,sceneId:scene?.sceneId,sceneRevision:scene?.revision,world,tr,onSaved:record=>setVideos(old=>[record,...old.filter(row=>row.videoId!==record.videoId)]),onError:message=>setError(message)})
  /** 保存当前视角（= 一次 scene_edit，与工具 saveAs 同一条路；失败如实报错，界面不显示"已保存"）。 */
- const saveCameraView=()=>{const instance=viewer.current,current=sceneRef.current;let name=cameraName.trim();if(!instance||!current||savingViewRef.current)return
+ const saveCameraView=(inputName?:string)=>{const instance=viewer.current,current=sceneRef.current;let name=(inputName??"").trim();if(!instance||!current||savingViewRef.current)return
   const currentCameras=namedCamerasOfScene(current.entities).cameras
   if(!name){let number=1;while(currentCameras.some(camera=>camera.name===tr(`视角 ${number}`,`View ${number}`)))number++;name=tr(`视角 ${number}`,`View ${number}`)}
   // 存的是**当场量出来的**状态（含 roll/视场/裁剪面/内参）：恢复时才回得到同一台相机。
   const saved={name,savedAt:new Date().toISOString(),state:instance.getViewState() as unknown as NamedCamera["state"]}
   savingViewRef.current=true;setSavingView(true)
-  perform(async()=>{try{await writeNamedCameras(current.sceneId,current.revision,withNamedCamera(currentCameras,saved));setCameraName("");setNotice(tr(`已保存机位「${name}」。`,`Saved view "${name}".`))}finally{savingViewRef.current=false;setSavingView(false)}})}
+  perform(async()=>{try{await writeNamedCameras(current.sceneId,current.revision,withNamedCamera(currentCameras,saved));setNotice(tr(`已保存机位「${name}」。`,`Saved view "${name}".`))}finally{savingViewRef.current=false;setSavingView(false)}})}
  /** 进入文档机位并保存主视图返程；姿态仍沿统一normalize/write路径。 */
  const restoreCameraView=(name:string)=>{const instance=viewer.current,current=sceneRef.current,row=sceneNamedCameras.find(item=>item.name===name);if(!instance||!current||!row)return
   perform(async()=>{enterSavedCameraView(instance,current,name);ui.showCentre("canvas")})}
@@ -1854,101 +2781,210 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   * 取景框只给"透过该相机看"这一支（线框＝整块视口，与投影同一份映射，见 viewer `captureGateRect`）；
   * Viewer 侧在相机被导航/预设/换相机后自动收起，这里不重复存门状态。 */
  const pilotRig=(spec:any,lens:boolean)=>{const instance=viewer.current;if(!instance)return;perform(async()=>{instance.pilotCameraRig(spec.key,lens);ui.showCentre("canvas")})}
- const cameraPanel=<>
-  <div className="lya-row"><button disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture")}</button><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("进入场景中心","Enter scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦选中","Focus selected")}</button></div>
+ const cameraPanel=<PanelPage title={tr("相机","Camera")}>
   {replayActive&&<p className="lya-help">{tr("录制回放为只读，返回实时视图后才能采集。","Recorded replay is read-only; return to the live view before capturing.")}</p>}
-  <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} aim={key=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:key})} returnView={()=>{exitCameraView();}} piloted={observerState?.mode!=='free'?observerState?.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} selectedRobotEntityId={robotSelected?entity?.entityId:undefined} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge}/>
+  <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} aim={key=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:key})} returnView={()=>{exitCameraView();}} piloted={observerState?.mode!=='free'?observerState?.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} selectedRobotEntityId={robotSelected?entity?.entityId:undefined} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge} scope="mounted" compareOverlayHost={compareOverlayHost} recordCamera={key=>{setRecordCameraKey(key);ui.openTool('recording')}}/>
   <CameraAimControl positionLocked={observerState?.positionLocked} spec={rigSpec} tr={tr} setFov={value=>perform(async()=>viewer.current?.setCameraRigAimFov(value))}/>
   {observerState?.mode==='camera-edit'&&<div className="lya-row"><span>{tr('正在编辑相机安装','Editing camera installation')}{observerState.dirty?tr(' · 未保存',' · unsaved'):''}</span><button onClick={()=>perform(async()=>{const source=viewer.current as unknown as CameraAuthoringViewer;if(!source.finishCameraRigEditing)throw Error('CAMERA_EDIT_FINISH_UNAVAILABLE');await source.finishCameraRigEditing({discard:false})})}>{tr('保存并结束编辑','Save and finish editing')}</button><button onClick={()=>perform(async()=>{const source=viewer.current as unknown as CameraAuthoringViewer;await source.finishCameraRigEditing?.({discard:true})})}>{tr('放弃草稿','Discard draft')}</button></div>}
-  <fieldset className="lya-property-editor"><legend>{tr("相机预设","Camera presets")}</legend>
-   <div className="lya-row">{(["perspective","top","front","side"] as const).map((value,index)=><button key={value} disabled={!viewerVisible} onClick={()=>viewer.current?.cameraPreset(value)}>{[tr("透视","Perspective"),tr("顶视","Top"),tr("前视","Front"),tr("侧视","Side")][index]}</button>)}</div>
-  </fieldset>
-  <details className="lya-advanced"><summary>{tr("视锥与镜头参数","Frustums and lens parameters")}</summary>
-  <fieldset className="lya-property-editor"><legend>{tr("相机视锥","Camera frustums")}</legend>
-   <label><input type="checkbox" checked={rigVisible} onChange={()=>{const next=!rigVisible;setRigVisible(next);viewer.current?.setCameraRigsVisible(next)}}/>{tr("在 3D 里显示相机视锥","Show camera frustums in 3D")}</label>
-   {rigSpec&&<div className="lya-row"><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,true)}>{tr("透过该相机看","Look through this camera")}</button><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,false)}>{tr("对齐机位","Align view to this camera")}</button><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera&&!(entity.components.camera as any).mount)))} onClick={()=>viewer.current?.attachCameraRigGizmo(rigSpec.key)}>{tr("gizmo 调整安装位姿","Adjust mount pose with gizmo")}</button><button disabled={!viewerVisible||replayActive||readOnly} onClick={()=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:rigSpec.key})}>{tr("在安装原点调朝向","Aim from installation origin")}</button></div>}
-   {rigSpec&&<div className="lya-row"><input type="number" aria-label={tr("焦距 mm","Focal length mm")} value={lensFocal} onChange={event=>setLensFocal(event.target.value)} style={{width:60}}/><input type="number" aria-label={tr("传感器宽 mm","Sensor width mm")} value={lensSensor} onChange={event=>setLensSensor(event.target.value)} style={{width:60}}/><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera)))} onClick={applyLensFov}>{tr("按摄影口径设 FOV","Set FOV from lens")}</button></div>}
-   {rigSpec
-    ?<p className="lya-help">{rigSpec.key} · {rigSpec.intrinsics.width}×{rigSpec.intrinsics.height} · fx {rigSpec.intrinsics.fx.toFixed(2)} / fy {rigSpec.intrinsics.fy.toFixed(2)} · cx {rigSpec.intrinsics.cx.toFixed(1)} / cy {rigSpec.intrinsics.cy.toFixed(1)} · K={rigSpec.intrinsicsSource}{rigSpec.parentBodyName?` · ${tr("挂载","mount")} ${rigSpec.parentBodyName} (${rigSpec.referenceFrame??"—"})`:""}{rigSpec.override?` · ${tr("临时 override","temporary override")}`:""}<br/>{tr("来源","Source")}={rigSpec.source} · {rigSpec.clipPlanesSource==="engine-global"?tr("near/far 为引擎全局实际值","near/far from engine-global clipping"):rigSpec.nearFarSource==="declared"?tr("near/far 为声明值","near/far declared"):tr("near/far 为显示默认（仅显示参数）","near/far display default (display-only)")}{rigSpec.notes?.length?` · ${rigSpec.notes.join("；")}`:""}</p>
-    :<p className="lya-help">{tr("点 3D 里的视锥看它的标定读数（数据来自 camera_list 回执，不是第二份状态）。","Click a frustum in 3D for its calibration readout (data comes from the camera_list receipt, not a second state store).")}</p>}
-  </fieldset>
+  <details className="lya-advanced" data-testid="camera-view-tools"><summary title={tr("视图与显示设置","View and display settings")}>{tr("视图设置","View settings")}</summary>
+   <div className="lya-row"><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("场景中心","Scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦选中","Focus selected")}</button></div>
+   <details className="lya-advanced"><summary>{tr("视锥与镜头参数","Frustums and lens parameters")}</summary>
+   <fieldset className="lya-property-editor"><legend>{tr("相机视锥","Camera frustums")}</legend>
+    <label><input type="checkbox" checked={rigVisible} onChange={()=>{const next=!rigVisible;setRigVisible(next);viewer.current?.setCameraRigsVisible(next)}}/>{tr("在 3D 里显示相机视锥","Show camera frustums in 3D")}</label>
+    {rigSpec&&<div className="lya-row"><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,true)}>{tr("透过该相机看","Look through this camera")}</button><button disabled={!viewerVisible} onClick={()=>pilotRig(rigSpec,false)}>{tr("对齐机位","Align view to this camera")}</button><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera&&!(entity.components.camera as any).mount)))} onClick={()=>viewer.current?.attachCameraRigGizmo(rigSpec.key)}>{tr("gizmo 调整安装位姿","Adjust mount pose with gizmo")}</button><button disabled={!viewerVisible||replayActive||readOnly} onClick={()=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:rigSpec.key})}>{tr("在安装原点调朝向","Aim from installation origin")}</button></div>}
+    {rigSpec&&<div className="lya-row"><input type="number" aria-label={tr("焦距 mm","Focal length mm")} value={lensFocal} onChange={event=>setLensFocal(event.target.value)} style={{width:60}}/><input type="number" aria-label={tr("传感器宽 mm","Sensor width mm")} value={lensSensor} onChange={event=>setLensSensor(event.target.value)} style={{width:60}}/><button disabled={!viewerVisible||replayActive||readOnly||Boolean(!world&&!(scene?.entities.some(entity=>entity.entityId===rigSpec.entityId&&entity.components.camera)))} onClick={applyLensFov}>{tr("按摄影口径设 FOV","Set FOV from lens")}</button></div>}
+    {rigSpec?<p className="lya-help">{rigSpec.key} · {rigSpec.intrinsics.width}×{rigSpec.intrinsics.height} · fx {rigSpec.intrinsics.fx.toFixed(2)} / fy {rigSpec.intrinsics.fy.toFixed(2)} · cx {rigSpec.intrinsics.cx.toFixed(1)} / cy {rigSpec.intrinsics.cy.toFixed(1)} · K={rigSpec.intrinsicsSource}{rigSpec.parentBodyName?` · ${tr("挂载","mount")} ${rigSpec.parentBodyName} (${rigSpec.referenceFrame??"—"})`:""}{rigSpec.override?` · ${tr("临时 override","temporary override")}`:""}</p>:<p className="lya-help">{tr("点 3D 里的视锥看它的标定读数。","Click a frustum in 3D for its calibration readout.")}</p>}
+   </fieldset>
+   </details>
+   <fieldset className="lya-property-editor"><legend>{tr("显示","Display")}</legend>
+    <label className="lya-field-label">{tr("点云画质","Point cloud quality")}<select aria-label={tr("点云画质","Point cloud quality")} value={display.splatQuality??'auto'} onChange={event=>setDisplay(old=>({...old,splatQuality:event.target.value as 'auto'|'fast'|'balanced'|'quality'}))}><option value="auto">{tr("自动","Auto")}</option><option value="fast">{tr("流畅","Fast")}</option><option value="balanced">{tr("均衡","Balanced")}</option><option value="quality">{tr("高画质","High quality")}</option></select></label>
+    <div className="lya-row">{(["grid","axes","wireframe","splats","collision"] as const).map((value,index)=><label key={value}><input type="checkbox" checked={display[value]} onChange={event=>setDisplay(old=>({...old,[value]:event.target.checked}))}/>{[tr("网格","Grid"),tr("坐标轴","Axes"),tr("线框","Wireframe"),"Gaussian",tr("碰撞","Collision")][index]}</label>)}
+      <label title={tr("显示/隐藏场景作者在 Blender 里打的灯；关掉后仍有基础环境光，不会全黑。","Show or hide the lights the scene author placed in Blender. Basic ambient light remains, so the view never goes fully black.")}><input type="checkbox" checked={sceneLights} onChange={event=>setSceneLights(event.target.checked)}/>{tr("场景灯","Scene lights")}</label>
+      <AnimationControls summary={animationSummary} requested={animationsPlaying} tr={tr} disabled={!viewerVisible} change={playing=>{const instance=viewer.current;if(!instance)return;setAnimationSummary(applyAnimationDisplay(instance,playing,true));setAnimationsPlaying(playing)}}/></div>
+    <div className="lya-row"><label className="lya-help">{tr("背景颜色","Background color")}<input type="color" aria-label={tr("背景颜色","Background color")} value={display.background} onChange={event=>setDisplay(old=>({...old,background:event.target.value}))}/></label><button onClick={()=>setViewerVisible(!viewerVisible)}>{viewerVisible?tr("关闭 Viewer","Close viewer"):tr("重开 Viewer","Reopen viewer")}</button></div>
+   </fieldset>
   </details>
-  <fieldset className="lya-property-editor"><legend>{tr("已保存视角","Saved views")}</legend>
-   <div className="lya-row"><input aria-label={tr("相机名","Camera name")} placeholder={tr("机位名称（可选）","View name (optional)")} value={cameraName} onChange={event=>setCameraName(event.target.value)}/><button disabled={readOnly||replayActive||!viewerVisible||!scene||savingView} onClick={saveCameraView}>{savingView?tr("正在保存…","Saving…"):tr("保存当前视角","Save view")}</button></div>
-   {cameraNames.length
-    ?<div className="lya-row">{cameraNames.map(name=><span className="lya-row" key={name}><button aria-label={tr(`进入保存视角 ${name}`,`Enter saved view ${name}`)} disabled={replayActive||!viewerVisible} onClick={()=>restoreCameraView(name)}>{name}</button><button aria-label={tr(`删除相机 ${name}`,`Delete camera ${name}`)} onClick={()=>deleteCameraView(name)}>×</button></span>)}</div>
-    :<p className="lya-help">{tr("在这个场景里保存几个机位：点名字进入已保存视角，再点返回主视图回到进入前的画面。滚转、视场和内参随机位保存。","Save camera views per scene: click a name to enter a saved view, then return to the main view to restore the previous camera. Roll, field of view and intrinsics stay with each view.")}</p>}
-   <CameraReturnControl mode={observerState?.mode} tr={tr} returnView={()=>exitCameraView()}/>
-  </fieldset>
-  <fieldset className="lya-property-editor"><legend>{tr("显示","Display")}</legend>
-   <label className="lya-field-label">{tr("点云画质","Point cloud quality")}<select aria-label={tr("点云画质","Point cloud quality")} value={display.splatQuality??'auto'} onChange={event=>setDisplay(old=>({...old,splatQuality:event.target.value as 'auto'|'fast'|'balanced'|'quality'}))}><option value="auto">{tr("自动","Auto")}</option><option value="fast">{tr("流畅","Fast")}</option><option value="balanced">{tr("均衡","Balanced")}</option><option value="quality">{tr("高画质","High quality")}</option></select></label>
-   <p className="lya-help">{tr("调整当前绘制细节，原文件保持完整。切换画质不重新解码场景。","Changes drawing detail; the original remains complete. Switching quality does not decode the scene again.")}</p>
-   <div className="lya-row">{(["grid","axes","wireframe","splats","collision"] as const).map((value,index)=><label key={value}><input type="checkbox" checked={display[value]} onChange={event=>setDisplay(old=>({...old,[value]:event.target.checked}))}/>{[tr("网格","Grid"),tr("坐标轴","Axes"),tr("线框","Wireframe"),"Gaussian",tr("碰撞","Collision")][index]}</label>)}
-     <label title={tr("显示/隐藏场景作者在 Blender 里打的灯；关掉后仍有基础环境光，不会全黑。","Show or hide the lights the scene author placed in Blender. Basic ambient light remains, so the view never goes fully black.")}><input type="checkbox" checked={sceneLights} onChange={event=>setSceneLights(event.target.checked)}/>{tr("场景灯","Scene lights")}</label>
-     <AnimationControls summary={animationSummary} requested={animationsPlaying} tr={tr} disabled={!viewerVisible} change={playing=>{const instance=viewer.current;if(!instance)return;setAnimationSummary(applyAnimationDisplay(instance,playing,true));setAnimationsPlaying(playing)}}/></div>
-   <div className="lya-row"><label className="lya-help">{tr("背景颜色","Background color")}<input type="color" aria-label={tr("背景颜色","Background color")} value={display.background} onChange={event=>setDisplay(old=>({...old,background:event.target.value}))}/></label><button onClick={()=>setViewerVisible(!viewerVisible)}>{viewerVisible?tr("关闭 Viewer","Close viewer"):tr("重开 Viewer","Reopen viewer")}</button></div>
-   <p className="lya-help">{tr("关闭 Viewer 只停显示，世界继续运行；停止按钮始终可用。","Closing the viewer only stops rendering; the world keeps running and Stop stays available.")}</p>
-  </fieldset>
-  {official&&world&&<fieldset className="lya-property-editor"><legend>{tr("官方视角","Official camera")}</legend><button aria-pressed={officialCamera} onClick={()=>setOfficialCamera(value=>!value)}>{officialCamera?tr("回到 3D 场景","Back to 3D scene"):tr("官方相机画面","Official camera view")}</button></fieldset>}
-  <details className="lya-advanced"><summary>{tr("采集与临时调整","Capture and temporary overrides")}</summary>
-  <CapturePanel api={api} captures={captures} capture={capture} sceneId={scene?.sceneId} sceneRevision={scene?.revision} world={world} readOnly={replayActive} select={setCapture} tr={tr} perform={perform} cameraReceipt={nativeCameras.receipt} refreshCameraList={nativeCameras.refresh} onCameraRigs={specs=>viewer.current?.setCameraRigs(specs,{visible:rigVisible,unavailableCameraNames})}/>
+  {official&&world&&<details className="lya-advanced"><summary>{tr("官方视角","Official camera")}</summary><button aria-pressed={officialCamera} onClick={()=>setOfficialCamera(value=>!value)}>{officialCamera?tr("回到 3D 场景","Back to 3D scene"):tr("官方相机画面","Official camera view")}</button></details>}
+ </PanelPage>
+ // 拍摄会话（自由视角/路线预览/路线录制/取消中）一旦开始，宿主不再暴露"下一次拍摄"的编辑入口：
+ // 世界固定机位、相机预设、RGB-D 与相机返程都只在空闲态渲染，退出拍摄后原样回来。
+ // 只切宿主侧这份设置子树；ContinuousCapturePanel、CaptureSessionBar、会话 owner 与 Viewer 都不卸载。
+ const captureActive=captureSession.phase!=="idle"
+ const capturePanel=<PanelPage title={tr("拍摄","Capture")}>
+  {replayActive&&<p className="lya-help">{tr("录制回放为只读，返回实时视图后才能采集。","Recorded replay is read-only; return to the live view before capturing.")}</p>}
+  <ContinuousCapturePanel key={scene?.sceneId ?? "no-scene"} session={captureSession} cameras={sceneNamedCameras} routes={sceneRoutes} videos={videos} captures={captures} api={api} sceneId={scene?.sceneId} sceneRevision={scene?.revision} tr={tr} perform={perform} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} worldReady={Boolean(scene&&world&&world.engineId&&world.sceneId===scene.sceneId&&['ready','running','paused'].includes(world.status))} saveRoutes={saveCaptureRoutes}
+   onTrail={(stations,selected)=>viewer.current?.setCaptureRouteTrail(stations,selected)}
+   onTrailCurrent={pose=>viewer.current?.setCaptureRouteCurrentPose(pose)}
+   onRouteOverview={stations=>viewer.current?.frameCaptureRoute(stations)}
+   currentView={()=>viewer.current?.getViewState()}
+   onUpdateCameraPose={async(name,state)=>{const current=sceneRef.current;if(!current)throw Error('SCENE_REQUIRED');const named=namedCamerasOfScene(current.entities);const camera=named.cameras.find(row=>row.name===name);if(!camera)throw Error('CAMERA_NOT_FOUND');await writeNamedCameras(current.sceneId,current.revision,withNamedCamera(named.cameras,{...camera,savedAt:new Date().toISOString(),state:state as unknown as NamedCamera["state"]}))}}
+   onSelectStop={name=>{if(!name)return;const named=namedCamerasOfScene(scene?.entities);if(named.carrier)viewer.current?.selectCameraRig(`${named.carrier}/${name}`)}}
+   onTakeImage={()=>perform(takeImage)} takeImageBusy={takingCapture}
+   onSaveView={name=>saveCameraView(name)} viewSaving={savingView}
+   onSelectView={restoreCameraView} onDeleteView={deleteCameraView}/>
+  {/* 设计稿 V8-24：拍摄态不复述"设置已锁定/去浮条停止"——锁定由设置区消失表达，停/取消由画布浮条表达。
+      保留 data-testid 的宿主判定改为不可见的语义标记，供既有断言与调试识别，不作为首屏文案。 */}
+  {captureActive
+   ?<span data-testid="capture-host-lock" hidden aria-hidden="true"/>
+   :<>
+  <CameraReturnControl mode={observerState?.mode} tr={tr} returnView={()=>exitCameraView()}/>
+  <details className="lya-advanced" data-testid="capture-settings"><summary>{tr("拍摄设置","Capture settings")}</summary>
+   <div className="lya-row"><button className="lya-primary" disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture image")}</button><button disabled={replayActive||!viewerVisible||!scene} title={tr("只将相机移到主体中心，不改变模型位置。","Moves only the camera to the subject center; model positions stay unchanged.")} onClick={()=>viewer.current?.enterSceneCenter()}>{tr("场景中心","Scene center")}</button><button disabled={replayActive||!viewerVisible} onClick={()=>viewer.current?.frameAll()}>{tr("全景","Fit")}</button><button disabled={!selected||!viewerVisible} onClick={()=>selected&&viewer.current?.focus(selected)}>{tr("聚焦选中","Focus selected")}</button></div>
+   <details className="lya-advanced" data-testid="capture-world-camera-settings"><summary>{tr("世界固定机位","World-fixed cameras")}</summary>
+    <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} aim={key=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:key})} returnView={()=>{exitCameraView();}} piloted={observerState?.mode!=='free'?observerState?.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge} scope="world" recordCamera={key=>{setRecordCameraKey(key);ui.openTool('recording')}}/>
+   </details>
+   <details className="lya-advanced"><summary>{tr("相机预设","Camera presets")}</summary>
+    <div className="lya-row">{(["perspective","top","front","side"] as const).map((value,index)=><button key={value} disabled={!viewerVisible} onClick={()=>viewer.current?.cameraPreset(value)}>{[tr("透视","Perspective"),tr("顶视","Top"),tr("前视","Front"),tr("侧视","Side")][index]}</button>)}</div>
+   </details>
+   <details className="lya-advanced"><summary>{tr("RGB-D 采集与多视角","RGB-D capture and multi-view")}</summary>
+    <CapturePanel api={api} captures={captures} capture={capture} sceneId={scene?.sceneId} sceneRevision={scene?.revision} world={world} readOnly={replayActive} select={setCapture} tr={tr} perform={perform} cameraReceipt={nativeCameras.receipt} refreshCameraList={nativeCameras.refresh} onCameraRigs={specs=>viewer.current?.setCameraRigs(specs,{visible:rigVisible,unavailableCameraNames})}/>
+   </details>
   </details>
+   </>}
+ </PanelPage>
+ const recordingPanel=<>
+  {/* Recording：固定机器人机位。来源从 Scene 挂载与现有 camera_list 投影接入，不新建第二份机位 owner。 */}
+  <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} embedded visible={visible&&!globalPanel&&mode!=="chat"&&uiState.tool==="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeTool()}/>
  </>
 
- const assetPanel=<>
-  {importPurposeControl}
-  <details className="lya-property-editor"><summary>{tr("模型导入高级设置","Advanced model import settings")}{sourceTexturePolicy==='strict'?tr(" · 严格完整依赖"," · Complete dependencies"):""}</summary><label className="lya-field-label">{tr("OBJ / FBX 纹理策略","OBJ / FBX texture policy")}<select aria-label={tr("源模型纹理策略","Source model texture policy")} value={sourceTexturePolicy} disabled={importBusy} onChange={event=>setSourceTexturePolicy(event.target.value as 'strict'|'available')}><option value="available">{tr("保留几何与现有材质（默认）","Geometry and available materials (default)")}</option><option value="strict">{tr("严格完整依赖","Require complete dependencies")}</option></select></label><p className="lya-help">{sourceTexturePolicy==='strict'?tr("文件选择、本地路径与拖入均要求材质依赖完整；缺少外部纹理时停止导入。","File selection, local paths, and drop require complete material dependencies; missing external textures stop the import."):tr("直接打开模型会载入几何与现有材质，缺失纹理单独提示。此设置适用于文件选择、本地路径与拖入。","Opening a model loads its geometry and available materials, with a separate notice for missing textures. This setting applies to file selection, local paths, and drop.")}</p></details>
-  <AssetLibraryPanel assets={assets} builtin={builtinAssets} builtinBusy={importBusy} query={assetQuery} loading={assetsLoading} includeDeleted={includeDeleted} canMount={canMountAsset} available={Boolean(sessionId)} tr={tr} {...assetInstanceControls}
-   setQuery={setAssetQuery} setIncludeDeleted={setIncludeDeleted} search={()=>perform(()=>refreshAssets(assetQuery))} refresh={()=>perform(()=>refreshAssets())}
-   mount={mountAsset} rename={asset=>setRenameAsset({resourceId:asset.ref.resourceId,original:asset.name,value:asset.name})}
-   verify={asset=>perform(async()=>{const result=await api.command<{valid:boolean;missing:string[];changed:string[]}>("asset_verify",{resourceId:asset.ref.resourceId,version:asset.ref.version});setNotice(result.valid?tr(`${asset.name} 的文件可用。`,`${asset.name} files are available.`):tr(`${asset.name} 有 ${result.missing.length+result.changed.length} 个文件需要处理。`,`${asset.name} has ${result.missing.length+result.changed.length} file issues.`))})}
-   toggleDeleted={asset=>perform(()=>toggleAssetDeleted(asset))}
-   importFile={()=>{if(window.lyapunovDesktop)perform(async()=>{const paths=await window.lyapunovDesktop!.selectFiles();if(paths.length)await importLocalPaths(paths,"library")});else setAssetImportOpen(value=>!value)}} importBuiltin={item=>perform(()=>importBuiltin(item))} browseEnvironment={()=>ui.openTool("environment")}
-   importPanel={assetImportOpen&&<form className="lya-library-import-section" onSubmit={event=>{event.preventDefault();perform(importToLibrary)}}>
-    <label className="lya-field-label">{tr("本地模型路径","Local model path")}<input autoFocus className="lya-wide" aria-label={tr("导入素材路径","Asset import path")} placeholder="/path/to/model.glb" value={assetPath} onChange={event=>setAssetPath(event.target.value)}/></label>
-    <p className="lya-help">{tr("导入后会保存在素材库，原文件保留。","The asset is added to your library. The original file is preserved.")}</p>
-    <div className="lya-row"><button className="lya-primary" type="submit" disabled={importBusy||!assetPath.trim()}>{importBusy?tr("导入中…","Importing…"):tr("导入素材","Import asset")}</button><button type="button" onClick={()=>setAssetImportOpen(false)}>{tr("取消","Cancel")}</button></div>
-   </form>}/>
-  {missingAssets.length>0&&<section className="lya-asset-library" aria-label={tr("待恢复原件","Missing originals")}>
-   <div className="lya-panel-title"><strong>{tr("待恢复原件","Missing originals")} {missingAssets.length}</strong><span><button disabled={missingAssetsLoading} onClick={()=>perform(refreshMissingAssets)}>{missingAssetsLoading?"…":tr("刷新","Refresh")}</button>{missingAssets.length>0&&<button disabled={missingAssetsLoading} onClick={()=>perform(rescanMissingAssets)}>{missingAssetsLoading?"…":tr("重扫原件","Rescan originals")}</button>}</span></div>
-   {missingAssets.length===0?<p className="lya-help">{tr("没有迁移阻断的原件。","No blocked migrated originals.")}</p>:missingAssets.map(asset=><div className="lya-row" key={asset.resourceId}><span className="lya-help" title={asset.legacyPath??asset.resourceId}><span className="lya-badge lya-warning">BLOCKED</span> {asset.displayName??asset.resourceId}{asset.legacyPath?` · ${asset.legacyPath}`:""}</span><span className="lya-help">{tr("请放回同一路径后重新迁移。重扫只检查，不会自动替换。","Restore the original at this path and rerun migration. Rescan only checks; it never replaces files.")}</span></div>)}
-  </section>}
-
+ const physicsPanel=<>
+  <WorldPhysicsPanel scene={scene} world={world} frame={frame} state={worldLifecycle} worlds={worlds.filter(item=>item.status!=="closed"&&item.sceneId===scene?.sceneId)} disabled={readOnly||!providerAvailable} tr={tr} enginePreference={engineState.preference} diagnostics={<WorldFacts world={world} tr={tr}/>} runtimeDiagnostics={<ComputerUseFacts computerUse={computerUse} tr={tr} place="settings"/>}
+   start={()=>perform(startWorld)} sync={()=>perform(sync)} pause={paused=>perform(()=>setWorldPaused(paused))} stop={()=>perform(()=>stop(true))} close={()=>perform(closePhysicsWorld)} prepare={()=>perform(preparePhysicsWorkspace)} saveGravity={gravity=>perform(()=>configureWorldGravity(gravity))} cancel={()=>automaticWorld.cancel()}
+   selectWorld={chosen=>{setWorld(chosen);worldRef.current=chosen;setFrame(undefined);persist(scene,chosen)}}/>
+  {!scene&&<p className="lya-help">{tr("先选择或新建一个场景，再配置物理世界。","Select or create a scene before configuring the physics world.")}</p>}
  </>
 
- const environmentPanel=<>
-  {!sessionId&&<p className="lya-help">{tr("先在左侧选择工作区，再搜索或下载环境素材。","Choose a workspace on the left to search for or download environment assets.")}</p>}
-  <EnvironmentPanel addAreaLight={()=>perform(addAreaLight)} status={environmentStatus} hdris={hdriAssets.map(item=>({resourceId:item.ref.resourceId,version:item.ref.version,name:item.name,mimeType:item.ref.original.mimeType}))} hdriBusy={hdriBusy} readOnly={readOnly} viewerVisible={viewerVisible} busy={!sessionId}
-   apply={patch=>perform(()=>applyEnvironmentPatch(patch))} remove={()=>perform(removeEnvironment)} setPlaying={playing=>toggleDayNight(playing)}
-   color={display.background} setColor={value=>setDisplay(old=>({...old,background:value}))} importHdri={path=>perform(()=>importHdriAsset(path))} refresh={()=>perform(()=>refreshHdriAssets())} tr={tr}/>
-  <div className="lya-section"><span>{tr("环境素材","Environment assets")}</span>{envCandidates.length>0&&<span className="lya-section-side">{envCandidates.length}</span>}</div>
-  {importPurposeControl}
-  <button className="lya-library-import" onClick={()=>{setImportUsageChoice(importUsage);ui.openTool("asset")}}>{tr("打开素材库","Open asset library")} <span aria-hidden="true">↗</span></button>
-  <DomainAssetList domain="environment" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} instanceControls={assetInstanceControls}/>
-  <fieldset className="lya-property-editor"><legend>{tr("搜索下载环境","Search and download")}</legend>
-   <div className="lya-row"><input className="lya-wide" aria-label={tr("环境需求","Environment query")} placeholder={tr("例如 indoor courtyard / forest terrain","for example indoor courtyard / forest terrain")} value={envQuery} onChange={event=>setEnvQuery(event.target.value)}/><button disabled={!sessionId||envBusy||!envQuery.trim()} onClick={()=>perform(searchEnvironment)}>{envBusy?"…":tr("检索","Search")}</button></div>
-   {envNote&&<p className="lya-help">{envNote}</p>}
-   {envCandidates.map(candidate=><div className="lya-env-card" key={candidate.assetId}>
-    {candidate.thumbnailUrl?<img className="lya-env-thumb" src={candidate.thumbnailUrl} alt="" loading="lazy"/>:<span className="lya-env-thumb" aria-hidden="true"><WorkbenchIcon id="environment" size={20}/></span>}
-    <div className="lya-env-main" title={candidate.pageUrl}><strong>{candidate.name}</strong><span>{candidate.categories.join("/")} · {candidate.license}</span></div>
-    <div className="lya-env-actions"><button className="lya-chip" disabled={!sessionId||envBusy} onClick={()=>perform(()=>inspectEnvironment(candidate.assetId))}>{tr("核对","Inspect")}</button><button className="lya-chip lya-chip-accent" disabled={envBusy||readOnly||replayActive} onClick={()=>perform(()=>importEnvironment(candidate.assetId))}>{tr("下载导入","Download")}</button></div>
-   </div>)}
-   {envDetail&&<div className="lya-detail-box"><div className="lya-panel-title"><strong>{envDetail.name}</strong><span className="lya-help">{envDetail.license} · {envDetail.resolution}</span></div>
-    <dl className="lya-kv"><dt>{tr("尺寸","Size")}</dt><dd>{envDetail.sizeM.map(value=>value.toFixed(2)).join(" × ")} m</dd><dt>{tr("三角面","Triangles")}</dt><dd>{envDetail.triangles}</dd><dt>Mesh</dt><dd>{envDetail.meshes}</dd><dt>{tr("材质","Materials")}</dt><dd>{envDetail.materials}</dd><dt>{tr("贴图","Images")}</dt><dd>{envDetail.images}</dd><dt>{tr("下载","Downloads")}</dt><dd>{envDetail.downloads.length} · {Math.round(envDetail.totalBytes/1024/1024)} MiB</dd></dl>
-    <p className="lya-help">{envDetail.note}</p>
-    <div className="lya-row"><button className="lya-chip lya-chip-accent" disabled={envBusy||readOnly||replayActive} onClick={()=>perform(()=>importEnvironment(envDetail.assetId))}>{tr("下载并导入","Download and import")}</button></div>
-   </div>}
-  </fieldset>
- </>
-
+ const environmentAssets=assets.filter(asset=>!asset.deletedAt&&inAssetDomain('environment',asset))
+ const environmentBuiltinCount=builtinAssets.filter(item=>item.category==='background').length
+ const environmentResourceCount=environmentAssets.length+environmentBuiltinCount
+ const environmentComponentPresent=Boolean(environmentStatus?.component)
+ const environmentLightingStatus=environmentComponentPresent?(environmentStatus!.environmentSource==='hdri'?tr('HDRI 环境光','HDRI environment lighting'):tr('自定义环境光照','Custom environment lighting')):tr('内置光照 · 未启用环境组件','Built-in lighting · no environment component')
+ /** World 顶端的真实 Environment 读数/选择：只有素材库里真的有可用 HDRI 时才给选择，否则只读 Built-in。 */
+ const environmentWorldChoices=hdriAssets.map(item=>({id:`${item.ref.resourceId}@${item.ref.version}`,label:`${item.name} · v${item.ref.version}`,resourceId:item.ref.resourceId,version:item.ref.version}))
+ const environmentWorldChoice=environmentStatus?.hdri?`${environmentStatus.hdri.resourceId}@${environmentStatus.hdri.version}`:""
+ /** HDRI 引用短名：库里有同名记录就用名称，否则按真实 resourceId@version 显示，不造名字。 */
+ const environmentRefLabel=(ref:{resourceId:string;version:number})=>hdriAssets.find(item=>item.ref.resourceId===ref.resourceId&&item.ref.version===ref.version)?.name??`${ref.resourceId}@${ref.version}`
+ // World 清单行只回答"这份环境资源到底是什么、是否真的在画面里"：未加载/加载中如实标注，不把请求当成功。
+ const environmentWorldSource=(()=>{
+  if(!environmentComponentPresent)return tr('内置','Built-in')
+  const hdri=environmentStatus!.hdri
+  if(!hdri)return environmentStatus!.environmentSource==='hdri'?tr('HDRI 环境光','HDRI environment lighting'):tr('环境组件 · 内置 IBL','Environment component · built-in IBL')
+  const requested=environmentRefLabel(hdri)
+  if(hdri.loaded)return`HDRI · ${requested}`
+  const state=hdri.loading?tr('加载中','loading'):tr('未加载','not loaded')
+  const applied=hdri.applied?` · ${tr('仍显示','still showing')} ${environmentRefLabel(hdri.applied)}`:''
+  return`HDRI · ${requested} · ${state}${applied}`
+ })()
+ /** Lighting 清单行读真实灯光数值（曝光/太阳/IBL/昼夜时刻）；读数不可得时才退回环境来源标签。 */
+ const environmentNumber=(value:number|undefined,digits=2)=>typeof value==='number'&&Number.isFinite(value)?(Number.isInteger(value)?String(value):value.toFixed(digits)):undefined
+ const environmentLightingReadout=(()=>{
+  const status=environmentStatus
+  if(!status)return''
+  const parts:string[]=[]
+  const exposure=environmentNumber(status.exposure)
+  if(exposure)parts.push(`${tr('曝光','Exposure')} ${exposure}`)
+  if(status.sun&&Number.isFinite(status.sun.elevationDeg)){const strength=environmentNumber(status.sun.intensity);parts.push(`${tr('太阳','Sun')} ${Math.round(status.sun.elevationDeg)}°${strength?` · ${strength}`:''}`)}
+  const intensity=environmentNumber(status.environmentIntensity)
+  if(intensity)parts.push(`IBL ${intensity}`)
+  if(status.clock?.playing)parts.push(`${environmentNumber(status.timeHours,1)} h`)
+  return parts.join(' · ')
+ })()
+ const environmentLightingSubtitle=environmentComponentPresent?(environmentLightingReadout||environmentLightingStatus):tr('工作室光照','Studio lighting')
+ const groundEntity=scene?.physics?.groundEntityId?scene.entities.find(entity=>entity.entityId===scene.physics!.groundEntityId):undefined
+ const groundVisible=groundEntity?groundEntity.components.visual?.visible!==false:undefined
+ // Ground 摘要按真实 groundState + 场景地面实体 + visual.visible 区分；没有可解析的地面实体时不能断言 Visible。
+ const environmentGroundState=scene?.physics?.groundState==='removed'?tr("已移除","Removed")
+  :scene?.physics?.groundState==='disabled'?tr("已禁用","Disabled")
+  :!groundEntity?tr("未声明","Not declared")
+  :groundVisible===false?tr("已隐藏","Hidden")
+  :tr("可见","Visible")
+ const environmentGroundSource=scene?.physics?.groundState==='removed'||scene?.physics?.groundState==='disabled'?tr("没有启用的场景地面","No enabled scene ground"):scene?.physics?.template==='physics-workspace-v2'?tr("零厚度无限碰撞平面（场景实体）","Zero-thickness infinite collision plane (scene entity)"):scene?.physics?.template?tr("场景物理模板","Scene physics template"):tr("场景实体","Scene entity")
+ // 二级页统一由 PanelPage 的 back/onBack 承担唯一返回入口（标题上方一条），不再重复 eyebrow/子内容返回。
+ // 原 environment-detail-header / environment-world-header 测试锚点保留在兼容宿主上：该宿主 display:contents，
+ // 不额外占盒；锚点内部第一个 button 就是 PanelPage 的返回键，导航仍走同一 setEnvironmentView。
+ const environmentDetailBack=environmentView==='list'?undefined:tr('‹ 环境','‹ Environment')
+ const environmentPanel=<div className="lya-panel-page lya-environment-detail" data-testid={environmentView==='lighting'?'environment-detail-header':environmentView==='world'?'environment-world-header':undefined}>
+  <PanelPage title={environmentView==='world'?tr("世界","World"):environmentView==='lighting'?tr("光照","Lighting"):tr("环境","Environment")} back={environmentDetailBack} onBack={environmentDetailBack?()=>setEnvironmentView("list"):undefined}>
+  {!sessionId&&<p className="lya-help">{tr("先在左侧选择工作区，再配置环境。","Choose a workspace on the left to configure the environment.")}</p>}
+  {environmentView==='lighting'
+   ?<>
+    <EnvironmentPanel addAreaLight={()=>perform(addAreaLight)} status={environmentStatus} hdris={hdriAssets.map(item=>({resourceId:item.ref.resourceId,version:item.ref.version,name:item.name,mimeType:item.ref.original.mimeType}))} hdriBusy={hdriBusy} readOnly={readOnly} viewerVisible={viewerVisible} busy={!sessionId}
+     apply={patch=>perform(()=>applyEnvironmentPatch(patch))} remove={()=>perform(removeEnvironment)} setPlaying={playing=>toggleDayNight(playing)}
+     color={display.background} setColor={value=>setDisplay(old=>({...old,background:value}))} importHdri={path=>perform(()=>importHdriAsset(path))} refresh={()=>perform(()=>refreshHdriAssets())} tr={tr}/>
+   </>
+   : environmentView==='world'
+   ?<>
+    {environmentWorldChoices.length>0
+     ?<label className="lya-field-row" data-testid="environment-world-selector">
+       <span className="lya-field-label">{tr("环境","Environment")}</span>
+       <select className="lya-environment-select" aria-label={tr("环境来源","Environment source")} disabled={readOnly||importBusy} value={environmentWorldChoice} onChange={event=>{const found=environmentWorldChoices.find(item=>item.id===event.target.value);perform(()=>applyEnvironmentPatch(found?{hdri:{resourceId:found.resourceId,version:found.version}}:{hdri:null}))}}>
+        <option value="">{tr("内置世界","Built-in world")}</option>
+        {environmentWorldChoices.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}
+       </select>
+      </label>
+     :<FieldRow label={tr("环境","Environment")} value={environmentWorldSource}/>}
+    <details className="lya-advanced" data-testid="environment-world-background">
+     <summary>{tr("背景","Background")}{` · ${display.background}`}</summary>
+     <label className="lya-field-label">{tr("背景颜色","Background color")}<input type="color" aria-label={tr("背景颜色","Background color")} disabled={readOnly} value={display.background} onChange={event=>setDisplay(old=>({...old,background:event.target.value}))}/></label>
+     <p className="lya-help">{tr("这是查看器显示设置；要随场景保存纯色背景，请在 Lighting → Advanced → Background 里勾选。","This is a viewer display setting; to save a solid background in the scene, enable it in Lighting → Advanced → Background.")}</p>
+    </details>
+    <details className="lya-advanced" data-testid="environment-world-ground">
+     <summary>{tr("地面","Ground")}{` · ${environmentGroundState}`}</summary>
+     <dl className="lya-kv">
+      <dt>{tr("状态","State")}</dt><dd>{environmentGroundState}</dd>
+      <dt>{tr("场景实体","Scene entity")}</dt><dd>{scene?.physics?.groundEntityId??tr("未声明","Not declared")}</dd>
+      <dt>{tr("显示","Visibility")}</dt><dd>{groundVisible===undefined?tr("未声明","Not declared"):groundVisible?tr("可见","Visible"):tr("已隐藏","Hidden")}</dd>
+      <dt>{tr("物理来源","Physics source")}</dt><dd>{environmentGroundSource}</dd>
+     </dl>
+     <p className="lya-help">{tr("隐藏只改变显示；地面碰撞来自场景实体/物理模板，不把网格可见当成碰撞。","Hiding changes display only; ground collision comes from the scene entity/physics template, not from grid visibility.")}</p>
+    </details>
+    <details className="lya-advanced" data-testid="environment-imported" open={assetImportOpen||undefined} onToggle={event=>{if(!event.currentTarget.open&&assetImportOpen)setAssetImportOpen(false)}}>
+     <summary>{tr("已导入环境","Imported environments")}{` · ${environmentResourceCount}`}</summary>
+     <DomainAssetList domain="environment" assets={assets} builtin={builtinAssets} busy={importBusy} available={Boolean(sessionId)} canMount={canMountAsset} tr={tr} importBuiltin={item=>perform(()=>importBuiltin(item))} mount={mountAsset} openLibrary={openDomainImport} instanceControls={assetInstanceControls}/>
+     <details className="lya-advanced" data-testid="domain-asset-management"><summary>{tr("管理环境资源（版本/检查/回收）","Manage environment assets (version/check/trash)")}</summary>{libraryManagement('environment')}</details>
+     <details className="lya-advanced"><summary>{tr("搜索与下载","Search and download")}</summary>
+      <div className="lya-row"><input className="lya-wide" aria-label={tr("环境需求","Environment query")} placeholder={tr("例如 indoor courtyard / forest terrain","for example indoor courtyard / forest terrain")} value={envQuery} onChange={event=>setEnvQuery(event.target.value)}/><button disabled={!sessionId||envBusy||!envQuery.trim()} onClick={()=>perform(searchEnvironment)}>{envBusy?"…":tr("检索","Search")}</button></div>
+      {envNote&&<p className="lya-help">{envNote}</p>}
+      {envCandidates.map(candidate=><div className="lya-env-card" key={candidate.assetId}>
+       {candidate.thumbnailUrl?<img className="lya-env-thumb" src={candidate.thumbnailUrl} alt="" loading="lazy"/>:<span className="lya-env-thumb" aria-hidden="true"><WorkbenchIcon id="environment" size={20}/></span>}
+       <div className="lya-env-main" title={candidate.pageUrl}><strong>{candidate.name}</strong><span>{candidate.categories.join("/")} · {candidate.license}</span></div>
+       <div className="lya-env-actions"><button className="lya-chip" disabled={!sessionId||envBusy} onClick={()=>perform(()=>inspectEnvironment(candidate.assetId))}>{tr("核对","Inspect")}</button><button className="lya-chip lya-chip-accent" disabled={envBusy||readOnly||replayActive} onClick={()=>perform(()=>importEnvironment(candidate.assetId))}>{tr("下载导入","Download")}</button></div>
+      </div>)}
+      {envDetail&&<div className="lya-detail-box"><div className="lya-panel-title"><strong>{envDetail.name}</strong><span className="lya-help">{envDetail.license} · {envDetail.resolution}</span></div>
+       <dl className="lya-kv"><dt>{tr("尺寸","Size")}</dt><dd>{envDetail.sizeM.map(value=>value.toFixed(2)).join(" × ")} m</dd><dt>{tr("三角面","Triangles")}</dt><dd>{envDetail.triangles}</dd><dt>Mesh</dt><dd>{envDetail.meshes}</dd><dt>{tr("材质","Materials")}</dt><dd>{envDetail.materials}</dd><dt>{tr("贴图","Images")}</dt><dd>{envDetail.images}</dd><dt>{tr("下载","Downloads")}</dt><dd>{envDetail.downloads.length} · {Math.round(envDetail.totalBytes/1024/1024)} MiB</dd></dl>
+       <p className="lya-help">{envDetail.note}</p>
+       <div className="lya-row"><button className="lya-chip lya-chip-accent" disabled={envBusy||readOnly||replayActive} onClick={()=>perform(()=>importEnvironment(envDetail.assetId))}>{tr("下载并导入","Download and import")}</button></div>
+      </div>}
+     </details>
+    </details>
+    {/* 设计稿 V8-10：本页唯一蓝色主按钮留给导入确认；「Import environment」只是入口，必须是中性按钮。 */}
+    <div className="lya-row" data-testid="environment-import-row"><button type="button" disabled={!sessionId||importBusy} onClick={()=>{setAssetImportOpen(true)}}>{tr("导入环境","Import environment")}</button></div>
+    {assetImportOpen&&<div className="lya-import-inline" data-testid="environment-inline-import">{importPurposeControl}{domainImportControl}</div>}
+   </>
+   :<>
+    <div className="lya-list">
+     <ListRow icon="environment" title={tr("世界","World")} subtitle={<span data-testid="environment-world-source">{environmentWorldSource}</span>} onClick={()=>setEnvironmentView("world")} testId="environment-world"/>
+     <ListRow icon="environment" title={tr("光照","Lighting")} subtitle={<span data-testid="environment-lighting-status">{environmentLightingSubtitle}</span>} onClick={()=>setEnvironmentView("lighting")} testId="environment-lighting"/>
+     {/* 设计稿 environment：`+ Add environment` 是纯文字行，不带资源计数。 */}
+     <ListRow icon="environment" title={tr("添加环境","Add environment")} onClick={()=>{setEnvironmentView("world");setAssetImportOpen(true)}} testId="environment-add"/>
+    </div>
+    <details className="lya-advanced" data-testid="environment-advanced"><summary>{tr("导入与高级选项","Import and advanced options")}</summary>
+     {importPurposeControl}
+     {domainImportControl}
+     <p className="lya-help">{environmentComponentPresent?tr("环境组件已启用；HDRI、曝光、阴影与昼夜在 Lighting 二级页里调整。","An environment component is enabled; adjust HDRI, exposure, shadows and day/night in Lighting."):tr("当前使用内置光照，未启用环境组件；进入 Lighting 可显式启用。","Built-in lighting is in use and no environment component is enabled; open Lighting to enable one explicitly.")}</p>
+     {environmentStatus?.warnings?.length?<p className="lya-help">{environmentStatus.warnings.length} {tr("条文档读数问题","document readout issues")}</p>:null}
+    </details>
+   </>}
+  </PanelPage>
+ </div>
  const deliverables=<>
-  <RecordingPanel visible={visible&&!globalPanel&&mode!=="chat"&&uiState.drawer==="deliverable"} api={api} sceneId={scene?.sceneId} world={world} tr={tr} perform={perform} onReplayChange={setReplayActive} close={()=>ui.closeDrawer()}/>
-  <div className="lya-row"><strong>{tr("图像","Images")} {captures.length}</strong><button disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture")}</button></div>
-  <div className="lya-captures">{captures.slice(0,12).map(record=><figure key={record.captureId}><img src={api.captureURL(record.captureId)} alt={record.captureId} width={record.attachment.width} height={record.attachment.height}/><figcaption className="lya-help">{record.capturedAt} · rev {record.sceneRevision}{record.worldId?` · ${record.worldId.slice(0,8)}`:""}</figcaption></figure>)}</div>
- </>
-
- const annotationPanel=<AnnotationPanel annotations={annotations} activeId={activeAnnotation} annotating={annotating} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} entityName={entityId=>scene?.entities.find(item=>item.entityId===entityId)?.name} onToggleMode={annotationActions.toggleMode} onSelect={annotationActions.select} onText={annotationActions.text} onRemove={annotationActions.remove} onCapture={()=>perform(annotationActions.capture)} inject={injectAnnotations} onInject={setInjectAnnotations} prompt={annotationPrompt} captures={annotationCaptures} tr={tr}/>
- const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,object:objectPanel,camera:cameraPanel,asset:assetPanel,annotation:annotationPanel}
+   <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} visible={visible&&!globalPanel&&mode!=="chat"&&uiState.drawer==="deliverable"&&uiState.tool!=="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeDrawer()}/>
+   <div className="lya-row"><strong>{tr("图像","Images")} {captures.length}</strong><button disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture")}</button></div>
+   <div className="lya-captures">{captures.slice(0,12).map(record=><figure key={record.captureId}><img src={api.captureURL(record.captureId)} alt={record.captureId} width={record.attachment.width} height={record.attachment.height}/><figcaption className="lya-help">{record.capturedAt} · rev {record.sceneRevision}{record.worldId?` · ${record.worldId.slice(0,8)}`:""}</figcaption></figure>)}</div>
+   {videos.length>0&&<><div className="lya-row"><strong>{tr("连续视频","Continuous videos")} {videos.length}</strong></div><div>{videos.slice(0,6).map(record=><div key={record.videoId}><video controls preload="metadata" style={{width:"100%",height:"auto"}} src={api.videoURL(record.videoId)} aria-label={tr("连续视频回放","Continuous video playback")}/><p className="lya-help">{record.source==="route"?tr("路线","Route"):tr("自由视角","Free view")} · {record.container}/{record.codec} · {(record.durationMs/1000).toFixed(2)} s · {record.bytes} B</p><a href={api.videoURL(record.videoId)} download={`${record.videoId}.${record.container==="unknown"?"bin":record.container}`}>{tr("下载视频","Download video")}</a></div>)}</div></>}
+  </>
+ const annotationBar=<AnnotationPanel annotations={annotations} activeId={activeAnnotation} annotating={annotating} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} sceneReady={Boolean(scene)} hasEntities={Boolean(scene?.entities.length)} entityName={entityId=>scene?.entities.find(item=>item.entityId===entityId)?.name} sceneId={annotationSceneId} focusRequest={annotationFocusRequest} onToggleMode={annotationActions.toggleMode} onSelect={annotationActions.select} onText={annotationActions.text} onRemove={annotationActions.remove} onCapture={captureAnnotations} inject={injectAnnotations} onInject={setInjectAnnotations} prompt={annotationPrompt} captures={annotationCaptures} tr={tr}/>
+ const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,object:objectPanel,camera:cameraPanel,capture:capturePanel,recording:recordingPanel,annotation:null,physics:physicsPanel}
  const addViewerToChat=async()=>{
   const menu=viewerMenu,snapshot=sceneRef.current,currentSession=sessionId,requestAPI=apiRef.current
   if(!menu||!snapshot||!currentSession||!insertViewerReference)throw Error('VIEWER_REFERENCE_NATIVE_INPUT_UNAVAILABLE')
@@ -1963,18 +2999,47 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    closeViewerMenu();setNotice(tr('已将所选实体与资源来源加入聊天草稿。','Selected entity and resource provenance added to the chat draft.'))
   }finally{setViewerMenuBusy(false)}
  }
- const canvas=<div className="lya-wb-canvas" aria-busy={renderLoading||Boolean(sceneCreating)} data-drop-target={dropTarget==="scene"||undefined}>
+ // P21：Native 且有**真实 Inspector** 时，Viewer 容器给 portal 出来的右面板让出同一列宽——
+ // 面板是 fixed 覆盖层，不占 `.lya-wb-main` 轨道；此前画布整块铺到面板下方（物件/导航 HUD 被盖）。
+ // 这里只缩真实 Viewer 容器（padding-right 作用于 `.lya-wb-canvas` 内容盒，`.lya-canvas` width:100%
+ // 随之变窄），坐标/拾取/ContextMenu/Notes 锚点/resize 仍从实际 canvas 尺寸读；无 Inspector/Notes/
+ // 文件/终端标签/窄到放不下时返回 0，不占一分空白，也不引入横向滚动。
+ const reservedViewerWidth=viewerReservedWidth({native:nativeTab,active:visible&&!globalPanel&&mode!=="chat",tool:uiState.tool,panelSuppressed:Boolean(placingAsset)||attachPick||parkingPickActive,fullWidth:availableWidth})
+ // V10：Controls 与 Frame/Scene focus 合成同一行自然 flex；不再各自绝对定位到左上角。
+ // 只在实时场景显示，回放/放置确认期间不叠在回放宿主或确认条上。
+ const canvasToolbar=scene&&!replayActive?<div className="lya-frame-actions" role="group" aria-label={tr('画布取景','Canvas framing')}>
+   <button type="button" data-testid="frame-selection" aria-label={tr('框选选中','Frame selection')} title={selected?tr('把视图框到当前选中项','Frame the current selection'):tr('先选中一个实体','Select an entity first')} disabled={!viewerVisible||!selected} onClick={()=>{if(selected)viewer.current?.focus(selected)}}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" focusable="false" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+   </button>
+   <button type="button" data-testid="frame-scene" aria-label={tr('框选场景','Frame scene')} title={tr('把整个场景框进视图（不改变模型与物理）','Frame the whole scene without changing models or physics')} disabled={!viewerVisible} onClick={()=>viewer.current?.frameAll()}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" focusable="false" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="2.5"/></svg>
+   </button>
+   {placingAsset&&<button type="button" data-testid="frame-placement" aria-label={tr('框选放置预览','Frame placement preview')} title={tr('只把已加载的真实放置 ghost 框进视图；不改 Scene、物理或落点','Frame only the loaded placement ghost; Scene, physics and the drop point are unchanged')} disabled={!viewerVisible||placingPreview.status!=='ready'} onClick={()=>viewer.current?.framePlacementPreview()}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" focusable="false" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 16l8-8"/><path d="M13 8h3v3"/></svg>
+   </button>}
+   {nativeTab&&sceneFocus&&<button type="button" className="lya-scene-focus" data-testid="scene-focus" aria-pressed={sceneFocusActive||undefined} aria-label={sceneFocusActive?tr('退出 Scene 专注','Exit Scene focus'):tr('Scene 专注','Scene focus')} title={sceneFocusActive?tr('返回对话与场景','Return to chat and scene'):tr('全宽查看场景','Show scene at full width')} onClick={sceneFocus}><span aria-hidden="true">⛶</span></button>}
+  </div>:undefined
+ const canvas=<div className="lya-wb-canvas" style={reservedViewerWidth?{paddingRight:reservedViewerWidth}:undefined} aria-busy={renderLoading||Boolean(sceneCreating)} data-drop-target={dropTarget==="scene"||undefined} data-notes-open={uiState.tool==="annotation"||undefined}>
   <ViewerSurfaceState visible={viewerVisible} failure={renderFailure} hasScene={Boolean(scene)} available={!readOnly&&Boolean(sessionId)} creating={sceneCreating} stop={world&&sessionId&&!replayActive?()=>perform(()=>stop(true)):undefined} tr={tr} create={template=>perform(()=>createScene(template))} retry={()=>{setRenderFailure(undefined);setRenderRetry(value=>value+1)}} reopen={()=>{setRenderFailure(undefined);setViewerVisible(true)}}>
-   <div ref={container} className="lya-canvas"/>
+   <div ref={container} className="lya-canvas" tabIndex={-1}/>
    {viewerMenu&&<ViewerContextMenu request={viewerMenu} tr={tr} busy={viewerMenuBusy} close={closeViewerMenu} addToChat={()=>perform(addViewerToChat)} annotate={()=>perform(async()=>{viewerMenu.annotate();closeViewerMenu();ui.openTool('annotation')})}/>}
    {official&&world&&officialCamera&&<img className="lya-canvas" style={{position:"absolute",inset:0,objectFit:"contain",background:"#151b24"}} alt="official agentview" src={api.mediaURL("official-view",{worldId:world.worldId,step:String(frame?.stepIndex??0)})}/>}
-   {scene&&<ViewerOverlays navigation={tr(VIEWER_NAVIGATION_HELP.zh,VIEWER_NAVIGATION_HELP.en)} importChoice={sessionId?<ImportPurposeChoice compact value={importUsage} disabled={importBusy} onChange={setImportUsageChoice} tr={tr}/>:undefined}>
-    {placingAsset&&<AssetPlacementBar asset={placingAsset} point={placingPoint} tr={tr} alignment={value=>setPlacingAsset(current=>current?{...current,alignBottomToSurface:value}:undefined)} confirm={()=>perform(confirmPlacement)} cancel={exitPlacement}/>}
-    {annotating&&!readOnly&&!replayActive&&<div className="lya-annotation-bar" aria-label={tr("批注模式","Annotation mode")}><strong>{tr("批注","Annotate")}</strong><span className="lya-muted">{tr("点物体表面落点，点已有标记改文字","Click a surface to drop a point; click a marker to edit")}</span><span className="lya-annotation-count">{annotations.length}</span><button className="lya-primary" onClick={annotationActions.toggleMode}>{tr("结束批注","Stop")}</button><button onClick={()=>ui.openTool("annotation")}>{tr("打开批注面板","Open panel")}</button></div>}
+   {scene&&<ViewerOverlays navigation={tr(VIEWER_NAVIGATION_HELP.zh,VIEWER_NAVIGATION_HELP.en)} tr={tr} actions={canvasToolbar}>
+    {attachPick&&<div className="lya-attach-picking-bar" data-testid="assembly-attach-picking-bar" role="status" aria-label={tr("拾取源安装点","Pick source mount")}><strong>{tr("拾取源安装点","Pick source mount")}</strong><span className="lya-help">{tr("在画布上点选手/工具的真实表面；Escape 也可取消。","Click the real hand/tool surface on the canvas; Escape also cancels.")}</span><button type="button" className="lya-chip" data-testid="assembly-attach-picking-cancel" onClick={attachCancelPick}>{tr("取消拾取","Cancel pick")}</button></div>}
+    {parkingPickActive&&<div className="lya-attach-picking-bar lya-parking-picking-bar" data-testid="assembly-parking-picking-bar" role="status" aria-label={tr("选择停放位置","Choose parking position")}><strong>{tr("选择旧件停放位置","Choose old part parking position")}</strong>{parkingPickPoint?<span className="lya-placement-point" data-testid="assembly-parking-picking-point">{parkingPickPoint.map(value=>value.toFixed(2)).join(', ')}</span>:<span className="lya-muted">{tr("点击场景选择位置","Click a spot in the scene")}</span>}{parkingPickPoint&&<button type="button" className="lya-primary" data-testid="assembly-parking-pick-confirm" onClick={confirmParkingPick}>{tr("确认停放点","Confirm parking point")}</button>}<button type="button" className="lya-chip" data-testid="assembly-parking-pick-cancel" onClick={cancelParkingPick}>{tr("取消","Cancel")}</button><span className="lya-help">{tr("Escape 也可取消","Escape also cancels")}</span></div>}
    </ViewerOverlays>}
+    {placingAsset&&<AssetPlacementBar asset={placingAsset} point={placingPoint} status={placingPreview.status} reason={placingPreview.reason} confirming={placingConfirming} tr={tr} alignment={value=>{const current=placingAssetRef.current;if(!current)return;const next={...current,alignBottomToSurface:value};placingAssetRef.current=next;setPlacingAsset(next);if(placingPointRef.current)void requestPlacementPreview(next,placingPointRef.current)}} confirm={()=>perform(confirmPlacement)} cancel={exitPlacement}/>}
    {renderLoading&&<div className="lya-file-drop-hint" role="status">{tr("正在加载场景…","Loading scene…")}</div>}
-   {selected&&!replayActive&&<div className="lya-selection-bar" aria-label={tr("当前选中","Current selection")}><strong title={selected}>{entity?.name??selected}</strong><button onClick={()=>ui.openTool("object")}>{tr("编辑对象","Edit object")}</button>{world&&<button disabled={!sessionId} onClick={()=>perform(()=>stop(false))}>{tr("停止选中对象","Stop selected")}</button>}</div>}
+   {/* V8：默认选中只保留细轮廓与简洁画布；编辑/停止入口在对象属性与机器人详情里，不再常驻重复选中条。 */}
+   <CaptureSessionBar session={captureSession} tr={tr} previewFrame={canvas=>viewer.current?.renderRouteCapturePreview(canvas)??false}/>
   </ViewerSurfaceState>
+  {/* V10-28：录制回放复用 RecordingPanel 内的独立 Viewer，只把呈现挂到自有主画布；右栏保留清单/来源。 */}
+  <div ref={setReplayHost} className="lya-recording-host" style={{right:reservedViewerWidth||0}} data-active={replayActive||undefined} aria-hidden={!replayActive}/>
+  {/* V10：资源详情只读预览的自有主画布宿主；有端口内容时才覆盖画布，Main Viewer 与其镜头状态不变。 */}
+  <div ref={setResourcePreviewHost} className="lya-resource-preview-host" style={{right:reservedViewerWidth||0}} data-active={!replayActive&&uiState.tool==='robot'&&Boolean(robotLibraryPack)&&Boolean(robotLibraryRows.some(row=>row.packId===robotLibraryPack))||undefined} aria-live="polite"/>
+  {/* V8-21：Camera 三通道对照的浮层宿主；只呈现，不改 Viewer/Scene/相机 scope。 */}
+  <div ref={compareOverlayHost} className="lya-compare-overlay-host" data-active={uiState.tool==="camera"||undefined} style={{right:reservedViewerWidth||0}}/>
+  {uiState.tool==="annotation"&&annotationBar}
  </div>
 
  return <div ref={frameRoot} onDragEnterCapture={event=>{if(event.dataTransfer.types.includes("Files")){event.stopPropagation();fileDragOver(event)}}} onDragOverCapture={fileDragOver} onDropCapture={fileDrop} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDropTarget(undefined)}} className="lya-wb" data-mode={mode} data-global-panel={globalPanel||undefined} aria-label={t("open")}>
@@ -1992,11 +3057,11 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
         const up=()=>{delete node.dataset.dragging;node.removeEventListener("pointermove",move);node.removeEventListener("pointerup",up)}
         node.addEventListener("pointermove",move);node.addEventListener("pointerup",up)
       }}/></>:null}
-   <WorkSurface revealScene={revealScene} nativeTab={nativeTab} active={visible&&!globalPanel&&mode!=="chat"} sessionId={sessionId} tr={tr} renderSlot={renderSlot} centre={canvas} panel={uiState.tool?panels[uiState.tool]:null} retainedPanel={objectEditor?{tool:'object',children:objectEditor}:undefined} deliverables={deliverables}/>
-   {!nativeTab&&<ToolRail tr={tr} engine={engineState.engine??engineState.preference??undefined} onSwitchEngine={switchEngine}/>}
+   <WorkSurface revealScene={revealScene} nativeTab={nativeTab} active={visible&&!globalPanel&&mode!=="chat"} panelSuppressed={Boolean(placingAsset)||attachPick||parkingPickActive} sessionId={sessionId} tr={tr} renderSlot={renderSlot} centre={canvas} panel={uiState.tool?panels[uiState.tool]:null} retainedPanel={(objectInspector||objectAdd)&&objectEditor?{tool:'object',hidden:!objectInspector||componentsView,children:<div className="lya-panel-seat" hidden={componentsView} style={componentsView?{display:'none'}:undefined}>{objectEditor}</div>}:undefined} deliverables={deliverables}/>
+   {!nativeTab&&<ToolRail tr={tr} engine={engineState.engine??undefined} preference={engineState.preference??undefined} onSwitchEngine={switchEngine}/>}
   </div>
   {importTextureWarnings.length>0&&<div className="lya-wb-status" role="status" aria-label={tr("现有材质导入损失","Available material import losses")}><WorkbenchMessage kind="warning" summary={importTextureWarnings.length===1?importTextureWarnings[0]:tr(`${importTextureWarnings.length} 个文件已导入，部分材质依赖缺失。`,`${importTextureWarnings.length} files imported with missing material dependencies.`)} message={(importTextureDetails.length?importTextureDetails:importTextureWarnings).join('\n')} tr={tr} onDismiss={()=>{setImportTextureWarnings([]);setImportTextureDetails([])}}/></div>}
-  {(scene||error||notice||replayActive||orientationStopTarget)&&<footer className="lya-wb-status" role="status">{scene&&!replayActive&&<SceneWorldStatus compact state={worldLifecycle} tr={tr} retry={()=>perform(startWorld)} cancel={()=>automaticWorld.cancel()} disabled={readOnly||!providerAvailable}/>}<WorkbenchMessage key={error?'error':replayActive?'replay':'notice'} kind={error?'error':'notice'} message={error||(replayActive?tr("回放只读取录制帧、不发送动作，也不暂停实时世界。","Replay only reads recorded frames and sends no actions; it does not pause the live world."):notice)} tr={tr} onDismiss={error?()=>setError(""):!replayActive&&notice?()=>setNotice(""):undefined}/><span className="lya-spacer"/>{orientationStopTarget&&<button type="button" className="lya-stop" data-testid="orientation-stop" disabled={orientationStopRef.current?.requested} onClick={()=>void stopOrientationCheck()}>{tr("停止方向检查","Stop orientation check")}</button>}{scene&&!replayActive&&<span className="lya-revision">rev {scene.revision}</span>}{frame&&!replayActive&&<span data-testid="world-step">{frame.simTime.toFixed(2)} s · {frame.stepIndex}</span>}</footer>}
+  {(scene||error||notice||replayActive||orientationStopTarget)&&<footer className="lya-wb-status" role="status">{scene&&!replayActive&&<SceneWorldStatus compact state={worldLifecycle} tr={tr} retry={()=>perform(startWorld)} cancel={()=>automaticWorld.cancel()} disabled={readOnly||!providerAvailable}/>}<WorkbenchMessage key={error?'error':replayActive?'replay':'notice'} kind={error?'error':'notice'} message={error||(replayActive?tr("回放只读取录制帧、不发送动作，也不暂停实时世界。","Replay only reads recorded frames and sends no actions; it does not pause the live world."):notice)} tr={tr} onDismiss={error?()=>setError(""):!replayActive&&notice?()=>setNotice(""):undefined}/><span className="lya-spacer"/>{orientationStopTarget&&<button type="button" className="lya-stop" data-testid="orientation-stop" disabled={orientationStopRef.current?.requested} onClick={()=>void stopOrientationCheck()}>{tr("停止方向检查","Stop orientation check")}</button>}{(scene||frame)&&!replayActive&&<details className="lya-status-meta" data-testid="workbench-status-meta"><summary title={tr("场景版本与运行步进","Scene revision and runtime step")}>{tr("运行信息","Runtime")}</summary><div className="lya-status-meta-body">{scene&&<span className="lya-revision">rev {scene.revision}</span>}{frame&&<span data-testid="world-step">{frame.simTime.toFixed(2)} s · {frame.stepIndex}</span>}</div></details>}</footer>}
   {/* D1：computer-use 事实的**常驻**呈现（不放进默认折叠的 `<details>`）——"本会话正在控制输入"与"恢复失败"
       是安全事实：用户上一次投诉的正是这两件事看不见（`VISIBILITY-HOLES-20260926.md`）。判据与 `settings` 那处
       共用 `computerUseNoticeLines()`：一个字段两处渲染，不是两套口径。 */}

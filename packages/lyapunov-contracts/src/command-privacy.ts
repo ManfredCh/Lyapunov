@@ -362,6 +362,32 @@ function isPathKey(key: string): boolean {
   return PATH_KEYS.has(key) || key.endsWith("Path")
 }
 
+function isFiniteNumberTuple(value: unknown, size: number): value is number[] {
+  return Array.isArray(value) && value.length === size && value.every(item => typeof item === "number" && Number.isFinite(item))
+}
+
+/**
+ * `SceneCameraMount` 的**类型白名单**（形状 owner 是 `types.ts:SceneCameraMount`）：
+ * 只有恰好四个 schema 键、且类型逐字相符的对象才是真实物理安装点。计费／取件的 `mount`
+ * （`{mountId, expiresAt, budget}`）与用户自定的同名对象都不满足，继续按 `INTERNAL_FIELD_NAMES` 丢弃。
+ * 本例外只回答"这个值是不是相机挂载"，不放行 `mount` 这个键，也不动计费 `mount` 的过滤规则。
+ */
+function isSceneCameraMountShape(value: unknown): value is { entityId: string; bodyName: string; positionM: number[]; quaternionXyzw: number[] } {
+  if (!isPlainObject(value)) return false
+  if (Object.keys(value).some(key => key !== "entityId" && key !== "bodyName" && key !== "positionM" && key !== "quaternionXyzw")) return false
+  return typeof value.entityId === "string" && typeof value.bodyName === "string"
+    && isFiniteNumberTuple(value.positionM, 3) && isFiniteNumberTuple(value.quaternionXyzw, 4)
+}
+
+/**
+ * 真 `SceneCameraComponent` 的 required schema 字段（`fovYDeg: number`，见 `types.ts`）。
+ * 只有挂着它的 `components.camera` 才进入相机上下文：用户自定的任意 `camera` namespace
+ * 若不满足该形状，其内部同名 `mount` 照旧按内部字段过滤，不借类型白名单泄露任意字段。
+ */
+function isSceneCameraComponentShape(value: unknown): value is Record<string, unknown> {
+  return isPlainObject(value) && typeof value.fovYDeg === "number" && Number.isFinite(value.fovYDeg)
+}
+
 export type OutboundFace = "ui" | "human"
 
 /**
@@ -369,8 +395,18 @@ export type OutboundFace = "ui" | "human"
  *  · `human`（卡片／截图／回放／诊断导出）：文本再过内部码与计费措辞中性化，`status` 改公开字；
  *  · `ui`（工作台面板续链）：标量原值（面板按状态字分支），只丢内部字段、脱凭据、路径改引用。
  * 需要原值续链的字段走 `uiCommandFields` 白名单；**没有 `result` 兜底**。
+ *
+ * 唯一的字段例外（R-005/P19）：`SceneCameraComponent.mount` 与同一相机 `installation.baseline.mount`
+ * 是真实物理安装关系，与计费/取件的 `mount` 同名但不同物。机器 UI 面进入真相机组件上下文后，
+ * 只有 `isSceneCameraMountShape` 的四个 schema 键会被原样保留；值仍逐字段走本函数的凭据/路径净化
+ * （所以挂载标识里即便混入 token 或机器路径也照旧脱敏）。人类面不享受此例外，计费 `mount` 一律仍被过滤。
  */
 export function sanitizeOutbound(value: unknown, roots?: ProductPathRoots, face: OutboundFace = "human", depth = 0): unknown {
+  return sanitizeOutboundNode(value, roots, face, depth, false)
+}
+
+/** 递归主体：`insideSceneCamera` 只在机器 UI 面下、真 `SceneCameraComponent` 子树内为 true。 */
+function sanitizeOutboundNode(value: unknown, roots: ProductPathRoots | undefined, face: OutboundFace, depth: number, insideSceneCamera: boolean): unknown {
   if (depth > 24) return undefined
   if (typeof value === "string") {
     const referenced = productRelativePath(value, roots ?? EMPTY_ROOTS)
@@ -382,11 +418,18 @@ export function sanitizeOutbound(value: unknown, roots?: ProductPathRoots, face:
   }
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value
   if (value === undefined) return undefined
-  if (Array.isArray(value)) return value.map(row => sanitizeOutbound(row, roots, face, depth + 1)).filter(row => row !== undefined)
+  if (Array.isArray(value)) return value.map(row => sanitizeOutboundNode(row, roots, face, depth + 1, insideSceneCamera)).filter(row => row !== undefined)
   if (!isPlainObject(value)) return undefined
   const out: Record<string, unknown> = {}
   for (const [key, row] of Object.entries(value)) {
-    if (isInternalFieldName(key)) continue
+    if (isInternalFieldName(key)) {
+      // 唯一例外：真相机组件里的真实挂载点。类型白名单在前，凭据/路径净化随后照旧生效。
+      if (face === "ui" && insideSceneCamera && key === "mount" && isSceneCameraMountShape(row)) {
+        const mount = sanitizeOutboundNode({ entityId: row.entityId, bodyName: row.bodyName, positionM: row.positionM, quaternionXyzw: row.quaternionXyzw }, roots, face, depth + 1, false)
+        if (mount !== undefined) out[key] = mount
+      }
+      continue
+    }
     if (face === "human" && key === "error" && typeof row === "string") {
       const error = publicCommandError(row)
       out[key] = `${error.code}: ${error.message}`
@@ -398,7 +441,7 @@ export function sanitizeOutbound(value: unknown, roots?: ProductPathRoots, face:
     }
     if (key === "uri" && typeof row === "string") { out[key] = resourceToken(row); continue }
     if (face === "human" && (key === "status" || key === "publicStatus")) { out[key] = publicStatusOf(row); continue }
-    const next = sanitizeOutbound(row, roots, face, depth + 1)
+    const next = sanitizeOutboundNode(row, roots, face, depth + 1, insideSceneCamera || (key === "camera" && isSceneCameraComponentShape(row)))
     if (next !== undefined) out[key] = next
   }
   return out
@@ -476,14 +519,17 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
       if(Array.isArray(source.localEntries))out.localEntries=source.localEntries.map(localPolicyEntry).filter(Boolean)
       return out
     case "policy_load_state":
-      pick("category", "executionKind", "ready", "runtimeChecked", "modelId", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "robotWalkingVerified","evidence")
+      pick("category", "executionKind", "ready", "runtimeChecked", "modelId", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "applyEligible", "robotWalkingVerified","evidence","recovery")
+      // 应用前差异只投影字段路径/原因/短说明；逐条过同一净化（域外绝对路径与凭据不外发），不放原始JSON。
+      if (Array.isArray(source.preApplyDifferences)) out.preApplyDifferences = source.preApplyDifferences.map(row => projectOut(row, roots)).filter(row => row !== undefined)
       localPolicyState()
       return out
     case 'policy_activate':
       pick('status','identity','snapshot','world','match','behaviorVerified','executionStarted')
       return out
     case "policy_load_local": case "policy_download_bundle":
-      pick("status", "category", "executionKind", "ready", "runtimeChecked", "modelId", "identity", "source", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "robotWalkingVerified", "code", "message", "retryable", "fallbackAction", "fallback", "reusedFiles", "downloadedFiles", "serverSideInference", "evidence")
+      pick("status", "category", "executionKind", "ready", "runtimeChecked", "modelId", "identity", "source", "dimensions", "missing", "nextActions", "worldBound", "policyPrepared", "applyEligible", "robotWalkingVerified", "code", "message", "retryable", "fallbackAction", "fallback", "reusedFiles", "downloadedFiles", "serverSideInference", "evidence", "recovery")
+      if (Array.isArray(source.preApplyDifferences)) out.preApplyDifferences = source.preApplyDifferences.map(row => projectOut(row, roots)).filter(row => row !== undefined)
       localPolicyState()
       return out
     case "policy_download":
@@ -516,6 +562,10 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
         return out
       }
       pick("sceneId", "resourceId", "resource", "snapshot", "revision", "name", "ref", "entityId")
+      return out
+    case 'asset_placement_preview':
+      // 只读预览：UI 需要真实临时实体/落点与资源身份；不含绝对路径（uri 走资源标记）。
+      pick('status','reason','sceneId','token','resourceId','version','name','kind','mimeType','transform','entities')
       return out
     case 'scene_bind_physics':
       pick('status','snapshot','entityId','normalized','maxMatrixDelta','resource','worldNeedsSync')
@@ -554,6 +604,14 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
         // 普通采集不带这两个键，pick 会跳过 undefined，成功回执的形状不变。
         "saved", "observe")
       return out
+    case "camera_lidar_scan_ui":
+      // 模拟LiDAR量测：只投影传感器位姿/来源、射线图案、真实距离与有效性统计和逐产物引用；不含宿主绝对路径之外的编辑态。
+      pick("captureId", "providerCaptureId", "sceneId", "sceneRevision", "worldId", "generation", "worldGeneration",
+        "appliedSceneRevision", "frameId", "stepIndex", "simTime", "source", "sensorId", "sensorKind", "sensorSource",
+        "cameraName", "resolvedCameraName", "parentBodyName", "parentEntityId", "mount", "geometrySource", "selfExclusion",
+        "rangeSemantics", "cameraDepthComparison", "rayPattern", "worldFromSensor", "referenceFrame", "override",
+        "range", "valid", "hitGeom", "preview", "rayCount", "validCount", "noReturnCount", "rangeMinM", "rangeMaxM", "rangeMeanM", "outputDir")
+      return out
     case "segment_sam3": case "segment_fastgs":
       pick("provider", "masks", "output", "emptyResult", "source", "image", "overlay", "result")
       return out
@@ -562,14 +620,51 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
         "closed", "stopped", "receipts", "affectedEntityIds", "stepIndex", "groundGeomNames", "capabilities", "device", "deviceKind", "deviceDegraded",
         "deviceNote", "solver", "warpVersion", "worldPhysics", "supportsPause")
       return out
+    // 目标级原生 Freeze/Restore：只投影真实保持事实（范围/根锚/关节锁/保持位姿/仍活动作），不投影任何编辑器内部状态。
+    case "robot_freeze": case "robot_restore":
+      pick("worldId", "generation", "freezeId", "status", "entityIds", "frozenEntityIds", "restoredEntityIds",
+        "alreadyFrozenEntityIds", "notFrozenEntityIds", "missingEntityIds", "freezeMismatchEntityIds", "scope",
+        "rootHeld", "jointLocks", "holdPose", "stillActiveActions", "controlConfigPreserved", "reason")
+      return out
     case "sim_execute_batch": case "robot_move": case "joint_move": case "vehicle_drive": case "robot_gripper":
       pick("actionId", "status", "startStep", "endStep", "effect", "taskAchieved", "reason")
       return out
     case "robot_move_tcp":
       pick("status", "taskAchieved", "reason", "executionMode", "site", "bodyName", "requestedDeltaM", "measuredDeltaM", "targetErrorM", "beforeTcp", "afterTcp", "action", "beforeStep", "afterStep", "jointNames", "beforePositions", "afterPositions", "contacts", "collisionChecked", "tracking")
       return out
-    case "robot_set_tcp": case "robot_set_base":
-      pick("status", "snapshot", "world", "frame", "entityId", "robot")
+    case "robot_set_tcp": case "robot_set_base": case "robot_assembly_undo":
+      pick("status", "saved", "sync", "syncRequired", "sceneId", "revision", "worldId", "worldGeneration", "appliedSceneRevision",
+        "reason", "snapshot", "world", "frame", "entityId", "robot", "robotDetail", "assembly")
+      return out
+    case "robot_assembly_history":
+      pick("sceneId", "entityId", "revision", "entries", "inspected", "historyComplete", "replacements", "subtreePartitions", "reason")
+      return out
+    // R-013 内部子树拆分/重组：浏览器要从 `api.command` 机器面拿到 supported、snapshot/sync 与成对身份，
+    // 缺了这三项只会得到 null，Precheck 后 Extract 永远禁用、重组后也无从收口 revision。
+    case "robot_assembly_extract_precheck":
+      pick("status", "saved", "sceneId", "entityId", "revision", "source", "selectedBody", "selectedBodyParent",
+        "supported", "subtree", "remaining", "closure", "crossEdges", "warnings", "reason")
+      return out
+    case "robot_assembly_extract": case "robot_assembly_reassemble":
+      pick("status", "saved", "sync", "syncRequired", "sceneId", "revision", "worldId",
+        "remainingEntityId", "partEntityId", "derivation", "restoredResource", "precheck", "snapshot", "world", "frame", "reason")
+      return out
+    // R-012 装配二级页面的机读面：预览/保存安装点/真实检查/一次 CAS 替换。缺了这几项，浏览器
+    // 只能拿到 null（`api.command` 用 `ui ?? null`），于是 Attach 面板的预览/保存/替换全部假失败。
+    case "robot_assembly_preview":
+      pick("status", "applied", "sceneId", "worldId", "revision", "generation", "source", "target", "sourceMount",
+        "sourceMountInSourceRoot", "targetMount", "pair", "targetBodyFromSourceRoot", "frame", "applyInput", "notes")
+      return out
+    case "robot_assembly_mount":
+      pick("sceneId", "entityId", "revision", "saved", "changed", "resourceId", "resourceVersion", "snapshot", "mount", "stale", "reason")
+      return out
+    case "robot_assembly_check":
+      pick("sceneId", "entityId", "revision", "savedBinding", "frame", "nativeBase", "relativePose", "joints", "contacts",
+        "actionReceipt", "attachments", "checked", "notes", "reason")
+      return out
+    case "robot_assembly_replace":
+      pick("status", "saved", "sync", "syncRequired", "sceneId", "revision", "worldId", "worldGeneration", "appliedSceneRevision",
+        "snapshot", "changes", "world", "frame", "reason")
       return out
     case 'camera_scene_save':
       pick('status','snapshot','entityId','source','worldNeedsSync','sample','note')
@@ -591,7 +686,7 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
       return out
     case "recording_start": case "recording_stop": case "recording_list": case "recording_inspect":
     case "recording_export":
-      pick("recordingId", "status", "frameCount", "lastFrame", "items", "jobId", "outputDir")
+      pick("recordingId", "status", "frameCount", "lastFrame", "firstFrame", "items", "jobId", "outputDir", "createdAt", "stopReason", "source", "channels", "cameraCapture", "missing", "missingCount", "generations")
       return out
     case "camera_list_ui": case "camera_adjust_ui": case "camera_annotation_ui": case "camera_dataset_export_ui":
       pick("sceneId", "sceneRevision", "worldId", "generation", "worldGeneration", "currentWorldGeneration",

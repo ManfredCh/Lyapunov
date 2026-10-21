@@ -6,7 +6,8 @@
     "modelEntry": "asset/cf2.xml",
     "model": "asset/cf2.xml",
     "builtinAssetId": "crazyflie_2",
-    "builtinModel": "materials/robots/crazyflie_2/bitcraze_crazyflie_2/cf2.xml"
+    "builtinModel": "materials/robots/crazyflie_2/bitcraze_crazyflie_2/cf2.xml",
+    "preview": "asset/cf2.png"
   },
   "pieces": {
     "asset": {

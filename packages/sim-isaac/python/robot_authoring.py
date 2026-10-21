@@ -162,6 +162,38 @@ def initialized_parent_body_world(stage, entry, parent, body_name, error):
     return local*UsdGeom.XformCache().GetLocalToWorldTransform(root)
 
 
+def install_freeze_constraints(stage, entities, error):
+    """预分配默认 disabled 的外部根锚（__lyapunov_freeze_fixed）；运行期 Freeze 只切 jointEnabled 并写世界锚。
+
+    已有 baseBinding 固定/跨实体约束的实体跳过（其保持由 base 约束负责，不能重复锁根）。固定世界
+    articulation 的根锚必须由 base joint 承担；这里只服务**浮动根/自由刚体**，且以 ExcludeFromArticulation
+    作为外部约束，不把 articulation 拓扑并吞。**不是产品 Freeze 已验收**：真实 CPU 运行证据见 P6 回执。
+    """
+    for eid, entry in entities.items():
+        if entry.get('baseConstraintPath'):
+            continue
+        roots = (entry.get('metadata') or {}).get('rootBodies') or []
+        # 只给**浮动/自由根**预分配外部根锚：固定世界/固定到父 body 的根不能被锁到 world，
+        # 否则会把无关父机器人一起锁死（B4）；它只由关节锁保持自身 DOF。
+        if not roots or roots[0].get('mode') != 'free':
+            continue
+        root_path = None
+        try:
+            root_path = body_prim(stage, entry, roots[0]['bodyName'], error).GetPath()
+        except Exception:
+            root_path = None
+        if root_path is None:
+            continue
+        path = Sdf.Path(entry['path']).AppendChild('__lyapunov_freeze_fixed')
+        joint = UsdPhysics.FixedJoint.Define(stage, path)
+        joint.CreateBody1Rel().SetTargets([root_path])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0., 0., 0.)); joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.))
+        joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0., 0., 0.)); joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.))
+        joint.CreateJointEnabledAttr().Set(False)
+        joint.CreateExcludeFromArticulationAttr().Set(True)
+        entry['freezeConstraintPath'] = str(path)
+
+
 def install_base_bindings(stage, scene, entities, error):
     declarations = {entity['entityId']: entity.get('components', {}).get('baseBinding') for entity in scene['entities']}
     done = set(); visiting = set()
@@ -235,6 +267,20 @@ def install_base_bindings(stage, scene, entities, error):
     for eid in declarations: install(eid)
 
 
+def install_eligibility(metadata):
+    """只读安装资格：源 MJCF 元数据里该实体是否有 plane geom。
+
+    PhysX/MuJoCo 的 plane 都不能随 moving 父树运动；把源根固定到另一个实体的 body 时任何
+    plane 都会让装配非法。这里只从已登记的源 geomKind 事实判断，不删几何、不改源模型，
+    也不把独立根/世界固定子 body 的正常安装当作不合法。
+    """
+    bodies = sorted({(definition.get('sourceBody') or 'world') for definition in (metadata.get('geoms') or {}).values() if definition.get('geomKind') == 'mjGEOM_PLANE'})
+    result = {'attachable': not bodies, 'staticPlaneBodies': bodies}
+    if bodies:
+        result['reason'] = 'SOURCE_HAS_STATIC_PLANE'
+    return result
+
+
 def authoring_description(world, eid):
     from scene_adapter import camera_mount_bodies, SceneError
     entry = world.entities[eid]; metadata = entry.get('metadata') or {}; declared = metadata.get('bodies') or {}; rows = []
@@ -247,10 +293,13 @@ def authoring_description(world, eid):
                     for name, definition in (metadata.get('sites') or {}).items() if name in entry['siteNames']]
     if base_source is None:
         state = {'bodyName': '', 'mode': 'unknown', 'source': 'native-model', 'reason': '源未提供可核验的根关节/质量；不推断固定地板', 'constraints': [], 'editable': {'fixed': False, 'free': False, 'entity': False, 'reason': '仅源根元数据可核的 MJCF 支持保真基座编辑'}}
-        return {'nativeBodies': rows, 'nativeSites': native_sites, 'base': state}
+        return {'nativeBodies': rows, 'nativeSites': native_sites, 'base': state, 'installEligibility': install_eligibility(metadata)}
     root = body_prim(world.stage, entry, base_source['bodyName'], SceneError); root_path = root.GetPath(); constraints = []
     for prim in Usd.PrimRange(world.stage.GetPseudoRoot()):
         if not prim.IsA(UsdPhysics.Joint): continue
+        # Freeze 的外部根锚是当前 world/generation 的运行控制状态，不是永久装配声明：
+        # 不得把浮动/自由基座误报成 fixed（R-015 内部根保护不退化）。
+        if '__lyapunov_freeze_fixed' in str(prim.GetPath()): continue
         joint = UsdPhysics.Joint(prim); a = list(joint.GetBody0Rel().GetTargets()); b = list(joint.GetBody1Rel().GetTargets())
         if root_path not in a + b: continue
         # 内部本体关节单独保留，不把 root→第一个转动关节说成固定世界。
@@ -268,9 +317,14 @@ def authoring_description(world, eid):
              'reason': '固定到指定实体的真实 USD/PhysX 约束' if declaration and (declaration.get('target') or {}).get('entityId') else '基座固定在世界坐标；未声明绑定地板' if fixed else '真实 USD 根未绑定世界；基座受重力和接触影响',
              'editable': {'fixed': bool(editable), 'free': bool(editable), 'entity': bool(editable)}}
     if not editable: state['editable']['reason'] = '根本体关节、质量或导入 body 映射不可核，不能保真编辑'
+    record = (getattr(world, 'frozen', None) or {}).get(eid)
+    state['freeze'] = ({'frozen': True, 'freezeId': record.get('freezeId'), 'scope': list(record.get('scope', [])),
+                        'rootHeld': bool(record.get('rootHeld')), 'jointLocks': list(record.get('jointLocks', [])),
+                        'holdPose': copy.deepcopy(record.get('holdPose')) if record.get('holdPose') else None,
+                        'restoreAvailable': True} if record else {'frozen': False, 'restoreAvailable': False})
     if declaration and declaration.get('target'): state['target'] = copy.deepcopy(declaration['target'])
     if base_source.get('modelFromBase'): state['modelFromBase'] = copy.deepcopy(base_source['modelFromBase'])
-    return {'nativeBodies': rows, 'nativeSites': native_sites, 'base': state}
+    return {'nativeBodies': rows, 'nativeSites': native_sites, 'base': state, 'installEligibility': install_eligibility(metadata)}
 
 
 def authoring_observation(world, frame):

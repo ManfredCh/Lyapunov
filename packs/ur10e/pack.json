@@ -2,7 +2,7 @@
  "packId": "ur10e",
  "version": "2026.09.22",
  "family": "arm",
- "asset": { "modelEntry": "asset/universal_robots_ur10e/scene.xml", "model": "asset/universal_robots_ur10e/ur10e.xml" },
+ "asset": { "modelEntry": "asset/universal_robots_ur10e/scene.xml", "model": "asset/universal_robots_ur10e/ur10e.xml", "preview": "asset/universal_robots_ur10e/ur10e.png" },
  "pieces": {
   "asset": {
    "ref": "ASSET_STAGING_MANIFEST.json#ur10e"

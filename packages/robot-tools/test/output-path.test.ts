@@ -109,8 +109,8 @@ describe('outputDir 的会话解析（薄层判据）', () => {
     assert.throws(() => sessionPath({ agent: { session: { header: {} } } }, 'derived/frames', 'outputDir'), /ROBOT_CWD_UNRESOLVED/)
   })
 
-  test('只有带 outputDir 的三个工具受影响；缺字段/类型不对留给原 schema', () => {
-    assert.deepEqual([...outputDirTools], ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export'])
+  test('只有带 outputDir 的四个工具受影响；缺字段/类型不对留给原 schema', () => {
+    assert.deepEqual([...outputDirTools], ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export', 'camera_lidar_scan'])
     const scope = { agent: { session: { header: { cwd: '/work/session' } } } }
     assert.equal(resolveCallerOutputDir('camera_list', { outputDir: 'derived' }, scope).outputDir, undefined)
     assert.deepEqual(resolveCallerOutputDir('camera_capture_multi', { worldId: 'w' }, scope), { value: { worldId: 'w' } })

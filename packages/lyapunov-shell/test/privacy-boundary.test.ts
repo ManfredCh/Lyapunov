@@ -163,6 +163,17 @@ describe("主控回归：不依赖密钥前缀的出站边界", () => {
       const serialized=JSON.stringify(response);expect(serialized).not.toContain(opaqueSecret);expect(serialized).not.toContain('/home/alice');expect(serialized).not.toContain('filePath');expect(serialized).not.toContain('entryPath');expect(serialized).not.toContain('bundlePath')
     }
   })
+  test('P18 A：策略load-state受控投影保留applyEligible与短差异，未知字段/敏感标记仍被过滤',()=>{
+    const diffs=[{path:'controller.robot',reason:'ROBOT_MODEL_MISMATCH',detail:'Apply rebuilds this field from the prepared adapter'}]
+    const raw={category:'direct_execution',ready:false,policyPrepared:true,applyEligible:true,preApplyDifferences:diffs,robotWalkingVerified:false,missing:[],nextActions:[],worldBound:true,internalToken:MARKER_TOKEN,unknownNested:{secret:MARKER_TOKEN,hostPath:MARKER_USER_PATH}}
+    for(const name of ['policy_load_state','policy_load_local','policy_download_bundle']){
+      const response=commandRouteResponse(name,{kind:'success',text:JSON.stringify(raw)},'formal')
+      expect(response.ui?.applyEligible).toBe(true)
+      expect(response.ui?.preApplyDifferences).toEqual(diffs)
+      const serialized=JSON.stringify(response)
+      expect(serialized).not.toContain(MARKER_TOKEN);expect(serialized).not.toContain('internalToken');expect(serialized).not.toContain('unknownNested');expect(serialized).not.toContain('/home/alice')
+    }
+  })
 })
 
 /** 一份带全标记的策略装配回执：形状取自 policy-registry 的真实字段名。 */
@@ -750,4 +761,24 @@ test('相机UI投影保留身份、调整读数和标注几何，继续剔除私
  }
  const multi=uiCommandFields('camera_capture_multi_ui',{...identity,cameras:[{cameraName:'c'}]},ROOTS)
  expect(multi).toMatchObject({...identity,cameras:[{cameraName:'c'}]})
+})
+
+test('R-013 提取/重组/成对历史的机器投影保留 supported/snapshot/sync 与身份，仍剔除私有字段',()=>{
+ const identity={sceneId:'s',entityId:'arm',revision:4}
+ const precheck=uiCommandFields('robot_assembly_extract_precheck',{...identity,supported:true,selectedBody:'hand',selectedBodyParent:'arm',
+   subtree:{bodies:['hand'],joints:[],cutJoints:[],actuators:[],tendons:[],equalities:[],sensors:[],meshes:1,textures:0},
+   remaining:{bodies:['arm'],joints:[],actuators:[],tendons:[],equalities:[],sensors:[]},
+   closure:{meshFiles:['m.stl'],textureFiles:[],copiedBytes:12},crossEdges:[],warnings:[],privateDiagnostic:MARKER_TOKEN},ROOTS)
+ expect(precheck).toMatchObject({...identity,supported:true,selectedBody:'hand',selectedBodyParent:'arm',closure:{meshFiles:['m.stl'],textureFiles:[],copiedBytes:12}})
+ expect(precheck).not.toHaveProperty('privateDiagnostic')
+ for(const name of ['robot_assembly_extract','robot_assembly_reassemble']){
+  const projected=uiCommandFields(name,{...identity,saved:true,sync:'SYNCED',syncRequired:false,worldId:'w',remainingEntityId:'arm',partEntityId:'part-1',
+    derivation:{kind:'subtree-extract'},restoredResource:{resourceId:'arm',version:1},snapshot:{sceneId:'s',revision:4,entities:[]},privateDiagnostic:MARKER_TOKEN},ROOTS)
+  expect(projected).toMatchObject({sceneId:'s',revision:4,saved:true,sync:'SYNCED',syncRequired:false,worldId:'w',remainingEntityId:'arm',partEntityId:'part-1',snapshot:{sceneId:'s',revision:4}})
+  expect(projected).not.toHaveProperty('privateDiagnostic')
+ }
+ const history=uiCommandFields('robot_assembly_history',{...identity,entries:[],inspected:1,historyComplete:true,
+   subtreePartitions:[{operationId:'op-1',role:'extract',remainingEntityId:'arm',partEntityId:'part-1',beforeRevision:1,afterRevision:2,undoable:true}],privateDiagnostic:MARKER_TOKEN},ROOTS)
+ expect(history).toMatchObject({...identity,subtreePartitions:[{operationId:'op-1',role:'extract',undoable:true}]})
+ expect(history).not.toHaveProperty('privateDiagnostic')
 })

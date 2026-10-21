@@ -109,6 +109,28 @@ export interface ResourceVersionDerivation {
   files: Array<{ source: string; target: string; before: { sha256: string; size: number }; after: { sha256: string; size: number } }>
   at: string
 }
+/**
+ * 几何拆分（RC v4 R-013）：一个内部 body 子树被真实移除/提取后得到的具名派生。
+ * **不是**路径重写：它记录切口身份（body/父/切口关节/源 SHA）与两侧的派生角色，
+ * 让重组与局部 Undo 能核对来源，而不把几何变化冒充成"同一份字节只换了路径"。
+ */
+export interface ResourceVersionDerivationSubtreeExtract {
+  kind: "subtree-extract"
+  /** 派生自该资源 id 的哪个已登记版本。 */
+  from: number
+  role: "remaining" | "part"
+  /** 同一次拆分的成对操作身份（remaining/part 两侧同值）。 */
+  operationId: string
+  format: string
+  cutBody: string
+  cutBodyParent: string
+  cutJoint?: { name: string; parent: string; type: string }
+  /** 拆分前后都核对过的源入口真实字节 sha256。 */
+  sourceSha256: string
+  at: string
+}
+/** 一个版本的来历（说明用；版本身份仍只看这一版自己的真实字节）。 */
+export type ResourceDerivation = ResourceVersionDerivation | ResourceVersionDerivationSubtreeExtract
 interface ResourceLocation { ref: ResourceRef; parsed: ParsedAsset }
 export type ResourceStorageKind = "cas" | "reference" | "materialized"
 export type ResourceOrigin = "builtin" | "download" | "generated" | "import"
@@ -213,7 +235,7 @@ export type ResourcePhysicalizationPatch = PhysicalizationBudgetOptions & (
 export interface ResourceRecord extends ResourceImportDefaults, ResourceLocation {
   name: string; tags: string[]; folder: string; category?: ResourceAuthorityCategory; deletedAt?: string; createdAt: string; alternateLocations?: ResourceLocation[]; operationID?: string; idempotencyKey?: string; registryRevision?: string; inventory?: ResourceFileInventory[]; tombstone?: ResourceAuthorityTombstone
   /** 这个版本的来历（哪个版本 + 打包器改写了哪几个文件）；只作说明，版本身份只看这一版自己的真实字节。 */
-  derivedFrom?: ResourceVersionDerivation
+  derivedFrom?: ResourceDerivation
   /** cas = 外部原件连同依赖闭包已复制进 <cache>/cas；reference = 引用原位置（产品自带或运行根内）；
    *  materialized = 原件连同依赖闭包已复制进按资源类别决定的域目录，落点见 home。 */
   storage?: ResourceStorageKind; storedEntryPath?: string
@@ -958,11 +980,11 @@ export class ResourceLibrary {
     if (!isAbsolute(givenPath)) return givenPath.split(sep).join("/")
     return undefined
   }
-  async import(input: { path: string; name?: string; resourceId?: string; category?: ResourceAuthorityCategory; source?: ResourceRef["source"]; sourceTexturePolicy?:SourceTexturePolicy; tags?: string[]; folder?: string; components?: Entity["components"]; sceneGeometryBinding?: SceneGeometryBinding; storage?: ResourceStorageKind } & ResourceImportDefaults & ResourceAuthorityIdentity): Promise<ResourceRecord & { replayed?: boolean; beforeRegistryRevision?: string; alreadyPresent?: boolean; warnings?: string[] }> {
+  async import(input: { path: string; name?: string; resourceId?: string; category?: ResourceAuthorityCategory; source?: ResourceRef["source"]; sourceTexturePolicy?:SourceTexturePolicy; tags?: string[]; folder?: string; components?: Entity["components"]; sceneGeometryBinding?: SceneGeometryBinding; storage?: ResourceStorageKind; derivedFrom?: ResourceDerivation } & ResourceImportDefaults & ResourceAuthorityIdentity): Promise<ResourceRecord & { replayed?: boolean; beforeRegistryRevision?: string; alreadyPresent?: boolean; warnings?: string[] }> {
     validatePhysicalizationRequest(input.physicalizationRequest)
     const path = localPath(input.path)
     const resourceId = input.resourceId ? safeId(input.resourceId) : `res_${randomUUID()}`
-    const { operationID, idempotencyKey, expectedRegistryRevision, category, storage: requestedStorage, ...metadata } = input
+    const { operationID, idempotencyKey, expectedRegistryRevision, category, storage: requestedStorage, derivedFrom, ...metadata } = input
     // 显式 storage 优先，其次是库级默认；两者都没有时保持旧行为不变。存储模式影响落盘位置，
     // 必须参与命令哈希，否则同幂等键换模式会被当成同一操作重放。
     const storageRequest = requestedStorage ?? this.options.defaultStorage
@@ -1039,6 +1061,7 @@ export class ResourceLibrary {
         ...(metadata.license?{license:normalizeResourceLicense(metadata.license)}:{}),
         ...(metadata.physicalizationRequest !== undefined ? { physicalizationRequest: structuredClone(metadata.physicalizationRequest) } : {}),
         ...(metadata.mountTransform?{mountTransform:structuredClone(metadata.mountTransform)}:{}),...(metadata.visualSourceTransform?{visualSourceTransform:structuredClone(metadata.visualSourceTransform)}:{}),...(metadata.legacySource?{legacySource:structuredClone(metadata.legacySource)}:{}),...(metadata.networkProvenance?{networkProvenance:structuredClone(metadata.networkProvenance)}:{}),
+        ...(derivedFrom?{derivedFrom:structuredClone(derivedFrom)}:{}),
         operationID: operationID ?? randomUUID(), idempotencyKey: idempotencyKey ?? operationID ?? randomUUID(),
       }
       if (geometry) {

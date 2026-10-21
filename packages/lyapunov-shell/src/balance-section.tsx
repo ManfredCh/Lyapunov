@@ -66,7 +66,7 @@ export function BalanceSection({t}:PropsLocale<"lyapunov">){
 
 const balanceStyle=`
 .lya-balance-card{display:flex;flex-direction:column;gap:6px;border:1px solid var(--border-weak-base,#26303f);border-radius:12px;padding:18px;max-width:360px}
-.lya-balance-card small{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.65}
+.lya-balance-card small{font-size:11px;letter-spacing:0;text-transform:none;opacity:.65}
 .lya-balance-card strong{font-size:28px;font-weight:650;letter-spacing:-.01em}
 .lya-balance-user{font-size:12px;opacity:.7}
 .lya-balance-hint{font-size:12px;opacity:.7;margin:0}

@@ -116,7 +116,7 @@ export async function importLocalFiles(port: LocalFileImportPort, paths: string[
         const receipt=await port.loadPolicy(path)
         if(!port.current()||receipt.face.cancelled)break
         if(receipt.entry||!receipt.face.failure)policyFiles.push(name)
-        if(receipt.face.failure)errors.push(`${name}：${receipt.entry?'策略已登记；当前实例兼容检查未完成 · ':''}${receipt.face.failure.code??'POLICY_LOAD_BLOCKED'} · ${receipt.face.failure.message??'文件加载被阻断'}`)
+        if(receipt.face.failure)errors.push(`${name}：${receipt.entry?'Policy registered; current-instance compatibility check did not finish · ':''}${receipt.face.failure.code??'POLICY_LOAD_BLOCKED'} · ${receipt.face.failure.message??'file load blocked'}`)
         continue
       }
       if (kind === "scene") {

@@ -61,6 +61,8 @@ export function captureFeedbackContent(capture: FeedbackCapture): ContentBlock[]
     worldId: capture.worldId, generation: capture.generation, worldSceneRevision: capture.worldSceneRevision,
     frameSceneRevision: capture.frameSceneRevision, frameId: capture.frameId, stepIndex: capture.stepIndex, simTime: capture.simTime,
     visualWarnings: capture.visualWarnings, environment: capture.environment, lod: capture.lod, lodIssue: capture.lodIssue,
+    // R-011：展示层事实随采集反馈一起交给模型——散开的图必须带 displayOnly/展开比例/选中部件，不能被当成真实拆卸。
+    presentation: capture.presentation,
   }
   return [
     { type: "text", text: [capture.prompt, "Viewer capture feedback (pins use original-frame pixels; absent pins are not visible annotations):", JSON.stringify(metadata)].filter(Boolean).join("\n") },

@@ -60,7 +60,7 @@ async function runtime(mode: Mode, dataRootAt: string): Promise<{ ctx: Context; 
   await ctx.plugin(Commands)
   // 部署默认模式就是这次会话的有效模式（会话没有 sandboxMode 覆盖时按它生效，与产品里同一条链）。
   await ctx.plugin(SandboxPolicy, { mode, workspaceRoot: workspace })
-  await ctx.plugin(scenePlugin, { dataRoot: dataRootAt })
+  await ctx.plugin(scenePlugin, { dataRoot: dataRootAt, productRoot: join(base, 'no-bundled-product') })
   const session = ctx.sessions.create(SessionId(`scene-policy-${mode}-${++calls}`), { meta: { cwd: workspace } })
   return { ctx, agent: { id: session.id, session } as Agent }
 }

@@ -85,3 +85,29 @@ export function projectionWorldLanded(
   if (projectionRevision !== undefined && live.appliedSceneRevision !== projectionRevision) return false
   return true
 }
+
+/** Apply/Replace 回执里可用于原生读回的最小身份字段（宿主投影的窄业务字段）。 */
+export interface AssemblyReadbackReceipt {
+  saved?: boolean
+  sceneId?: string
+  syncRequired?: boolean
+  worldId?: string
+  worldGeneration?: number
+}
+
+/**
+ * 同一次 robot_set_base / robot_assembly_replace 回执 → 自动原生读回身份。
+ *
+ * 判据是**命令回执自己的** world 代次，不是并发 state 轮询的 `worldRef`：轮询可能还没采纳
+ * 命令刚同步出的新代次（甚至临时把句柄置空），用它去读回会把已经 SYNCED 的装配按严格世代
+ * 检查判成 STALE。只有回执明确 `saved:true`、同 Scene、`syncRequired !== true` 且 worldId/代次
+ * 齐全时才返回；否则由调用方登记 pending，等 world owner 采纳当前版本后按同样规则收口。
+ */
+export function assemblyReadbackIdentity(
+  receipt: AssemblyReadbackReceipt | undefined,
+  sceneId: string | undefined,
+): { worldId: string; generation: number } | undefined {
+  if (!receipt || receipt.saved !== true || !sceneId || receipt.sceneId !== sceneId) return undefined
+  if (receipt.syncRequired === true || typeof receipt.worldId !== 'string' || !receipt.worldId || !Number.isInteger(receipt.worldGeneration) || receipt.worldGeneration! < 1) return undefined
+  return { worldId: receipt.worldId, generation: receipt.worldGeneration! }
+}

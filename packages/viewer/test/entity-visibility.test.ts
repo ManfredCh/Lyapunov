@@ -38,7 +38,7 @@ describe("节点显隐独立于资源加载与全局灯开关",()=>{
   await value.setScene(snapshot(5,[{...parent,transform:{position:[20,30,40],quaternion:[1,0,0,0],scale:[1,1,1]}},child,other]))
   expect(loads()).toBe(3);expect(value.objects.get("parent")).toBe(loaded)
   expect(loaded.group.position.toArray()).toEqual([20,30,40])
-  value.options.commitEdit=()=>{}
+  value.options.commitEdit=()=>{};value.transformEditing=true
   value.select("parent");value.select("child")
   expect(value.transformControls.object).toBe(childLoaded.group)
   expect(loads()).toBe(3)

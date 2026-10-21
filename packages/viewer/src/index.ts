@@ -45,7 +45,7 @@ export {
 export type { EnvironmentParseResult, EnvironmentScan, EnvironmentPatch, SceneEnvironment } from "./environment.ts"
 export type { EnvironmentHdriResolution } from "./environment.ts"
 import { buildRobotVisual, type RobotVisual } from "./robot.ts"
-import {objectWorldBounds,fitPerspectiveBounds,subjectEntityIds} from "./framing.ts"
+import {objectWorldBounds,fitPerspectiveBounds,subjectEntityIds,markAuthoringHelper,isAuthoringHelperRoot} from "./framing.ts"
 import {CollisionTopologyLayer,type CollisionTopologyStatus} from "./collision-topology.ts"
 export type {CollisionTopologyStatus} from "./collision-topology.ts"
 import { chooseDerivedNode, derivedNodeMatrix, fileNodeChain, LOD_BASE, primaryResource, rawLodLevel, resolveLodPlan, selectLodLevel, type DerivedNodeCandidate, type LodPlan } from "./lod.ts"
@@ -55,11 +55,12 @@ import {
   type ViewerAnnotation, type ViewerAnnotationAnchor,
 } from "./annotations.ts"
 import {
-  applyViewToCamera, assertRenderSize, cameraRequestFromState, cameraStateFromView, describeCameraView, isPlainLens, namedCamerasOfScene, normalizeCameraRequest, scaleIntrinsics, setCameraIntrinsics,
+  applyViewToCamera, assertRenderSize, cameraForward, cameraRequestFromState, cameraStateFromView, describeCameraView, isPlainLens, namedCamerasOfScene, normalizeCameraRequest, rotateByQuaternion, scaleIntrinsics, setCameraIntrinsics,
   writeViewToCamera, ViewerCameraError,
   type ViewerCameraCurrent, type ViewerCameraIntrinsics, type ViewerCameraMeasurement, type ViewerCameraRequest, type ViewerVec3, type ViewerCameraView,
 } from "./camera-view.ts"
 import { cameraRequestFromRig, captureGateLabel, captureGateRect, frustumFromReceipt, frustumGeometry, rigidPoseOf, type FrustumGeometry, type FrustumSpec, type RigidPose } from "./camera-frustum.ts"
+import { captureRoutePathSegments, captureRouteStationGeometry, captureRouteStationsGeometry, type CaptureRouteStationGeometry, type CaptureRouteStationInput } from "./capture-route-display.ts"
 import { currentRobotFrame } from "../../lyapunov-contracts/src/robot-frame.ts"
 import { projectSceneCameraRigs } from "./scene-camera-rigs.ts"
 import { staticAnimationReference, type StaticAnimationReference } from "./animation-reference.ts"
@@ -73,10 +74,14 @@ export interface ViewerOptions {
   splatRetentionScope?: SplatRetentionScope
   commitEdit?: (input: { sceneId: string; expectedRevision: number; entityId: string; transform: Transform }) => Promise<SceneSnapshot>
   onSelection?: (entityId: string | undefined) => void
+  /** 部件级选择（R-011）：只报告"当前高亮的是哪个真实部件"，不写 Scene、不动物理。 */
+  onPartSelect?: (selection: ViewerPartSelection | undefined) => void
   /** 右键只贡献当前选择与真实命中；聊天引用仍由原生会话 owner 处理。 */
   onContextMenu?: (input: { clientX:number; clientY:number; sceneId:string; sceneRevision:number; entityId:string; annotate:()=>void }) => void
   onRobotAnchorSelect?: (selection: RobotAnchorSelection) => void
   onPlacePoint?: (point: [number, number, number]) => void
+  /** 表面安装点拾取（R-012）：用户点中源真实可见几何，点/法线已换算到源真实根 body 局部系。 */
+  onMountPick?: (pick: ViewerSurfaceMountPick) => void
   onError?: (error: Error) => void
   /** 用户在 3D 视口里新落一条批注：锚点已换算成实体局部坐标，换视角/移动实体都不会走位。 */
   onAnnotationCreate?: (anchor: ViewerAnnotationAnchor) => void
@@ -85,6 +90,20 @@ export interface ViewerOptions {
   translate?: (zh:string,en:string)=>string
 }
 export interface ViewerDisplaySettings { grid: boolean; axes: boolean; background: string; wireframe: boolean; splats: boolean; collision?: boolean;splatQuality?:SplatQuality }
+/** Viewer 自己的显示默认：V8 画布底色；碰撞线框默认收起，只有用户显式打开才显示。 */
+export const DEFAULT_VIEWER_DISPLAY: Readonly<ViewerDisplaySettings> = { grid: true, axes: true, background: "#242a32", wireframe: false, splats: true, collision: false }
+/**
+ * 网格只往上抬 2mm：地面与网格线原本共面，线宽只有 1px，深度值相等时会出现点状 z-fighting。
+ * 这是**显示层**修正：不移动地面/实体、不改碰撞或 Scene 变换，也不关闭网格功能。
+ */
+export const VIEWER_GRID_Z_OFFSET_M = 0.002
+/** 网格显示材质只读深度、不写深度；与上面的微抬升一起消除共面闪烁。 */
+export function applyViewerGridDepthPolicy(grid: THREE.GridHelper): void {
+  grid.position.z = VIEWER_GRID_Z_OFFSET_M
+  grid.renderOrder = 1
+  const materials = Array.isArray(grid.material) ? grid.material : [grid.material]
+  for (const material of materials) material.depthWrite = false
+}
 /**
  * 相机状态。前三个字段的老语义一字未改（老调用方传 `{position,quaternion,target}` 照常工作），
  * 后面几个是"照片相机"必需、而老形状装不下的东西：
@@ -155,6 +174,8 @@ export interface ViewerCameraRender {
    * 出图后窗口相机那一级会恢复回去。回执据此说清"这张图用了简化件 / 有没有比该用的更粗"。
    */
   lod: LodCaptureFace
+  /** 这张图这一帧的**展示层事实**（是否炸开、选中哪个真实部件、哪一版资源）；与 `capture()` 同一 owner。 */
+  presentation: PresentationCaptureFace
   worldId?: string; generation?: number; worldSceneRevision?: number
   frameId?: string; frameSceneRevision?: number; stepIndex?: number; simTime?: number
   capturedAt: string
@@ -264,6 +285,44 @@ export interface LodCaptureFace {
   /** 参与不了级别交换的实体（例如带烘焙动画）：如实带上，不省这点面数。 */
   skipped?: Array<{ entityId: string; reason: string }>
 }
+/**
+ * 一个**可读部件**的对外身份（R-011）。`partId` 只在同一实体内唯一，跨实体靠 `entityId` 定身份；
+ * `resource`/`signature` 说明这棵树来自哪一版资源，避免"同名不同版"被当成同一件东西。
+ */
+export interface ViewerPart {
+  entityId: string
+  partId: string
+  name: string
+  kind: "body" | "link" | "node"
+  /** 原生名字路径（展示用；不参与身份）。 */
+  path: string[]
+  /** 这一版资源身份：`resourceId@version` 或（非机器人资源）加载签名。 */
+  resource?: string
+  resourceSignature: string
+  granularity: "hierarchy" | "single"
+  /** 是否可参与展示层炸开；false 时 `reason` 给出具体不可用原因。 */
+  separable: boolean
+  reason?: string
+  /** 当前是否是选中的部件。 */
+  selected: boolean
+}
+export interface ViewerPartSelection { entityId: string; partId: string }
+/**
+ * 随采集/观察一起交出去的**展示层事实**：这张图是不是炸开视图、展开到多少、选中的是哪个真实部件、
+ * 对应哪一版资源。它描述的是"这张图画的是什么显示状态"，不是 Scene/物理的改动（`displayOnly` 恒真）。
+ */
+export interface PresentationCaptureFace {
+  displayOnly: true
+  exploded: boolean
+  spread: number
+  entityId?: string
+  selectedPart?: { entityId: string; partId: string; name: string; kind: ViewerPart["kind"] }
+  catalog?: { entityId: string; resource?: string; signature: string; parts: number; separable: number }
+  /** 未应用的装配预览 ghost：画面里的第二只手只是临时预览，不是已提交实体。 */
+  assemblyPreview?: ViewerAssemblyPreviewFace
+  /** 未应用的旧件停放 ghost：旧件身份 + 明确停放位姿，`applied:false` 说明它还没被真正停放。 */
+  parkingPreview?: ViewerParkingPreviewFace
+}
 interface Loaded {
   group: THREE.Group; signature: string; documentWorldMatrix?: THREE.Matrix4
   robot?: RobotVisual; splat?: SplatMesh; collision?: THREE.Object3D
@@ -299,6 +358,36 @@ interface Loaded {
    * （见 `derivedNodeMatrix`），也是按名字找节点的依据。链只含该文件自己的 glTF 节点，Scene 侧父变换不在里面。
    */
   baseNode?: { matrix: THREE.Matrix4; name: string }
+  /**
+   * 非机器人刚体物件的**纯显示炸开层**（R-011）：按实例缓存的稳定部件身份 + 每部件的展示包装组。
+   * 包装组只插在**本实例自己的克隆层级**里（几何/材质仍归 GLTF 缓存），原真实节点矩阵不动。
+   */
+  nodeExplode?: NodeExplodeRuntime
+}
+/**
+ * 非机器人结点的展示层不可分原因（码值）；文案在读取时经 `options.translate` 本地化，
+ * 因此缓存的身份里不存语言相关的字符串。
+ */
+type NodePartReasonCode = "PART_NO_OWN_GEOMETRY" | "PART_GROUP_GEOMETRY" | "PART_NESTED_GEOMETRY" | "PART_SKINNED" | "PART_SINGLE"
+/** 一个非机器人真实结点（包装组不算用户部件，身份只来自原层级）。 */
+interface NodePartRecord {
+  partId: string
+  node: THREE.Object3D
+  name: string
+  path: string[]
+  /** 该结点自己有可视几何（自身是 Mesh，或直接挂着 Mesh 子结点）。 */
+  hasVisual: boolean
+  separable: boolean
+  reasonCode?: NodePartReasonCode
+}
+interface NodeExplodeRuntime {
+  /** 身份缓存对应的可视对象；LOD/重建换了对象就重算。 */
+  visual?: THREE.Object3D
+  parts: NodePartRecord[]
+  /** partId → 展示包装组（只有可分部件有；懒建一次，绝不重复插入）。 */
+  wrappers: Map<string, THREE.Object3D>
+  offsets: Map<string, [number, number, number]>
+  spread: number
 }
 /** 一个实体上的 LOD：计划 + 已加载的派生级别 + 在途/失败记录。 */
 interface LodRuntime {
@@ -340,6 +429,41 @@ const LEGACY_LIGHTING = {
 const LOAD_CONCURRENCY = 64
 
 /**
+ * 展示层炸开的位移尺度（与 `robot.ts` 同一条口径）：可视整体包围盒对角线的这个比例 × spread。
+ * 纯显示量，不写任何原生矩阵/Scene。
+ */
+const NODE_EXPLODE_RADIUS_FACTOR = 0.35
+
+/**
+ * 部件/炸开的系统能力理由（zh, en）。**唯一一份**：Viewer 读取时经 `options.translate` 本地化，
+ * 缓存的身份里只存码值；这样英文界面不会出现系统中文，用户自己的名称则原样保留。
+ */
+const PART_REASONS = {
+  dynamic: ["该实体当前显示原生动态几何（线缆/网格由物理帧驱动），不能按刚体拉开", "This entity currently shows native dynamic geometry (driven by physics frames), so it cannot be exploded as a rigid body."],
+  animated: ["该实体带烘焙/蒙皮动画，刚体展示偏移会与动画骨骼冲突，不能按刚体拉开", "This entity has baked/skinned animation; a rigid display offset would conflict with the animated skeleton, so it cannot be exploded."],
+  lod: ["该实体使用 LOD 级别切换，展示层偏移不会跟随交换后的级别，因此不提供炸开", "This entity uses LOD level switching; a display explode layer would not follow the swapped level, so explosion is unavailable."],
+  robotSingle: ["整个资源只有一个可视部件，没有可分离的兄弟部件", "The resource has only one visual component, so there are no sibling components to separate."],
+  objectSingle: ["这个物件只有一个可视部件，没有可独立显示的子部件，不虚构可拆面", "This object has only one visual component; there are no independently displayable child components, and no cut faces are invented."],
+  noVisual: ["该实体没有可读的可视节点", "This entity has no readable visual nodes."],
+  notLoaded: ["实体尚未加载", "The entity has not finished loading."],
+  robotNoVisual: ["该节点没有自己的可视几何（纯变换/关节节点）", "This node has no visual geometry of its own (a pure transform/joint node)."],
+  noOwnGeometry: ["该节点没有自己的可视几何（几何由子部件提供）", "This node has no visual geometry of its own (its geometry belongs to child components)."],
+  groupGeometry: ["该节点是容器，自己的可视几何由子部件提供", "This node is a container; its visual geometry belongs to child components."],
+  nestedGeometry: ["该网格下面还有子部件，单独平移会一并带走它们，因此不独立炸开", "This mesh contains child components; translating it alone would move them too, so it is not exploded independently."],
+  skinned: ["该部件是蒙皮网格，刚体展示偏移会与骨骼蒙皮冲突", "This component is a skinned mesh; a rigid display offset would conflict with its skeleton skinning."],
+} as const
+
+/** 结点级原因码 → 本地化文案键（唯一映射，避免把码值当文案）。 */
+const NODE_PART_REASON_KEY: Record<NodePartReasonCode, keyof typeof PART_REASONS> = {
+  PART_NO_OWN_GEOMETRY: "noOwnGeometry",
+  PART_GROUP_GEOMETRY: "groupGeometry",
+  PART_NESTED_GEOMETRY: "nestedGeometry",
+  PART_SKINNED: "skinned",
+  PART_SINGLE: "objectSingle",
+}
+
+
+/**
  * DEV-039：WebGL 不可用时的专用错误。
  *
  * 为什么要一个类型而不是让 three.js 的原始异常冒出去：客户机上 WebGL 可能因为
@@ -358,6 +482,143 @@ export class WebGLUnavailableError extends Error {
 
 export function createViewer(options: ViewerOptions) { return new SceneViewer(options) }
 
+/**
+ * R-012／§2.9：临时装配预览 ghost 的只读输入。
+ *
+ * `targetBodyFromSourceRoot` 是服务端 `robot_assembly_preview` 按
+ * `T_targetBody_sourceRoot = T_targetBody_targetMount · T_pair · inverse(T_sourceRoot_sourceMount)`
+ * 算出的**目标 body 局部**安装变换（米、归一化 xyzw）。Viewer 只负责用真实已加载几何把它显示出来，
+ * 不自己算安装数学、不读 explode 偏移、不新增 Scene 实体。
+ */
+export interface ViewerAssemblyGhostSpec {
+  sourceEntityId: string
+  targetEntityId: string
+  targetBodyName: string
+  targetBodyFromSourceRoot: { positionM: number[]; quaternionXyzw: number[] }
+  /** 身份绑定：任一变化（scene/world/revision/generation/资源签名）都必须清理 ghost。 */
+  worldId?: string
+  sceneId?: string
+  sceneRevision?: number
+  generation?: number
+  sourceRootBodyName?: string
+  sourceResourceSignature?: string
+  targetResourceSignature?: string
+}
+export interface ViewerAssemblyGhostResult {
+  status: "PREVIEW" | "UNAVAILABLE"
+  reason?: string
+  sourceEntityId?: string
+  targetEntityId?: string
+  targetBodyName?: string
+}
+/**
+ * R-012 Replace：旧末端**离开挂载位的停放**临时 ghost 的只读输入。`worldPose` 是旧末端真实根 body
+ * 在世界系中的明确停放位姿（米/归一化 xyzw）。Viewer 只把它显示出来，不决定停放位置、不写 Scene。
+ */
+export interface ViewerParkingGhostSpec {
+  entityId: string
+  worldPose: { positionM: number[]; quaternionXyzw: number[] }
+  worldId?: string
+  sceneId?: string
+  sceneRevision?: number
+  generation?: number
+}
+export interface ViewerParkingGhostResult {
+  status: "PREVIEW" | "UNAVAILABLE"
+  reason?: string
+  entityId?: string
+}
+/**
+ * V10-08/38：真实资产放置预览的只读输入。
+ *
+ * 实体来自服务端 `asset_placement_preview`（与 `scene_mount` 同一份落点/底面对齐和纯节点构造），
+ * 只允许 Viewer 真实显示的 mesh/robot。ghost 放在独立 authoring 子树里，不进入 `objects`/部件目录/
+ * 物理/主拾取/采集；身份 = session+scene+resource/version+本次 placement token。
+ */
+export interface ViewerPlacementPreviewSpec {
+  token: string
+  sceneId: string
+  resourceId: string
+  version: number
+  entities: Entity[]
+  /** 预览资源字节的专用解析器；与主 Scene 的授权路由分开，只由本次放置使用。 */
+  resolveResource?: ViewerOptions["resolveResource"]
+}
+export interface ViewerPlacementPreviewResult {
+  status: "PREVIEW" | "UNAVAILABLE" | "SUPERSEDED"
+  reason?: string
+  token?: string
+}
+/** 采集/观察里给模型看的**未应用装配预览**窄面：ghost 不是第二只手，只是未提交的临时显示。 */
+export interface ViewerAssemblyPreviewFace {
+  applied: false
+  sourceEntityId: string
+  targetEntityId: string
+  targetBodyName: string
+  sourceRootBodyName?: string
+  worldId?: string
+  sceneRevision?: number
+  generation?: number
+}
+/**
+ * 采集/观察里给模型看的**未应用旧件停放预览**窄面。它必须同时说清"哪件旧件、停在哪个世界位姿、
+ * 还没应用"，否则截图里的额外一只手会被当成真实实例。
+ */
+export interface ViewerParkingPreviewFace {
+  applied: false
+  entityId: string
+  positionM: [number, number, number]
+  quaternionXyzw: [number, number, number, number]
+  worldId?: string
+  sceneRevision?: number
+  generation?: number
+}
+/** 表面拾取结果：点/法线在**源真实根 body** 局部系中，可直接当 `robot_assembly_preview` 的 `kind:'pose'` 源安装面。 */
+export interface ViewerSurfaceMountPick {
+  entityId: string
+  bodyName?: string
+  positionM: [number, number, number]
+  quaternionXyzw: [number, number, number, number]
+  normalRootM: [number, number, number]
+  hitPointWorld: [number, number, number]
+}
+/**
+ * 独立的**输出画布**：录制/预览只从它取帧，不再从主画布直接 requestFrame。
+ *
+ * 原因：隐藏 helper → render → 恢复 helper → render 屏幕是同一个 JS 任务，但 canvas 的合成/取帧并不保证
+ * 在同一个任务里发生；对主画布 `requestFrame()` 仍可能抓到恢复后的 dirty 帧。先把干净渲染同步
+ * `drawImage` 到这块输出画布，再对输出画布取帧，视频内容就不再依赖浏览器何时合成主画布。
+ */
+function createCaptureSurface(width: number, height: number, host: HTMLElement): HTMLCanvasElement {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") throw new Error("VIEWER_CAPTURE_SURFACE_UNSUPPORTED: 当前环境不能创建独立输出画布")
+  if (!host || typeof host.appendChild !== "function") throw new Error("VIEWER_CAPTURE_SURFACE_HOST_UNAVAILABLE: 当前 Viewer 没有可用的 DOM 父节点，不能建立连续视频流")
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, width)
+  canvas.height = Math.max(1, height)
+  // 输出画布必须进入真实 DOM 的绘制生命周期，但只占 1×1 透明像素：不能在用户界面形成第二块画面。
+  // 不能用 display:none/visibility:hidden（浏览器会跳过合成/采集），也不能让它获得焦点或改变布局。
+  canvas.setAttribute("aria-hidden", "true")
+  canvas.tabIndex = -1
+  Object.assign(canvas.style, { position: "absolute", left: "0", top: "0", width: "1px", height: "1px", opacity: "0", pointerEvents: "none" })
+  try { host.appendChild(canvas) } catch (failure) {
+    detachCaptureSurface(canvas)
+    throw new Error("VIEWER_CAPTURE_SURFACE_HOST_UNAVAILABLE: 当前 Viewer 的 DOM 父节点不能接收输出画布，不能建立连续视频流", { cause: failure })
+  }
+  return canvas
+}
+
+/** 只移除**本次**输出节点；宿主已提前移走/替换时保持幂等，绝不按选择器或兄弟位置误删别次画布。 */
+function detachCaptureSurface(canvas: HTMLCanvasElement): void {
+  const parent = canvas.parentNode
+  if (!parent || typeof parent.removeChild !== "function") return
+  try { parent.removeChild(canvas) } catch { /* 节点已被宿主移除或替换 */ }
+}
+
+function stopStreamTracks(stream: MediaStream | undefined): void {
+  if (!stream) return
+  try { for (const track of stream.getTracks()) { try { track.stop() } catch { /* 已结束 */ } } } catch { /* 无轨道列表 */ }
+}
+
 /** 只负责显示、本地选择/相机/gizmo；没有 step、下载索引、LLM 或机器人动作实现。 */
 export class SceneViewer {
   readonly renderer: THREE.WebGLRenderer
@@ -371,6 +632,8 @@ export class SceneViewer {
   private navigationPreference?: "orbit" | "first-person"
   private observerSnapshot?: ViewerObserverState
   private observerListeners?: Set<() => void>
+  /** 展示层状态（部件选择/炸开）的订阅者：面板据此在外部合拢/换身份后读回实际 0 状态，不新增轮询所有者。 */
+  private presentationListeners?: Set<() => void>
   private observerLabel?: HTMLElement
   private observerExitButton?: HTMLButtonElement
   private navigationChanged=(event:Event)=>{const mode=(event as CustomEvent).detail;if(mode==="orbit"||mode==="first-person")this.setNavigationMode(mode,false)}
@@ -441,14 +704,69 @@ export class SceneViewer {
   private snapshot?: SceneSnapshot
   private world?: WorldHandle
   private selected?: string
+  /**
+   * 3D 变换手柄是**显式模式**：默认选中只保留细轮廓；只有用户在对象属性/快捷键里
+   * 明确进入 Move/Rotate/Scale 时才挂上 TransformControls。
+   */
+  private transformEditing = false
+  /** 当前高亮的部件（R-011）：只影响展示层高亮，不提交任何 Scene/物理改动。 */
+  private selectedPart?: ViewerPartSelection
+  /** 展示层炸开的**唯一状态**：哪台实体、展开多少。偏移只写 RobotVisual 的 presentation 组。 */
+  private partExplode?: { entityId: string; spread: number; reason?: string }
+  /**
+   * R-012 临时装配预览 ghost：真实源几何的透明克隆 + 独立材质；不属于 Scene entities、不进入部件目录，
+   * 换 scene/world/revision/generation、取消或销毁时清理。几何是共享的（克隆不复制 geometry），只销毁克隆材质。
+   */
+  private assemblyGhost?: {
+    sourceEntityId: string; targetEntityId: string; targetBodyName: string
+    sourceRootBodyName?: string
+    targetBodyLocalName: string
+    worldId?: string; sceneId?: string; sceneRevision?: number; generation?: number
+    sourceResourceSignature?: string; targetResourceSignature?: string
+    /** 安装局部关系（源根在目标 body 局部系）与源模型帧逆；每帧用当前目标 body 重算，只算一次会漂。 */
+    install: THREE.Matrix4; rootFrameInverse: THREE.Matrix4
+    sourceVisual: THREE.Object3D
+    root: THREE.Group; visual: THREE.Object3D; marker: THREE.Group; materials: THREE.Material[]
+  }
+  /**
+   * R-012 Replace 的旧末端停放预览 ghost：与装配 ghost 同源的真实几何透明克隆，但摆在**明确的世界停放位姿**，
+   * 不跟随任何目标 body。它不是 Scene 实体、不进入物理；换身份/取消/提交时与装配 ghost 一并清理。
+   */
+  private parkingGhost?: {
+    entityId: string
+    worldPose: {positionM: [number, number, number]; quaternionXyzw: [number, number, number, number]}
+    worldId?: string; sceneId?: string; sceneRevision?: number; generation?: number
+    root: THREE.Group; visual: THREE.Object3D; materials: THREE.Material[]
+  }
+  /**
+   * V10-08/38 真实资产放置 ghost：独立 authoring 子树，只由 `previewPlacement` 的临时实体构造。
+   * 不写 `objects`/snapshot、不进部件目录/物理/拾取/采集；几何按原 Loader 约定共享，只销毁克隆材质。
+   */
+  private placementGhost?: { token: string; sceneId: string; resourceId: string; version: number; root: THREE.Group; materials: THREE.Material[]; dispose(): void }
+  private placementPreviewGeneration = 0
+  /** 源表面安装点拾取模式与临时标记（不属于 Scene 实体，不进目录/拾取）。 */
+  private mountPick?: { entityId: string; rootBodyName: string }
+  private mountPickMarker?: THREE.Group
+  /** 高亮用的材质克隆（按 Mesh 记住原材质）：清除时必须逐项换回，绝不能改到共享材质本身。 */
+  private partHighlight?: { entityId: string; partId: string; swaps: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> }
   private collisionTopologyLayer?: CollisionTopologyLayer
   private robotAnchorLayer?: RobotAnchorLayer
   private disposed = false
+  /** 活动连续视频流的手动取帧定时器清理句柄；Viewer 销毁时必须清掉，避免关闭后计时器泄漏。 */
+  private captureStreamStops = new Set<() => void>()
+  /**
+   * 路线预览/录制的**临时**POV 相机。它不是场景相机、不是第二份持久状态：只在本轮 capture pass
+   * 里供 `captureCanvasStream`/预览画布渲染；主视角、OrbitControls、物理时钟都不动。
+   */
+  private routeCaptureView?: ViewerCameraView
+  private routeCaptureCamera?: THREE.PerspectiveCamera
   private generation = 0
   private raf = 0
   private readonly resize: ResizeObserver
   private editing = false
   private placing = false
+  private placementTransformEnabled?: boolean
+  private annotationTransformEnabled?: boolean
   private placeMarker?: THREE.Group
   private placeDown?: { x: number; y: number }
   private annotating = false
@@ -461,6 +779,12 @@ export class SceneViewer {
    * （`camera_list` 回执经 `frustumFromReceipt`），本类**不算 K、不算 FK、不存第二份相机事实**。
    */
   private readonly cameraRigRoot = new THREE.Group()
+  /** 路线轨迹（与 cameraRigRoot 分开）：临时路线显示不能覆盖/清除机器人已挂载机位。 */
+  private readonly captureRouteRoot = new THREE.Group()
+  /** 路线预览/录制中当前运动相机的独立 helper：不随站点重建，也不与机器人机位共用 owner。 */
+  private readonly captureRouteCurrentRoot = new THREE.Group()
+  private captureRouteCurrent?: THREE.Group
+  private captureRouteCurrentLensKey = ""
   private readonly cameraRigs = new Map<string, CameraRigRecord>()
   private cameraRigSelected?: string
   /** 只保存导航返回位；跟随姿态来自原生相机回执或同 Frame 快照，没有第二份安装状态。 */
@@ -490,7 +814,7 @@ export class SceneViewer {
   private cameraRigGizmoKey?: string
   private readonly grid = new THREE.GridHelper(20, 40, 0x48515f, 0x282f3a)
   private readonly axes = new THREE.AxesHelper(0.5)
-  private display: ViewerDisplaySettings = { grid: true, axes: true, background: "#121a24", wireframe: false, splats: true, collision: true }
+  private display: ViewerDisplaySettings = { ...DEFAULT_VIEWER_DISPLAY }
   /**
    * 当前生效的**照片内参**，按"应用它时"的画布尺寸记。`undefined` = 普通镜头（fov + 宽高比就够，没有视口偏移）。
    *
@@ -541,7 +865,7 @@ export class SceneViewer {
     this.scene.environment = this.materialEnvironment.texture
     this.scene.environmentIntensity = 0.7
     environment.dispose(); pmrem.dispose()
-    this.scene.background = new THREE.Color(0x121a24)
+    this.scene.background = new THREE.Color(0x242a32)
     this.camera.up.set(0, 0, 1)
     this.camera.position.set(5, -6, 4)
     this.renderer.domElement.addEventListener("pointerdown", this.orbitFocusPointer, true)
@@ -564,20 +888,32 @@ export class SceneViewer {
     this.hemisphere = new THREE.HemisphereLight(0xe7efff, 0x47515c, 2.4)
     this.scene.add(this.hemisphere)
     this.sun = new THREE.DirectionalLight(0xffffff, 3); this.sun.position.set(5, -4, 8); this.scene.add(this.sun)
-    this.grid.rotateX(Math.PI / 2); this.scene.add(this.grid)
+    this.grid.rotateX(Math.PI / 2); applyViewerGridDepthPolicy(this.grid); this.scene.add(this.grid)
     this.scene.add(this.axes)
     this.annotationRoot.name = ANNOTATION_ROOT_NAME
+    markAuthoringHelper(this.annotationRoot)
     this.scene.add(this.annotationRoot)
     this.cameraRigRoot.name = "lyapunov-camera-rigs"
+    markAuthoringHelper(this.cameraRigRoot)
     this.scene.add(this.cameraRigRoot)
+    this.captureRouteRoot.name = "lyapunov-capture-route"
+    markAuthoringHelper(this.captureRouteRoot)
+    this.scene.add(this.captureRouteRoot)
+    this.captureRouteCurrentRoot.name = "lyapunov-capture-route-current"
+    markAuthoringHelper(this.captureRouteCurrentRoot)
+    this.scene.add(this.captureRouteCurrentRoot)
+    markAuthoringHelper(this.grid)
+    markAuthoringHelper(this.axes)
     this.captureGateSvg.setAttribute("class", "lya-capture-gate")
     this.captureGateSvg.setAttribute("aria-hidden", "true")
     Object.assign(this.captureGateSvg.style, { position: "absolute", inset: "0", width: "100%", height: "100%", pointerEvents: "none", zIndex: "5" })
     options.container.appendChild(this.captureGateSvg)
     options.container.appendChild(this.renderer.domElement)
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement)
+    markAuthoringHelper(this.transformControls.getHelper())
     this.scene.add(this.transformControls.getHelper())
     this.transformControls.addEventListener("dragging-changed", event => {
+      if (this.placing || this.annotating) return // 放置/批注独占指针，旧gizmo迟到事件不能提交实体。
       if(this.cancellingCameraEdit){this.editing=false;this.syncObserverControls();return}
       this.editing = Boolean(event.value)
       this.syncObserverControls()
@@ -587,7 +923,7 @@ export class SceneViewer {
         else if (options.commitEdit) {
           // CAS尚未返回时保留拖动结果；恢复帧投影会把它覆盖回旧位姿。
           this.editing = true; this.controls.enabled = false; this.transformControls.enabled = false
-          void this.finishEdit().catch(error => options.onError?.(error)).finally(() => { this.editing = false;if(!this.disposed){this.transformControls.enabled=Boolean(this.options.commitEdit);this.syncObserverControls()} })
+          void this.finishEdit().catch(error => options.onError?.(error)).finally(() => { this.editing = false;if(!this.disposed){const enabled=Boolean(this.options.commitEdit);if(this.placing)this.placementTransformEnabled=enabled;if(this.annotating)this.annotationTransformEnabled=enabled;this.transformControls.enabled=!this.placing&&!this.annotating&&enabled;this.syncObserverControls()} })
         }
       }
     })
@@ -686,6 +1022,8 @@ export class SceneViewer {
     this.advanceDayNight()
     // 批注每帧按实体当前世界矩阵重新落位：这正是"转相机/移动实体后标记仍钉在原处"的执行点。
     this.updateAnnotationMarkers()
+    // 底座/TCP 标签与批注标记同一条屏幕尺寸判据：不按米缩放，近景不糊住机器人。
+    this.robotAnchorLayer?.updateLabels(this.camera, this.renderer.domElement.getBoundingClientRect().height || this.renderer.domElement.height)
     if (this.options.container.clientWidth > 0 && this.options.container.clientHeight > 0) this.renderer.render(this.scene, this.camera)
     if (this.spark?.activeSplats && this.options.container.clientWidth > 0 && this.options.container.clientHeight > 0) {
       for (const [id, state] of this.splatRuntime ?? []) {
@@ -699,13 +1037,21 @@ export class SceneViewer {
   async setScene(snapshot: SceneSnapshot): Promise<void> {
     if (this.disposed) throw new Error("VIEWER_DISPOSED")
     if (this.snapshot?.sceneId === snapshot.sceneId && snapshot.revision < this.snapshot.revision) return
+    const sameScene = this.snapshot?.sceneId === snapshot.sceneId
+    // 换场景版本/换场景：旧部件选择、高亮与展示层展开一律按身份清掉，绝不让上一版资源停留在展开态。
+    // 先用 restore 让被炸开时让位的 Transform gizmo 回到选中实体上，再清选择/高亮。
+    if (this.snapshot && (this.snapshot.sceneId !== snapshot.sceneId || this.snapshot.revision !== snapshot.revision)) { this.clearAssemblyPreview(); this.restorePartExplode(); this.clearPartState(); this.clearSurfaceMountMarker(); this.mountPick = undefined }
     if (this.snapshot?.sceneId !== snapshot.sceneId || this.snapshot?.revision !== snapshot.revision) for (const loaded of this.objects.values()) this.clearDynamicGeometry(loaded)
     if (this.snapshot?.sceneId !== snapshot.sceneId) {
+      // 换 Scene 时临时放置 ghost 一律清掉；迟到加载由 token/generation 拒绝复活。
+      this.clearPlacementPreview()
       // 不让相同 entityId 的新场景复用旧场景尚未结束的泼溅初始化。
       for (const [id, loaded] of this.objects) if (loaded.pendingSplat || loaded.pending && loaded.planVisual?.kind === "splat") {
         this.release(loaded); this.objects.delete(id); this.mixers.delete(id)
       }
     }
+    // 临时路线 POV 只属于发出它的那轮 capture；切 Scene 时立即清掉，绝不让旧 POV 继续渲染新场景。
+    if (this.snapshot?.sceneId !== snapshot.sceneId) this.clearRouteCaptureView()
     if (this.world && this.world.sceneId !== snapshot.sceneId) this.setWorld(undefined)
     const generation = ++this.generation
     if(this.snapshot?.sceneId!==snapshot.sceneId||this.snapshot?.revision!==snapshot.revision)this.displayedFrame=undefined
@@ -743,7 +1089,7 @@ export class SceneViewer {
         if (loaded && loaded.signature !== signature) {
           // 改灯参数保留当前实体 Group/选择，属性面板可连续调整。
           if (loaded.group.userData.sceneLight) { loaded.group.clear(); loaded.signature = signature; loaded.lodWarnings = [] }
-          else { this.release(loaded); this.objects.delete(entity.entityId); loaded = undefined }
+          else { this.release(loaded, sameScene); this.objects.delete(entity.entityId); loaded = undefined }
         }
         if (!loaded) {
           loaded = { group: new THREE.Group(), signature, lodWarnings: [] }
@@ -766,7 +1112,7 @@ export class SceneViewer {
       const {visible:_visible,...visual}=entity.components.visual??{}
       const signature = JSON.stringify({ resources: entity.resources, visual })
       let loaded = this.objects.get(entity.entityId)
-      if (loaded && loaded.signature !== signature) { this.release(loaded); this.objects.delete(entity.entityId); loaded = undefined }
+      if (loaded && loaded.signature !== signature) { this.release(loaded, sameScene); this.objects.delete(entity.entityId); loaded = undefined }
       if (!loaded) {
         loaded = { group: new THREE.Group(), signature, lodWarnings: [] }
         loaded.group.name = entity.name
@@ -876,6 +1222,8 @@ export class SceneViewer {
         this.refreshVisualWarnings(entity.entityId, loaded)
         loaded.group.userData.loaded = true
         this.applyDisplay(loaded)
+        // 资源加载完成后部件目录才真正可读：播报一次，已打开的面板据此从"空"切到真实部件/展开状态。
+        this.notifyPresentationState()
         // 新几何进画面：场景包围球变了，阴影取景要跟着重取（否则大模型的光影只覆盖到加载前那一小块）。
         this.geometryRevision++
         if (this.sun.castShadow) this.applyEnvironment({ meshes: false })
@@ -913,7 +1261,7 @@ export class SceneViewer {
    * 读一个实体的**基础级别**可视对象（`visual` 表示）。GLB 通过 `loadGltfObject` 走按 URL 的缓存：
    * 同一份资产被 N 个实体引用时只解析一次，N 个克隆共享同一批几何/材质/贴图实例。
    */
-  private async loadVisual(entity: Entity, loaded: Loaded): Promise<THREE.Object3D | undefined> {
+  private async loadVisual(entity: Entity, loaded: Loaded, resolveResource: ViewerOptions["resolveResource"] = this.options.resolveResource): Promise<THREE.Object3D | undefined> {
     const visual = entity.components.visual
     const splatLoadStarted = visual?.kind === "splat" ? performance.now() : 0
     const requestedSceneId = this.snapshot?.sceneId, requestedSignature = loaded.signature
@@ -934,7 +1282,7 @@ export class SceneViewer {
       // 出站投影已把它换成不可逆标记 `res:<指纹>`，而 `Representation.mimeType` 不受投影影响。
       // 配对判据是逐字相等（`pairDocumentAssets`，唯一一份），配不上就是空表——回落到定位符真名后缀，不猜。
       const assetDeclarations=new Map(pairDocumentAssets(entity).map(row=>[row.file,row.mimeType]))
-      loaded.robot = await buildRobotVisual({...robotInput,rootBody:robotInput.rootBody??native.rootBody,hideCollisionGeoms:native.source==="official-env",assetDeclarations}, this.options.resolveResource, { renderer: this.renderer })
+      loaded.robot = await buildRobotVisual({...robotInput,rootBody:robotInput.rootBody??native.rootBody,hideCollisionGeoms:native.source==="official-env",assetDeclarations}, resolveResource, { renderer: this.renderer })
       return loaded.robot.root
     }
     const ref = primaryResource(entity)
@@ -995,7 +1343,7 @@ export class SceneViewer {
         state.decodeCacheHit=retained!==undefined;state.sourceReadCompleteMs=retained?0:null;state.phase='initializing'
         if(retained)mesh=new SplatMesh({packedSplats:restoreSplatData(retained),enableLod:true})
         else{
-          const url=await this.options.resolveResource(rep.uri,ref)
+          const url=await resolveResource(rep.uri,ref)
           controller.signal.throwIfAborted()
           if(!current())throw new DOMException('泼溅加载已不属于当前场景','AbortError')
           mesh=new SplatMesh({url,fileName:filename,fileType,lod:initializationLod,enableLod:true,onProgress:event=>{if(state.sourceReadCompleteMs===null&&event.total>0&&event.loaded>=event.total)state.sourceReadCompleteMs=performance.now()-splatLoadStarted}})
@@ -1046,7 +1394,7 @@ export class SceneViewer {
         if (loaded.pendingSplat === pending) loaded.pendingSplat = undefined
       }
     }
-    const url = await this.options.resolveResource(rep.uri, ref)
+    const url = await resolveResource(rep.uri, ref)
     if (rep.mimeType !== "model/gltf-binary") throw new Error(`VIEWER_FORMAT_UNSUPPORTED: ${rep.mimeType}`)
     const { object, gltf, node } = await this.loadGltfObject(url, visual)
     // 单网格来源保留原轴向怀疑诊断；多网格装配体的零件长宽没有独立上下语义。
@@ -1349,6 +1697,7 @@ export class SceneViewer {
         loaded.group.userData.loaded = true
         this.applyDisplay(loaded)
         this.trackAnimation(entity.entityId, loaded)
+        this.notifyPresentationState()
         return true
       } catch { /* 这一级也读不出来：接着试更粗的 */ }
     }
@@ -1365,9 +1714,8 @@ export class SceneViewer {
    */
   setEditCommit(commit: ViewerOptions["commitEdit"]): void {
     this.options.commitEdit = commit
-    if (!commit) { this.transformControls.detach(); return }
-    if (this.selected && this.objects.has(this.selected)&&this.snapshot?.entities.find(entity=>entity.entityId===this.selected)?.locked!==true) this.transformControls.attach(this.objects.get(this.selected)!.group)
-    else this.transformControls.detach()
+    // 与 `select()` 共用同一条挂接判据：炸开的实体不因权限变化被重新挂上真实 Transform。
+    this.syncTransformGizmo()
   }
   /**
    * 开关 Scene 里作者打的灯。硬编码的环境灯（Hemisphere/Directional）**不归它管**——
@@ -1819,6 +2167,9 @@ export class SceneViewer {
     const changed = this.world?.worldId !== world?.worldId || this.world?.worldGeneration !== world?.worldGeneration || this.world?.appliedSceneRevision !== world?.appliedSceneRevision
     const unavailable=Boolean(world&&!['ready','running','paused'].includes(world.status))
     if(changed||unavailable)this.displayedFrame=undefined
+    // 切 world/代次：旧展示层展开与高亮按身份清掉（同一 Scene 的实体在换代时仍会保留 Loaded，必须显式收口）。
+    // 与 setScene 同一顺序：先 restore（把让位的 gizmo 还回选中实体），再清选择/高亮。
+    if (changed || unavailable) { this.clearAssemblyPreview(); if (this.partExplode) this.restorePartExplode(); this.clearPartState() }
     this.world = world ? structuredClone(world) : undefined
     this.projection.setWorld(world)
     this.syncRobotAnchors()
@@ -1835,11 +2186,11 @@ export class SceneViewer {
     if(changed||!world||unavailable)for(const [entityId,loaded] of this.objects)this.trackAnimation(entityId,loaded)
   }
   private syncCollisionTopology():void {
-    if (!this.collisionTopologyLayer) { this.collisionTopologyLayer=new CollisionTopologyLayer({resolveResource:(uri,ref)=>this.options.resolveResource(uri,ref)});this.scene.add(this.collisionTopologyLayer.root) }
+    if (!this.collisionTopologyLayer) { this.collisionTopologyLayer=new CollisionTopologyLayer({resolveResource:(uri,ref)=>this.options.resolveResource(uri,ref)});markAuthoringHelper(this.collisionTopologyLayer.root);this.scene.add(this.collisionTopologyLayer.root) }
     this.collisionTopologyLayer.setContext(this.snapshot,this.world,this.selected,this.display?.collision===true)
   }
   private syncRobotAnchors():void {
-    if(!this.robotAnchorLayer){this.robotAnchorLayer=new RobotAnchorLayer();this.scene.add(this.robotAnchorLayer.root)}
+    if(!this.robotAnchorLayer){this.robotAnchorLayer=new RobotAnchorLayer();markAuthoringHelper(this.robotAnchorLayer.root);this.scene.add(this.robotAnchorLayer.root)}
     this.robotAnchorLayer.setContext(this.snapshot,this.world,this.selected)
   }
   collisionStatus():CollisionTopologyStatus {this.syncCollisionTopology();return this.collisionTopologyLayer!.status()}
@@ -1878,19 +2229,878 @@ export class SceneViewer {
       })
       this.setCameraRigs(specs)
     }
+    // 装配预览 ghost 绑定 scene/world/revision/generation 与源/目标 body：身份变了就清理，否则跟随当前目标 body。
+    this.refreshAssemblyGhostForFrame(frame)
   }
   private clearDynamicGeometry(loaded: Loaded): void {
     if (!loaded.dynamicGeometry) return
     loaded.dynamicGeometry.dispose(); loaded.dynamicGeometry = undefined
     this.applyEntityMaterial(loaded)
   }
+  /** 系统能力理由的本地化：走既有 `options.translate`（未接线时回中文，与历史行为逐字一致）。 */
+  private reason(key: keyof typeof PART_REASONS): string {
+    const [zh, en] = PART_REASONS[key]
+    return (this.options?.translate ?? ((zhText: string) => zhText))(zh, en)
+  }
+  /**
+   * 非机器人刚体物件的**真实结点身份缓存**（R-011）：只走原可视层级，跳过展示包装组，
+   * 因此反复调用 `listParts` 不会改变 partId，也不会把新增包装结点列成用户部件。
+   * 身份与 `Loaded` 同生命周期；换了可视对象（LOD/重建）才重算。
+   */
+  private nodeExplodeRuntime(loaded: Loaded): NodeExplodeRuntime {
+    const visual = loaded.baseVisual ?? loaded.visual
+    const existing = loaded.nodeExplode
+    if (existing && existing.visual === visual) return existing
+    const runtime: NodeExplodeRuntime = { visual, parts: [], wrappers: new Map(), offsets: new Map(), spread: 0 }
+    if (!visual) return runtime
+    const hasGeometryDescendant = (object: THREE.Object3D): boolean => {
+      let found = false
+      object.traverse(child => { if (!found && child !== object && (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh)) found = true })
+      return found
+    }
+    const walk = (object: THREE.Object3D, path: string[]): void => {
+      const name = object.name || (object instanceof THREE.Mesh ? "mesh" : "node")
+      const ownMesh = object instanceof THREE.Mesh || object.children.some(child => child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh)
+      const partId = `node:${runtime.parts.length}`
+      object.userData.partId = partId
+      let reasonCode: NodePartReasonCode | undefined
+      if (object instanceof THREE.SkinnedMesh) reasonCode = "PART_SKINNED"
+      else if (object instanceof THREE.Mesh && hasGeometryDescendant(object)) reasonCode = "PART_NESTED_GEOMETRY"
+      else if (object instanceof THREE.Mesh) reasonCode = undefined
+      else if (ownMesh) reasonCode = "PART_GROUP_GEOMETRY"
+      else reasonCode = "PART_NO_OWN_GEOMETRY"
+      runtime.parts.push({ partId, node: object, name, path: [...path, name], hasVisual: ownMesh, separable: false, ...(reasonCode ? { reasonCode } : {}) })
+      for (const child of object.children) {
+        if (child.userData.presentationWrapper === true) continue
+        if (child instanceof THREE.Mesh || child instanceof THREE.Group || child instanceof THREE.Scene) walk(child, [...path, name])
+      }
+    }
+    walk(visual, [])
+    const candidates = runtime.parts.filter(part => part.reasonCode === undefined)
+    // 单一可视部件不提供炸开：不虚构可拆面；≥2 个真实结点才各自可独立展示偏移。
+    if (candidates.length >= 2) for (const part of candidates) part.separable = true
+    else for (const part of candidates) part.reasonCode = "PART_SINGLE"
+    loaded.nodeExplode = runtime
+    return runtime
+  }
+  /**
+   * 懒建每个可分部件的**展示包装组**：插在真实结点与它的父之间，原结点局部矩阵原样搬过去
+   * （包装单位矩阵 ⇒ 世界矩阵逐元素不变）。子部件仍挂在真实结点下，不继承父部件的偏移，
+   * 因此各部件真正独立。包装结点打标，目录与后续遍历都跳过它。
+   */
+  private ensureNodeWrappers(runtime: NodeExplodeRuntime): void {
+    for (const part of runtime.parts) {
+      if (!part.separable || runtime.wrappers.has(part.partId)) continue
+      const node = part.node, parent = node.parent
+      if (!parent) continue
+      const wrapper = new THREE.Group()
+      wrapper.name = `presentation:${node.name || "mesh"}`
+      wrapper.userData.presentationWrapper = true
+      parent.add(wrapper)
+      wrapper.add(node)
+      runtime.wrappers.set(part.partId, wrapper)
+    }
+  }
+  /** 只读展示层炸开（非机器人）：偏移只写包装组，真实结点/源几何/共享材质一个数不动。 */
+  private setNodeExplodeSpread(loaded: Loaded, spread: number): void {
+    const runtime = this.nodeExplodeRuntime(loaded)
+    this.ensureNodeWrappers(runtime)
+    for (const wrapper of runtime.wrappers.values()) wrapper.position.set(0, 0, 0)
+    runtime.offsets.clear()
+    const visual = loaded.baseVisual ?? loaded.visual
+    visual?.updateWorldMatrix(true, true)
+    const value = Number.isFinite(spread) ? Math.max(0, Math.min(1, spread)) : 0
+    runtime.spread = value
+    if (value <= 0) return
+    const boxes = new Map<string, THREE.Box3>()
+    const overall = new THREE.Box3()
+    for (const part of runtime.parts) {
+      if (!part.separable || !runtime.wrappers.has(part.partId)) continue
+      const box = new THREE.Box3().setFromObject(part.node)
+      if (box.isEmpty()) continue
+      boxes.set(part.partId, box)
+      overall.union(box)
+    }
+    if (overall.isEmpty()) return
+    const center = overall.getCenter(new THREE.Vector3())
+    const radius = Math.max(overall.getSize(new THREE.Vector3()).length() * 0.5, 1e-6)
+    const distance = radius * NODE_EXPLODE_RADIUS_FACTOR * value
+    for (const [partId, box] of boxes) {
+      const wrapper = runtime.wrappers.get(partId)
+      const parent = wrapper?.parent
+      if (!wrapper || !parent) continue
+      const direction = box.getCenter(new THREE.Vector3()).sub(center)
+      if (direction.lengthSq() < 1e-12) continue
+      direction.normalize().multiplyScalar(distance)
+      parent.updateWorldMatrix(true, false)
+      const basis = new THREE.Matrix4().copy(parent.matrixWorld)
+      basis.setPosition(0, 0, 0)
+      wrapper.position.copy(direction.applyMatrix4(basis.invert()))
+      runtime.offsets.set(partId, wrapper.position.toArray() as [number, number, number])
+    }
+    visual?.updateWorldMatrix(true, true)
+  }
+  /** 对任意实体施加展示层展开比例：机器人走 RobotVisual，其余刚体物件走本实例的包装组。 */
+  private applyEntitySpread(entityId: string, spread: number): void {
+    const loaded = this.objects.get(entityId)
+    if (!loaded) return
+    if (loaded.robot) { loaded.robot.setExplodeSpread(spread); return }
+    // 合拢时只有真的建过包装组才回写：不给不可炸开（LOD/动画/蒙皮/单部件）的实体白插一层包装。
+    if (spread > 0) this.setNodeExplodeSpread(loaded, spread)
+    else if (loaded.nodeExplode && loaded.nodeExplode.wrappers.size > 0) this.setNodeExplodeSpread(loaded, 0)
+  }
+  /** 炸开时真实 Transform 编辑必须先合拢/让位：展示偏移绝不能经 gizmo 写进 Scene。 */
+  private transformEditBlockedByExplode(entityId: string | undefined): boolean {
+    return entityId !== undefined && this.partExplode?.entityId === entityId && this.partExplode.spread > 0
+  }
+  /** 重新挂接/让位的**唯一判据**：选中实体、可编辑、未锁定、且未处于炸开展示态。 */
+  private syncTransformGizmo(): void {
+    const selected = this.selected
+    const targetId = selected && this.snapshot ? sceneEditTarget(this.snapshot, selected)?.entityId : selected
+    if (this.transformEditing && !this.placing && !this.annotating && targetId && this.options.commitEdit && this.objects.has(targetId) && this.snapshot?.entities.find(entity => entity.entityId === targetId)?.locked !== true && !this.transformEditBlockedByExplode(targetId) && !this.transformEditBlockedByExplode(selected)) this.transformControls.attach(this.objects.get(targetId)!.group)
+    else this.transformControls.detach()
+  }
+  /** 显式进入/退出手动变换：默认 false，只显示选中轮廓；真实提交仍走原有 commitEdit。 */
+  setTransformEditing(enabled: boolean): void {
+    this.transformEditing = Boolean(enabled)
+    if (!this.transformEditing) this.transformControls.axis = null
+    this.syncTransformGizmo()
+    this.syncObserverControls()
+  }
+  transformEditingEnabled(): boolean { return this.transformEditing }
+  /** 展示层状态变化的唯一播报点：面板据此读回外部合拢/换身份后的实际 0 状态。 */
+  private notifyPresentationState(): void { for (const listener of this.presentationListeners ?? []) listener() }
+  subscribePresentationState(listener: () => void): () => void { (this.presentationListeners ??= new Set()).add(listener); return () => this.presentationListeners?.delete(listener) }
+  /**
+   * 该实体的**部件目录**（R-011）：机器人按真实 body/link 建；非机器人刚体物件按真实节点层级建，
+   * 身份缓存稳定、可逆展示炸开。全部字段来自当前 `Loaded` 的真实身份/节点，不做几何猜测。
+   */
+  private partCatalog(entityId: string): ViewerPart[] {
+    const loaded = this.objects.get(entityId)
+    if (!loaded) return []
+    const selected = this.selectedPart
+    const isSelected = (partId: string) => selected?.entityId === entityId && selected.partId === partId
+    const resource = loaded.baseRef ? `${loaded.baseRef.resourceId}@${loaded.baseRef.version}` : undefined
+    if (loaded.robot) {
+      const reason = this.explodeBlockReason(entityId, loaded)
+      return loaded.robot.parts.map(part => ({
+        entityId, partId: part.partId, name: part.name, kind: part.kind, path: part.path,
+        ...(resource ? { resource } : {}), resourceSignature: loaded.signature, granularity: part.granularity,
+        separable: part.hasVisual && reason === undefined,
+        ...(!part.hasVisual ? { reason: this.reason("robotNoVisual") } : reason ? { reason } : {}),
+        selected: isSelected(part.partId),
+      }))
+    }
+    // 非机器人刚体物件：真实节点层级来自本实例自己的克隆（几何/材质仍共享，不被修改）。
+    // 目录只列原层级结点；展示包装组不算用户部件，partId 由缓存身份给出，反复读取不变。
+    const runtime = this.nodeExplodeRuntime(loaded)
+    if (runtime.parts.length === 0) return []
+    const reason = this.explodeBlockReason(entityId, loaded)
+    const granularity: ViewerPart["granularity"] = runtime.parts.length >= 2 ? "hierarchy" : "single"
+    return runtime.parts.map(part => ({
+      entityId, partId: part.partId, name: part.name, kind: "node", path: part.path,
+      ...(resource ? { resource } : {}), resourceSignature: loaded.signature, granularity,
+      separable: part.separable && reason === undefined,
+      ...(part.reasonCode && !part.separable ? { reason: this.reason(NODE_PART_REASON_KEY[part.reasonCode]) } : reason ? { reason } : {}),
+      selected: isSelected(part.partId),
+    }))
+  }
+  /** 该实体当前是否可炸开；不可时给出**具体**原因（动态几何/烘焙动画/LOD/蒙皮/单部件）。 */
+  private explodeBlockReason(entityId: string, loaded: Loaded): string | undefined {
+    if (loaded.dynamicGeometry) return this.reason("dynamic")
+    if (loaded.mixer) return this.reason("animated")
+    if (loaded.lod) return this.reason("lod")
+    if (loaded.robot) return loaded.robot.parts.filter(part => part.hasVisual).length < 2 ? this.reason("robotSingle") : undefined
+    const runtime = this.nodeExplodeRuntime(loaded)
+    if (runtime.parts.length === 0) return this.reason("noVisual")
+    if (runtime.parts.filter(part => part.separable).length >= 2) return undefined
+    return this.reason(runtime.parts.some(part => part.reasonCode === "PART_SKINNED") ? "skinned" : "objectSingle")
+  }
+  /** 列出部件：给了 entityId 只列该实体；不给则列当前所有已加载实体（机器人优先）。 */
+  listParts(entityId?: string): ViewerPart[] {
+    if (entityId !== undefined) return this.partCatalog(entityId)
+    return [...this.objects.keys()].flatMap(id => this.partCatalog(id))
+  }
+  /** 只收集实际提交给渲染器的顶点范围，材质数组按 geometry group 分开裁剪。 */
+  private componentGeometryBounds(mesh: THREE.Mesh | THREE.Line | THREE.LineSegments | THREE.InstancedMesh): THREE.Box3 {
+    const box = new THREE.Box3()
+    const geometry = mesh.geometry
+    const position = geometry.getAttribute("position")
+    if (!position || position.count === 0 || !mesh.material) return box
+
+    const index = geometry.index
+    const sourceCount = index?.count ?? position.count
+    const drawRange = geometry.drawRange
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    const grouped = Array.isArray(mesh.material)
+    const isMesh = mesh instanceof THREE.Mesh
+    const isInstancedMesh = mesh instanceof THREE.InstancedMesh
+    const isLine = mesh instanceof THREE.Line
+    const isLineSegments = mesh instanceof THREE.LineSegments
+    const vertexForSlot = (slot: number, wireframe: boolean): number => {
+      if (wireframe) {
+        const edge = slot % 6
+        const triangleSlot = Math.floor(slot / 6) * 3 + [0, 1, 1, 2, 2, 0][edge]!
+        return index ? index.getX(triangleSlot) : triangleSlot
+      }
+      return index ? index.getX(slot) : slot
+    }
+    const rangeFactorFor = (material: THREE.Material): number => isMesh && (material as THREE.MeshBasicMaterial).wireframe ? 2 : 1
+    const renderElementCount = (material: THREE.Material): number => rangeFactorFor(material) === 2 ? Math.floor(sourceCount / 3) * 6 : sourceCount
+    const instanceCount = isInstancedMesh ? mesh.count : 1
+    const local = new THREE.Vector3()
+    const instanceMatrix = new THREE.Matrix4()
+    const worldMatrix = new THREE.Matrix4()
+    const addVertex = (slot: number, wireframe: boolean, world: THREE.Matrix4) => {
+      const vertex = vertexForSlot(slot, wireframe)
+      if (!Number.isInteger(vertex) || vertex < 0 || vertex >= position.count) return
+      if (isMesh) (mesh as THREE.Mesh).getVertexPosition(vertex, local)
+      else local.fromBufferAttribute(position, vertex)
+      box.expandByPoint(local.applyMatrix4(world))
+    }
+
+    const addRange = (material: THREE.Material, group?: { start: number; count: number; materialIndex?: number }) => {
+      if (!material.visible || (material.transparent && material.opacity <= 0)) return
+      const wireframe = rangeFactorFor(material) === 2
+      const factor = wireframe ? 2 : 1
+      let start = Math.max(0, drawRange.start * factor)
+      let end = (drawRange.start + drawRange.count) * factor
+      if (group) {
+        start = Math.max(start, group.start * factor)
+        end = Math.min(end, (group.start + group.count) * factor)
+      }
+      end = Math.min(end, renderElementCount(material))
+      if (!Number.isFinite(start) || Number.isNaN(end)) return
+      start = Math.ceil(start)
+      end = Math.floor(end)
+      if (end <= start) return
+
+      // OpenGL ignores incomplete final primitives; do not let their unused tail vertices widen the frame.
+      if (!wireframe && isMesh) end = start + Math.floor((end - start) / 3) * 3
+      else if (!wireframe && isLineSegments) end = start + Math.floor((end - start) / 2) * 2
+      if (end <= start || (isLine && !isLineSegments && end - start < 2)) return
+
+      for (let instanceIndex = 0; instanceIndex < instanceCount; instanceIndex++) {
+        let world = mesh.matrixWorld
+        if (isInstancedMesh) {
+          mesh.getMatrixAt(instanceIndex, instanceMatrix)
+          worldMatrix.multiplyMatrices(mesh.matrixWorld, instanceMatrix)
+          world = worldMatrix
+        }
+        for (let slot = start; slot < end; slot++) addVertex(slot, wireframe, world)
+      }
+    }
+
+    if (grouped) {
+      for (const group of geometry.groups) {
+        const material = group.materialIndex === undefined ? undefined : materials[group.materialIndex]
+        if (material) addRange(material, group)
+      }
+    } else {
+      addRange(materials[0]!)
+    }
+    return box
+  }
+  /**
+   * 显式 Components 取景的展示边界：保留全部可见尺寸，不用自动取景的主体/大几何过滤。
+   * 只读取当前世界矩阵（包括 presentation/wrapper 炸开偏移），不回放帧、不改关节或展示姿态。
+   */
+  private componentDisplayBounds(root: THREE.Object3D): THREE.Box3 {
+    const box = new THREE.Box3()
+    let displayed = false
+    for (let ancestor: THREE.Object3D | null = root; ancestor; ancestor = ancestor.parent) {
+      if (!ancestor.visible || isAuthoringHelperRoot(ancestor)) return box
+      if (ancestor === this.scene) displayed = true
+    }
+    // LOD 切换可保留已脱离 scene 的 baseVisual 目录；不能拿缓存节点冒充当前展示。
+    if (!displayed) return box
+    root.updateWorldMatrix(true, true)
+    const stack = [root]
+    while (stack.length) {
+      const object = stack.pop()!
+      if (!object.visible || isAuthoringHelperRoot(object)) continue
+      stack.push(...object.children)
+      if (!object.layers.test(this.camera.layers)) continue
+      const mesh = object as THREE.Mesh
+      const local = new THREE.Box3()
+      const splat = this.splatBounds.get(object)
+      if (splat) local.copy(splat)
+      else if (mesh.geometry) local.copy(this.componentGeometryBounds(mesh))
+      if (local.isEmpty()) continue
+      if (![...local.min.toArray(), ...local.max.toArray()].every(Number.isFinite)) {
+        throw new Error("COMPONENT_BOUNDS_INVALID: The component has invalid display bounds.")
+      }
+      box.union(local)
+    }
+    return box
+  }
+  /** 显式取景到一个真实部件；身份/几何失败前不改变观察相机，选择与炸开状态保持原值。 */
+  framePart(entityId: string, partId: string): void {
+    if (this.disposed) throw new Error("VIEWER_DISPOSED: The 3D viewport is no longer available.")
+    const loaded = this.objects.get(entityId)
+    if (!loaded) throw new Error("ENTITY_NOT_FOUND: The component's entity is not loaded.")
+    // 先核对该实体自己的目录，不能以另一个实例的同名节点或 partId 代替。
+    if (!this.partCatalog(entityId).some(part => part.partId === partId)) throw new Error("PART_NOT_FOUND: The selected component is no longer available.")
+    const target = loaded.robot ? loaded.robot.parts.find(part => part.partId === partId)?.presentation : this.partNodeOf(loaded, partId)
+    if (!target) throw new Error("PART_NOT_FOUND: The selected component is no longer available.")
+    const box = this.componentDisplayBounds(target)
+    if (box.isEmpty()) throw new Error("PART_NO_VISIBLE_GEOMETRY: The selected component has no visible geometry to frame.")
+    this.frameBounds(box)
+  }
+  /** 显式取景到 Components 当前实体的完整展示；不含其它实体或临时装配 ghost。 */
+  frameAssembly(entityId: string): void {
+    if (this.disposed) throw new Error("VIEWER_DISPOSED: The 3D viewport is no longer available.")
+    const loaded = this.objects.get(entityId)
+    if (!loaded) throw new Error("ENTITY_NOT_FOUND: The assembly is not loaded.")
+    const box = this.componentDisplayBounds(loaded.group)
+    if (box.isEmpty()) throw new Error("ASSEMBLY_NO_VISIBLE_GEOMETRY: The assembly has no visible geometry to frame.")
+    this.frameBounds(box)
+  }
+  /** 当前选中的部件（只读）。 */
+  selectedPartRef(): ViewerPartSelection | undefined { return this.selectedPart ? { ...this.selectedPart } : undefined }
+  /**
+   * 选中一个真实部件：只做展示层高亮 + 上报，不写 Scene、不动物理 Transform。
+   * 部件必须真属该实体；`partId` 缺省或不存在即清除选择。
+   */
+  selectPart(entityId: string | undefined, partId: string | undefined): void {
+    const catalog = entityId ? this.partCatalog(entityId) : []
+    const hit = partId !== undefined ? catalog.find(part => part.partId === partId) : undefined
+    if (this.selectedPart !== undefined && (entityId === undefined || hit === undefined || this.selectedPart.entityId !== entityId || this.selectedPart.partId !== partId)) this.clearPartHighlight()
+    this.selectedPart = entityId !== undefined && hit !== undefined ? { entityId, partId: hit.partId } : undefined
+    if (this.selectedPart) this.applyPartHighlight(this.selectedPart.entityId, this.selectedPart.partId)
+    this.options.onPartSelect?.(this.selectedPart ? { ...this.selectedPart } : undefined)
+    this.notifyPresentationState()
+  }
+  /**
+   * 展示层炸开：机器人只写 `RobotVisual` 的 presentation 组，刚体物件只写本实例的展示包装组；
+   * 原生矩阵、源几何、Scene、物理一概不动。`spread=0` 即合拢；实体不可炸开时保持合拢并记原因。
+   */
+  setPartExplode(entityId: string, spread: number): { spread: number; reason?: string } {
+    const loaded = this.objects.get(entityId)
+    const value = Number.isFinite(spread) ? Math.max(0, Math.min(1, spread)) : 0
+    const reason = loaded ? this.explodeBlockReason(entityId, loaded) : this.reason("notLoaded")
+    const effective = loaded && reason === undefined ? value : 0
+    // 换实体的旧偏移先合拢，绝不让上一台机器人/物件留在展开态。
+    if (this.partExplode && this.partExplode.entityId !== entityId) this.applyEntitySpread(this.partExplode.entityId, 0)
+    this.applyEntitySpread(entityId, effective)
+    this.partExplode = { entityId, spread: effective, ...(reason ? { reason } : {}) }
+    this.syncTransformGizmo()
+    this.notifyPresentationState()
+    return { spread: effective, ...(reason ? { reason } : {}) }
+  }
+  /** 合拢当前炸开视图并清除部件高亮（切换场景/工具/关闭面板时的显式收口）。 */
+  restorePartExplode(): void {
+    if (this.partExplode) this.applyEntitySpread(this.partExplode.entityId, 0)
+    this.partExplode = undefined
+    this.syncTransformGizmo()
+    this.notifyPresentationState()
+  }
+  /** 当前展示层炸开读数（含不可炸开原因）。 */
+  partExplodeStatus(): { entityId?: string; spread: number; reason?: string } {
+    return this.partExplode ? { entityId: this.partExplode.entityId, spread: this.partExplode.spread, ...(this.partExplode.reason ? { reason: this.partExplode.reason } : {}) } : { spread: 0 }
+  }
+  /**
+   * R-012／§2.9：临时装配预览 ghost。clone 真实已加载几何与**当时内部关节姿态**，材质独立透明，
+   * 按源 native 根、目标 body 与源安装面精确对齐。
+   *
+   * 边界：不新增真实 Scene 实体、不改共享材质/geometry（克隆只复制节点结构）、不动物理 Transform、
+   * 不进入部件目录/选择实体。只有 `robot_set_base` 会提交绑定；ghost 本身不是兼容或装配成功。
+   * 源处于炸开态时由调用方先显式 `restorePartExplode()`（本方法不改炸开状态，只消费原生节点）。
+   */
+  previewAssemblyGhost(spec: ViewerAssemblyGhostSpec): ViewerAssemblyGhostResult {
+    this.clearAssemblyPreview()
+    const source = this.objects.get(spec.sourceEntityId), target = this.objects.get(spec.targetEntityId)
+    if (!source) return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_SOURCE_NOT_LOADED", sourceEntityId: spec.sourceEntityId }
+    // 源正在炸开时不得把展示偏移当成物理安装面：先由调用方显式 `restorePartExplode()` 合拢再预览。
+    if (this.partExplode && this.partExplode.spread > 0 && this.partExplode.entityId === spec.sourceEntityId) return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_SOURCE_EXPLODED", sourceEntityId: spec.sourceEntityId }
+    if (!target?.robot) return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_TARGET_NOT_LOADED", targetEntityId: spec.targetEntityId }
+    const body = target.robot.bodyNode(localBodyName(spec.targetBodyName, spec.targetEntityId))
+    if (!body) return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_TARGET_BODY_MISSING", targetBodyName: spec.targetBodyName }
+    const pose = spec.targetBodyFromSourceRoot
+    if (!Array.isArray(pose?.positionM) || pose.positionM.length !== 3 || pose.positionM.some(value => !Number.isFinite(value)) || !Array.isArray(pose?.quaternionXyzw) || pose.quaternionXyzw.length !== 4 || pose.quaternionXyzw.some(value => !Number.isFinite(value))) {
+      return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_POSE_INVALID" }
+    }
+    // 源实体的可见根：优先当前 LOD 级别的可视对象，回落到实体 group。克隆节点结构，几何/贴图仍共享。
+    // 回落到 group 时清零克隆根自身的局部变换，避免把 `entityTransform · rootFrameInverse` 叠加两次。
+    const useGroupFallback = !source.visual && !source.baseVisual
+    const sourceVisual = source.visual ?? source.baseVisual ?? source.group
+    const visual = sourceVisual.clone(true)
+    if (useGroupFallback) { visual.position.set(0, 0, 0); visual.quaternion.identity(); visual.scale.set(1, 1, 1) }
+    const materials: THREE.Material[] = []
+    visual.traverse(child => {
+      const mesh = child as THREE.Mesh
+      if (!(mesh as THREE.Mesh).isMesh) return
+      const clone = (material: THREE.Material) => {
+        const copy = material.clone()
+        copy.transparent = true
+        copy.opacity = 0.45
+        copy.depthWrite = false
+        materials.push(copy)
+        return copy
+      }
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(clone) : clone(mesh.material)
+      // ghost 不参与拾取/选择/放置：即使克隆保留了 userData.entityId 也不会被射线命中。
+      ;(mesh as unknown as { raycast: () => void }).raycast = () => {}
+    })
+    visual.userData.assemblyGhost = true
+    visual.userData.entityId = undefined
+    // 源 group 的本地矩阵是 `entityTransform · rootFrameInverse`；ghost 根要放成
+    // `targetBodyWorld · install · rootFrameInverse`，模型帧点 p → targetBodyWorld·install·(rootFrame^-1·p)。
+    const rootFrameInverse = (source.robot?.rootFrameInverse ?? new THREE.Matrix4()).clone()
+    const install = new THREE.Matrix4().compose(new THREE.Vector3(...pose.positionM), new THREE.Quaternion(...pose.quaternionXyzw).normalize(), new THREE.Vector3(1, 1, 1))
+    const targetBodyLocalName = localBodyName(spec.targetBodyName, spec.targetEntityId)
+    const ghost = new THREE.Group()
+    ghost.name = "assembly-ghost"
+    ghost.matrixAutoUpdate = false
+    ghost.userData.assemblyGhost = true
+    markAuthoringHelper(ghost)
+    ghost.add(visual)
+    const marker = new THREE.Group()
+    marker.name = "assembly-mount-marker"
+    marker.matrixAutoUpdate = false
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85, depthWrite: false }))
+    dot.userData.assemblyGhost = true
+    ;(dot as unknown as { raycast: () => void }).raycast = () => {}
+    marker.add(dot)
+    marker.userData.assemblyGhost = true
+    markAuthoringHelper(marker)
+    this.scene.add(ghost)
+    this.scene.add(marker)
+    this.assemblyGhost = {
+      sourceEntityId: spec.sourceEntityId, targetEntityId: spec.targetEntityId, targetBodyName: spec.targetBodyName,
+      ...(spec.sourceRootBodyName ? { sourceRootBodyName: spec.sourceRootBodyName } : {}),
+      targetBodyLocalName,
+      ...(spec.worldId ? { worldId: spec.worldId } : {}), ...(spec.sceneId ? { sceneId: spec.sceneId } : {}),
+      ...(spec.sceneRevision !== undefined ? { sceneRevision: spec.sceneRevision } : {}), ...(spec.generation !== undefined ? { generation: spec.generation } : {}),
+      ...(spec.sourceResourceSignature ? { sourceResourceSignature: spec.sourceResourceSignature } : {}), ...(spec.targetResourceSignature ? { targetResourceSignature: spec.targetResourceSignature } : {}),
+      install, rootFrameInverse, sourceVisual, root: ghost, visual, marker, materials,
+    }
+    // 首次就用当前目标 body 摆好；之后每帧由 applyFrame 用**当前** body 重算，身体移动时 ghost 跟随。
+    this.refreshAssemblyGhost()
+    this.notifyPresentationState()
+    return { status: "PREVIEW", sourceEntityId: spec.sourceEntityId, targetEntityId: spec.targetEntityId, targetBodyName: spec.targetBodyName }
+  }
+  /**
+   * 用**当前**目标 body 世界位姿重算 ghost 根/标记矩阵，并把源克隆的内部关节姿态对齐到源当前姿态。
+   * 只重算矩阵，不重建几何、不新增 Scene 实体；目标 body 缺失就清理（不留下漂在旧位置的手）。
+   */
+  private refreshAssemblyGhost(): void {
+    const ghost = this.assemblyGhost
+    if (!ghost) return
+    const target = this.objects.get(ghost.targetEntityId)
+    const body = target?.robot?.bodyNode(ghost.targetBodyLocalName)
+    if (!body) { this.clearAssemblyPreview(); return }
+    // 源关节/根姿态对齐：克隆与源可视对象同结构，逐节点复制局部矩阵（共享 geometry 不动）。
+    // 跳过各自的根节点：ghost 根的摆放由上面的 ghost.matrix 全权负责，复制它会叠加两次。
+    const source = this.objects.get(ghost.sourceEntityId)
+    if (source?.robot) {
+      const from: THREE.Object3D[] = [], to: THREE.Object3D[] = []
+      ghost.sourceVisual.traverse(object => from.push(object))
+      ghost.visual.traverse(object => to.push(object))
+      if (from.length === to.length) for (let index = 1; index < from.length; index++) {
+        to[index].matrix.copy(from[index].matrix)
+        to[index].matrixAutoUpdate = from[index].matrixAutoUpdate
+        to[index].matrixWorldNeedsUpdate = true
+      }
+    }
+    body.updateWorldMatrix(true, false)
+    ghost.root.matrix.copy(body.matrixWorld).multiply(ghost.install).multiply(ghost.rootFrameInverse)
+    ghost.root.matrixWorldNeedsUpdate = true
+    ghost.marker.matrix.copy(body.matrixWorld).multiply(ghost.install)
+    ghost.marker.matrixWorldNeedsUpdate = true
+  }
+  /**
+   * 原生帧到达后按身份与源/目标资源核对 ghost：任一变化或目标 body 缺姿态都清理。
+   * 同一身份则用当前目标 body 重算，保证 body 移动时预览跟随。
+   */
+  private refreshAssemblyGhostForFrame(frame: Frame): void {
+    this.refreshParkingGhostForFrame(frame)
+    const ghost = this.assemblyGhost
+    if (!ghost) return
+    if ((ghost.worldId !== undefined && ghost.worldId !== frame.worldId) || (ghost.generation !== undefined && ghost.generation !== frame.generation) || (ghost.sceneRevision !== undefined && ghost.sceneRevision !== frame.sceneRevision)) { this.clearAssemblyPreview(); return }
+    const entity = frame.entities.find(row => row.entityId === ghost.targetEntityId)
+    const poses = entity?.sensors?.bodyWorldPoses as Record<string, unknown> | undefined
+    const targetPose = poses?.[ghost.targetBodyLocalName] ?? poses?.[`${ghost.targetEntityId}/${ghost.targetBodyLocalName}`]
+    if (!targetPose) { this.clearAssemblyPreview(); return }
+    this.refreshAssemblyGhost()
+  }
+  /**
+   * R-012 Replace：把旧末端显示在**明确的世界停放位姿**上做临时预览。
+   * 只显示：不新增 Scene 实体、不动物理、不决定停放位置；停放位置由调用方给出的真实世界位姿驱动。
+   */
+  previewParkingGhost(spec: ViewerParkingGhostSpec): ViewerParkingGhostResult {
+    this.clearParkingGhost()
+    const source = this.objects.get(spec.entityId)
+    if (!source) return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_SOURCE_NOT_LOADED", entityId: spec.entityId }
+    const pose = spec.worldPose
+    if (!Array.isArray(pose?.positionM) || pose.positionM.length !== 3 || pose.positionM.some(value => !Number.isFinite(value)) || !Array.isArray(pose?.quaternionXyzw) || pose.quaternionXyzw.length !== 4 || pose.quaternionXyzw.some(value => !Number.isFinite(value))) {
+      return { status: "UNAVAILABLE", reason: "ASSEMBLY_PREVIEW_POSE_INVALID", entityId: spec.entityId }
+    }
+    const useGroupFallback = !source.visual && !source.baseVisual
+    const sourceVisual = source.visual ?? source.baseVisual ?? source.group
+    const visual = sourceVisual.clone(true)
+    if (useGroupFallback) { visual.position.set(0, 0, 0); visual.quaternion.identity(); visual.scale.set(1, 1, 1) }
+    const materials: THREE.Material[] = []
+    visual.traverse(child => {
+      const mesh = child as THREE.Mesh
+      if (!(mesh as THREE.Mesh).isMesh) return
+      const clone = (material: THREE.Material) => {
+        const copy = material.clone()
+        copy.transparent = true
+        copy.opacity = 0.35
+        copy.depthWrite = false
+        materials.push(copy)
+        return copy
+      }
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(clone) : clone(mesh.material)
+      ;(mesh as unknown as { raycast: () => void }).raycast = () => {}
+    })
+    visual.userData.assemblyGhost = true
+    visual.userData.entityId = undefined
+    const rootFrameInverse = (source.robot?.rootFrameInverse ?? new THREE.Matrix4()).clone()
+    const root = new THREE.Group()
+    root.name = "parking-ghost"
+    root.matrixAutoUpdate = false
+    root.userData.assemblyGhost = true
+    markAuthoringHelper(root)
+    root.add(visual)
+    const world = new THREE.Matrix4().compose(new THREE.Vector3(...pose.positionM), new THREE.Quaternion(...pose.quaternionXyzw).normalize(), new THREE.Vector3(1, 1, 1))
+    root.matrix.copy(world).multiply(rootFrameInverse)
+    root.matrixWorldNeedsUpdate = true
+    this.scene.add(root)
+    this.parkingGhost = {
+      entityId: spec.entityId,
+      worldPose: {positionM: [pose.positionM[0], pose.positionM[1], pose.positionM[2]], quaternionXyzw: [pose.quaternionXyzw[0], pose.quaternionXyzw[1], pose.quaternionXyzw[2], pose.quaternionXyzw[3]]},
+      ...(spec.worldId ? { worldId: spec.worldId } : {}), ...(spec.sceneId ? { sceneId: spec.sceneId } : {}),
+      ...(spec.sceneRevision !== undefined ? { sceneRevision: spec.sceneRevision } : {}), ...(spec.generation !== undefined ? { generation: spec.generation } : {}),
+      root, visual, materials,
+    }
+    this.notifyPresentationState()
+    return { status: "PREVIEW", entityId: spec.entityId }
+  }
+  /** 停放 ghost 的身份核对：scene/world/revision/generation 任一变化即清理（停放是世界位姿，不逐帧重算）。 */
+  private refreshParkingGhostForFrame(frame: Frame): void {
+    const ghost = this.parkingGhost
+    if (!ghost) return
+    if ((ghost.worldId !== undefined && ghost.worldId !== frame.worldId) || (ghost.generation !== undefined && ghost.generation !== frame.generation) || (ghost.sceneRevision !== undefined && ghost.sceneRevision !== frame.sceneRevision)) this.clearParkingGhost()
+  }
+  /** 只移除停放 ghost 与克隆材质；共享 geometry 绝不销毁。 */
+  clearParkingGhost(): void {
+    const ghost = this.parkingGhost
+    if (!ghost) return
+    ghost.root.removeFromParent()
+    for (const material of ghost.materials) material.dispose()
+    ghost.root.clear()
+    this.parkingGhost = undefined
+    this.notifyPresentationState()
+  }
+  /** 取消/退出/换上下文：移除 ghost 与 marker，销毁克隆材质（共享 geometry 绝不销毁）。 */
+  clearAssemblyPreview(): void {
+    this.clearParkingGhost()
+    const ghost = this.assemblyGhost
+    if (!ghost) return
+    ghost.root.removeFromParent()
+    ghost.marker.removeFromParent()
+    for (const material of ghost.materials) material.dispose()
+    // marker 的 geometry/material 由本 Viewer 创建，随 marker 一并销毁；ghost.root 的 geometry 是共享的，不 dispose。
+    disposeObject(ghost.marker)
+    ghost.root.clear()
+    this.assemblyGhost = undefined
+    this.notifyPresentationState()
+  }
+  /**
+   * V10-08/38：真实资产放置 ghost。用服务端只读预览返回的临时 Entity 数据走**既有 `loadVisual`**
+   * 读取真实 mesh/robot；挂在独立 authoring helper 子树，材质独立半透明，不写 `objects`/snapshot，
+   * 不进部件目录/物理/主拾取/采集。token 或 scene 变化时迟到结果原地丢弃，不复活旧 ghost。
+   */
+  async previewPlacement(spec: ViewerPlacementPreviewSpec): Promise<ViewerPlacementPreviewResult> {
+    this.clearPlacementPreview()
+    const generation = ++this.placementPreviewGeneration
+    if (this.disposed) return { status: "UNAVAILABLE", reason: "VIEWER_DISPOSED", token: spec.token }
+    if (this.snapshot && this.snapshot.sceneId !== spec.sceneId) return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_SCENE_CHANGED", token: spec.token }
+    if (!Array.isArray(spec.entities) || spec.entities.length === 0) return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_EMPTY", token: spec.token }
+    const stale = (): boolean => this.disposed || generation !== this.placementPreviewGeneration || Boolean(this.snapshot && this.snapshot.sceneId !== spec.sceneId)
+    const materials: THREE.Material[] = []
+    const root = new THREE.Group()
+    root.name = "placement-ghost"
+    root.matrixAutoUpdate = false
+    root.userData.placementGhost = true
+    markAuthoringHelper(root)
+    // 本次 ghost **实际拥有**的 GPU 资源。GLTF 缓存克隆打了 sharedVisual：几何/贴图归缓存，不能销毁；
+    // 机器人网格、无限地面等由本次 loadVisual 新建 ⇒ 必须在这里统一释放。root.clear 只脱树，不释放 GPU。
+    const ownedGeometry = new Set<THREE.BufferGeometry>()
+    const ownedMaterials = new Set<THREE.Material>()
+    const ownedTextures = new Set<THREE.Texture>()
+    const ownedSplats = new Set<SplatMesh>()
+    const clonedMaterials = new Set<THREE.Material>()
+    let released = false
+    const collectTextures = (material: THREE.Material) => {
+      for (const value of Object.values(material as unknown as Record<string, unknown>)) if (value instanceof THREE.Texture) ownedTextures.add(value)
+    }
+    const collectOwnedVisual = (visual: THREE.Object3D) => {
+      visual.traverse(child => {
+        if (child.userData.sharedVisual === true) return
+        if (child instanceof SplatMesh) { ownedSplats.add(child); return }
+        const drawable = child as THREE.Mesh | THREE.LineSegments
+        if (!(drawable instanceof THREE.Mesh) && !(drawable instanceof THREE.LineSegments)) return
+        if (drawable.geometry) ownedGeometry.add(drawable.geometry)
+        const list = Array.isArray(drawable.material) ? drawable.material : [drawable.material]
+        for (const material of list) { if (!material) continue; ownedMaterials.add(material); collectTextures(material) }
+      })
+    }
+    const release = (): void => {
+      if (released) return
+      released = true
+      for (const material of clonedMaterials) material.dispose()
+      for (const material of ownedMaterials) material.dispose()
+      for (const texture of ownedTextures) texture.dispose()
+      for (const geometry of ownedGeometry) geometry.dispose()
+      for (const splat of ownedSplats) splat.dispose()
+      clonedMaterials.clear(); ownedMaterials.clear(); ownedTextures.clear(); ownedGeometry.clear(); ownedSplats.clear()
+    }
+    const detachSelf = () => {
+      if (this.placementGhost?.root === root) {
+        root.removeFromParent()
+        this.placementGhost = undefined
+      }
+    }
+    const fail = (reason: string): ViewerPlacementPreviewResult => {
+      detachSelf(); release(); root.clear()
+      return { status: "UNAVAILABLE", reason, token: spec.token }
+    }
+    const discard = (): ViewerPlacementPreviewResult => {
+      detachSelf(); release(); root.clear()
+      return { status: "SUPERSEDED", reason: "ASSET_PREVIEW_SUPERSEDED", token: spec.token }
+    }
+    const groups = new Map<string, THREE.Group>()
+    for (const entity of spec.entities) {
+      const group = new THREE.Group()
+      group.name = `placement:${entity.entityId}`
+      group.matrixAutoUpdate = false
+      group.position.set(...entity.transform.position)
+      group.quaternion.fromArray(entity.transform.quaternion).normalize()
+      group.scale.set(...entity.transform.scale)
+      group.updateMatrix()
+      group.matrixWorldNeedsUpdate = true
+      group.userData.placementGhost = true
+      markAuthoringHelper(group)
+      groups.set(entity.entityId, group)
+    }
+    for (const entity of spec.entities) {
+      const group = groups.get(entity.entityId)!
+      const parent = entity.parentId ? groups.get(entity.parentId) : undefined
+      ;(parent ?? root).add(group)
+    }
+    try {
+      for (const entity of spec.entities) {
+        const group = groups.get(entity.entityId)!
+        const loaded = { group, signature: `placement:${spec.token}:${entity.entityId}`, lodWarnings: [] } as unknown as Loaded
+        const visual = await this.loadVisual(entity, loaded, spec.resolveResource ?? this.options.resolveResource)
+        // 先登记所有权，再判迟到：loadVisual 刚返回但请求已被替换/换 Scene 时，这棵子树的几何/材质不能悬空。
+        if (visual) collectOwnedVisual(visual)
+        if (stale()) return discard()
+        if (!visual) continue
+        // 独立半透明材质：只复制材质，不改共享几何/贴图/原材质；raycast 关闭，ghost 不参与主拾取。
+        visual.traverse(child => {
+          const mesh = child as THREE.Mesh
+          if (!mesh.isMesh) return
+          const cloneMaterial = (material: THREE.Material) => {
+            const copy = material.clone()
+            copy.transparent = true
+            copy.opacity = Math.min(0.45, typeof copy.opacity === "number" && copy.opacity > 0 ? copy.opacity * 0.55 : 0.45)
+            copy.depthWrite = false
+            clonedMaterials.add(copy)
+            materials.push(copy)
+            return copy
+          }
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map(cloneMaterial) : cloneMaterial(mesh.material)
+          mesh.userData.placementGhost = true
+          ;(mesh as unknown as { raycast: () => void }).raycast = () => {}
+        })
+        visual.userData.placementGhost = true
+        markAuthoringHelper(visual)
+        group.add(visual)
+      }
+      if (stale()) return discard()
+      let hasVisual = false
+      root.traverse(child => { if ((child as THREE.Mesh).isMesh) hasVisual = true })
+      if (!hasVisual) return fail("ASSET_PREVIEW_NO_VISUAL")
+      this.scene.add(root)
+      this.placementGhost = { token: spec.token, sceneId: spec.sceneId, resourceId: spec.resourceId, version: spec.version, root, materials, dispose: release }
+      this.notifyPresentationState()
+      return { status: "PREVIEW", token: spec.token }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+  /** 取消/确认/换资源/换 Scene/销毁：移除 ghost 与克隆材质；共享 geometry/贴图一律不动。 */
+  clearPlacementPreview(): void {
+    this.placementPreviewGeneration += 1
+    const ghost = this.placementGhost
+    if (!ghost) return
+    ghost.root.removeFromParent()
+    ghost.dispose()
+    ghost.root.clear()
+    this.placementGhost = undefined
+    this.notifyPresentationState()
+  }
+  /**
+   * V10：只把**已加载的真实 placement ghost**框进查看相机。只动相机，不写 Scene/物理/落点，
+   * 不并入落点圈或远处原件；没有 ghost 时返回 ok:false，由调用方保留原视角。
+   */
+  framePlacementPreview(): { ok: boolean; token?: string } {
+    const ghost = this.placementGhost
+    if (!ghost) return { ok: false }
+    ghost.root.updateMatrixWorld(true)
+    // ghost 根与子组都打了 authoring helper 标记；要框的是标记内部的真实 ghost 几何。
+    const box = new THREE.Box3().setFromObject(ghost.root)
+    if (box.isEmpty()) return { ok: false, token: ghost.token }
+    this.frameBounds(box)
+    return { ok: true, token: ghost.token }
+  }
+  /** 只读 ghost 读数；`active` 只说明有临时放置预览，不代表任何已提交实体。 */
+  placementPreviewStatus(): { active: boolean; token?: string; sceneId?: string; resourceId?: string; version?: number } {
+    return this.placementGhost ? { active: true, token: this.placementGhost.token, sceneId: this.placementGhost.sceneId, resourceId: this.placementGhost.resourceId, version: this.placementGhost.version } : { active: false }
+  }
+  /** 当前 ghost 读数（只读；`active` 只说明有临时预览，不代表任何物理绑定）。 */
+  assemblyPreviewStatus(): { active: boolean; sourceEntityId?: string; targetEntityId?: string; targetBodyName?: string } {
+    return this.assemblyGhost ? { active: true, sourceEntityId: this.assemblyGhost.sourceEntityId, targetEntityId: this.assemblyGhost.targetEntityId, targetBodyName: this.assemblyGhost.targetBodyName } : { active: false }
+  }
+  /**
+   * V10-33：把临时安装 ghost 与目标机器人一起框进真实查看相机。
+   *
+   * 只移动查看相机：不改 Scene、world、物理、选择或 ghost 位姿；没有 ghost 时返回 ok:false，
+   * 调用方保留原视角。目标组只取该机器人自身，不并入远处未挂接手或无限地面。
+   */
+  frameAssemblyPreview(): { ok: boolean; entityIds: string[] } {
+    const ghost = this.assemblyGhost
+    if (!ghost) return { ok: false, entityIds: [] }
+    ghost.root.updateMatrixWorld(true)
+    ghost.visual.updateMatrixWorld(true)
+    ghost.marker.updateMatrixWorld(true)
+    // ghost.visual 本身是 authoring helper：这里要框的是 helper **内部**的真实几何，
+    // 不能用会跳过 helper 整棵子树的 objectWorldBounds。
+    ghost.visual.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(ghost.visual)
+    const target = this.objects.get(ghost.targetEntityId)
+    if (target) {
+      target.group.updateMatrixWorld(true)
+      const targetBox = objectWorldBounds(target.group, this.splatViewBounds, true, false)
+      if (!targetBox.isEmpty()) box.union(targetBox)
+    }
+    if (box.isEmpty()) return { ok: false, entityIds: [ghost.sourceEntityId, ghost.targetEntityId] }
+    this.frameBounds(box)
+    return { ok: true, entityIds: [ghost.sourceEntityId, ghost.targetEntityId] }
+  }
+  /** 采集/观察携带的同帧展示层元数据；未炸开且无选中部件时也如实给出 `exploded:false`。 */
+  presentationStatus(): PresentationCaptureFace {
+    const entityId = this.partExplode?.entityId ?? this.selectedPart?.entityId
+    const selected = this.selectedPart ? this.partCatalog(this.selectedPart.entityId).find(part => part.partId === this.selectedPart!.partId) : undefined
+    const loaded = entityId ? this.objects.get(entityId) : undefined
+    const catalogRows = entityId ? this.partCatalog(entityId) : []
+    return {
+      displayOnly: true,
+      exploded: (this.partExplode?.spread ?? 0) > 0,
+      spread: this.partExplode?.spread ?? 0,
+      ...(entityId ? { entityId } : {}),
+      ...(selected ? { selectedPart: { entityId: selected.entityId, partId: selected.partId, name: selected.name, kind: selected.kind } } : {}),
+      ...(entityId && loaded ? { catalog: { entityId, ...(selected?.resource ? { resource: selected.resource } : {}), signature: loaded.signature, parts: catalogRows.length, separable: catalogRows.filter(part => part.separable).length } } : {}),
+      // ghost 必须可解释为**未应用**的装配预览：否则模型会把画面里的第二只手当成真实实体。
+      ...(this.assemblyGhost ? { assemblyPreview: this.assemblyPreviewFace() } : {}),
+      ...(this.parkingGhost ? { parkingPreview: this.parkingPreviewFace() } : {}),
+    }
+  }
+  /** 停放 ghost 只读读数；`active` 只说明有临时预览，不代表任何物理停放或声明。 */
+  parkingPreviewStatus(): { active: boolean; entityId?: string; positionM?: [number, number, number]; quaternionXyzw?: [number, number, number, number] } {
+    if (!this.parkingGhost) return { active: false }
+    const face = this.parkingPreviewFace()
+    return { active: true, entityId: face.entityId, positionM: face.positionM, quaternionXyzw: face.quaternionXyzw }
+  }
+  /** ghost 的采集窄面：只说明"这是未应用预览"及其源/目标/帧身份，绝不含任何已提交声明。 */
+  private assemblyPreviewFace(): ViewerAssemblyPreviewFace {
+    const ghost = this.assemblyGhost!
+    return {
+      applied: false,
+      sourceEntityId: ghost.sourceEntityId,
+      targetEntityId: ghost.targetEntityId,
+      targetBodyName: ghost.targetBodyName,
+      ...(ghost.sourceRootBodyName ? { sourceRootBodyName: ghost.sourceRootBodyName } : {}),
+      ...(ghost.worldId ? { worldId: ghost.worldId } : {}),
+      ...(ghost.sceneRevision !== undefined ? { sceneRevision: ghost.sceneRevision } : {}),
+      ...(ghost.generation !== undefined ? { generation: ghost.generation } : {}),
+    }
+  }
+  /** 旧件停放 ghost 的采集窄面：旧件 ID + 明确世界停放位姿 + `applied:false`，不说成已提交停放。 */
+  private parkingPreviewFace(): ViewerParkingPreviewFace {
+    const ghost = this.parkingGhost!
+    return {
+      applied: false,
+      entityId: ghost.entityId,
+      positionM: [ghost.worldPose.positionM[0], ghost.worldPose.positionM[1], ghost.worldPose.positionM[2]],
+      quaternionXyzw: [ghost.worldPose.quaternionXyzw[0], ghost.worldPose.quaternionXyzw[1], ghost.worldPose.quaternionXyzw[2], ghost.worldPose.quaternionXyzw[3]],
+      ...(ghost.worldId ? { worldId: ghost.worldId } : {}),
+      ...(ghost.sceneRevision !== undefined ? { sceneRevision: ghost.sceneRevision } : {}),
+      ...(ghost.generation !== undefined ? { generation: ghost.generation } : {}),
+    }
+  }
+  /** 换回原材质、释放高亮克隆；共享材质一个字节都不改（只替换 Mesh 的材质引用，再换回）。 */
+  private clearPartHighlight(): void {
+    const highlight = this.partHighlight
+    if (!highlight) return
+    for (const { mesh, original } of highlight.swaps) { const current = mesh.material; mesh.material = original; if (Array.isArray(current)) for (const material of current) material.dispose(); else current.dispose() }
+    this.partHighlight = undefined
+  }
+  private applyPartHighlight(entityId: string, partId: string): void {
+    this.clearPartHighlight()
+    const loaded = this.objects.get(entityId)
+    if (!loaded) return
+    const part = loaded.robot?.parts.find(row => row.partId === partId)
+    const target = part?.presentation ?? this.partNodeOf(loaded, partId)
+    if (!target) return
+    const swaps: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> = []
+    target.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return
+      const original = object.material
+      const cloneOne = (material: THREE.Material): THREE.Material => {
+        const clone = material.clone()
+        const emissive = (clone as THREE.MeshStandardMaterial).emissive
+        if (emissive instanceof THREE.Color) { emissive.set(0xffb020); (clone as THREE.MeshStandardMaterial).emissiveIntensity = 1 }
+        return clone
+      }
+      object.material = Array.isArray(original) ? original.map(cloneOne) : cloneOne(original)
+      swaps.push({ mesh: object, original })
+    })
+    this.partHighlight = { entityId, partId, swaps }
+  }
+  /** 非机器人资源的部件节点：按 partId 在可视层级里定位（tag 过 userData.partId）。 */
+  private partNodeOf(loaded: Loaded, partId: string): THREE.Object3D | undefined {
+    const root = loaded.baseVisual ?? loaded.visual
+    let found: THREE.Object3D | undefined
+    root?.traverse(object => { if (!found && object.userData.partId === partId) found = object })
+    return found
+  }
+  /** 按身份清理旧部件/高亮/展开（实体删除、资源版本变化、scene/world/generation 切换、dispose）。 */
+  private clearPartState(entityId?: string): void {
+    if (entityId === undefined) {
+      if (this.partExplode) this.applyEntitySpread(this.partExplode.entityId, 0)
+      this.clearPartHighlight(); this.partExplode = undefined
+      const had = this.selectedPart !== undefined
+      this.selectedPart = undefined
+      if (had) this.options.onPartSelect?.(undefined)
+      this.notifyPresentationState()
+      return
+    }
+    if (this.partExplode?.entityId === entityId) { this.applyEntitySpread(entityId, 0); this.partExplode = undefined }
+    if (this.partHighlight?.entityId === entityId) this.clearPartHighlight()
+    if (this.selectedPart?.entityId === entityId) { this.selectedPart = undefined; this.options.onPartSelect?.(undefined) }
+    this.notifyPresentationState()
+  }
   select(entityId: string | undefined): void {
     if(this.cameraRigGizmoKey!==undefined){if(entityId===this.selected)return;this.exitCameraMode({restoreView:false})}
     this.selected = entityId
     this.syncRobotAnchors()
-    const targetId=entityId&&this.snapshot?sceneEditTarget(this.snapshot,entityId)?.entityId:entityId
-    if (targetId && this.options.commitEdit && this.objects.has(targetId)&&this.snapshot?.entities.find(entity=>entity.entityId===targetId)?.locked!==true) this.transformControls.attach(this.objects.get(targetId)!.group)
-    else this.transformControls.detach()
+    // 重新挂接与 `setEditCommit` 共用同一条判据：炸开的实体先合拢前不挂真实 Transform。
+    this.syncTransformGizmo()
     this.syncCollisionTopology()
     this.options.onSelection?.(entityId)
   }
@@ -1901,7 +3111,19 @@ export class SceneViewer {
    * 为什么用模式而不是常驻左键：视口左键已经有两个语义（选择对象、放置素材），
    * 再塞一个"随手点就是批注"会让用户无法预判；模式切换是显式的，也让落点判据只有一条。
    */
-  setAnnotationMode(on: boolean): void { this.annotating = on }
+  setAnnotationMode(on: boolean): void {
+    if (this.annotating === on) return
+    this.annotating = on
+    if (on) {
+      this.annotationTransformEnabled = this.placing ? this.placementTransformEnabled ?? this.transformControls.enabled : this.transformControls.enabled
+      this.transformControls.enabled = false
+      this.transformControls.axis = null
+    } else {
+      if (!this.placing && this.annotationTransformEnabled !== undefined) this.transformControls.enabled = this.annotationTransformEnabled
+      this.annotationTransformEnabled = undefined
+    }
+    this.syncTransformGizmo()
+  }
   /**
    * 用外部（面板/持久化）的批注集合替换当前显示。
    *
@@ -1980,7 +3202,7 @@ export class SceneViewer {
       if(!rig){
         const geometry=frustumGeometry(spec.intrinsics,{nearM:spec.nearM,farM:spec.farM,...options.truncationM===undefined?{}:{truncationM:options.truncationM}})
         const lines=new THREE.LineSegments(rigLineGeometry(geometry),new THREE.LineBasicMaterial({color:0x6cb6ff,transparent:true,opacity:.9})),pick=rigPickMesh(geometry),group=new THREE.Group()
-        pick.userData.cameraRigKey=spec.key;group.name=`camera-rig:${spec.key}`;group.add(lines,pick)
+        pick.userData.cameraRigKey=spec.key;group.name=`camera-rig:${spec.key}`;markAuthoringHelper(group);group.add(lines,pick)
         const origin=new THREE.Mesh(new THREE.SphereGeometry(.012,12,8),new THREE.MeshBasicMaterial({color:0xffbb35,depthTest:false}));origin.name='camera-install-origin'
         const normal=new THREE.ArrowHelper(new THREE.Vector3(0,0,-1),new THREE.Vector3(),.18,0x69e5ae,.04,.025);normal.name='camera-view-normal'
         group.add(origin,normal)
@@ -2040,6 +3262,242 @@ export class SceneViewer {
     return { reason: matches.length > 1 ? `body 名「${parent}」在 ${matches.length} 个实体里同形（${matches.map(match => match.entityId).join("、")}），归属无法确定：拒绝取第一个匹配` : `没有任何已加载实体有 body「${parent}」` }
   }
   setCameraRigsVisible(visible: boolean): void { this.cameraRigRoot.visible = visible; for (const rig of this.cameraRigs.values()) rig.group.visible = visible }
+  /** 当前 Capture 输出的真实像素画幅（与 cameraView 的 K 同一套画布像素）；拿不到时返回 0，让 fov-only 站点明确不可用。 */
+  private captureRouteFrame(): {width:number;height:number} {
+    try{const k=this.cameraView().intrinsics;return {width:k.width,height:k.height}}catch{return {width:0,height:0}}
+  }
+  /**
+   * 路线站点轨迹：只读显示层，位姿/朝向/镜头全部来自持久 Route 引用的真实命名机位 viewState。
+   * **独立 root**：不与 cameraRigRoot 共键、不 selectCameraRig、不清机器人已挂载机位；传空数组即隐藏。
+   *
+   * 每个可画站点是"相机"而不是圆点：四棱锥（near 矩形＋像平面矩形＋顶点→像平面四角＋roll 顶角）、
+   * 机身、镜头环、位置点、真实前向中心线与真实 up 线。选中站点用暖色，其余用蓝色；缺失/坏数据
+   * 不补 `[0,0,0]`/identity，也不从路径里跨过去连一条假直线。
+   */
+  setCaptureRouteTrail(stations: readonly CaptureRouteStationInput[], selected = -1): void {
+    const root=this.captureRouteRoot
+    const clear=()=>{for(const child of [...root.children]){disposeObject(child);root.remove(child)}}
+    clear()
+    if(stations.length===0){root.visible=false;return}
+    // 画幅只取当前 Viewer 真实输出像素：fov-only 站点按这个宽高比投影，不把 640×480 当实际 Capture。
+    const frame=this.captureRouteFrame()
+    const geometry=captureRouteStationsGeometry(stations.map(station=>({...station,frameWidth:station.frameWidth??frame.width,frameHeight:station.frameHeight??frame.height})),selected)
+    for(const segment of captureRoutePathSegments(geometry)){
+      const points=segment.map(point=>new THREE.Vector3(point[0],point[1],point[2]))
+      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineDashedMaterial({color:0x78aaff,transparent:true,opacity:.9,dashSize:.045,gapSize:.028,depthTest:false}))
+      line.computeLineDistances();line.name='capture-route-path';line.renderOrder=18;root.add(line)
+    }
+    for(const station of geometry){
+      if(!station.available||!station.position||!station.quaternion||!station.frustum)continue
+      const color=station.selected?0xffbb35:0x78aaff
+      const group=this.buildCaptureRouteCameraGroup(station,color,`capture-route-stop:${station.index}`)
+      group.position.set(station.position[0],station.position[1],station.position[2])
+      group.quaternion.set(station.quaternion[0],station.quaternion[1],station.quaternion[2],station.quaternion[3])
+      root.add(group)
+    }
+    root.visible=root.children.length>0
+  }
+  /**
+   * 路线预览/录制中**当前运动相机**的实时 pose/前向 helper。单独 root，站点列表重建时不清掉它；
+   * 每帧只更新位置/四元数，镜头不变时不重建几何。传 `undefined` 即隐藏。
+   */
+  setCaptureRouteCurrentPose(station?: CaptureRouteStationInput): void {
+    const root=this.captureRouteCurrentRoot
+    if(!station){root.visible=false;return}
+    const frame=this.captureRouteFrame()
+    const geometry=captureRouteStationGeometry({...station,available:true,frameWidth:station.frameWidth??frame.width,frameHeight:station.frameHeight??frame.height},0,0)
+    if(!geometry.available||!geometry.position||!geometry.quaternion||!geometry.frustum||!geometry.intrinsics){root.visible=false;return}
+    // 画幅/resize 也会改变派生 K；用几何实际 K 当 lensKey，避免旧画幅的视锥留在当前相机上。
+    const lensKey=JSON.stringify(geometry.intrinsics)
+    if(!this.captureRouteCurrent||this.captureRouteCurrentLensKey!==lensKey){
+      if(this.captureRouteCurrent){disposeObject(this.captureRouteCurrent);this.captureRouteCurrent.removeFromParent()}
+      this.captureRouteCurrent=this.buildCaptureRouteCameraGroup(geometry,0x69e5ae,'capture-route-current')
+      this.captureRouteCurrentLensKey=lensKey
+      root.add(this.captureRouteCurrent)
+    }
+    this.captureRouteCurrent.position.set(geometry.position[0],geometry.position[1],geometry.position[2])
+    this.captureRouteCurrent.quaternion.set(geometry.quaternion[0],geometry.quaternion[1],geometry.quaternion[2],geometry.quaternion[3])
+    root.visible=true
+  }
+  /**
+   * 路线预览/录制的**临时 POV**：只写这一份 capture pass 用的视图，不改主相机、不建第二份 Scene 状态。
+   *
+   * 会话每 tick 把真实采样（position/quaternion/target/up/FOV/K）送到这里，`captureCanvasStream`
+   * 和 `renderRouteCapturePreview` 按它渲染；主视口继续保留可交互的路线总览。传 `undefined` 即清理。
+   */
+  setRouteCaptureView(state?: ViewerViewState): void {
+    if (state === undefined) { this.routeCaptureView = undefined; return }
+    const current: ViewerCameraCurrent = {
+      position: state.position, quaternion: state.quaternion,
+      ...state.up === undefined ? {} : {cameraUp: state.up},
+      target: state.target, fovYDeg: state.fovDeg, near: state.near, far: state.far,
+      ...state.intrinsics === undefined ? {} : {intrinsics: state.intrinsics},
+    }
+    // 立刻校验并归一化：坏位姿在开始录制/预览时就明确失败，不拖到视频里才变成错帧。
+    this.routeCaptureView = normalizeCameraRequest(cameraRequestFromState(state), current)
+  }
+  /** 显式清理临时 POV（停止/取消/切 Scene/Viewer 更换/卸载都必须走这里）。 */
+  clearRouteCaptureView(): void { this.routeCaptureView = undefined }
+  /** 当前临时 POV 是否仍在（会话收尾自检/测试读回；不暴露第二份可写状态）。 */
+  routeCaptureViewActive(): boolean { return this.routeCaptureView !== undefined }
+  /** 临时 POV 相机：每次按真实输出尺寸写一遍并核对，绝不动主相机。 */
+  private routeCapturePerspective(size: {width:number;height:number}): THREE.PerspectiveCamera {
+    const view = this.routeCaptureView
+    if (!view) throw new Error("VIEWER_ROUTE_CAPTURE_VIEW_MISSING: 没有临时路线相机视图")
+    let camera = this.routeCaptureCamera
+    if (!camera) { camera = new THREE.PerspectiveCamera(view.fovYDeg, size.width / size.height, view.near, view.far); this.routeCaptureCamera = camera }
+    const verification = writeViewToCamera(camera, undefined, view, size)
+    if (!verification.ok) throw new ViewerCameraError("VIEWER_ROUTE_CAPTURE_VIEW_MISMATCH", `临时路线相机没有按采样复现：${verification.errors.join("；")}`)
+    camera.updateMatrixWorld(true)
+    return camera
+  }
+  /**
+   * 把当前临时 POV 渲染到一块小预览画布（真实 scene、同一套灯光/材质/tone mapping）。
+   *
+   * 预览与录制共用同一个 clean capture pass；渲染完立即按主相机重绘屏幕，主视口仍是可交互总览。
+   * 画布像素尺寸按主输出宽高比自动定高，避免把 676×890 的 POV 拉成方图。
+   */
+  renderRouteCapturePreview(target: HTMLCanvasElement, maxHeight = 96): boolean {
+    if (this.disposed || !this.routeCaptureView || !target || typeof target.getContext !== "function") return false
+    const size = this.canvasPixels()
+    if (size.width <= 0 || size.height <= 0) return false
+    const height = Math.max(24, Math.min(240, Math.round(maxHeight)))
+    const width = Math.max(16, Math.round(height * size.width / size.height))
+    if (target.width !== width) target.width = width
+    if (target.height !== height) target.height = height
+    const context = target.getContext("2d")
+    if (!context) return false
+    let camera: THREE.PerspectiveCamera
+    try { camera = this.routeCapturePerspective(size) } catch { return false }
+    try {
+      this.withoutCaptureHelpers(() => {
+        this.renderer.render(this.scene, camera)
+        context.drawImage(this.renderer.domElement, 0, 0, width, height)
+      })
+      return true
+    } catch { return false }
+    finally {
+      // 临时 POV 渲染或同步 copy 失败时也不能把主画面留在 POV：helpers 由内层 finally 恢复，
+      // 这里无论成功/异常都用主相机重绘可交互总览（预览不改 LOD owner，不额外 settle）。
+      try { this.renderer.render(this.scene, this.camera) } catch { /* 主画面恢复失败不覆盖原返回值 */ }
+    }
+  }
+  /**
+   * 路线总览：把真实站点相机机身/镜头/四棱锥/上方向与场景主体一起框进 3D 视角。
+   *
+   * 与 `frameAll` 的区别：站点（含远端站点）是取景包围盒的一部分，不会被主体框丢下；场景主体仍用
+   * 自动取景的可见主体判据（跳过无限地面/超大墙面），所以不会把地面无限范围撑满。缺失位姿的站点
+   * 不参与包围盒，也不补零位姿。它只移动查看相机，不 pilot、不选中、不改物理。
+   */
+  frameCaptureRoute(stations: readonly CaptureRouteStationInput[]): { ok: boolean; stations: number; available: number; bounds?: { min: [number, number, number]; max: [number, number, number] } } {
+    const frame = this.captureRouteFrame()
+    const geometry = captureRouteStationsGeometry(stations.map(station => ({...station, frameWidth: station.frameWidth ?? frame.width, frameHeight: station.frameHeight ?? frame.height})), -1)
+    const box = new THREE.Box3()
+    let available = 0
+    for (const station of geometry) {
+      if (!station.available || !station.position || !station.quaternion || !station.forward || !station.up || !station.right || !station.frustum) continue
+      available++
+      const position = new THREE.Vector3(...station.position)
+      const forward = new THREE.Vector3(...station.forward)
+      const up = new THREE.Vector3(...station.up)
+      const right = new THREE.Vector3(...station.right)
+      box.expandByPoint(position)
+      box.expandByPoint(position.clone().addScaledVector(forward, -0.06)) // 机身/镜头在顶点后方
+      box.expandByPoint(position.clone().addScaledVector(up, 0.14))       // 真实 up 线
+      const center = position.clone().addScaledVector(forward, station.frustum.imagePlaneM)
+      const halfWidth = station.frustum.imageWidth / 2, halfHeight = station.frustum.imageHeight / 2
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) box.expandByPoint(center.clone().addScaledVector(right, sx * halfWidth).addScaledVector(up, sy * halfHeight))
+    }
+    if (available === 0) return {ok: false, stations: stations.length, available: 0}
+    // 场景主体：与 frameAll 同一主体判据 + 同一"超大几何不参与"过滤；跳过 PlaneGeometry 的无限地面。
+    // 这里**不**做 frameAll 的"整场都是超大几何"兜底：路线站点已经给出取景范围，把 6 m 墙面/地板重新
+    // 并进来只会把总览拉远成小点。站点始终是包围盒的一部分，远端站点不会被主体框丢下。
+    const subject = subjectEntityIds(this.snapshot?.entities)
+    for (const [entityId, loaded] of this.objects) {
+      if (subject && !subject.has(entityId)) continue
+      const bounds = objectWorldBounds(loaded.group, this.splatViewBounds, true, false)
+      if (!bounds.isEmpty()) box.union(bounds)
+    }
+    if (this.preview) box.union(objectWorldBounds(this.preview, this.splatBounds, true, false))
+    if (box.isEmpty()) return {ok: false, stations: stations.length, available: 0}
+    this.frameBounds(box)
+    return {ok: true, stations: stations.length, available, bounds: {min: box.min.toArray() as [number,number,number], max: box.max.toArray() as [number,number,number]}}
+  }
+  /** 一台"看得见的相机"：四棱锥/像平面 + 机身/镜头 + 位置点 + 真实前向/up。局部系，调用方写位姿。 */
+  private buildCaptureRouteCameraGroup(station: CaptureRouteStationGeometry, color: number, name: string): THREE.Group {
+    const group=new THREE.Group(),frustum=station.frustum!
+    group.name=name
+    const lineMaterial=new THREE.LineBasicMaterial({color,transparent:true,opacity:.98,depthTest:false})
+    const lineGeometry=new THREE.BufferGeometry()
+    lineGeometry.setAttribute('position',new THREE.Float32BufferAttribute(frustum.lineVertices,3))
+    const frustumLines=new THREE.LineSegments(lineGeometry,lineMaterial)
+    frustumLines.name=`${name}:frustum`;frustumLines.renderOrder=20;group.add(frustumLines)
+    // 像平面：半透明矩形，读得出"画面朝哪、有多大"；是显示面，不参与任何采集。
+    const planeGeometry=new THREE.PlaneGeometry(frustum.imageWidth,frustum.imageHeight)
+    const plane=new THREE.Mesh(planeGeometry,new THREE.MeshBasicMaterial({color,transparent:true,opacity:.13,side:THREE.DoubleSide,depthWrite:false,depthTest:false}))
+    plane.position.set(0,0,-frustum.imagePlaneM);plane.name=`${name}:image-plane`;plane.renderOrder=19;group.add(plane)
+    // 机身：顶点后方的短盒 + 镜头环 + 顶点球，让"相机"在 3D 里一眼可读。
+    const bodyGeometry=new THREE.BoxGeometry(.062,.046,.036)
+    const body=new THREE.Mesh(bodyGeometry,new THREE.MeshBasicMaterial({color:0x171b21,transparent:true,opacity:.96,depthTest:false}))
+    body.position.set(0,0,.024);body.name=`${name}:body`;body.renderOrder=20;group.add(body)
+    const edges=new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeometry),lineMaterial)
+    edges.position.copy(body.position);edges.name=`${name}:body-edges`;edges.renderOrder=21;group.add(edges)
+    const lensGeometry=new THREE.CylinderGeometry(.016,.019,.026,14)
+    const lens=new THREE.Mesh(lensGeometry,new THREE.MeshBasicMaterial({color:0x2c3541,transparent:true,opacity:.98,depthTest:false}))
+    lens.rotation.x=Math.PI/2;lens.position.set(0,0,.004);lens.name=`${name}:lens`;lens.renderOrder=20;group.add(lens)
+    const apex=new THREE.Mesh(new THREE.SphereGeometry(.009,12,8),new THREE.MeshBasicMaterial({color,depthTest:false}))
+    apex.name=`${name}:origin`;apex.renderOrder=22;group.add(apex)
+    // 真实前向中心线与真实 up 线：四棱锥已给出方向，这两条让 roll/朝向在缩略视角里也清楚。
+    const forward=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-frustum.imagePlaneM)]),lineMaterial)
+    forward.name=`${name}:forward`;forward.renderOrder=20;group.add(forward)
+    const up=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,.14,0)]),new THREE.LineBasicMaterial({color:0xffd166,transparent:true,opacity:.95,depthTest:false}))
+    up.name=`${name}:up`;up.renderOrder=20;group.add(up)
+    return group
+  }
+  /**
+   * capture pass 的显式范围：截图、按相机出图、连续视频都只在这段范围内出图。
+   *
+   * 这里隐藏的是**显示辅助**，不是场景内容：TransformControls（那根巨大的绿色手柄）、网格/坐标轴、
+   * 批注标记、相机视锥（含挂在 robot body 下的那些，所以必须逐个 rig.group 处理，不能只藏 cameraRigRoot）、
+   * 路线站点/当前相机 helper、碰撞/底座标签、放置/安装点标记与装配 ghost。选中部件的高亮材质也临时换回。
+   *
+   * 所有 visible 原值（以及部件高亮）在 finally 里逐项恢复；相机、物理时钟、Scene 都不改。
+   * Note 专用图（`captureAnnotated`）仍走同一条干净底图，随后由 `drawAnnotationPins` 把编号烧进像素。
+   */
+  private withoutCaptureHelpers<T>(run:()=>T):T {
+    const hidden: Array<{object: THREE.Object3D; visible: boolean}> = []
+    const hide = (object: THREE.Object3D | undefined): void => {
+      if (!object) return
+      hidden.push({object, visible: object.visible})
+      object.visible = false
+    }
+    // 视锥可能被 `placeCameraRig` 挂到 robot body 节点下：只藏 cameraRigRoot 会让它们继续进视频。
+    for (const rig of this.cameraRigs?.values() ?? []) hide(rig.group)
+    hide(this.cameraRigRoot)
+    hide(this.captureRouteRoot)
+    hide(this.captureRouteCurrentRoot)
+    hide(this.transformControls?.getHelper?.())
+    hide(this.grid)
+    hide(this.axes)
+    hide(this.annotationRoot)
+    hide(this.collisionTopologyLayer?.root)
+    hide(this.robotAnchorLayer?.root)
+    hide(this.placeMarker)
+    hide(this.mountPickMarker)
+    hide(this.assemblyGhost?.root)
+    hide(this.parkingGhost?.root)
+    // 放置预览 ghost 是未提交模型：预览时可见，但 Capture/截图/观察输出不能把它烧进像素；渲染后恢复。
+    hide(this.placementGhost?.root)
+    // 选中部件的暖色高亮属于选择辅助：临时换回原材质（共享材质不写）；finally 再按同一选择重建。
+    const highlight = this.partHighlight
+    const selectedPart = this.selectedPart
+    if (highlight) this.clearPartHighlight()
+    try { return run() }
+    finally {
+      for (const {object, visible} of hidden) object.visible = visible
+      if (highlight && selectedPart && !this.partHighlight && this.selectedPart?.entityId === selectedPart.entityId && this.selectedPart.partId === selectedPart.partId) this.applyPartHighlight(selectedPart.entityId, selectedPart.partId)
+    }
+  }
   /** 选中一台相机视锥（点选/面板同路）：高亮 + 回调读数卡。`undefined`＝取消选中。 */
   selectCameraRig(key: string | undefined): void {
     this.cameraRigSelected = key !== undefined && this.cameraRigs.has(key) ? key : undefined
@@ -2088,7 +3546,9 @@ export class SceneViewer {
       else copy(button,tr('漫游','Roam'),tr('查看器漫游','Roam view'),tr('中键转头 · Shift+中键平移 · 滚轮前后移动 · WASD/QE · Shift加速','Middle-drag to look · Shift+middle-drag to pan · wheel to dolly · WASD/QE · Shift to accelerate'))
     }
     if(this.observerExitButton)copy(this.observerExitButton,tr('退出相机','Exit camera'),tr('退出相机','Exit camera'),tr('返回主视图','Return to the main view'))
-    if(current&&this.observerLabel){const caption=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 中键拖动调朝向','Origin locked · middle-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:current.navigation==="first-person"?tr('自由漫游 · WASD/QE','Free movement · WASD/QE'):tr('自由环绕','Free orbit');if(this.observerLabel.textContent!==caption)this.observerLabel.textContent=caption}
+    // 默认自由模式不再常驻“Free movement · WASD/QE”等说明：模式由 Orbit/Roam 按钮的选中态表达，
+    // 完整键位在按钮 title 里。只有 pilot/相机编辑这类**有状态**身份保留短标识（Pilot、退出见旁边按钮）。
+    if(current&&this.observerLabel){const caption=current.mode==="pilot"?`${tr('查看相机（锁定）','Viewing camera (locked)')} · ${current.cameraId}`:current.mode==="camera-edit"?`${current.positionLocked?tr('原点锁定 · 中键拖动调朝向','Origin locked · middle-drag to aim'):tr('编辑相机安装','Editing camera installation')}${current.saving?tr(' · 保存中',' · saving'):current.error?` · ${current.error}`:current.dirty?tr(' · 未保存',' · unsaved'):''}`:"";if(this.observerLabel.textContent!==caption)this.observerLabel.textContent=caption}
     if(current&&this.observerExitButton&&this.observerExitButton.hidden!==(current.mode==="free"))this.observerExitButton.hidden=current.mode==="free"
   }
   private publishObserverState():void {
@@ -2360,7 +3820,8 @@ export class SceneViewer {
   /** 场景图读数：验收/诊断用（哪些实体组在场景里、可见性、包围盒、相机位姿）。只读，不改任何状态。 */
   describeScene(): unknown {
     const groups = [...this.objects.entries()].map(([entityId, loaded]) => {
-      const box = new THREE.Box3().setFromObject(loaded.group)
+      // 只算模型/GLB/机器人/splat 的真实几何；挂在 body 下的相机视锥、安装点/gizmo 等辅助子树被整棵跳过。
+      const box = objectWorldBounds(loaded.group, this.splatBounds)
       return { entityId, visible: loaded.group.visible, parented: Boolean(loaded.group.parent), meshes: loaded.group.getObjectsByProperty("isMesh", true).length, empty: box.isEmpty(), bounds: box.isEmpty() ? null : { min: box.min.toArray(), max: box.max.toArray() } }
     })
     return { groups, camera: { position: this.camera.position.toArray(), target: this.controls.target.toArray(), near: this.camera.near, far: this.camera.far, aspect: this.camera.aspect }, canvas: { width: this.renderer.domElement.width, height: this.renderer.domElement.height, cssHeight: Math.round(this.renderer.domElement.getBoundingClientRect().height) }, children: this.scene.children.length }
@@ -2374,7 +3835,8 @@ export class SceneViewer {
   probeEntityPixel(entityId: string): { screen?: [number, number]; insideCanvas?: boolean; pick?: ReturnType<SceneViewer["probePick"]>; bounds?: { min: number[]; max: number[] } } {
     const loaded = this.objects.get(entityId)
     if (!loaded) return {}
-    const box = new THREE.Box3().setFromObject(loaded.group)
+    // 与 focus/frameAll/describeScene 同一份实体几何：辅助显示不参与中心与包围盒，拾取落回真实表面。
+    const box = objectWorldBounds(loaded.group, this.splatBounds)
     if (box.isEmpty()) return {}
     const center = box.getCenter(new THREE.Vector3())
     const ndc = center.clone().project(this.camera)
@@ -2436,20 +3898,31 @@ export class SceneViewer {
    * 判据与"选择/放置"同源（同一个 `firstVisibleHit`），所以被隐藏的碰撞 geom 不会被当成可批注表面；
    * 空白处（没有视觉命中）不落点——批注必须挂在真实物体上，否则"附着"就无从谈起。
    */
-  private annotatePointer = (event: PointerEvent): void => {
+  private annotatePointer = (event: PointerEvent): void => { this.handleAnnotationPointer(event) }
+  /**
+   * 批注模式左键：命中标记/表面就交给回调，并取消这次左键的默认动作。
+   *
+   * 为什么必须 preventDefault：浏览器在 pointerdown 之后还会补发一次 mousedown，它的默认动作是
+   * "聚焦被点中的画布"，正好把浮条输入框刚拿到的焦点抢回视口（真机事件序复现见
+   * `.rc-evidence/p8-focus-fix`）。只吞真正处理了的那一次；空白点击与其它模式的默认行为不动。
+   * 单独成方法是为了让这条判据在无 WebGL 的测试里用真源码钉住（`annotation-pointer-focus.test.ts`）。
+   */
+  private handleAnnotationPointer(event: PointerEvent): void {
     if (!this.annotating || event.button !== 0 || this.transformControls.axis) return
-    this.applyAnnotationHit(this.annotationHitAtPointer(event.clientX,event.clientY))
+    if (this.applyAnnotationHit(this.annotationHitAtPointer(event.clientX,event.clientY))) event.preventDefault()
   }
-  private applyAnnotationHit(hit:{annotationId:string}|{anchor:ViewerAnnotationAnchor}|undefined):void {
-    if(!hit)return
+  /** 返回这次是否真的交给了批注回调——调用方据此决定要不要取消浏览器随后的默认聚焦。 */
+  private applyAnnotationHit(hit:{annotationId:string}|{anchor:ViewerAnnotationAnchor}|undefined):boolean {
+    if(!hit)return false
     if('annotationId' in hit)this.options.onAnnotationSelect?.(hit.annotationId)
     else this.options.onAnnotationCreate?.(hit.anchor)
+    return true
   }
   private annotationHitAtPointer(clientX:number,clientY:number,expectedEntityId?:string):{annotationId:string}|{anchor:ViewerAnnotationAnchor}|undefined {
     const rect = this.renderer.domElement.getBoundingClientRect()
     const pointer = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1)
     const ray = new THREE.Raycaster(); ray.setFromCamera(pointer, this.camera)
-    const onMarker = ray.intersectObjects([...this.markers.values()].map(entry => entry.pick), false)[0]
+    const onMarker = ray.intersectObjects([...this.markers.values()].flatMap(entry => [entry.badge, entry.pick]), false)[0]
     const annotationId = onMarker?.object.userData.annotationId
     if (typeof annotationId === "string") return {annotationId}
     const hit = firstVisibleHit(ray.intersectObjects([...this.objects.values()].map(value => value.group), true))
@@ -2472,8 +3945,22 @@ export class SceneViewer {
     this.updateAnnotationMarkers()
   }
   setPlacementMode(on: boolean): void {
+    const wasOn = this.placing
     this.placing = on
-    if (!on) this.clearPlaceMarker()
+    this.placeDown = undefined
+    if (on) {
+      if (!wasOn) this.placementTransformEnabled = this.annotating ? this.annotationTransformEnabled ?? this.transformControls.enabled : this.transformControls.enabled
+      this.transformControls.enabled = false
+      this.transformControls.axis = null
+      this.syncTransformGizmo()
+    } else {
+      this.clearPlaceMarker()
+      if (wasOn && this.placementTransformEnabled !== undefined) {
+        if (!this.annotating) this.transformControls.enabled = this.placementTransformEnabled
+        this.placementTransformEnabled = undefined
+        this.syncTransformGizmo()
+      }
+    }
   }
   private clearPlaceMarker(): void {
     if (!this.placeMarker) return
@@ -2490,8 +3977,74 @@ export class SceneViewer {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.018, 16, 8), new THREE.MeshBasicMaterial({ color: 0xfff6a3, depthTest: false, depthWrite: false }))
     dot.renderOrder = 1001
     group.add(ring, dot)
+    markAuthoringHelper(group)
     this.scene.add(group)
     this.placeMarker = group
+  }
+  /**
+   * 进入/退出源表面安装点拾取模式。进入后左键点中源实体**真实可见几何**才产生结果：
+   * 碰撞代理/隐藏 geom 由 `firstVisibleHit` 排除，ghost 不在 `objects` 里天然不参与。
+   */
+  setMountPickMode(target?: { entityId: string; rootBodyName: string }): void {
+    this.mountPick = target
+    if (!target) this.clearSurfaceMountMarker()
+  }
+  clearSurfaceMountMarker(): void {
+    if (!this.mountPickMarker) return
+    this.mountPickMarker.removeFromParent()
+    disposeObject(this.mountPickMarker)
+    this.mountPickMarker = undefined
+  }
+  /**
+   * 射线只命中所选源的**真实可视几何**；点与法线换算到源真实根 body 局部系。
+   * 返回的位姿把 +Z 对齐到表面法线，可直接交给 `robot_assembly_preview` 当 `kind:'pose'` 源安装面。
+   */
+  pickSourceSurfaceMount(entityId: string, rootBodyName: string, clientX: number, clientY: number): ViewerSurfaceMountPick | undefined {
+    const loaded = this.objects.get(entityId)
+    if (!loaded) return undefined
+    const root = loaded.robot?.bodyNode(rootBodyName)
+    if (!root) return undefined
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return undefined
+    const pointer = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1)
+    const ray = new THREE.Raycaster(); ray.setFromCamera(pointer, this.camera)
+    const visual = loaded.visual ?? loaded.baseVisual ?? loaded.group
+    const hit = firstVisibleHit(ray.intersectObjects([visual], true))
+    if (!hit) return undefined
+    root.updateWorldMatrix(true, false)
+    const worldFromRootInverse = root.matrixWorld.clone().invert()
+    const position = hit.point.clone().applyMatrix4(worldFromRootInverse)
+    const faceNormal = hit.face?.normal
+    const normalWorld = faceNormal ? faceNormal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1)
+    const normalRoot = normalWorld.clone().transformDirection(worldFromRootInverse).normalize()
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normalRoot)
+    // 命中归属的真实 body/link 名：从命中节点往上找最内层已登记部件。
+    let bodyName: string | undefined
+    for (let node: THREE.Object3D | null = hit.object; node && bodyName === undefined; node = node.parent) {
+      const part = loaded.robot?.parts.find(candidate => candidate.node === node)
+      if (part) bodyName = part.name
+    }
+    return { entityId, ...(bodyName ? { bodyName } : {}), positionM: [position.x, position.y, position.z], quaternionXyzw: [quaternion.x, quaternion.y, quaternion.z, quaternion.w], normalRootM: [normalRoot.x, normalRoot.y, normalRoot.z], hitPointWorld: [hit.point.x, hit.point.y, hit.point.z] }
+  }
+  /** 小型位置/方向标记：加在源真实根 body 下（局部位姿），随 FK 移动但不进目录、不被拾取。 */
+  private showSurfaceMountMarker(entityId: string, rootBodyName: string, pick: ViewerSurfaceMountPick): void {
+    this.clearSurfaceMountMarker()
+    const root = this.objects.get(entityId)?.robot?.bodyNode(rootBodyName)
+    if (!root) return
+    const group = new THREE.Group()
+    group.name = "assembly-mount-pick-marker"
+    group.matrixAutoUpdate = false
+    group.matrix.copy(new THREE.Matrix4().compose(new THREE.Vector3(...pick.positionM), new THREE.Quaternion(...pick.quaternionXyzw).normalize(), new THREE.Vector3(1, 1, 1)))
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.01, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff9f43, depthTest: false, depthWrite: false }))
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.03, 10), new THREE.MeshBasicMaterial({ color: 0xffd34d, depthTest: false, depthWrite: false }))
+    arrow.position.set(0, 0, 0.02)
+    arrow.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1)))
+    for (const object of [dot, arrow]) { object.userData.assemblyGhost = true; (object as unknown as { raycast: () => void }).raycast = () => {} }
+    group.add(dot, arrow)
+    group.userData.assemblyGhost = true
+    markAuthoringHelper(group)
+    root.add(group)
+    this.mountPickMarker = group
   }
   /**
    * 自动画质预算的唯一写入口：真实显卡族 + 当前用户画质 + "这个 Scene 是否已识别高精"三者合成。
@@ -2633,11 +4186,16 @@ export class SceneViewer {
       // 那一级对近景就是"粗件"；不在这里按出图相机 settle 一次，近景照片会沿用远景的简化件。
       // 交换在判据满足时同步完成，出图前调一次即可。
       this.updateLod(camera, { settle: true })
-      renderer.render(this.scene, camera)
-      // 此刻 loaded.lod 描述的就是**刚渲染出来的这一帧**：级别、资源版本、三角形、到这台相机的距离。
-      // 下面的 finally 会把窗口相机那一级恢复回来，所以这一次读数必须在这里留住。
-      captureLod = this.lodCaptureFace("capture")
-      dataURL = renderer.domElement.toDataURL("image/png")
+      // 所有作者辅助层（gizmo/视锥/路线/选择/碰撞…）不能混进"按相机出图"的 RGB；capture pass 自恢复。
+      const captured = this.withoutCaptureHelpers(() => {
+        renderer.render(this.scene, camera)
+        // 此刻 loaded.lod 描述的就是**刚渲染出来的这一帧**：级别、资源版本、三角形、到这台相机的距离。
+        // 下面的 finally 会把窗口相机那一级恢复回来，所以这一次读数必须在这里留住。
+        const lod = this.lodCaptureFace("capture")
+        return { lod, dataURL: renderer.domElement.toDataURL("image/png") }
+      })
+      captureLod = captured.lod
+      dataURL = captured.dataURL
     } finally {
       renderer.setPixelRatio(previous.pixelRatio)
       this.restoreCanvasSize(previous)
@@ -2657,6 +4215,8 @@ export class SceneViewer {
       environment: this.environmentCaptureFace(),
       // 这张图这一帧的 LOD 窄面：渲染**前**按这台相机 settle、渲染**后**当场读（不是返回时才读）。
       lod: captureLod,
+      // 展示层事实与 `capture()` 同一 owner：按相机出的图同样是"当前画面的显示状态"，不能不带这一面。
+      presentation: this.presentationStatus(),
       sceneId: this.snapshot?.sceneId, sceneRevision: this.snapshot?.revision,
       ...this.world ? { worldId: this.world.worldId, generation: this.world.worldGeneration, worldSceneRevision: this.world.appliedSceneRevision, ...frame ? { frameId: frame.frameId, frameSceneRevision: frame.sceneRevision, stepIndex: frame.stepIndex, simTime: frame.simTime } : {} } : {},
       capturedAt: new Date().toISOString(),
@@ -2684,15 +4244,25 @@ export class SceneViewer {
   }
   private contextPointer = (event: MouseEvent): void => { this.openContextMenu(event) }
   private openContextMenu(event: MouseEvent):void {
-    if(!this.options.onContextMenu||!this.selected||!this.snapshot)return
+    if(!this.options.onContextMenu||!this.snapshot)return
+    // 菜单目标必须是**光标下的真实实体**，不能拿“当前已选中”冒充：先射线拾取，点到空处不开菜单。
+    const rect=this.renderer.domElement.getBoundingClientRect()
+    const pointer=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1)
+    const ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera)
+    const hit=firstVisibleHit(ray.intersectObjects([...this.objects.values()].map(value=>value.group),true))
+    let target:THREE.Object3D|undefined=hit?.object
+    while(target&&!target.userData.entityId)target=target.parent??undefined
+    const entityId=typeof target?.userData.entityId==='string'?target.userData.entityId:undefined
+    if(entityId===undefined)return
     event.preventDefault()
-    const entityId=this.selected,sceneId=this.snapshot.sceneId,sceneRevision=this.snapshot.revision
+    if(this.selected!==entityId)this.select(entityId)
+    const sceneId=this.snapshot.sceneId,sceneRevision=this.snapshot.revision
     // 保存右键当帧的真实表面锚点；菜单焦点/面板布局变化后旧屏幕坐标不能再次投射。
-    const carrier=this.objects.get(entityId),hit=this.annotationHitAtPointer(event.clientX,event.clientY,entityId)
+    const carrier=this.objects.get(entityId),hitAtPointer=this.annotationHitAtPointer(event.clientX,event.clientY,entityId)
     this.options.onContextMenu({clientX:event.clientX,clientY:event.clientY,entityId,sceneId,sceneRevision,annotate:()=>{
       if(this.selected!==entityId||this.snapshot?.sceneId!==sceneId||this.snapshot.revision!==sceneRevision||!carrier||this.objects.get(entityId)!==carrier)throw Error('VIEWER_ANNOTATION_TARGET_CHANGED: 当前批注对象已变化 / The annotation target has changed.')
-      if(!hit)throw Error('VIEWER_ANNOTATION_SURFACE_REQUIRED: 当前位置没有可批注的所选对象表面 / No annotatable surface of the selected object was hit.')
-      this.applyAnnotationHit(hit)
+      if(!hitAtPointer)throw Error('VIEWER_ANNOTATION_SURFACE_REQUIRED: 当前位置没有可批注的所选对象表面 / No annotatable surface of the selected object was hit.')
+      this.applyAnnotationHit(hitAtPointer)
     }})
   }
   private orbitFocusPointer = (event: PointerEvent): void => {
@@ -2705,8 +4275,15 @@ export class SceneViewer {
   }
   private selectPointer = (event: PointerEvent): void => {
     // 批注模式下左键的语义归 annotatePointer：否则"点一个物体加批注"会顺带把它选中并挂上 gizmo。
-    if (event.button !== 0 || this.transformControls.axis || this.annotating) return
+    if (event.button !== 0) return
     if (this.placing) { this.placeDown = { x: event.clientX, y: event.clientY }; return }
+    if (this.transformControls.axis || this.annotating) return
+    // 表面安装点拾取模式：左键只做源真实几何拾取，不触发普通选择/gizmo。
+    if (this.mountPick) {
+      const pick = this.pickSourceSurfaceMount(this.mountPick.entityId, this.mountPick.rootBodyName, event.clientX, event.clientY)
+      if (pick) { this.showSurfaceMountMarker(this.mountPick.entityId, this.mountPick.rootBodyName, pick); this.options.onMountPick?.(pick) }
+      return
+    }
     const rect = this.renderer.domElement.getBoundingClientRect()
     const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1)
     const ray = new THREE.Raycaster(); ray.setFromCamera(pointer, this.camera)
@@ -2720,7 +4297,15 @@ export class SceneViewer {
     const hit = firstVisibleHit(ray.intersectObjects([...this.objects.values()].map(value => value.group), true))
     let object: THREE.Object3D | undefined = hit?.object
     while (object && !object.userData.entityId) object = object.parent ?? undefined
-    this.select(object?.userData.entityId)
+    const entityId = object?.userData.entityId
+    this.select(entityId)
+    // 部件级选择（R-011）：从命中面往上找**最内层**带 partId 的真实部件；点到无部件的节点则清除部件选择。
+    // 这只是展示层高亮 + 上报，下面 `select` 走的实体选择语义（gizmo/右键）一字未改。
+    let partNode: THREE.Object3D | undefined = hit?.object
+    while (partNode && partNode.userData.partId === undefined && partNode.userData.entityId === undefined) partNode = partNode.parent ?? undefined
+    const partId = typeof partNode?.userData.partId === "string" ? partNode.userData.partId : undefined
+    if (entityId !== undefined && partId !== undefined) this.selectPart(entityId, partId)
+    else if (this.selectedPart) this.selectPart(undefined, undefined)
   }
   private placePointer = (event: PointerEvent): void => {
     const down = this.placeDown
@@ -2910,13 +4495,126 @@ export class SceneViewer {
     if(!loaded)throw new Error(`ENTITY_NOT_FOUND: ${entityId}`)
     this.frameBounds(objectWorldBounds(loaded.group,this.splatViewBounds,true))
   }
-  capture(): { dataURL: string; sceneId?: string; sceneRevision?: number; environment: EnvironmentCaptureFace; lod: LodCaptureFace; worldId?: string; generation?: number; worldSceneRevision?: number; frameSceneRevision?: number; frameId?: string; stepIndex?: number; simTime?: number; camera: { position: number[]; quaternion: number[]; projectionMatrix: number[]; target:number[];up:number[];fov_y:number;near:number;far:number;projection:"perspective" }; capturedAt: string } {
+  capture(): { dataURL: string; sceneId?: string; sceneRevision?: number; environment: EnvironmentCaptureFace; lod: LodCaptureFace; presentation: PresentationCaptureFace; worldId?: string; generation?: number; worldSceneRevision?: number; frameSceneRevision?: number; frameId?: string; stepIndex?: number; simTime?: number; camera: { position: number[]; quaternion: number[]; projectionMatrix: number[]; target:number[];up:number[];fov_y:number;near:number;far:number;projection:"perspective" }; capturedAt: string } {
     const pending = this.projection.consume()
     if (pending && !this.editing) this.applyFrame(pending)
+    // 显示辅助（gizmo/视锥/路线/选择/碰撞…）只在这一帧的 capture pass 里隐藏，finally 恢复。相机状态/物理时钟一概不动。
+    const dataURL = this.withoutCaptureHelpers(() => {
+      this.renderer.render(this.scene, this.camera)
+      return this.renderer.domElement.toDataURL("image/png")
+    })
+    // 恢复 helper 后再补一帧屏幕画面，避免用户看到"helper 忽然消失"的静态画布。
     this.renderer.render(this.scene, this.camera)
     const frame = this.editing ? undefined : this.projection.current()
-    return { dataURL: this.renderer.domElement.toDataURL("image/png"), sceneId: this.snapshot?.sceneId, sceneRevision: this.snapshot?.revision, environment: this.environmentCaptureFace(), lod: this.lodCaptureFace("window"), ...(this.world ? { worldId: this.world.worldId, generation: this.world.worldGeneration, worldSceneRevision: this.world.appliedSceneRevision, ...(frame ? { frameId: frame.frameId, frameSceneRevision: frame.sceneRevision, stepIndex: frame.stepIndex, simTime: frame.simTime } : {}) } : {}), camera: { position: this.camera.position.toArray(), quaternion: this.camera.quaternion.toArray(), projectionMatrix: this.camera.projectionMatrix.toArray(),target:this.controls.target.toArray(),up:this.camera.up.toArray(),fov_y:this.camera.fov,near:this.camera.near,far:this.camera.far,projection:"perspective" }, capturedAt: new Date().toISOString() }
+    return { dataURL, sceneId: this.snapshot?.sceneId, sceneRevision: this.snapshot?.revision, environment: this.environmentCaptureFace(), lod: this.lodCaptureFace("window"), presentation: this.presentationStatus(), ...(this.world ? { worldId: this.world.worldId, generation: this.world.worldGeneration, worldSceneRevision: this.world.appliedSceneRevision, ...(frame ? { frameId: frame.frameId, frameSceneRevision: frame.sceneRevision, stepIndex: frame.stepIndex, simTime: frame.simTime } : {}) } : {}), camera: { position: this.camera.position.toArray(), quaternion: this.camera.quaternion.toArray(), projectionMatrix: this.camera.projectionMatrix.toArray(),target:this.controls.target.toArray(),up:this.camera.up.toArray(),fov_y:this.camera.fov,near:this.camera.near,far:this.camera.far,projection:"perspective" }, capturedAt: new Date().toISOString() }
   }
+  /**
+   * 输出画布的真实宿主：优先用主画布当前的父节点（就是 Viewer 容器），退化到构造时给的 container。
+   *
+   * 两条都是“当前 Viewer 自己的 DOM 宿主”，不是离树画布，也不是全局 document.body；如果都没有就明确报错。
+   */
+  private captureSurfaceHost(): HTMLElement {
+    const canvas = this.renderer?.domElement as (HTMLCanvasElement & { parentElement?: HTMLElement | null }) | undefined
+    const parent = canvas?.parentElement
+    if (parent && typeof parent.appendChild === "function") return parent
+    const container = this.options?.container
+    if (container && typeof container.appendChild === "function") return container
+    throw new Error("VIEWER_CAPTURE_SURFACE_HOST_UNAVAILABLE: 当前 Viewer 没有可用的 DOM 父节点，不能建立连续视频流")
+  }
+
+  /**
+   * 真实渲染画布的连续视频流（供 MediaRecorder 使用）：**只**给画布，不请求麦克风或桌面录屏。
+   *
+   * V10 生产路径：独立输出画布 + 平台 `captureStream(fps)`。每 tick 在显式 capture pass 里真实渲染，
+   * 再同步 `drawImage` 到输出画布；帧时间戳由平台按真实合成/采集时刻填写。不再经过
+   * `MediaStreamTrackProcessor` / `MediaStreamTrackGenerator`，也不再使用 `captureStream(0)` +
+   * `requestFrame()`（它的帧时间戳在本机 Chromium 上按名义 1/fps 递增，会压缩 WebM 时间轴）。
+   *
+   * 首帧必须在开流**之前**就真实渲染并同步复制到输出画布：平台建立轨道时看到的就是本次录制的
+   * 真实画面，Start 后立刻 Stop 也不会先给一帧空白。开流后定时器每 tick 继续真实 clean render，
+   * 即使场景静止也不会退化成只有首帧。
+   *
+   * 输出画布也必须在开流**之前**附着到当前 Viewer 的真实 DOM 宿主（1×1、透明、pointer-events:none，
+   * 不用 display/visibility 隐藏）：本机 Chromium 对离树 canvas 的 captureStream 无法可靠连续出帧。
+   * 每一轮 Start 都创建/附着自己的节点，Stop/失败/dispose 只摘除本轮节点。
+   *
+   * V9 干净出图保持不变：每帧先在显式 capture pass 里渲染，再同步 `drawImage` 到独立输出画布；
+   * 路线预览/录制时若设了 `setRouteCaptureView`，这一帧用临时 POV 相机；主画布随后恢复为可交互总览。
+   */
+  captureCanvasStream(frameRate = 30): { stream: MediaStream; width: number; height: number; stop: () => void } {
+    if (this.disposed) throw new Error("VIEWER_DISPOSED")
+    const canvas = this.renderer.domElement
+    const capture = (canvas as HTMLCanvasElement & { captureStream?: (frameRate?: number) => MediaStream }).captureStream
+    if (typeof capture !== "function") throw new Error("VIEWER_CANVAS_STREAM_UNSUPPORTED: 当前浏览器不支持 canvas.captureStream，不能录制连续视频")
+    const fps = Math.max(1, Math.min(120, Math.round(frameRate) || 30))
+    const intervalMs = Math.max(1, Math.round(1000 / fps))
+    // 独立输出画布：先附着到当前 Viewer 的真实宿主，再渲染/开流；Chromium 对离树画布的连续采集不可靠。
+    const output = createCaptureSurface(canvas.width, canvas.height, this.captureSurfaceHost())
+    const outputCapture = (output as HTMLCanvasElement & { captureStream?: (frameRate?: number) => MediaStream }).captureStream
+    if (typeof outputCapture !== "function") {
+      detachCaptureSurface(output)
+      throw new Error("VIEWER_CANVAS_STREAM_UNSUPPORTED: 独立输出画布不支持 canvas.captureStream，不能录制连续视频")
+    }
+    // 先真实渲染/同步复制首帧，再开平台流。这里失败时还没有创建任何流或定时器，但附着节点必须由本次
+    // closure 清掉，不能留成 1×1 残 canvas。
+    let stream: MediaStream | undefined
+    let timer: ReturnType<typeof setInterval> | undefined
+    let closed = false
+    const stop = () => {
+      if (closed) return
+      closed = true
+      if (timer !== undefined) { clearInterval(timer); timer = undefined }
+      this.captureStreamStops.delete(stop)
+      stopStreamTracks(stream)
+      detachCaptureSurface(output)
+    }
+    const draw = () => {
+      if (this.disposed || closed) { stop(); return }
+      try { this.drawCleanCaptureFrame(output) } catch { stop() }
+    }
+    this.captureStreamStops.add(stop)
+    try {
+      this.drawCleanCaptureFrame(output)
+      stream = outputCapture.call(output, fps)
+      timer = setInterval(draw, intervalMs)
+    } catch (failure) {
+      // 首帧/开流/异常定时器任何一个失败，都停本次轨道、清本次 timer、移除本次节点后再把错误交给调用方。
+      stop()
+      throw failure
+    }
+    return { stream: stream!, width: output.width, height: output.height, stop }
+  }
+
+  /**
+   * 一帧干净输出：按临时 POV（有则用）渲染 → 同步 `drawImage` 到输出画布 → 恢复屏幕主视角。
+   *
+   * 顺序是判据：`drawImage` 与 render 在同一个 JS 任务里完成，复制到输出画布的就是**隐藏 helper 后**
+   * 那一帧；之后主画布怎么重绘都不会影响输出画布/视频。helper 的 visible 原值由 finally 恢复。
+   */
+  private drawCleanCaptureFrame(output: HTMLCanvasElement): { width: number; height: number } {
+    const canvas = this.renderer.domElement
+    const size = { width: canvas.width, height: canvas.height }
+    if (output.width !== size.width) output.width = size.width
+    if (output.height !== size.height) output.height = size.height
+    const context = output.getContext("2d")
+    if (!context) throw new Error("VIEWER_CAPTURE_SURFACE_UNSUPPORTED: 独立输出画布没有 2D 上下文")
+    const routeCamera = this.routeCaptureView ? this.routeCapturePerspective(size) : this.camera
+    const routeActive = Boolean(this.routeCaptureView)
+    try {
+      if (routeActive) this.updateLod(routeCamera, { settle: true })
+      this.withoutCaptureHelpers(() => {
+        this.renderer.render(this.scene, routeCamera)
+        context.drawImage(canvas, 0, 0, output.width, output.height)
+      })
+      return { width: output.width, height: output.height }
+    } finally {
+      // 临时 POV 的渲染/同步 copy 即使抛错，也不能把主画布留在 POV：先在 finally 恢复主相机那一级
+      // LOD（helpers 已由 withoutCaptureHelpers 的 finally 恢复），再用主相机重绘可交互总览。
+      if (routeActive) { try { this.updateLod(this.camera, { settle: true }) } catch { /* 继续恢复主画面 */ } }
+      this.renderer.render(this.scene, this.camera)
+    }
+  }
+
   /**
    * 带批注的截图：同一张真图 + 编号点烧进像素 + 逐条屏幕坐标与锚点回执。
    *
@@ -3026,8 +4724,10 @@ export class SceneViewer {
       dynamicGeometry: [...this.objects].flatMap(([entityId, loaded]) => loaded.dynamicGeometry ? [{ entityId, nativeNames: loaded.dynamicGeometry.nativeNames, unmatchedBodyNames: loaded.dynamicGeometry.unmatchedBodyNames }] : []),
     }
   }
-  private release(loaded: Loaded): void {
+  private release(loaded: Loaded, preserveSelection = false): void {
     // 这个 Loaded 连同它的缺件警告一起离开画面：实体被移除、换资源、销毁都在这里清，警告不会挂在同一个 entityId 上。
+    const entityId = loaded.group.userData.entityId
+    if (typeof entityId === "string") this.clearPartState(entityId)
     this.visualWarnings.delete(loaded.group.userData.entityId)
     loaded.dynamicGeometry?.dispose(); loaded.dynamicGeometry = undefined
     loaded.pendingSplat?.cancel()
@@ -3036,7 +4736,9 @@ export class SceneViewer {
       const data = retainSplatData(loaded.splat)
       if (data) retainedSplats.put(this.options.splatRetentionScope, loaded.splatRetentionKey, data)
     }
-    if (this.selected === loaded.group.userData.entityId) { if (this.disposed) this.transformControls.detach(); else this.select(undefined) }
+    // 同一 Scene 内仍存在的实体仅换视觉资源（例如 Apply policy 的配套模型）时，释放的是旧图形。
+    // 保留实体选择，只暂时解绑旧 gizmo；setScene 完成后按当前选择挂到新图形。删除/换 Scene/销毁仍清选择。
+    if (this.selected === loaded.group.userData.entityId) { if (this.disposed || preserveSelection) this.transformControls.detach(); else this.select(undefined) }
     loaded.group.removeFromParent(); loaded.splat?.dispose()
     // 共享的可视对象（几何/材质/贴图归 GLTF 缓存所有）在 `disposeObject` 里按 `sharedVisual` 跳过：
     // 同一个 GLB 的其它实例可能还在画面上，绝不能因为其中一个实体离开就把共用的几何/贴图销毁掉。
@@ -3052,8 +4754,13 @@ export class SceneViewer {
   }
   dispose(): void {
     this.navigationBar?.remove();if(typeof window!=="undefined"){window.removeEventListener("lyapunov-viewer-navigation",this.navigationChanged);window.removeEventListener("storage",this.navigationStored)}
-    this.exitCameraMode({restoreView:false,focus:false});this.observerListeners?.clear();this.renderer.domElement.removeEventListener("keydown",this.observerKeyDown,true)
-    this.disposed = true; cancelAnimationFrame(this.raf); this.resize.disconnect(); this.firstPerson?.dispose(); this.controls.dispose(); this.transformControls.dispose()
+    this.exitCameraMode({restoreView:false,focus:false});this.observerListeners?.clear();this.presentationListeners?.clear();this.renderer.domElement.removeEventListener("keydown",this.observerKeyDown,true)
+    this.disposed = true; this.clearRouteCaptureView(); if (this.captureStreamStops) { for (const stop of this.captureStreamStops) { try { stop() } catch { /* 已清理 */ } } this.captureStreamStops.clear() } cancelAnimationFrame(this.raf); this.resize.disconnect(); this.firstPerson?.dispose(); this.controls.dispose(); this.transformControls.dispose()
+    // 部件高亮克隆属于本 Viewer：销毁前换回原材质并释放克隆，避免把克隆材质留在共享几何上。
+    this.clearPartState()
+    this.clearAssemblyPreview()
+    this.clearPlacementPreview()
+    this.clearSurfaceMountMarker()
     this.renderer.domElement.removeEventListener("contextmenu", this.contextPointer)
     this.renderer.domElement.removeEventListener("pointerdown", this.orbitFocusPointer, true)
     this.renderer.domElement.removeEventListener("pointerdown", this.selectPointer)
@@ -3063,6 +4770,9 @@ export class SceneViewer {
     this.markers.clear(); this.annotations = []; this.annotationRoot.clear()
     for (const rig of this.cameraRigs.values()) { disposeObject(rig.group); rig.group.removeFromParent() }
     this.cameraRigs.clear(); this.cameraRigSelected = undefined
+    if (this.captureRouteRoot) for (const child of [...this.captureRouteRoot.children]) { disposeObject(child); child.removeFromParent() }
+    if (this.captureRouteCurrentRoot) for (const child of [...this.captureRouteCurrentRoot.children]) { disposeObject(child); child.removeFromParent() }
+    this.captureRouteCurrent=undefined;this.captureRouteCurrentLensKey=""
     for (const loaded of this.objects.values()) this.release(loaded)
     this.objects.clear()
     this.collisionTopologyLayer?.dispose();this.collisionTopologyLayer=undefined

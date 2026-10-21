@@ -1,6 +1,6 @@
 import type {InputActions,SessionInput} from "@deepseek-ai/dsh-client-ui-conversation/client"
 import type {InsertViewerReference} from "./viewer-context-menu.tsx"
-import {useCallback,useEffect,useState} from "react"
+import {useCallback,useState} from "react"
 /** 原生标签与场景工具的薄接线；标签状态仍归DSH sidebarRight。 */
 import type {Context} from "@deepseek-ai/cordis"
 import type {PropsLocale,PropsRenderSlots,PropsRuntime} from "@deepseek-ai/dsh-client-ui-slots"
@@ -24,6 +24,53 @@ import type {WorkbenchSlotKeys} from "./work-surface.tsx"
 
 export const SCENE_TAB_KIND="lyapunov.scene"
 const SCENE_TAB_ID="@lyapunov/shell/scene"
+/**
+ * P21 真实初始布局时序：默认紧凑左栏必须在**首次右工作区宽度初始化之前**折起。
+ *
+ * P17 把这次折叠放在 SceneTab 的 `tab.visible` effect 里 ⇒ SDK 早已按 280px 左栏调过 `openRightbar`
+ * （`stores.ts` 的 `rightbar ??= viewport - (sidebar||56) - 400`），rightbar 偏好被钉在 760px，
+ * 折左栏腾出的 224px 全被聊天列吃掉。这里提前到**插件初始化**（`registerNativeWorkspace` 定义/注册
+ * tab 之前、React 首次渲染与 RightbarRoot 首次 `openRightbar` 之前），只用公开 `ctx.layout.toggleSidebar()`。
+ *
+ * - **一次性内存守卫**（同一 page load 只折一次，不落 localStorage）：刷新 = 新页面 = 重新给合理默认；
+ *   用户本页之后手动展开/拖拽不会再被抢回。
+ * - **窄视口不调用**：SDK 在 <1024 已自动折叠，此时 `toggleSidebar` 翻转 `narrowExpanded` 反而会展开左栏。
+ * - **不持久化任何宽度**：只调用公开 toggle，不碰共享 store、不发假键盘事件、不直接改 inline grid。
+ * - 生产无 HMR：模块只求值一次；开发 HMR 会重新求值，但首次调用后 SDK 左栏已为 0（DOM 带
+ *   `data-sidebar-collapsed`），下面的 DOM 检查会跳过，不会又展开回去。
+ */
+const SIDEBAR_AUTO_COLLAPSE=1024
+let sidebarCompactedThisPage=false
+let rightbarAlongsideSeededThisPage=false
+/** 仅测试用：重置“本页已折叠/已预置 alongside”内存守卫（生产路径不调用）。 */
+export function resetSidebarCompactionForTests(){sidebarCompactedThisPage=false;rightbarAlongsideSeededThisPage=false}
+/**
+ * V10 原生宽度：pinned Scene 首次 openRightbar 之前先按公开 `openRightbar(...,alongside)` 报告一次
+ * alongside，随后立即 `closeRightbar()` 只留下“首开正常默认宽度”的初始化结果。
+ *
+ * 为什么需要：SDK 的 `SidebarRight.ensurePinned` 在 **passive effect** 里补 pinned tab，而首次
+ * `syncPresentation` 在 layout effect 里已经不带 alongside 调过 `openRightbar`，于是 `rightbar ??=`
+ * 先按 45% 钉死；之后 alongside 再来也改不回 Chat 400px 的默认。这里在注册 pinned Scene 之前用
+ * 同一份公开动作预置，只影响本页第一次初始化；已展开的右栏/已存在用户宽度不碰。
+ */
+export function seedPinnedSceneRightbar(ctx:Context):boolean{
+ if(rightbarAlongsideSeededThisPage)return false
+ rightbarAlongsideSeededThisPage=true
+ if(ctx.sidebarRight?.isExpanded?.())return false
+ try{ctx.layout.openRightbar(false,false,true);ctx.layout.closeRightbar();return true}catch{return false}
+}
+/**
+ * 首次进入宽视口时折起 SDK 左栏一次。返回是否真的调用了公开 `toggleSidebar`。
+ * 没有公开 layout 服务、窄视口、DOM 已是折叠态、或本页已折过 ⇒ 不调用，保持原布局。
+ */
+export function compactLeftSidebarOnce(ctx:Context):boolean{
+ if(sidebarCompactedThisPage)return false
+ sidebarCompactedThisPage=true
+ if(typeof window!=="undefined"&&window.innerWidth<SIDEBAR_AUTO_COLLAPSE)return false
+ // HMR/二次求值：DOM 已折叠就不再 toggle（宽屏 toggle 会反向展开成 280px）。
+ if(typeof document!=="undefined"&&document.querySelector('[data-sidebar-collapsed="true"]'))return false
+ try{ctx.layout.toggleSidebar();return true}catch{return false}
+}
 type SceneTabProps=PropsRuntime<"sidebar.right.pane.tab">&PropsRenderSlots<WorkbenchSlotKeys>&PropsLocale<"lyapunov">
 
 type ToolsProps=PropsRuntime<"sidebar.right.surface.actions">&PropsLocale<"lyapunov">&{openScene:()=>void;openFiles:()=>void;openTerminal:()=>void}
@@ -34,21 +81,24 @@ function WorkspaceTools({t,activeTab,openScene,openFiles,openTerminal,sessionId}
  // 实测点它既不写偏好也不更新标签，而 `engine` 恒为 undefined 显示成"—"。
  // 与 Workbench 共用同一份引擎状态/切换逻辑（此前两处各写一份，原生模式下那份是后补的）。
  const {state:engineState,switchEngine:applyEnginePreference}=useEnginePreference(sessionId)
- const [engineNotice,setEngineNotice]=useState("")
- const engine=engineState.engine??engineState.preference??undefined
+ const [engineNotice,setEngineNotice]=useState<{text:string;detail:string}|undefined>(undefined)
  const switchEngine=useCallback((next:"isaac"|"mujoco")=>{
-   setEngineNotice("")
-   void applyEnginePreference(next)
-     .then(()=>setEngineNotice(tr(`已选择 ${next==="isaac"?"Isaac":"MuJoCo"}；引擎在启动时装配，下次启动工作台后生效（当前会话与动作不受影响）。`,
-                          `${next==="isaac"?"Isaac":"MuJoCo"} selected. The engine is composed at startup, so it takes effect after the next workbench start; this session and its actions are unaffected.`)))
-     .catch((error:unknown)=>setEngineNotice(tr("切换失败：","Switch failed: ")+String(error instanceof Error?error.message:error)))
+  const label=next==="isaac"?"Isaac":"MuJoCo"
+  setEngineNotice(undefined)
+  void applyEnginePreference(next)
+    .then(()=>setEngineNotice({text:tr(`${label} · 下次启动生效`,`${label} · next start`),detail:tr("引擎在启动时装配；当前会话与动作不受影响，按回执提示重启工作台后生效。","Composed at startup; this session and its actions are unaffected. Restart the workbench as the receipt explains.")}))
+    .catch((error:unknown)=>setEngineNotice({text:tr("引擎切换失败","Engine switch failed"),detail:String(error instanceof Error?error.message:error)}))
  },[applyEnginePreference,tr])
  return <div className="lya-wb lya-workspace-tools"><style>{workbenchStyle}</style>
-  <ToolRail tr={tr} nativeSceneActive={activeTab?.kind===SCENE_TAB_KIND} revealScene={openScene} openFiles={openFiles} openTerminal={openTerminal} engine={engine} onSwitchEngine={switchEngine}/>
-  {engineNotice?<p className="lya-rail-engine-notice" role="status">{engineNotice}</p>:null}
+  <ToolRail tr={tr} nativeSceneActive={activeTab?.kind===SCENE_TAB_KIND} revealScene={openScene} openFiles={openFiles} openTerminal={openTerminal} engine={engineState.engine??undefined} preference={engineState.preference??undefined} onSwitchEngine={switchEngine}/>
+  {engineNotice?<p className="lya-rail-engine-notice" role="status" title={engineNotice.detail}>{engineNotice.text}</p>:null}
  </div>
 }
 export function registerNativeWorkspace(ctx:Context){
+ // P21：在注册 tab / 首次 openRightbar 之前先折默认紧凑左栏（公开 toggle、一次性内存守卫，见上）。
+ compactLeftSidebarOnce(ctx)
+ // V10：pinned Scene 首开前用公开 openRightbar(alongside) 预置正常默认宽度（只本页第一次）。
+ seedPinnedSceneRightbar(ctx)
  const tr=ctx.locale.bind("lyapunov")
  // 与原生ui-workspace同一client face；本仓同时检查Host同名SessionStore类型，不能当客户端目录用。
  const sessions=ctx.get('sessions') as unknown as ISessions
@@ -89,7 +139,13 @@ export function registerNativeWorkspace(ctx:Context){
   return receipt
  }
  function SceneTab({sessionId,t,renderSlot,useTabInfo}:SceneTabProps){
-  const {tab}=useTabInfo()
+  const {tab,sidebar}=useTabInfo()
+  // V10 窄窗 Scene 专注：只用公开 sidebarRight 的 fullscreen 动作；目标取被点击按钮所在的真实 dock 面板，
+  // 不读私有 store、不写宽度偏好、也不伪造键盘。返回时仍走原生全屏控件。
+  const sceneFocus=()=>{
+   const target=ctx.sidebarRight.commandTarget()
+   if(target)ctx.sidebarRight.toggleFullscreen(target)
+  }
   const insertViewerReference:InsertViewerReference=reference=>{
    if(!sessionId)return false
    const scope=sessions.scope(sessionId as SessionId)
@@ -99,7 +155,7 @@ export function registerNativeWorkspace(ctx:Context){
    if(applied)input.focus()
    return applied
   }
-  return <Workbench insertViewerReference={insertViewerReference} key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} nativeTab visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={entry=>openExistingHistorySession(entry,{refresh:()=>sessions.refresh(),snapshot:()=>sessions.list.getSnapshot(),open:id=>ctx.uiWorkspace.openSession(id as SessionId)},ctx.layout.beginNavigation())}/>
+  return <Workbench insertViewerReference={insertViewerReference} key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} nativeTab visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={entry=>openExistingHistorySession(entry,{refresh:()=>sessions.refresh(),snapshot:()=>sessions.list.getSnapshot(),open:id=>ctx.uiWorkspace.openSession(id as SessionId)},ctx.layout.beginNavigation())} sceneFocus={sceneFocus} sceneFocusActive={sidebar.fullscreen}/>
  }
  ctx.effect(()=>{
   // 宿主带 lya-wb：portal 过去的工具窗在 DOM 上脱离工作台，令牌（--lya-*）与按钮/输入皮肤

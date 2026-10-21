@@ -108,6 +108,24 @@ class Articulation(_DynamicPrim):
     def get_dof_limits(self):
         value=_array(self._tensor().get_dof_limits())
         return value[...,0],value[...,1]
+    def set_dof_limits(self,lower,upper,dof_indices=None):
+        """把 DOF 位置上下限写回原生 PhysX articulation view（core.prims 没有 setter，走官方 tensor view）。
+
+        官方 tensor API 不支持只改关节子集：必须取当前整组 (count,max_dofs,2)、改命中列后再整体 set
+        （见 omni.physics.tensors ArticulationView.set_dof_limits 的稀疏限制说明）。dof_indices=None 时
+        改全部列。调用方负责保存/恢复，本方法只做一次真实原生写，不缓存也不读后置状态。
+        """
+        core=self._tensor();view=core._physics_view
+        data=_array(view.get_dof_limits()).astype(np.float32)
+        if data.ndim!=3:data=data.reshape(core.count,-1,2)
+        lo=_rows(lower);hi=_rows(upper)
+        if dof_indices is None:
+            data[:,:,0]=lo;data[:,:,1]=hi
+        else:
+            index=np.asarray(dof_indices,dtype=np.int32)
+            data[:,index,0]=lo.reshape(data[:,index,0].shape)
+            data[:,index,1]=hi.reshape(data[:,index,1].shape)
+        view.set_dof_limits(data,np.arange(core.count,dtype=np.uint32))
     def get_dof_gains(self):
         stiffness,damping=self._tensor().get_gains()
         return _array(stiffness),_array(damping)

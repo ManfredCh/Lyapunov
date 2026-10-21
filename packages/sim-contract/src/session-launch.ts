@@ -212,7 +212,11 @@ interface NativeSandboxService {
 }
 
 export interface SimSessionLauncherOptions {
-  /** 由宿主装配声明的代码与SDK根；不是模型或HTTP请求可传入的权限扩展。 */
+  /**
+   * 由宿主装配声明的只读根：代码/SDK 根，以及引擎要读的**场景资源根**（worlds/assets/robots/cache、
+   * 产品 packs）。它们不是模型或 HTTP 请求可传入的权限扩展；bwrap 的 `/tmp` tmpfs 会遮住放在其中的
+   * 安装包与数据根，启动接线只把这些声明过的根按只读重新挂回。
+   */
   readOnlyRoots?: readonly string[]
   /** 引擎名，只进诊断文本（会话身份/策略解析对所有引擎同一条链）。 */
   engineName: string

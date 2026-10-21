@@ -120,6 +120,9 @@ describe('模型面判据：只读声明，声明不全如实派生', () => {
 })
 
 describe('真实内容根：三个基础策略包的模型面（逐字取自 model-download-face.test.ts:133-142）', () => {
+  // 本文件是唯一对**真实 pack 目录**做 `inspectPack` 的真实 IO 用例：冷缓存实测约 5.8s，
+  // 超过 Bun 单 test 默认 5s（CI 单文件上限 120s）。只给这一条真实 IO 用例明确有界的 60s 预算，
+  // 全部断言原样保留，不改生产 inspectPack、也不减少供给来"变绿"；其余用例不额外延长时限。
   test('基础策略包的模型面可取件，文件清单与代码侧适配器台账逐项相同', async () => {
     for (const packId of BASE_POLICY_PACKS) {
       const contract = await inspectPack(join(CONTENT_ROOT, packId))
@@ -129,7 +132,7 @@ describe('真实内容根：三个基础策略包的模型面（逐字取自 mod
       expect(contract.route.model!.files).toEqual(adapterDownloadFiles(implemented))
       expect(contract.route.model!.source).toEqual(contract.route.source)
     }
-  })
+  }, 60_000)
 })
 
 describe('本机缓存事实（逐字取自 model-download-face.test.ts:158-172）', () => {

@@ -177,7 +177,7 @@ async function composeSession(data: string, withCwd: boolean): Promise<{ ctx: Co
   await composed.plugin(Tools)
   await composed.plugin(Sessions)
   await composed.plugin(Commands)
-  await composed.plugin(scenePlugin, { dataRoot: data })
+  await composed.plugin(scenePlugin, { dataRoot: data, productRoot: join(base, "no-bundled-product") })
   const session = composed.sessions.create(SessionId(`scene-open-${Math.trunc(Date.now() % 1e9)}`), withCwd ? { meta: { cwd: workspace } } : {})
   return { ctx: composed, agent: { id: session.id, session } as Agent }
 }

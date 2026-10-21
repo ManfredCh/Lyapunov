@@ -10,9 +10,11 @@
  *  1. **夹具是真的**：`test/fixtures/mjcf-duplicate-sections/scene.xml`（带 `include`、两段 `<asset>`）
  *     过真生产者 `formats.ts:robotVisual` + 真依赖闭包 `parseAsset`，文件真的在磁盘上；
  *     mimeType 的消费侧判据拿真函数 `viewer/src/asset-locator.ts:pairDocumentAssets` 验，不手写期望。
- *  2. **负对照在文件里**：候选集空 / 行没有 `name` / 扩展名不在 mimeType 表里 / 引用已带 scheme
- *     ——四条各有一条"一条都不改"的读数。放宽本模块的判据（例如取消 `name` 判据或不过滤候选集），
+ *  2. **负对照在文件里**：候选集空 / 扩展名不在 mimeType 表里 / 引用已带 scheme
+ *     ——各有一条"一条都不改"的读数。放宽本模块的判据（例如不过滤候选集），
  *     正向用例仍绿而**负对照精确变红**。
+ *     注：没有 `name` 的行**不是**不动——它先补上 Viewer 本来就会推出的隐式名（文件名的去扩展名段）
+ *     再换引用，键因此逐字不变；这条由 ① 的正向用例（真夹具）与 ⑤ 之后的真件链钉住。
  *  3. **不放宽授权**：候选集成员资格是唯一闸门，而候选集由调用方按"已登记资源 + 文档依赖闭包"构造，
  *     与 `plugin.ts` 的 `resource` 路由同一批输入；本模块只对成员发标记。
  *
@@ -146,12 +148,19 @@ describe("② 负对照：判据一放宽就精确变红", () => {
     expect(meshFiles(fixed.entity)).toEqual(before)
   })
 
-  test("行没有 `name` ⇒ 不动（Viewer 的资产表键由文件名推出来，换了引用就换了键）", async () => {
+  test("行没有 `name` ⇒ 先补 MuJoCo/Viewer 的隐式名再换引用：键逐字保住，不再是相对引用", async () => {
     const { entity, candidates } = await realEntity()
     const unnamed = withDocument(entity, document => eachMesh(document, row => { delete row.name }))
     const fixed = robotDocumentAssetLocators(unnamed, authorizedAssetIndex(candidates))
-    expect(fixed.facts).toEqual({ entities: 0, meshes: 0, textures: 0, skipped: 4 })
-    expect(meshFiles(fixed.entity)).toEqual(["a.stl", "b.stl", "c.stl"])
+    // 3 条网格行被投影；夹具里那条 `builtin="checker"`（没有 `file`）仍如实计入 skipped。
+    expect(fixed.facts).toEqual({ entities: 1, meshes: 3, textures: 0, skipped: 1 })
+    const rows = meshRows(fixed.entity)
+    // 隐式名 = 原文件名的去扩展名段，与 Viewer 的 `name ?? 文件名段` 逐字相同 ⇒ geom→mesh 键不变。
+    expect(rows.map(row => row.name)).toEqual(["a", "b", "c"])
+    expect(rows.every(row => row.file.startsWith("res:"))).toBe(true)
+    // copy-on-write：入参仍没有 name，引用也逐字原样。
+    expect(meshRows(unnamed).every(row => row.name === undefined)).toBe(true)
+    expect(meshFiles(unnamed)).toEqual(["a.stl", "b.stl", "c.stl"])
   })
 
   // 这一条原来拿 `.glb` 当"表里没有的扩展名"的实例。`.glb` 进表之后换成 `.ply`：
@@ -508,5 +517,74 @@ describe("⑦ `.obj` 孪生件（同一份文档、同一份几何，只换 `fil
     const projected = projectPathsOnly(fixed.entity, ROOTS) as any
     expect(pairDocumentAssets(projected).map(row => row.mimeType)).toEqual(["model/stl", "model/stl", "model/stl"])
     expect(assetFormatFromMimeType(ROBOT_VISUAL_MIME_BY_EXTENSION[".dae"]!)).toBe("dae")
+  })
+})
+
+/**
+ * ⑧ P6B：**无 `name` 的 MJCF mesh 行**。真实 Allegro/UR10e 原件里 31 条 `<mesh>` 全部没有 `name`，
+ * 旧判据（"没有 name 一律不动"）把它们全 skip ⇒ 相对引用原样送进浏览器 ⇒ `ROBOT_VISUAL_REFERENCE_UNRESOLVED`。
+ * 正解不是放宽授权，而是先把 MuJoCo/Viewer 本来就会推出的隐式名写回，再走同一条已授权件投影。
+ * 前一条用**仓内真件**（3 条小 STL）走完整真链；后一条用**真实 packs 原件**只量投影读数（不加载 32MB 几何）。
+ */
+describe("⑧ 无 `name` 的 MJCF mesh：补隐式名保住 Viewer 键，再投影成已授权标记", () => {
+  /** 真件链用的临时文档：三条无 `name` 的网格行，`meshdir` 指向仓内真 STL 夹具目录。 */
+  const UNNAMED_XML = (() => {
+    const directory = mkdtempSync(join(tmpdir(), "robot-visual-unnamed-"))
+    writeFileSync(join(directory, "robot.xml"), `<mujoco model="unnamed">
+  <compiler angle="radian" meshdir="${join(FIXTURES, "meshes")}"/>
+  <asset>
+    <mesh file="a.stl"/>
+    <mesh file="b.stl"/>
+    <mesh file="c.stl"/>
+  </asset>
+  <worldbody>
+    <body name="arm">
+      <geom name="g_a" type="mesh" mesh="a"/>
+      <geom name="g_b" type="mesh" mesh="b"/>
+      <geom name="g_c" type="mesh" mesh="c"/>
+    </body>
+  </worldbody>
+</mujoco>
+`)
+    return join(directory, "robot.xml")
+  })()
+
+  test("真件链：出站补隐式名 → 媒体路由回真字节 → Viewer 建出 3 个网格且无未解析告警", async () => {
+    const scene: any = robotScene(await robotDocumentEntity(UNNAMED_XML, "unnamed"))
+    const reading = await realChain(scene, join(FIXTURES, "meshes", "a.stl"))
+    expect(reading.facts).toEqual({ entities: 1, meshes: 3, textures: 0, skipped: 0 })
+    // 引用已是标记（不是相对串）；声明表逐条拿得到 mimeType。
+    expect(reading.reference.startsWith("res:")).toBe(true)
+    expect(reading.declarations.map(row => row.mimeType)).toEqual(["model/stl", "model/stl", "model/stl"])
+    // 路由回的是磁盘上同一份字节；三个无 name 的 geom 都按隐式名命中同一个资产表键。
+    expect(reading.route).toEqual({ status: 200, bytes: 284, shaMatchDisk: true })
+    expect(reading.geometry.meshes).toBe(3)
+    expect(reading.unresolved).toEqual([])
+    expect(reading.loadFailures).toEqual([])
+  })
+
+  test("真实 packs 原件：Allegro 11 + UR10e 20 条无 name 网格全部在依赖闭包里并被投影", async () => {
+    const cases = [
+      { label: "allegro_hand", source: join(import.meta.dir, "..", "..", "..", "packs", "allegro_hand", "asset", "left_hand.xml"), meshes: 11 },
+      { label: "ur10e", source: join(import.meta.dir, "..", "..", "..", "packs", "ur10e", "asset", "universal_robots_ur10e", "ur10e.xml"), meshes: 20 },
+    ]
+    for (const { label, source, meshes } of cases) {
+      const robot = await robotVisual(source)
+      const parsed = await parseAsset(source)
+      const uri = pathToFileURL(source).href
+      const entity = {
+        entityId: label, name: label,
+        resources: [{ resourceId: `${label}-1`, version: 1, original: { uri, mimeType: parsed.mimeType }, representations: [{ uri, mimeType: parsed.mimeType }], source: parsed.source }],
+        components: { mujoco: { sourcePath: source }, visual: { kind: "robot", robot } },
+      }
+      const candidates = [uri, source, ...parsed.dependencies.flatMap(item => [item.path, pathToFileURL(item.path).href])]
+      const fixed = robotDocumentAssetLocators(entity, authorizedAssetIndex(candidates))
+      expect({ label, facts: fixed.facts }).toEqual({ label, facts: { entities: 1, meshes, textures: 0, skipped: 0 } })
+      const files = meshFiles(fixed.entity)
+      expect(files).toHaveLength(meshes)
+      expect(files.every(file => file.startsWith("res:"))).toBe(true)
+      // 每条标记都能在候选集里换回磁盘上的那一件（授权闸门没有被放宽）。
+      expect(files.every(file => matchResourceToken(file, candidates) !== undefined)).toBe(true)
+    }
   })
 })

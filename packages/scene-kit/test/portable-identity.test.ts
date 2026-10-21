@@ -145,6 +145,7 @@ describe("派生版本登记：字节变了就是新版本，冒充不了旧版�
     expect(second.ref.version).toBe(2)
     expect(localPath(second.ref.original.uri)).toBe(target)
     expect(second.derivedFrom!.from).toBe(1)
+    if (second.derivedFrom!.kind !== "external-path-rewrite") throw new Error("expected an external-path-rewrite derivation")
     expect(second.derivedFrom!.files[0]!.source).toBe(fixture.originalGlb)
     expect(second.derivedFrom!.files[0]!.target).toBe(target)
     expect(second.derivedFrom!.files[0]!.after.sha256).toBe(digest(await readFile(target)))

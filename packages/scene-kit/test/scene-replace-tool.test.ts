@@ -42,7 +42,7 @@ beforeEach(async () => {
   await ctx.plugin(Tools)
   await ctx.plugin(Sessions)
   await ctx.plugin(Commands)
-  await ctx.plugin(scenePlugin, { dataRoot })
+  await ctx.plugin(scenePlugin, { dataRoot, productRoot: join(base, "no-bundled-product") })
   // 真实会话：命令运行时把 command/run、command/done 记在 agent.session 上。
   const session = ctx.sessions.create(SessionId(sessionKey))
   agent = { id: session.id, session } as Agent

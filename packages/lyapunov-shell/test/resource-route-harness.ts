@@ -60,7 +60,7 @@ export async function boot(options: { root?: string; sceneRoot?: string } = {}):
   ctx.provide("agents", { get: (id: unknown) => agents.get(String(id)) })
   ctx.provide("sessions", { flush: async () => undefined })
   ctx.provide("sessionController", { resolveAgent: async (id: unknown) => agents.has(String(id)) ? { agent } : { error: new Error("SESSION_NOT_FOUND") } })
-  ctx.provide("sessionQuery", { observeSession: async (id: unknown) => ({ header: { id: String(id) }, dispose: () => undefined }) })
+  ctx.provide("sessionQuery", { observeSession: async (id: unknown) => agents.has(String(id)) ? ({ header: { id: String(id) }, dispose: () => undefined }) : undefined })
   ctx.provide("commands", { register: () => () => undefined, execute: async () => undefined })
   // jobs/subprocess 本夹具不碰（provider 安装、后台作业）；只提供建路由期会调到的那个形状。
   ctx.provide("jobs", { attachController: () => () => undefined, start: async () => ({ jobId: "job-stub" }), get: () => undefined })

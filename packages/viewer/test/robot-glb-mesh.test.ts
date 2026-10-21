@@ -240,3 +240,120 @@ describe("登记判据没有被放宽（负对照：还原 B1 的话这两条必
     expect(code).not.toContain("new GLTFLoader(")
   })
 })
+
+/* --- STL 存储法线缺零修复验收（并入自 robot-stl-normals 的同一组判据） --- */
+
+const TRIANGLE = join(ROOT, "packages", "scene-kit", "test", "fixtures", "mjcf-duplicate-sections", "meshes", "a.stl")
+const meshes = (visual: RobotVisual): THREE.Mesh[] => {
+  const found: THREE.Mesh[] = []
+  visual.root.traverse(object => { if (object instanceof THREE.Mesh) found.push(object) })
+  return found
+}
+/** 每个面：存储法线是零向量、或与环绕方向几何法线反向（dot ≤ 0）的"失配面"数。 */
+const defectiveFaces = (geometry: THREE.BufferGeometry): { defective: number; checked: number } => {
+  const position = geometry.getAttribute("position"), normal = geometry.getAttribute("normal")
+  const index = geometry.getIndex()
+  const count = index ? index.count : position.count
+  const vertexOf = (i: number): number => index ? index.getX(i) : i
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const winding = new THREE.Vector3(), edge = new THREE.Vector3(), stored = new THREE.Vector3()
+  let defective = 0, checked = 0
+  for (let i = 0; i + 2 < count; i += 3) {
+    const i0 = vertexOf(i), i1 = vertexOf(i + 1), i2 = vertexOf(i + 2)
+    a.fromBufferAttribute(position, i0); b.fromBufferAttribute(position, i1); c.fromBufferAttribute(position, i2)
+    winding.copy(b).sub(a); edge.copy(c).sub(a); winding.cross(edge)
+    if (winding.lengthSq() < 1e-24) continue
+    checked++
+    stored.fromBufferAttribute(normal, i0)
+    if (winding.dot(stored) <= 0) defective++
+  }
+  return { defective, checked }
+}
+/** 二进制 STL：把每个 facet 记录前 12 字节的存储法线改写为 `make(face)` 的返回值。 */
+const rewriteStlNormals = (bytes: Buffer, make: (face: number, geometric: THREE.Vector3) => THREE.Vector3): Buffer => {
+  const out = Buffer.from(bytes)
+  const faces = out.readUInt32LE(80)
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), geometric = new THREE.Vector3()
+  for (let face = 0; face < faces; face++) {
+    const base = 84 + face * 50
+    a.fromArray([out.readFloatLE(base + 12), out.readFloatLE(base + 16), out.readFloatLE(base + 20)])
+    b.fromArray([out.readFloatLE(base + 24), out.readFloatLE(base + 28), out.readFloatLE(base + 32)])
+    c.fromArray([out.readFloatLE(base + 36), out.readFloatLE(base + 40), out.readFloatLE(base + 44)])
+    geometric.copy(b).sub(a).cross(c.clone().sub(a)).normalize()
+    const next = make(face, geometric)
+    out.writeFloatLE(next.x, base); out.writeFloatLE(next.y, base + 4); out.writeFloatLE(next.z, base + 8)
+  }
+  return out
+}
+const serveBytes = (bytes: Buffer) => () => `data:model/stl;base64,${bytes.toString("base64")}`
+
+const singleMeshDoc = {
+  format: "mjcf", baseUri: "file:///robot/",
+  document: {
+    compiler: { angle: "radian" },
+    asset: { mesh: { name: "part", file: "part.stl" } },
+    worldbody: { body: { name: "b", geom: { type: "mesh", mesh: "part" } } },
+  },
+}
+
+describe("真实原件：Unitree Go1 的腿 STL 存储法线整批是零向量", () => {
+  test("装载后每个网格每个面的法线都非零且与环绕方向一致（修复前腿网格必挂）", async () => {
+    const input = await robotVisual(GO1_MJCF)
+    const requested: string[] = []
+    const visual = await buildRobotVisual(input as any, (uri: string) => {
+      requested.push(uri)
+      return `data:model/stl;base64,${readFileSync(fileURLToPath(uri)).toString("base64")}`
+    })
+    // 21 个可视 geom 里 13 个是网格 geom：trunk + 4×(hip+thigh+calf)；其余是场景/碰撞基元。
+    const all = meshes(visual)
+    const loaded = all.filter(mesh => (mesh.geometry.getAttribute("position")?.count ?? 0) > 1000)
+    expect(loaded.length).toBe(13)
+    expect(new Set(requested.map(uri => decodeURIComponent(uri).split("/").pop()!))).toEqual(
+      new Set(["trunk.stl", "hip.stl", "thigh.stl", "thigh_mirror.stl", "calf.stl"]))
+    // 四条腿的网格（按原件顶点数识别：thigh 47610 / thigh_mirror 57045 / calf 86874 /
+    // hip 90312）修复前法线整批为零，修复后必须逐面有效；trunk.stl 有 9 个面是文件固有
+    // 的反向法线（112384 里占 9，低于修复阈值 ⇒ 存储法线原样保留），全场残留 ≤ 9。
+    const legVertexCounts = new Set([47610, 57045, 86874, 90312])
+    let total = 0
+    for (const mesh of all) {
+      const { defective, checked } = defectiveFaces(mesh.geometry)
+      total += defective
+      if (legVertexCounts.has(mesh.geometry.getAttribute("position")?.count ?? 0)) {
+        expect({ defective, checked }.defective).toBe(0)
+      }
+    }
+    expect(total).toBeLessThanOrEqual(9)
+    expect(visual.warnings).toEqual([])
+  })
+})
+
+describe("不误伤：同向但非几何法线的存储法线原样保留", () => {
+  test("只修系统性失配——同向的自定义法线不被重算", async () => {
+    // 把 face 0 的存储法线改成"环绕法线朝任意垂直方向倾斜 30°"——仍同向（dot>0）但不再等于
+    // 几何法线。若装载端 blanket 重算，这里读回来的会是几何法线，断言必挂。
+    const tilted = new THREE.Vector3()
+    const bytes = rewriteStlNormals(readFileSync(TRIANGLE), (face, geometric) => {
+      if (face !== 0) return geometric
+      const perpendicular = Math.abs(geometric.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+      tilted.copy(geometric).multiplyScalar(Math.cos(Math.PI / 6))
+        .addScaledVector(perpendicular.cross(geometric).normalize(), Math.sin(Math.PI / 6)).normalize()
+      return tilted.clone()
+    })
+    const visual = await buildRobotVisual(singleMeshDoc as any, serveBytes(bytes))
+    const mesh = meshes(visual).find(object => object.geometry.getAttribute("position")?.count === 12)!
+    const normal = mesh.geometry.getAttribute("normal") as THREE.BufferAttribute
+    const loaded = new THREE.Vector3().fromBufferAttribute(normal, 0)
+    expect(loaded.distanceTo(tilted)).toBeLessThan(1e-5)
+    expect(visual.warnings).toEqual([])
+  })
+
+  test("整批零法线的合成 STL 按环绕方向重算（Go1 腿件的同款形态）", async () => {
+    const bytes = rewriteStlNormals(readFileSync(TRIANGLE), () => new THREE.Vector3(0, 0, 0))
+    const visual = await buildRobotVisual(singleMeshDoc as any, serveBytes(bytes))
+    const mesh = meshes(visual).find(object => object.geometry.getAttribute("position")?.count === 12)!
+    expect(defectiveFaces(mesh.geometry).defective).toBe(0)
+    const normal = mesh.geometry.getAttribute("normal") as THREE.BufferAttribute
+    expect(new THREE.Vector3().fromBufferAttribute(normal, 0).lengthSq()).toBeGreaterThan(0.5)
+    expect(visual.warnings).toEqual([])
+  })
+})

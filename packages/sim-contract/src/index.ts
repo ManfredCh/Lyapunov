@@ -81,6 +81,33 @@ export type SimAction = { actionId: string; expectedGeneration: number; startSte
 export interface WorldOptions { worldId?: string; timestepS?: number; realtimeFactor?: number; frameRateHz?: number; ground?: boolean; clock?: 'realtime' | 'manual'; /** 在首个对外物理步之前原子暂停；不改变时钟、重力或模型。省略保持原默认行为。 */ startPaused?: boolean }
 export interface ObservationSelection { entityIds?: string[]; contacts?: boolean; sensors?: boolean; cameraAuthoring?: boolean;collisionTopology?:{entityIds?:string[];includeGeometry?:boolean} }
 export interface StopSelection { entityIds?: string[]; actionId?: string; expectedGeneration?: number }
+/** 目标级原生 Freeze/Restore 的选择：显式实体范围 + 严格代次 + 本次保持记录 ID。 */
+export interface FreezeSelection { entityIds?: string[]; expectedGeneration?: number; freezeId?: string }
+/**
+ * Freeze/Restore 真实回执：只报告这一次原生保持真实作用的实体范围、根锚/关节锁与保持位姿。
+ * `controlConfigPreserved` 表示源 kp/kv/gear/force/ctrl 限制未被 Freeze 改写；`stillActiveActions`
+ * 是保持之后仍活的无关动作，证明没有暂停整 world、没有取消无关机器人。
+ */
+export interface FreezeReceipt {
+  worldId: string
+  generation: number
+  freezeId?: string
+  status: 'frozen' | 'already-frozen' | 'not-found' | 'restored' | 'not-frozen' | 'mismatched'
+  entityIds: string[]
+  frozenEntityIds?: string[]
+  restoredEntityIds?: string[]
+  alreadyFrozenEntityIds?: string[]
+  notFrozenEntityIds?: string[]
+  missingEntityIds?: string[]
+  freezeMismatchEntityIds?: string[]
+  scope?: string[]
+  rootHeld?: Record<string, boolean>
+  jointLocks?: Record<string, string[]>
+  holdPose?: Record<string, { positionM: number[]; quaternionXyzw: number[] }>
+  stillActiveActions?: string[]
+  controlConfigPreserved?: boolean
+  reason?: string
+}
 export interface JointDescription { name: string; type: 'hinge' | 'slide'; unit: 'rad' | 'm'; range?: [number, number]; actuator?: string; /** 只报源元数据声明的执行器模式；源未声明时该字段不出现（不默认 position），此时 prepare(kind:'control') 对该关节明确拒绝。 */ controlMode?: 'position' | 'velocity' | 'torque'; /** 引擎侧该关节 drive 的力限回读（N·m / N，视关节类型）；无有限限值的关节不出现该字段。 */ driveMaxEffort?: number; /** 引擎侧该关节 drive 的刚度回读（位置 drive 的 kp，力矩执行器=controller.jointKp/kp）；无有限值时不出现。 */ driveStiffness?: number; /** 引擎侧该关节 drive 的阻尼回读（位置 drive 的 kd，力矩执行器=controller.jointKd/kd）；无有限值时不出现。 */ driveDamping?: number; /** 驱动该关节的源 tendon 执行器名；该关节没有关节级执行器，只是被肌腱带动。 */ tendonActuators?: string[] }
 /**
  * 源模型 tendon 执行器通道。名字是源码里的 tendon 名（tendon 动作按它寻址），actuator 是源执行器名，
@@ -250,6 +277,8 @@ export interface RobotDescription { entityId: string; modelVersion: string; expe
   nativeBodies?: import('../../lyapunov-contracts/src/robot-authoring.ts').NativeRobotBody[];
   nativeSites?: import('../../lyapunov-contracts/src/robot-authoring.ts').NativeRobotSite[];
   base?: import('../../lyapunov-contracts/src/robot-authoring.ts').RobotBaseState;
+  /** 只读安装资格：源模型是否含会被 moving 挂接带动的静态 plane（来自实际原生/源元数据，不删几何）。 */
+  installEligibility?: import('../../lyapunov-contracts/src/robot-authoring.ts').RobotInstallEligibility;
 }
 /**
  * capture 的显式可选渲染配置。geomGroups 列出 MuJoCo 显示组 0..5 中要渲染的组：
@@ -296,6 +325,34 @@ export interface CameraAnnotationOptions { cameraName: string; pixel: [number, n
 /** 把真实 capture 记录导出为自包含数据集（samples.jsonl + 逐相机标定 + 标注引用 + 真实 PNG/NPY 副本）。 */
 export interface CameraDatasetExportOptions { outputDir: string; captureIds: string[] }
 /**
+ * 一次**模拟LiDAR**量测：从一台已命名机位（Scene/原生相机的实际 world pose，随父 body FK 运动）发射
+ * 原生物理射线。射线是引擎的真实几何求交（MuJoCo `mj_multiRay` 打在编译模型的 geom 上；Isaac 走 PhysX
+ * 场景查询），不是相机深度或点云投影改名，回执必须标来源与几何边界。
+ *
+ * 传感器位姿由 `cameraName` 决定（**不新增独立全局传感器库**：安装/归属继续由现有 Scene 相机或原生
+ * 相机清单持有）；本结构只描述这一次扫描的射线图案与量程。机身坐标系约定：`+X` 右、`+Y` 上、`-Z` 前
+ * （与相机的光学轴一致，直接复用挂载相机的 worldFromCamera）。方位角以 `-Z` 为 0、绕 `+Y` 向 `+X` 增大；
+ * 俯仰角以水平面为 0、向 `+Y` 为正。
+ */
+export interface LidarScanOptions {
+  outputDir: string
+  /** 作为传感器位姿来源的已命名相机（`camera_list` 的 cameraName 或 Scene 实体局部名）。 */
+  cameraName: string
+  expectedGeneration?: number
+  /** 竖直波束数（默认 16，1..512）。 */
+  channels?: number
+  /** 每圈方位采样数（默认 360，1..4096）。 */
+  horizontalSamples?: number
+  /** 水平视场（默认 360，0 < fov <= 360；=360 时首尾不重复采样）。 */
+  horizontalFovDeg?: number
+  /** [下界, 上界] 竖直视场（默认 [-15, 15]，下界 < 上界，绝对值 <= 90）。 */
+  verticalFovDeg?: [number, number]
+  /** 量程上限（米，默认 100，0 < range；射线超过 cutoff 视为无返回）。 */
+  rangeM?: number
+  /** 可选：按 MuJoCo 显示组过滤射线可见 geom（0..5）；省略=全部编译 geom。仅支撑后端支持。 */
+  geomGroups?: number[]
+}
+/**
  * 一套世界服务（一个会话的 Provider 实例拥有的全部世界）。方法语义与修前逐条一致；
  * 区别只在**归属**：这些世界属于取到它的那个会话，别的会话寻址不到（见 `SimService`）。
  */
@@ -328,6 +385,13 @@ export interface SimWorlds {
   stop(worldId: string, selection?: StopSelection): Promise<{ stopped: true; stepIndex: number; receipts: ActionReceipt[]; affectedEntityIds?: string[] }>
   /** 可选停止事件：仅在当前会话的真实 stop 确认后通知上层控制器，防止短窗口间继续提交。 */
   subscribeStops?(worldId:string,listener:(selection:StopSelection)=>void):()=>void
+  /**
+   * 可选原生 Freeze：只停止目标实体的动作，并用真实原生约束/关节锁按当前 pose 保持；不暂停整 world、
+   * 不写 Scene checkpoint、不每 tick 覆盖 qpos。返回真实作用范围/保持位姿/是否可恢复。
+   */
+  freeze?(worldId: string, selection?: FreezeSelection): Promise<FreezeReceipt>
+  /** 可选原生 Restore：只解除本次 Freeze 的 native 保持；不自动恢复旧动作/旧速度，重新 Start 才执行。 */
+  restore?(worldId: string, selection?: FreezeSelection): Promise<FreezeReceipt>
   subscribeFrames(worldId: string, listener: (frame: Frame) => void): () => void
   close(worldId: string): Promise<void>
   /** 辅助附着保持初始相对位置与姿态；仍标记 assisted-teleport，不计作真实接触抓取。 */
@@ -343,6 +407,12 @@ export interface SimWorlds {
   projectAnnotation(worldId: string, options: CameraAnnotationOptions): Promise<Record<string, unknown>>
   /** 真实多视角采集 → 自包含训练数据集（JSONL/PNG/NPY/标定/标注）。 */
   exportCameraDataset(worldId: string, options: CameraDatasetExportOptions): Promise<Record<string, unknown>>
+  /**
+   * 可选**模拟LiDAR**量测：从 `cameraName` 的实际 world pose 发射原生物理射线，返回原始距离与有效性。
+   * 距离是沿射线的欧氏 range（米），与相机沿光轴的 Z 深度是两种量，不能互相改名；无返回不当作 0。
+   * 不支持该通道的后端必须结构化拒绝（如 `SENSOR_UNAVAILABLE`），不返回占位图或假量测。
+   */
+  scanLidar?(worldId: string, options: LidarScanOptions): Promise<Record<string, unknown>>
   /** 释放这一套世界服务（含其 worker）。Host 级释放走 `SimService.dispose()`。 */
   dispose(): Promise<void>
 }

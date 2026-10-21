@@ -3,9 +3,17 @@ import type { Frame, SceneSnapshot, WorldHandle } from '../../lyapunov-contracts
 import type { RobotAnchorPose, RobotBaseState } from '../../lyapunov-contracts/src/robot-authoring.ts'
 import { validRobotPose } from '../../lyapunov-contracts/src/robot-authoring.ts'
 import { currentRobotFrame } from '../../lyapunov-contracts/src/robot-frame.ts'
+import { screenSpriteScale } from './annotations.ts'
 
 export interface RobotAnchorSelection { entityId: string; kind: 'base' | 'tcp' }
 interface Marker { group: THREE.Group; pick: THREE.Mesh; label: THREE.Sprite; selection: RobotAnchorSelection }
+/**
+ * 底座/TCP 标签的屏幕高度（CSS 像素）。此前标签按米缩放（`.16` 世界单位），近景会糊住半个机器人。
+ * 改成屏幕像素后，远近都只占一小条；状态文字用英文，与英文主稿一致，不遮住机器人。
+ */
+const LABEL_SCREEN_PX = 15
+/** 标签贴图 144×64，宽度按同一比例换算，不把文字拉扁。 */
+const LABEL_ASPECT = 144 / 64
 /** 底座与 TCP 标志只投影同版本原生 Frame，标志几何不参与物理、碰撞或抓取。 */
 export class RobotAnchorLayer {
   readonly root = new THREE.Group()
@@ -27,7 +35,7 @@ export class RobotAnchorLayer {
     const keep = new Set<string>()
     for (const entity of frame.entities) {
       const base = entity.sensors?.robotBase as RobotBaseState | undefined
-      if (base?.mode === 'fixed' && validRobotPose(base.worldFromBody)) this.update(keep, entity.entityId, 'base', base.worldFromBody, base.target?.entityId ? '绑定' : '固定', 0xffba52)
+      if (base?.mode === 'fixed' && validRobotPose(base.worldFromBody)) this.update(keep, entity.entityId, 'base', base.worldFromBody, base.target?.entityId ? 'Bound' : 'Fixed', 0xffba52)
       const tcp = entity.sensors?.tcp as RobotAnchorPose | undefined
       if (validRobotPose(tcp)) this.update(keep, entity.entityId, 'tcp', tcp, 'TCP', 0x47cfff)
     }
@@ -48,7 +56,7 @@ export class RobotAnchorLayer {
       const context = canvas.getContext('2d')!
       context.fillStyle = '#162636'; context.beginPath(); context.roundRect(3, 4, 138, 52, 12); context.fill()
       context.fillStyle = new THREE.Color(color).getStyle(); context.font = 'bold 30px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(text, 72, 30)
-      const texture = new THREE.CanvasTexture(canvas); const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })); label.scale.set(.16, .071, 1); label.position.set(0, 0, radius + .055); label.renderOrder = 91; label.userData.text = text; group.add(label)
+      const texture = new THREE.CanvasTexture(canvas); const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })); label.scale.set(0.036, 0.016, 1); label.position.set(0, 0, radius + .055); label.renderOrder = 91; label.userData.text = text; group.add(label)
       marker = { group, pick, label, selection: { entityId, kind } }; this.markers.set(key, marker); this.root.add(group)
     }
     marker.group.position.fromArray(pose.positionM); marker.group.quaternion.fromArray(pose.quaternionXyzw)
@@ -57,6 +65,19 @@ export class RobotAnchorLayer {
   pick(ray: THREE.Raycaster): RobotAnchorSelection | undefined {
     const hit = ray.intersectObjects([...this.markers.values()].filter(marker => marker.group.visible).map(marker => marker.pick), false)[0]
     return hit?.object.userData.robotAnchor
+  }
+  /**
+   * 每帧把标签压在固定屏幕高度：按米缩放会在近景遮住机器人（R010 实见的大"固定"徽标根因）。
+   * 只改显示尺寸，不改真实的底座/TCP 身份与位姿。
+   */
+  updateLabels(camera: THREE.PerspectiveCamera, viewportHeightPx: number): void {
+    const origin = new THREE.Vector3()
+    for (const marker of this.markers.values()) {
+      if (!marker.group.visible) continue
+      marker.group.getWorldPosition(origin)
+      const height = screenSpriteScale(camera.position.distanceTo(origin), camera, viewportHeightPx, LABEL_SCREEN_PX)
+      marker.label.scale.set(height * LABEL_ASPECT, height, 1)
+    }
   }
   private disposeMarker(marker: Marker) {
     marker.group.traverse(object => {

@@ -4,6 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {cp,mkdtemp,readFile,rm,stat,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {createRequire} from 'node:module'
 import * as THREE from 'three'
 import {TransformControls} from 'three/addons/controls/TransformControls.js'
 import {AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,AssetPhysicsStatus,type AssetDomain,type AssetPlacement} from '../src/asset-library-panel.tsx'
@@ -15,6 +16,59 @@ import {SceneViewer} from '../../viewer/src/index.ts'
 import {FrameProjection} from '../../viewer/src/projection.ts'
 import {assetSceneInstances,entityEffectivelyVisible,removeSceneNodeCommit,visibilityCommit} from '../src/scene-node-controls.tsx'
 const noop=()=>{}
+
+test('Objects 选择页搜索名称、标签、格式与内置项；过滤保留真实选择且不提前放置',async()=>{
+ const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+ const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'})
+ const previous=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){
+  previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})
+ }
+ const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils')
+ const asset:AssetRecord={ref:{resourceId:'cube',version:4,original:{uri:'file:///cube.glb',mimeType:'model/gltf-binary'}},name:'Cube plain',tags:['Furniture'],folder:'',parsed:{kind:'mesh'}}
+ const bench:AssetRecord={...asset,ref:{...asset.ref,resourceId:'bench',original:{uri:'file:///bench.obj',mimeType:'model/obj'}},name:'Workbench',tags:['Table']}
+ const assets=[asset,bench,{...asset,ref:{...asset.ref,resourceId:'trashed'},name:'Deleted cube',deletedAt:'2026-10-19'}, {...asset,ref:{...asset.ref,resourceId:'robot'},name:'Robot cube',parsed:{kind:'robot'}}]
+ const before=structuredClone(assets),selected:AssetRecord[]=[],mounted:AssetRecord[]=[],imported:string[]=[]
+ const builtin:Parameters<typeof DomainAssetList>[0]['builtin']=[{resourceId:'builtin-box',assetId:'builtin-box',displayName:'Builtin box',category:'object',kind:'mesh',path:'/local/box.glb'},{resourceId:'builtin-robot',assetId:'builtin-robot',displayName:'Builtin robot',category:'robot',kind:'robot',path:'/local/robot.xml'}]
+ let canMount=true,domain:AssetDomain='object'
+ function Harness(){
+  const [selectedKey,setSelectedKey]=React.useState<string>()
+  return <DomainAssetList domain={domain} assets={assets} builtin={builtin} busy={false} available canMount={canMount} tr={(_cn,en)=>en} importBuiltin={item=>imported.push(item.assetId)} mount={item=>mounted.push(item)} selectionMode selectedKey={selectedKey} onSelect={item=>{selected.push(item);setSelectedKey(`${item.ref.resourceId}:${item.ref.version}`)}}/>
+ }
+ const host=document.getElementById('root')!,root=createRoot(host),draw=()=>root.render(<Harness/>),search=()=>host.querySelector<HTMLInputElement>('[aria-label="Search assets"]')!
+ const change=async(value:string)=>{await React.act(async()=>Simulate.change(search(),{target:{value}} as any))}
+ const rows=()=>[...host.querySelectorAll<HTMLButtonElement>('.lya-object-asset-row')]
+ try{
+  await React.act(async()=>draw())
+  expect(search().type).toBe('search');expect(rows().map(row=>row.textContent)).toEqual(['Cube plainSelect','WorkbenchSelect'])
+  expect(host.textContent).not.toContain('Deleted cube');expect(host.textContent).not.toContain('Robot cube');expect(host.textContent).not.toContain('Builtin robot')
+  await change('  FURNITURE ');expect(rows()).toHaveLength(1)
+  await React.act(async()=>rows()[0]!.click())
+  expect(selected).toEqual([asset]);expect(rows()[0]!.getAttribute('aria-pressed')).toBe('true');expect(mounted).toHaveLength(0)
+  await change('bench');expect(rows().map(row=>row.getAttribute('aria-label'))).toEqual(['Select asset Workbench'])
+  await change('missing');expect(rows()).toHaveLength(0);expect(host.querySelector('[role="status"]')?.textContent).toBe('No matching assets')
+  await change('GLB');expect(rows()).toHaveLength(1);expect(rows()[0]!.getAttribute('aria-pressed')).toBe('true')
+  await change('Builtin box');expect(rows()).toHaveLength(0)
+  await React.act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Import')!.click())
+  expect(imported).toEqual(['builtin-box']);expect(mounted).toHaveLength(0)
+  await change('');expect(rows()).toHaveLength(2);expect(rows()[0]!.getAttribute('aria-pressed')).toBe('true')
+  expect(host.querySelectorAll('details[open]')).toHaveLength(0);expect(assets).toEqual(before)
+  canMount=false;await React.act(async()=>draw());expect(rows().every(row=>row.disabled)).toBe(true)
+  domain='environment';await React.act(async()=>draw());expect(search()).toBeNull()
+ }finally{
+  await React.act(async()=>root.unmount());dom.window.close()
+  for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}
+ }
+})
+
+test('Objects 局部样式固定选择行32px、搜索/属性/放置控件28px，不依赖全局token',async()=>{
+ const {libraryStyle}=await import('../src/library-style.ts')
+ expect(libraryStyle).toContain('.lya-wb-panel .lya-object-asset-picker .lya-object-asset-search{height:28px;min-height:28px;font-size:12px}')
+ expect(libraryStyle).toMatch(/\.lya-wb-panel \.lya-object-asset-picker \.lya-object-asset-row\{[^}]*height:32px;min-height:32px/)
+ expect(libraryStyle).toContain('.lya-wb-panel .lya-property-editor .lya-values input{height:28px;min-height:28px;font-size:12px}')
+ expect(libraryStyle).toContain('.lya-wb .lya-placement-bar button{min-height:28px;font-size:12px}')
+})
+
 test('素材卡片直读四种派生事实和失败原因，恢复动作传真实同版本资源并遵守编辑权限',()=>{
  const asset:AssetRecord={ref:{resourceId:'r',version:2,original:{uri:'file:///actual.glb',mimeType:'model/gltf-binary'}},name:'环境模型',tags:[],folder:'',parsed:{kind:'mesh'},physicalizationRequest:{usage:'environment'}}
  const ref={...asset.ref,representations:[],source:{units:'m',upAxis:'Z' as const,handedness:'right' as const}},scene:SceneSnapshot={sceneId:'s',revision:4,coordinates:SCENE_COORDINATES,entities:[{entityId:'model',name:'model',transform:identityTransform(),resources:[ref],components:{visual:{kind:'group'},physicsBinding:{resourceId:'r',version:2,status:'BIND_REQUIRED',reason:'PHYSICS_DERIVATION_NOT_RUNNING'}}}]}
@@ -54,17 +108,34 @@ test('放置条按真实kind默认原点/底面，实际命令传显式模式；
   for(const [kind,uri,expected] of [['robot','/native.xml',false],['robot','/native.urdf',false],['robot','/unexpected.name',false],['mesh','/ordinary.xml',true],['splat','/scene.ply',true],[undefined,'/unknown.xml',true]] as const){
    begin(kind,uri);expect(placement?.alignBottomToSurface).toBe(expected)
    expect(renderToStaticMarkup(render())).toContain(expected?'value="bottom" selected':'value="origin" selected')
-   expect(buttons(render()).some(item=>text(item.props.children)==='确认放置')).toBe(false)
-   point=[2,3,4];await button(render(),'确认放置').props.onClick!()
+   expect(buttons(render()).some(item=>text(item.props.children)==='放置物体')).toBe(false)
+   point=[2,3,4];await button(render(),'放置物体').props.onClick!()
    expect(sent.at(-1)?.name).toBe('scene_mount');expect(sent.at(-1)?.input).toEqual({sceneId:'scene-current',resourceId:'arbitrary',version:4,alignBottomToSurface:expected,transform:{position:[2,3,4],quaternion:[0,0,0,1],scale:[1,1,1]}})
    select(render())!.props.onChange({target:{value:expected?'origin':'bottom'}})
-   await button(render(),'确认放置').props.onClick!();expect(sent.at(-1)?.input.alignBottomToSurface).toBe(!expected)
+   await button(render(),'放置物体').props.onClick!();expect(sent.at(-1)?.input.alignBottomToSurface).toBe(!expected)
    button(render(),'取消').props.onClick!();expect(placement).toBeUndefined();expect(point).toBeUndefined()
    begin(kind,uri);expect(placement?.alignBottomToSurface).toBe(expected);expect(point).toBeUndefined()
   }
   const before=sent.length;cancel();expect(placement).toBeUndefined();begin('mesh','/object.glb');expect(placement?.alignBottomToSurface).toBe(true);expect(point).toBeUndefined();expect(sent).toHaveLength(before)
  }finally{globalThis.fetch=oldFetch}
 })
+test('放置条：选点前可取消、选点后 Place/取消可达；Escape 说明不常驻但仍由画布键盘处理',async()=>{
+ const placement=assetPlacementOf({ref:{resourceId:'r',version:1,original:{uri:'/a.glb',mimeType:'fixture'}},name:'任意名称',tags:[],folder:'',parsed:{kind:'mesh'}})
+ const before=renderToStaticMarkup(AssetPlacementBar({asset:placement,point:undefined,tr:cn=>cn,alignment:noop,confirm:noop,cancel:noop}))
+ expect(before).toContain('data-testid="asset-placement-bar"')
+ expect(before).toContain('data-testid="asset-placement-cancel"')
+ expect(before).not.toContain('Escape 也可取消')
+ // 选点前不给提前可用的 Confirm（合理行为），但取消始终可达。
+ expect(before).not.toContain('data-testid="asset-placement-confirm"')
+ const after=renderToStaticMarkup(AssetPlacementBar({asset:placement,point:[1,2,3],tr:cn=>cn,alignment:noop,confirm:noop,cancel:noop}))
+ expect(after).toContain('data-testid="asset-placement-confirm"')
+ expect(after).toContain('data-testid="asset-placement-point"')
+ // Escape 路径必须覆盖资产放置，而不只覆盖装配拾取。
+ const source=await readFile(new URL('../src/workbench.tsx',import.meta.url),'utf8')
+ expect(source).toMatch(/placingAsset\)return[\s\S]{0,500}exitPlacement\(\)/)
+ expect(source).toContain('[attachPick,parkingPickActive,placingAsset]')
+})
+
 test('四个域展示同Scene的真实实例根，包含旧版本、当前选择和显隐；未放置资源区分',()=>{
  for(const [domain,kind] of [['robot','robot'],['object','mesh'],['environment','splat'],['scene','source']] as Array<[AssetDomain,string]>){
   const asset:AssetRecord={ref:{resourceId:'r',version:3,original:{uri:'file:///fixture',mimeType:'test'}},name:'可加入资源',tags:[],folder:'',parsed:{kind}}
@@ -207,4 +278,18 @@ test('机器人多文件 CAS 闭包与外部原件/网格 inode 独立，内部�
   expect((await readFile(mesh.path)).equals(original)).toBe(true)
   expect((await ops.resources.verify('robot',record.ref.version)).valid).toBe(true)
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('V10 放置条：预览状态短条；确认复用预览同一份 transform，避免二次换算错位',async()=>{
+ const placement=assetPlacementOf({ref:{resourceId:'r',version:2,original:{uri:'/a.glb',mimeType:'fixture'}},name:'任意名称',tags:[],folder:'',parsed:{kind:'mesh'}})
+ const resolved={position:[1,2,3] as [number,number,number],quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as [number,number,number]}
+ expect(assetPlacementInput('scene-current',placement,[9,9,9],resolved)).toEqual({sceneId:'scene-current',resourceId:'r',version:2,alignBottomToSurface:false,transform:resolved})
+ const ready=renderToStaticMarkup(AssetPlacementBar({asset:placement,point:[1,2,3],status:'ready',tr:cn=>cn,alignment:noop,confirm:noop,cancel:noop}))
+ expect(ready).toContain('data-preview-status="ready"')
+ expect(ready).toContain('预览就绪')
+ expect(ready).toContain('data-testid="asset-placement-confirm"')
+ const unavailable=renderToStaticMarkup(AssetPlacementBar({asset:placement,point:[1,2,3],status:'unavailable',reason:'ASSET_PREVIEW_SPLAT_UNSUPPORTED',tr:cn=>cn,alignment:noop,confirm:noop,cancel:noop}))
+ expect(unavailable).toContain('预览不可用')
+ expect(unavailable).toContain('ASSET_PREVIEW_SPLAT_UNSUPPORTED')
+ expect(unavailable).not.toContain('Escape 也可取消')
 })

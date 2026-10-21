@@ -42,7 +42,7 @@ const other={id:outsider.id,session:outsider} as Agent
 const agents=new Map([[String(agent.id),agent],[String(other.id),other]])
 ctx.provide('agents',{get:(id:unknown)=>agents.get(String(id))} as never)
 ctx.provide('sessionController',{resolveAgent:async(id:unknown)=>{const agent=agents.get(String(id));return agent?{agent}:{error:new Error('SESSION_NOT_FOUND')}}} as never)
-await ctx.plugin(scenePlugin,{dataRoot:join(output,'data')})
+await ctx.plugin(scenePlugin,{dataRoot:join(output,'data'),productRoot:join(output,'no-bundled-product')})
 await ctx.plugin(workspacePlugin,{dataDirectory:join(output,'workspace-data'),cacheRoot:join(output,'cache'),blenderExecutable:blenderExecutable()})
 const server=createServer(async(req,res)=>{try{const route=routes.get(new URL(req.url??'/', 'http://localhost').pathname);if(!route){res.writeHead(404);res.end();return}const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.from(chunk));const response=await route(new Request(`http://localhost${req.url}`,{method:req.method,headers:{'content-type':'application/json'},...req.method==='POST'?{body:Buffer.concat(chunks)}:{}}));res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()))}catch(error){res.writeHead(500);res.end(String(error))}})
 await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));const addr=server.address();assert(addr&&typeof addr==='object');const origin=`http://127.0.0.1:${addr.port}`

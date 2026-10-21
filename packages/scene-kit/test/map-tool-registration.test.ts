@@ -51,7 +51,7 @@ async function mount(config: { mapTool?: boolean }): Promise<{ ctx: Context; age
   await ctx.plugin(Sessions)
   await ctx.plugin(Commands)
   await ctx.plugin(FsLocal, { cwd: base })
-  await ctx.plugin(scenePlugin, { dataRoot: join(base, "data"), ...config })
+  await ctx.plugin(scenePlugin, { dataRoot: join(base, "data"), productRoot: join(base, "no-bundled-product"), ...config })
   // 会话工作目录 = 工作区（原生 agent 的 exec.agent.session.header.cwd 就是它）
   const session = ctx.sessions.create(SessionId(`map-tool-${++calls}`), { meta: { cwd: workspace } })
   return { ctx, agent: { id: session.id, session } as Agent }

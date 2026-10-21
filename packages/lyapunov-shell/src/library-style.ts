@@ -3,7 +3,7 @@ export const libraryStyle = `
 /* 素材库由本体按“找到、了解、加入场景”的操作顺序设计；排版沿用工作台的圆角/描边/文字层级令牌。 */
 .lya-library{display:flex;flex-direction:column;gap:16px}
 .lya-library-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.lya-eyebrow{display:block;color:var(--lya-caption);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+.lya-eyebrow{display:block;color:var(--lya-caption);font-size:11px;font-weight:600;letter-spacing:0;text-transform:none}
 .lya-library-heading h3{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:17px;font-weight:620;letter-spacing:-.01em;line-height:1.25}
 .lya-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--lya-hover);color:var(--lya-muted);font-size:11px;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
 .lya-icon-button{width:28px;height:28px;min-height:28px!important;padding:0!important;display:grid;place-items:center;border-radius:var(--lya-r-sm);color:var(--lya-muted)}
@@ -26,7 +26,7 @@ export const libraryStyle = `
 .lya-asset-mark{display:grid;place-items:center;width:42px;height:42px;flex:none;border:1px solid var(--lya-line);border-radius:var(--lya-r-md);background:var(--lya-chrome);color:var(--lya-accent)}
 .lya-asset-description{display:flex;flex-direction:column;gap:4px;min-width:0}
 .lya-asset-description>strong{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lya-asset-description>span{display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.04em;color:var(--lya-caption);flex-wrap:wrap}
+.lya-asset-description>span{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:0;color:var(--lya-caption);flex-wrap:wrap}
 .lya-asset-description i{font-style:normal}
 .lya-asset-description em{font-style:normal;color:var(--lya-warn)}
 .lya-wb .lya-asset-use{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:32px;padding:6px 10px;border-radius:var(--lya-r-md);background:var(--lya-accent-soft);color:var(--lya-accent);font-size:12px;font-weight:550}
@@ -38,7 +38,7 @@ export const libraryStyle = `
 .lya-asset-details dt{color:var(--lya-caption);margin-top:8px}
 .lya-asset-details dd{margin:3px 0 0;color:var(--lya-muted);overflow-wrap:anywhere}
 .lya-asset-tags{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
-.lya-asset-tags>span{padding:2px 6px;border-radius:var(--lya-r-sm);background:var(--lya-hover);color:var(--lya-muted);font-size:10.5px;overflow-wrap:anywhere;max-width:100%}
+.lya-asset-tags>span{padding:2px 6px;border-radius:var(--lya-r-sm);background:var(--lya-hover);color:var(--lya-muted);font-size:11px;overflow-wrap:anywhere;max-width:100%}
 .lya-asset-actions{display:flex;flex-wrap:wrap;gap:3px}
 .lya-wb .lya-asset-actions button{min-height:26px;padding:3px 7px;font-size:11.5px}
 .lya-asset-card[data-deleted=false] .lya-asset-actions button:last-child{color:var(--lya-danger)}
@@ -52,6 +52,20 @@ export const libraryStyle = `
 .lya-builtin-group{display:flex;flex-direction:column;gap:6px}
 /* 域面板（机器人/物件/环境）的素材列表：沿用内置分组的行节奏，次要入口靠左不铺满。 */
 .lya-domain{display:flex;flex-direction:column;gap:6px}
+/* Objects 选择页局部节奏，不改变其他域或来源管理页。 */
+.lya-wb-panel .lya-property-editor .lya-values input{height:28px;min-height:28px;font-size:12px}
+.lya-wb .lya-placement-bar button{min-height:28px;font-size:12px}
+.lya-object-asset-picker{display:flex;flex-direction:column;gap:8px;min-width:0}
+.lya-wb-panel .lya-object-asset-picker .lya-object-asset-search{height:28px;min-height:28px;font-size:12px}
+.lya-wb-panel .lya-object-asset-picker .lya-object-asset-row{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:100%;height:32px;min-height:32px;padding:2px 6px;border:0;border-radius:4px;background:transparent;color:var(--lya-text);text-align:left;font-size:12px}
+.lya-object-asset-row>svg{width:16px;height:16px;flex:none}
+.lya-object-asset-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lya-object-asset-choice{flex:none;font-size:11px;color:var(--lya-muted)}
+.lya-wb-panel .lya-object-asset-picker .lya-object-asset-row:hover:not(:disabled){background:var(--lya-hover)}
+.lya-wb-panel .lya-object-asset-picker .lya-object-asset-row[aria-pressed=true]{background:var(--lya-accent-soft);box-shadow:inset 2px 0 0 var(--lya-panel-action)}
+.lya-wb-panel .lya-object-asset-picker .lya-env-actions button{min-height:28px;font-size:12px}
+.lya-wb-panel .lya-object-asset-picker .lya-domain-asset>.lya-advanced{padding-top:0;margin-top:0;border-top:0}
+.lya-wb-panel .lya-object-asset-picker .lya-domain-asset>.lya-advanced>summary{min-height:28px;box-sizing:border-box;padding:5px 6px;font-size:11px}
 .lya-wb .lya-domain>.lya-text-link{align-self:flex-start;margin-top:2px;text-align:left}
 .lya-library-import-section{padding:12px;border:1px solid var(--lya-line);border-radius:var(--lya-r-md);background:var(--lya-chrome)}
 .lya-library-import-section[open]>summary{margin-bottom:10px}

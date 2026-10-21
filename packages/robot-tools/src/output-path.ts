@@ -5,9 +5,9 @@ export type SessionScope = { agent?: { session?: { header?: { cwd?: string } } }
 
 /**
  * 带 `outputDir` 的采集/导出工具：Provider 会在这个目录里落真实产物。
- * 只有这三个入口收调用方给的目录；其余机器人工具不收路径。
+ * 只有这四个入口收调用方给的目录；其余机器人工具不收路径。
  */
-export const outputDirTools = ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export'] as const
+export const outputDirTools = ['sensor_capture', 'camera_capture_multi', 'camera_dataset_export', 'camera_lidar_scan'] as const
 
 /**
  * 报错里只说"收到了什么形状"，不把值本身写进去：值可能带着调用方自己的路径，回执不该反吐路径。
