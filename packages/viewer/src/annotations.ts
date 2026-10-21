@@ -16,6 +16,7 @@
  */
 import * as THREE from "three"
 import type { Frame } from '../../lyapunov-contracts/src/types.ts'
+import { NOTE_ICON_ANCHOR_X, NOTE_ICON_ANCHOR_Y, NOTE_ICON_MARKER_FILL, NOTE_ICON_MARKER_FILL_SELECTED, NOTE_ICON_MARKER_STROKE, NOTE_ICON_MARKER_STROKE_SELECTED, NOTE_ICON_MARKER_STROKE_WIDTH, NOTE_ICON_PATH, NOTE_ICON_VIEWBOX } from '../../lyapunov-contracts/src/note-icon.ts'
 import { rigidPoseOf } from './camera-frustum.ts'
 
 /**
@@ -103,18 +104,66 @@ export const ANNOTATION_ROOT_NAME = "lyapunov-annotations"
  * 为什么：按米定的标记在近距离占满半个屏幕、远距离缩成一个点，字号更是不可读（实测反馈："字体不是自适应
  * 屏幕的，太小了"）。这里每帧按相机距离反算世界尺寸，让徽标在各种距离下都保持同一屏幕大小。
  */
-const BADGE_SCREEN_PX = 30
-const BADGE_CANVAS_PX = 96
-const BADGE_MAX_DPR = 2
+/** 标记在屏幕上的可见尺寸（CSS 像素，对应 24 单位 viewBox 的整边长）：克制、不遮挡落在的表面。 */
+const MARKER_SCREEN_PX = 28
+const MARKER_CANVAS_PX = 96
+const MARKER_MAX_DPR = 2
+/** 贴图四周留白：viewBox 本身在 3.5..20.5 已有边距，这里再留 4px 防止 DPR 取整/抗锯齿裁掉描边。 */
+const MARKER_PAD_PX = 4
+const MARKER_BOX_PX = MARKER_CANVAS_PX - 2 * MARKER_PAD_PX
+const MARKER_UNIT_PX = MARKER_BOX_PX / NOTE_ICON_VIEWBOX
+/** 锚点 (5,20.5) 在贴图里的像素位置：texture 绘制与 Sprite 中心用同一份比例，不再取横向中心/长杆底端。 */
+const MARKER_ANCHOR_PX_X = MARKER_PAD_PX + NOTE_ICON_ANCHOR_X * MARKER_UNIT_PX
+const MARKER_ANCHOR_PX_Y = MARKER_PAD_PX + NOTE_ICON_ANCHOR_Y * MARKER_UNIT_PX
+/** Sprite.center 用贴图归一化坐标（原点左下）：x 同向、y 从下往上，所以取 1 - 比例。 */
+const MARKER_SPRITE_CENTER_X = MARKER_ANCHOR_PX_X / MARKER_CANVAS_PX
+const MARKER_SPRITE_CENTER_Y = 1 - MARKER_ANCHOR_PX_Y / MARKER_CANVAS_PX
 /** 抬离表面的距离按米：贴面偏移是几何量（防 z-fighting），不该随屏幕大小变。 */
 const SURFACE_LIFT_M = 0.012
 const PICK_RADIUS_M = 0.045
 
+/**
+ * 批注标记的**唯一几何**：用户 2026-10-16 确认稿的单一路径（Lyapunov 自绘，非 Tabler）。
+ *
+ * 路径定义在 `@lyapunov/contracts` 的 note-icon.ts，工具栏 SVG、三维 Sprite 贴图与截图叠加三处共用，
+ * 因此画布里的标记、PNG 像素上的标记与工具栏入口逐点同形；不再各自画"圆点 + 编号"或"圆弧 + 长杆"。
+ * 路径数据是纯字符串：既可直接喂给 `new Path2D(d)`（浏览器 canvas），也可在离线测试里逐字核对，
+ * 不需要 Path2D 存在。
+ */
+export const ANNOTATION_MARKER_PATH = NOTE_ICON_PATH
+
+/** Path2D 只在真实浏览器里存在；离线/SSR 下返回 undefined，绘制函数据此跳过而不是抛错。 */
+function markerPath(d: string): Path2D | undefined {
+  return typeof Path2D === "undefined" ? undefined : new Path2D(d)
+}
+
+/**
+ * 在 2D 上下文里按确认稿的单一路径画同一枚标记，尾部落点 (5,20.5) 落在 (x, y)。
+ *
+ * `size` 是 24 单位 viewBox 的整边长（像素）；内部把 viewBox 平移到锚点、再按 size/24 放大，
+ * 因此三维贴图和截图像素放大走的是同一条几何，默认/选中只换填充与外描边颜色。
+ */
+export function paintAnnotationMarker(context: CanvasRenderingContext2D, x: number, y: number, size: number, selected: boolean): void {
+  const shape = markerPath(ANNOTATION_MARKER_PATH)
+  if (!shape) return
+  context.save()
+  context.translate(x, y)
+  context.scale(size / NOTE_ICON_VIEWBOX, size / NOTE_ICON_VIEWBOX)
+  context.translate(-NOTE_ICON_ANCHOR_X, -NOTE_ICON_ANCHOR_Y)
+  context.lineJoin = "round"; context.lineCap = "round"
+  context.fillStyle = selected ? NOTE_ICON_MARKER_FILL_SELECTED : NOTE_ICON_MARKER_FILL
+  context.strokeStyle = selected ? NOTE_ICON_MARKER_STROKE_SELECTED : NOTE_ICON_MARKER_STROKE
+  context.lineWidth = NOTE_ICON_MARKER_STROKE_WIDTH
+  context.fill(shape)
+  context.stroke(shape)
+  context.restore()
+}
+
 interface MarkerEntry {
   marker: THREE.Group
-  /** 屏幕尺寸恒定的编号徽标（一个圆点 + 编号，压住锚点）。 */
+  /** 屏幕尺寸恒定的单一气泡标记（尾部落点 (5,20.5) 压住锚点）。 */
   badge: THREE.Sprite
-  /** 圆点本体：sprite 底部的小实心点，让"落点"与"编号"在视觉上分开。 */
+  /** 标记贴图：由 `drawMarkerTexture` 按同一确认稿路径绘制。 */
   badgeTexture: THREE.CanvasTexture
   badgeCanvas: HTMLCanvasElement
   badgeKey?: string
@@ -141,50 +190,40 @@ export function liftAnchor(carrier: AnnotationCarrier, worldPoint: THREE.Vector3
 }
 
 /**
- * 画"编号圆点"徽标（复刻 Codex 那类图上标注的样子：一个实心点 + 编号，不要外圈和文字块）。
+ * 画批注标记的 Sprite 贴图（用户确认的单一路径，见 `paintAnnotationMarker`）。
  *
- * 文字不上标记：3D 视图里挂标签会互相压叠、越远越小；文字留在右侧面板（可编辑、可复制），
- * 标记只负责"这是第几个点"，这样画面干净且始终可读。
+ * 不再画"圆点 + 编号"或"圆弧 + 长杆"：标记只负责指向落点，编号住在底部浮条的列表里。
  * dpr 上限 2：再高只增加贴图内存，屏幕上已经看不出差别。
  */
-function drawBadge(canvas: HTMLCanvasElement, index: number, selected: boolean, devicePixelRatio: number): void {
-  const dpr = Math.max(1, Math.min(devicePixelRatio || 1, BADGE_MAX_DPR))
-  canvas.width = BADGE_CANVAS_PX * dpr
-  canvas.height = BADGE_CANVAS_PX * dpr
+function drawMarkerTexture(canvas: HTMLCanvasElement, selected: boolean, devicePixelRatio: number): void {
+  const dpr = Math.max(1, Math.min(devicePixelRatio || 1, MARKER_MAX_DPR))
+  canvas.width = MARKER_CANVAS_PX * dpr
+  canvas.height = MARKER_CANVAS_PX * dpr
   const context = canvas.getContext("2d")
   if (!context) return
-  const size = BADGE_CANVAS_PX * 1
-  const center = size / 2
-  context.clearRect(0, 0, size, size)
-  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(0, 0, canvas.width, canvas.height)
   context.scale(dpr, dpr)
-  const dotRadius = size * 0.095
-  const badgeRadius = size * 0.30
-  // 落点：底部一个小实心点，带描边（深色底、浅色面上都看得见）。
-  context.beginPath(); context.arc(center, size - dotRadius - size * 0.06, dotRadius, 0, Math.PI * 2)
-  context.fillStyle = "#ffffff"; context.fill()
-  context.lineWidth = size * 0.035; context.strokeStyle = "rgba(12,18,26,0.9)"; context.stroke()
-  // 编号：一个圆，压着锚点上方，避免盖住落点本身。
-  const badgeY = center - size * 0.06
-  context.beginPath(); context.arc(center, badgeY, badgeRadius, 0, Math.PI * 2)
-  context.fillStyle = selected ? "#4fb3ff" : "#ffd34d"; context.fill()
-  context.lineWidth = size * 0.045; context.strokeStyle = "rgba(12,18,26,0.9)"; context.stroke()
-  context.fillStyle = "#10161f"
-  context.font = `700 ${Math.round(size * 0.30)}px system-ui, sans-serif`
-  context.textAlign = "center"; context.textBaseline = "middle"
-  context.fillText(String(index), center, badgeY + size * 0.012)
-  context.restore()
+  // 24 单位 viewBox 放进贴图，锚点 (5,20.5) 由 paintAnnotationMarker 自己平移；四周留白够，不裁描边。
+  paintAnnotationMarker(context, MARKER_ANCHOR_PX_X, MARKER_ANCHOR_PX_Y, MARKER_BOX_PX, selected)
 }
 
-/** 按相机距离算"一个屏幕像素对应多少世界单位"，让徽标在各种距离下保持同一屏幕大小。 */
-export function annotationScreenScale(distance: number, camera: THREE.PerspectiveCamera, heightPx: number): number {
+/** 贴图里标记可见尺寸占画布的比例：屏幕尺寸换算要用它补掉四周留白。 */
+const MARKER_CANVAS_RATIO = MARKER_CANVAS_PX / MARKER_BOX_PX
+
+/** 按相机距离算"一个屏幕像素对应多少世界单位"，让屏幕恒定尺寸的 Sprite 在各种距离下大小一致。 */
+export function screenSpriteScale(distance: number, camera: THREE.PerspectiveCamera, heightPx: number, screenPx: number): number {
   const height = Math.max(heightPx, 1)
   const halfHeight = Math.tan(camera.fov * Math.PI / 360) * Math.max(distance, 0.001)
-  // 贴图里圆点只占画布约 60% 高，这里按画布整体高度换算，留出边距不被拉扁。
-  return (BADGE_SCREEN_PX * 1.6 / height) * 2 * halfHeight
+  return (screenPx / height) * 2 * halfHeight
 }
 
-/** 建一个批注标记：屏幕尺寸恒定的编号徽标 + 不可见的拾取球。 */
+/** 批注标记的屏幕尺寸换算：补掉贴图四周留白后，24 单位 viewBox 在屏幕上恒为 MARKER_SCREEN_PX。 */
+export function annotationScreenScale(distance: number, camera: THREE.PerspectiveCamera, heightPx: number): number {
+  return screenSpriteScale(distance, camera, heightPx, MARKER_SCREEN_PX * MARKER_CANVAS_RATIO)
+}
+
+/** 建一个批注标记：屏幕尺寸恒定的 SVG 标记贴图 + 不可见的拾取球。 */
 export function buildAnnotationMarker(annotation: ViewerAnnotation): MarkerEntry {
   const marker = new THREE.Group()
   marker.name = `annotation-${annotation.annotationId}`
@@ -195,8 +234,12 @@ export function buildAnnotationMarker(annotation: ViewerAnnotation): MarkerEntry
   badgeTexture.minFilter = THREE.LinearFilter
   badgeTexture.magFilter = THREE.LinearFilter
   badgeTexture.generateMipmaps = false
-  const badge = new THREE.Sprite(new THREE.SpriteMaterial({ map: badgeTexture, transparent: true, depthTest: true, depthWrite: false }))
+  // 屏幕标记完整覆盖表面；世界锚点仍由真实实体/原生body计算，物体不能切掉气泡轮廓。
+  const badge = new THREE.Sprite(new THREE.SpriteMaterial({ map: badgeTexture, transparent: true, depthTest: false, depthWrite: false }))
   badge.renderOrder = 900
+  badge.userData.annotationId = annotation.annotationId
+  // 尾部落点对齐锚点：Sprite 中心取贴图里 (5,20.5) 的归一化位置，而不是贴图正中/长杆底端。
+  badge.center.set(MARKER_SPRITE_CENTER_X, MARKER_SPRITE_CENTER_Y)
   // 拾取球：可见性交给材质透明度，`visible` 保持 true——Raycaster 会跳过 visible=false 的对象，
   // 关掉批注模式时改用 `pick.raycast` 置空来禁用拾取，而不是把对象隐藏。
   const pick = new THREE.Mesh(new THREE.SphereGeometry(PICK_RADIUS_M, 12, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }))
@@ -207,12 +250,12 @@ export function buildAnnotationMarker(annotation: ViewerAnnotation): MarkerEntry
   return entry
 }
 
-/** 编号/选中态变了才重画贴图：文字是逐键推下来的，无脑重画会让每敲一个字都重绘一遍。 */
+/** 编号/选中态变了才重画贴图：标记只随选中态换色，编号变化不重绘时也不出错。 */
 export function refreshAnnotationMarker(entry: MarkerEntry, index: number, selected: boolean): void {
   const key = `${String(index)}|${selected ? "1" : "0"}`
   if (entry.badgeKey === key) return
   entry.badgeKey = key
-  drawBadge(entry.badgeCanvas, index, selected, typeof window === "undefined" ? 1 : window.devicePixelRatio)
+  drawMarkerTexture(entry.badgeCanvas, selected, typeof window === "undefined" ? 1 : window.devicePixelRatio)
   entry.badgeTexture.needsUpdate = true
 }
 
@@ -231,6 +274,8 @@ export function applyAnnotationSelection(entry: MarkerEntry, selected: boolean):
 export function updateAnnotationMarker(entry: MarkerEntry, world: THREE.Vector3, camera: THREE.PerspectiveCamera, viewportHeightPx: number, pickable: boolean): void {
   entry.marker.position.copy(world)
   entry.pick.raycast = pickable ? THREE.Mesh.prototype.raycast : () => undefined
+  // 可见气泡按屏幕保持大小，点击区域直接复用同一Sprite，远景也能点中气泡本体。
+  entry.badge.raycast = pickable ? THREE.Sprite.prototype.raycast : () => undefined
   const distance = camera.position.distanceTo(world)
   const scale = annotationScreenScale(distance, camera, viewportHeightPx)
   entry.badge.scale.set(scale, scale, 1)
@@ -251,10 +296,12 @@ export function projectToCapture(world: THREE.Vector3, camera: THREE.Perspective
 }
 
 /**
- * 把编号点烧进 PNG：标签是 DOM/Sprite 之外的展示件，模型要"看见"编号就只能落在像素上。
+ * 把批注标记烧进 PNG：标记是 DOM/Sprite 之外的展示件，模型要"看见"落点就只能落在像素上。
  *
+ * 画的是与三维 Sprite 完全相同的确认稿路径（`paintAnnotationMarker`），所以画布与截图同形；
+ * 编号只作为必要标识落在气泡中心（浅色气泡上写深色字），caption 用深色小条垫在白底上，保证可读。
  * 为什么在浏览器里做：投影矩阵与 canvas 尺寸只在客户端存在，host 侧再算一遍要复制整套相机参数与
- * 像素比约定，任何一处不一致都会让圈点与画面错位。这里用与 capture() 完全相同的投影输入，只做一次。
+ * 像素比约定，任何一处不一致都会让标记与画面错位。这里用与 capture() 完全相同的投影输入，只做一次。
  */
 export function drawAnnotationPins(base: string, pins: Array<{ index: number; point: [number, number]; text?: string }>, pixelRatio: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -266,25 +313,32 @@ export function drawAnnotationPins(base: string, pins: Array<{ index: number; po
       if (!context) { reject(new Error("ANNOTATION_OVERLAY_CONTEXT_UNAVAILABLE")); return }
       context.drawImage(image, 0, 0)
       const unit = Math.max(canvas.width / 640, 1) * Math.max(pixelRatio, 1)
-      const radius = 16 * unit
+      const size = 30 * unit
+      // 24 单位 viewBox 里：圆头中心 (12,12)、圆头右缘 (20.5,12)；相对锚点 (5,20.5) 换算成像素。
+      const shapeUnit = size / NOTE_ICON_VIEWBOX
+      const bubbleCenterX = (x: number) => x + (12 - NOTE_ICON_ANCHOR_X) * shapeUnit
+      const bubbleCenterY = (y: number) => y + (12 - NOTE_ICON_ANCHOR_Y) * shapeUnit
+      const bubbleRight = (x: number) => x + (20.5 - NOTE_ICON_ANCHOR_X) * shapeUnit
       for (const pin of pins) {
         const [x, y] = pin.point
-        if (x < -radius || y < -radius || x > canvas.width + radius || y > canvas.height + radius) continue
-        context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2)
-        context.fillStyle = "#ffd34d"; context.fill()
-        context.lineWidth = 2.5 * unit; context.strokeStyle = "#121a24"; context.stroke()
-        context.fillStyle = "#121a24"; context.font = `bold ${16 * unit}px sans-serif`
+        if (x < -size || y < -size * 2 || x > canvas.width + size || y > canvas.height + size) continue
+        paintAnnotationMarker(context, x, y, size, false)
+        // 编号只落在气泡中心、只给模型做行号：浅色气泡上写深色字，不是实心编号圆。
+        context.font = `700 ${size * 0.30}px sans-serif`
         context.textAlign = "center"; context.textBaseline = "middle"
-        context.fillText(String(pin.index), x, y + unit)
+        context.fillStyle = NOTE_ICON_MARKER_STROKE
+        context.fillText(String(pin.index), bubbleCenterX(x), bubbleCenterY(y))
         const caption = (pin.text ?? "").trim()
         if (!caption) continue
         context.font = `${14 * unit}px sans-serif`; context.textAlign = "left"; context.textBaseline = "middle"
         const label = caption.length > 24 ? caption.slice(0, 24) + "…" : caption
+        const captionY = bubbleCenterY(y)
         const padding = 6 * unit, width = context.measureText(label).width + padding * 2
+        // 深色小条垫在 caption 下：无论截图底色明暗都读得出，位置贴新气泡右缘。
         context.fillStyle = "rgba(18,26,36,0.85)"
-        context.fillRect(x + radius + 4 * unit, y - 11 * unit, width, 22 * unit)
+        context.fillRect(bubbleRight(x) + 6 * unit, captionY - 11 * unit, width, 22 * unit)
         context.fillStyle = "#e7efff"
-        context.fillText(label, x + radius + 4 * unit + padding, y)
+        context.fillText(label, bubbleRight(x) + 6 * unit + padding, captionY)
       }
       resolve(canvas.toDataURL("image/png"))
     }

@@ -12,7 +12,8 @@
  */
 import { describe, expect, it } from "bun:test"
 import * as THREE from "three"
-import { SceneViewer } from "../src/index.ts"
+import { SceneViewer, DEFAULT_VIEWER_DISPLAY } from "../src/index.ts"
+import { objectWorldBounds, markAuthoringHelper } from "../src/framing.ts"
 import { frustumFromReceipt, type FrustumSpec, type RigidPose } from "../src/camera-frustum.ts"
 import { normalizeIntrinsics, quaternionAngleDeg, type ViewerQuat, type ViewerVec3 } from "../src/camera-view.ts"
 import type {Frame} from '../../lyapunov-contracts/src/types.ts'
@@ -332,4 +333,226 @@ describe("判据 3（实体归属）：同名 body 各挂各的，归属不明�
     expect(rig.group.parent).toBe(viewer.cameraRigRoot)
     expect(String(rig.group.userData.mountMissingReason)).toContain("worldbody")
   })
+})
+
+// ── V9 返修一：Capture 路线相机 helper 与 owner 隔离 ──
+const pose=(x:number):{position:number[];quaternion:number[];fovDeg:number}=>({position:[x,0,1],quaternion:[0,0,0,1],fovDeg:50})
+
+function routeHarness() {
+ const viewer:any=Object.create(SceneViewer.prototype)
+ viewer.scene=new THREE.Scene()
+ viewer.objects=new Map()
+ viewer.cameraRigs=new Map()
+ viewer.cameraRigRoot=new THREE.Group()
+ viewer.scene.add(viewer.cameraRigRoot)
+ viewer.captureRouteRoot=new THREE.Group()
+ viewer.scene.add(viewer.captureRouteRoot)
+ viewer.captureRouteCurrentRoot=new THREE.Group()
+ viewer.scene.add(viewer.captureRouteCurrentRoot)
+ viewer.captureRouteCurrent=undefined
+ viewer.captureRouteCurrentLensKey=""
+ viewer.disposed=false
+ viewer.editing=false
+ viewer.snapshot=undefined
+ viewer.world=undefined
+ viewer.camera=new THREE.PerspectiveCamera(50,1,0.1,100)
+ // 真实 Capture 画幅：路线显示只从这里取宽高比（不是固定 640×480）。
+ viewer.cameraView=()=>({intrinsics:{fx:1000,fy:1000,cx:959.5,cy:539.5,width:1920,height:1080}})
+ viewer.controls={target:new THREE.Vector3(),update(){},dispose(){}}
+ viewer.projection={consume:()=>undefined,current:()=>undefined}
+ viewer.environmentCaptureFace=()=>({source:"builtin",loaded:false,loading:false})
+ viewer.lodCaptureFace=()=>({camera:"window",planned:0,entries:[]})
+ viewer.presentationStatus=()=>({})
+ return viewer
+}
+const routeNames=(root:THREE.Group)=>root.children.map(child=>child.name)
+
+
+describe("Viewer 显示默认（V8）",()=>{
+ it("碰撞线框默认收起，画布底色为 #242a32；网格/坐标仍默认开启",()=>{
+  expect(DEFAULT_VIEWER_DISPLAY).toMatchObject({grid:true,axes:true,background:"#242a32",wireframe:false,splats:true,collision:false})
+ })
+})
+describe("路线相机 helper 与 owner 隔离",()=>{
+ it("每个可用站点画成相机；选中站点用暖色，位置来自真实位姿",()=>{
+  const viewer=routeHarness()
+  viewer.setCaptureRouteTrail([{key:"A",...pose(1)},{key:"B",...pose(2)}],1)
+  expect(viewer.captureRouteRoot.visible).toBe(true)
+  expect(routeNames(viewer.captureRouteRoot)).toContain("capture-route-stop:0")
+  expect(routeNames(viewer.captureRouteRoot)).toContain("capture-route-stop:1")
+  expect(routeNames(viewer.captureRouteRoot)).toContain("capture-route-path")
+  const first=viewer.captureRouteRoot.getObjectByName("capture-route-stop:0")
+  const second=viewer.captureRouteRoot.getObjectByName("capture-route-stop:1")
+  expect(first.position.toArray()).toEqual([1,0,1])
+  expect(second.position.toArray()).toEqual([2,0,1])
+  const colorOf=(group:THREE.Object3D)=>{
+   const line=group.getObjectByName(`capture-route-stop:${group.name.endsWith("0")?"0":"1"}:frustum`) as THREE.LineSegments
+   return (line.material as THREE.LineBasicMaterial).color.getHex()
+  }
+  expect(colorOf(first)).toBe(0x78aaff)
+  expect(colorOf(second)).toBe(0xffbb35)
+  // 机身/镜头/up 都在：不是圆点+两条线。
+  expect(second.getObjectByName("capture-route-stop:1:body")).toBeDefined()
+  expect(second.getObjectByName("capture-route-stop:1:image-plane")).toBeDefined()
+  expect(second.getObjectByName("capture-route-stop:1:up")).toBeDefined()
+ })
+ it("缺失站不画假相机，选中索引不串位；路径在缺口断开",()=>{
+  const viewer=routeHarness()
+  viewer.setCaptureRouteTrail([{key:"missing"},{key:"B",...pose(2)}],1)
+  expect(viewer.captureRouteRoot.getObjectByName("capture-route-stop:0")).toBeUndefined()
+  expect(viewer.captureRouteRoot.getObjectByName("capture-route-stop:1")).toBeDefined()
+  expect((viewer.captureRouteRoot.getObjectByName("capture-route-stop:1:up") as THREE.Line).material).toBeDefined()
+  expect(routeNames(viewer.captureRouteRoot).filter(name=>name==="capture-route-path")).toHaveLength(0)
+ })
+ it("清空隐藏并释放；不碰机器人已挂载机位 owner",()=>{
+  const viewer=routeHarness()
+  const rigGroup=new THREE.Group();rigGroup.name="mounted-camera";viewer.cameraRigRoot.add(rigGroup)
+  viewer.cameraRigs.set("robot/cam",{group:rigGroup})
+  viewer.setCaptureRouteTrail([{key:"A",...pose(1)},{key:"B",...pose(2)}],0)
+  expect(viewer.cameraRigRoot.children).toContain(rigGroup)
+  expect(viewer.cameraRigs.get("robot/cam")?.group).toBe(rigGroup)
+  viewer.setCaptureRouteTrail([],0)
+  expect(viewer.captureRouteRoot.visible).toBe(false)
+  expect(viewer.captureRouteRoot.children).toHaveLength(0)
+  expect(viewer.cameraRigRoot.children).toContain(rigGroup)
+ })
+
+ it("当前运动相机按同一真实画幅派生视锥；画幅变化会重建而不是沿用旧 K",()=>{
+  const viewer=routeHarness()
+  viewer.setCaptureRouteCurrentPose(pose(3))
+  const plane=()=>viewer.captureRouteCurrent.getObjectByName("capture-route-current:image-plane") as THREE.Mesh
+  expect(plane()).toBeDefined()
+  const first=(plane().geometry as THREE.PlaneGeometry).parameters
+  expect(first.width/first.height).toBeCloseTo(1920/1080,9)
+  // 模拟窗口 resize/真实输出改成 2.4:1：同一站点的 fov 不变，视锥必须按新画幅重建。
+  viewer.cameraView=()=>({intrinsics:{fx:1000,fy:1000,cx:959.5,cy:399.5,width:1920,height:800}})
+  viewer.setCaptureRouteCurrentPose(pose(3))
+  const second=(plane().geometry as THREE.PlaneGeometry).parameters
+  expect(second.width/second.height).toBeCloseTo(1920/800,9)
+ })
+ it("当前运动相机 helper 独立更新/隐藏；站点重建不清它",()=>{
+  const viewer=routeHarness()
+  viewer.setCaptureRouteCurrentPose(pose(3))
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(true)
+  expect(viewer.captureRouteCurrentRoot.children[0]!.position.toArray()).toEqual([3,0,1])
+  viewer.setCaptureRouteTrail([{key:"A",...pose(1)},{key:"B",...pose(2)}],0)
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(true)
+  viewer.setCaptureRouteCurrentPose(undefined)
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(false)
+  viewer.setCaptureRouteCurrentPose({position:[1,2,3],quaternion:[0,0,0,0],fovDeg:50})
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(false)
+ })
+ it("出图路径隐藏 helper 并在成功/异常后恢复",()=>{
+  const viewer=routeHarness()
+  const seen:boolean[][]=[]
+  viewer.renderer={render:()=>{},domElement:{toDataURL:()=>{seen.push([viewer.captureRouteRoot.visible,viewer.captureRouteCurrentRoot.visible]);return "data:image/png;base64,AAAA"}}}
+  viewer.setCaptureRouteTrail([{key:"A",...pose(1)},{key:"B",...pose(2)}],0)
+  viewer.setCaptureRouteCurrentPose(pose(3))
+  const shot=viewer.capture()
+  expect(shot.dataURL).toContain("data:image/png")
+  expect(seen).toEqual([[false,false]])
+  expect(viewer.captureRouteRoot.visible).toBe(true)
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(true)
+  // 错误路径：toDataURL 抛错后 finally 必须恢复。
+  viewer.renderer={render:()=>{},domElement:{toDataURL:()=>{throw new Error("PNG_FAILED")}}}
+  expect(()=>viewer.capture()).toThrow("PNG_FAILED")
+  expect(viewer.captureRouteRoot.visible).toBe(true)
+  expect(viewer.captureRouteCurrentRoot.visible).toBe(true)
+ })
+})
+
+describe("路线总览实际边界",()=>{
+ it("把远端站点相机与场景主体一起框入；无限地面不参与；缺站不造零位姿、不 pilot",()=>{
+  const viewer=routeHarness()
+  const subject=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial())
+  // 2000 m 地面盒按“超大几何”过滤；不是靠 PlaneGeometry 特判才通过。
+  const ground=new THREE.Mesh(new THREE.BoxGeometry(2000,2000,0.01),new THREE.MeshBasicMaterial())
+  ground.position.z=-0.002
+  const subjectGroup=new THREE.Group();subjectGroup.add(subject)
+  const groundGroup=new THREE.Group();groundGroup.add(ground)
+  viewer.objects=new Map([["subject",{group:subjectGroup}],["ground",{group:groundGroup}]])
+  viewer.snapshot={sceneId:"s",revision:1,entities:[{entityId:"subject",components:{}},{entityId:"ground",components:{}}]}
+  viewer.splatViewBounds=new WeakMap()
+  viewer.splatBounds=new WeakMap()
+  viewer.preview=undefined
+  const far={key:"far",position:[50,0,1],quaternion:[0,0,0,1],fovDeg:50}
+  const result=viewer.frameCaptureRoute([{key:"A",...pose(1)},{key:"B",...pose(2)},{key:"missing"},far])
+  expect(result.ok).toBe(true)
+  expect(result.available).toBe(3)
+  expect(result.bounds!.max[0]).toBeGreaterThan(50)
+  // 2000 m 地面不能把总览包围盒撑到 ±1000 m。
+  expect(Math.abs(result.bounds!.min[0])).toBeLessThan(60)
+  expect(Math.abs(result.bounds!.max[0])).toBeLessThan(60)
+  expect(viewer.cameraRigPilot).toBeUndefined()
+  expect(viewer.controls.enabled).not.toBe(false)
+ })
+ it("全部站点缺失位姿时明确不取景",()=>{
+  const viewer=routeHarness()
+  viewer.objects=new Map();viewer.snapshot={sceneId:"s",revision:1,entities:[]}
+  viewer.splatViewBounds=new WeakMap();viewer.splatBounds=new WeakMap();viewer.preview=undefined
+  const result=viewer.frameCaptureRoute([{key:"missing"}])
+  expect(result.ok).toBe(false)
+  expect(result.available).toBe(0)
+  expect(result.bounds).toBeUndefined()
+ })
+})
+
+describe("capture pass 的显示辅助范围",()=>{
+ it("挂在 robot body 下的视锥也必须逐个隐藏；gizmo/网格/坐标轴一并隐藏并在 finally 恢复",()=>{
+  const viewer=routeHarness()
+  const body=new THREE.Group(),rigGroup=new THREE.Group()
+  body.add(rigGroup)
+  viewer.cameraRigs.set("robot/cam",{group:rigGroup})
+  const transformHelper={visible:true}
+  viewer.transformControls={getHelper:()=>transformHelper}
+  viewer.grid={visible:true}
+  viewer.axes={visible:true}
+  const seen:any[]=[]
+  viewer.renderer={render:()=>{seen.push({rig:rigGroup.visible,helper:transformHelper.visible,grid:viewer.grid.visible,axes:viewer.axes.visible})},domElement:{toDataURL:()=>"data:image/png;base64,AAAA"}}
+  const shot=viewer.capture()
+  expect(shot.dataURL).toContain("data:image/png")
+  // 第一帧是 capture pass（全隐藏）；第二帧是还原后重绘屏幕（全恢复）。
+  expect(seen[0]).toEqual({rig:false,helper:false,grid:false,axes:false})
+  expect(seen[1]).toEqual({rig:true,helper:true,grid:true,axes:true})
+  expect(rigGroup.visible).toBe(true)
+  expect(transformHelper.visible).toBe(true)
+  expect(viewer.grid.visible).toBe(true)
+  expect(viewer.axes.visible).toBe(true)
+ })
+})
+
+describe("实体取景边界不把 authoring helper 当模型",()=>{
+ it("挂在真实 body 下的 100 m 相机视锥不进 describeScene/probeEntityPixel/focus/frameAll；真实 mesh 不被误删",()=>{
+  const viewer=routeHarness()
+  const body=new THREE.Group()
+  const model=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial())
+  model.name="panda_link"
+  body.add(model)
+  const robotGroup=new THREE.Group();robotGroup.add(body)
+  viewer.objects=new Map([["robot",{group:robotGroup,robot:{bodyNode:(name:string)=>name==="wrist"?body:undefined}}]])
+  viewer.snapshot={sceneId:"s",revision:1,entities:[{entityId:"robot",components:{articulation:{}}}]}
+  viewer.splatBounds=new WeakMap();viewer.splatViewBounds=new WeakMap();viewer.preview=undefined
+  viewer.renderer={domElement:{width:800,height:600,getBoundingClientRect:()=>({left:0,top:0,width:800,height:600})},info:{render:{triangles:0}}}
+  viewer.loadingErrors=new Map()
+  // 真实 Native 的形态：相机视锥 parent 到 robot body；helper 里是 100 m 视锥盒。
+  const rigGroup=new THREE.Group()
+  rigGroup.add(new THREE.Mesh(new THREE.BoxGeometry(100,100,100),new THREE.MeshBasicMaterial()))
+  markAuthoringHelper(rigGroup)
+  body.add(rigGroup)
+  const span=(bounds:{min:number[];max:number[]}|null)=>bounds?Math.max(...bounds.max.map((value,index)=>value-bounds.min[index]!)):0
+  // describeScene / probeEntityPixel 与 focus/frameAll 共用同一份实体几何：模型约 1 m，不是 100 m。
+  const described=viewer.describeScene() as {groups:Array<{bounds:{min:number[];max:number[]}|null}>}
+  expect(span(described.groups[0]!.bounds)).toBeCloseTo(1,6)
+  const probe=viewer.probeEntityPixel("robot")
+  expect(span(probe.bounds!)).toBeCloseTo(1,6)
+  viewer.focus("robot")
+  expect(viewer.lastFraming.distance).toBeLessThan(5)
+  viewer.frameAll()
+  expect(viewer.lastFraming.distance).toBeLessThan(5)
+  // 负对照：同一 100 m 网格如果是真实模型（未标记），仍必须被算入，不能靠“global >2 m 就删”。
+  const real=new THREE.Group()
+  real.add(new THREE.Mesh(new THREE.BoxGeometry(100,100,100),new THREE.MeshBasicMaterial()))
+  real.updateMatrixWorld(true)
+  expect(objectWorldBounds(real,new WeakMap(),false).getSize(new THREE.Vector3()).x).toBeCloseTo(100,6)
+ })
 })

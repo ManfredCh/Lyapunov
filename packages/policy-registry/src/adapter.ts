@@ -58,7 +58,11 @@ export interface PreparedAdapter {
   inferenceFormat?: 'torchscript' | 'onnx'; supportedEngines?: string[]; modelJointNames?: string[]; modelActuatorNames?: string[]; rootBody?: string
   /** adaptation_module 权重（WTW；与 observations.adaptationWeightsPath 同源，两处都保留以兼容既有读法） */
   adaptationWeightsPath?: string
-  modelSha256: string; sourceRevision: string; sourceModelId: string; sourceProvider: PolicySource
+  modelSha256: string
+  /** 准备时输入的本体原件字节哈希（与 modelPath 的派生件哈希分开）。安装/会话路径搬迁后，
+   *  旧路径可能已回收；这个字段让“同一登记原件的复制件”仍可按字节核对，而不是按绝对路径猜。 */
+  modelSourceSha256?: string
+  sourceRevision: string; sourceModelId: string; sourceProvider: PolicySource
   physicsPreserved: string[]; gravityCompensation: boolean
 }
 /** SmolVLA×LIBERO 的 VLA 适配契约：只描述 bench 链的动作/观测语义与派生权重，不进 Go1/WTW 的 execution.ts。 */
@@ -132,11 +136,14 @@ export function validateLiberoVlaAdapter(raw: unknown): LiberoVlaAdapter {
   if (bad.length) throw adapterContractError(bad)
   return a as unknown as LiberoVlaAdapter
 }
-/** 消费 PreparedAdapter stdout（prepare_go2/prepare_unitree/prepare_wtw 共用）：契约校验→身份戳→modelSha256。 */
+/** 消费 PreparedAdapter stdout（prepare_go2/prepare_unitree/prepare_wtw 共用）：契约校验→身份戳→modelSha256。
+ *  同时登记输入本体原件的字节哈希：派生件 modelPath 与原件 modelSourcePath 是两份不同字节，
+ *  搬迁后的等价比对需要后者；旧缓存没有该字段时消费者退回按现存路径逐一比对。 */
 export async function consumePreparedAdapter(stdout: string, source: AdapterIdentity): Promise<PreparedAdapter> {
   const adapter = validatePreparedAdapter(parseAdapterStdout(stdout))
   adapter.sourceRevision = source.resolvedRevision; adapter.sourceModelId = source.modelId; adapter.sourceProvider = source.provider
   adapter.modelSha256 = (await hashFile(adapter.modelPath)).sha256
+  try { adapter.modelSourceSha256 = (await hashFile(adapter.modelSourcePath)).sha256 } catch {}
   return adapter
 }
 /** 消费 SmolVLA×LIBERO stdout（prepare_libero_vla.py）：契约校验→身份戳→modelSha256（派生权重哈希）。 */

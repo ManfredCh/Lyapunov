@@ -90,7 +90,7 @@ beforeEach(async () => {
   await ctx.plugin(Tools)
   await ctx.plugin(Sessions)
   await ctx.plugin(Commands)
-  await ctx.plugin(scenePlugin, { dataRoot: join(base, 'data') })
+  await ctx.plugin(scenePlugin, { dataRoot: join(base, 'data'), productRoot: join(base, 'no-bundled-product') })
   // 载体是候选里的真 MuJoCoProvider；引擎进程由假 worker 顶替（scenario/marker 经 env 传入）。
   await ctx.plugin(simWithFakeMuJoCoWorker())
   await ctx.plugin(robotTools)
@@ -297,7 +297,7 @@ describe.skipIf(PYTHON === undefined)('MuJoCo sim_open 的取消接线（同一�
     process.env.FAKE_SCENARIO = scenario({ ready: 'ok', phases: true, openDelayByWorld: { 'world-b': 700 } })
     const mujoco = new Context()
     await mujoco.plugin(SystemPrompt); await mujoco.plugin(Tools); await mujoco.plugin(Sessions); await mujoco.plugin(Commands)
-    await mujoco.plugin(scenePlugin, { dataRoot: join(base, 'data-mujoco') })
+    await mujoco.plugin(scenePlugin, { dataRoot: join(base, 'data-mujoco'), productRoot: join(base, 'no-bundled-product') })
     await mujoco.plugin(simWithFakeMuJoCoWorker())
     await mujoco.plugin(robotTools)
     const mujocoAgent = { id: SessionId(MUJOCO_SESSION_ID), session: mujoco.sessions.create(SessionId(MUJOCO_SESSION_ID)) } as unknown as Agent

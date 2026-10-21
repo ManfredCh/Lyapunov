@@ -12,10 +12,11 @@ import { adoptableReceipt, adjustAppliedRefreshFailedMessage, cameraListSequence
 import {cameraMountBodies,sceneCameraCommit,sceneCameraDraftOf,sceneCamerasOfScene} from '../src/workbench-camera.ts'
 import type {Entity,SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
 import * as THREE from 'three'
-import {describeCameraView,projectionMatrixFromIntrinsics,cameraStateFromView} from '../../viewer/src/camera-view.ts'
+import {describeCameraView,projectionMatrixFromIntrinsics,cameraStateFromView,fovXFromIntrinsics,fovYFromIntrinsics,scaleIntrinsics} from '../../viewer/src/camera-view.ts'
 import {cameraDraftFromRigEdit,cameraDraftFromSample,type CameraAuthoringSnapshot} from '../src/camera-authoring.ts'
 import {sceneCameraDraftAtBody} from '../src/workbench-camera.ts'
 import {cameraDraftOfScene,cameraInstallationCommit,restoredCameraDraft} from '../src/camera-installation.ts'
+import {recordingSourceOptions} from '../src/recording-source.ts'
 import {projectSceneCameraRigs} from '../../viewer/src/scene-camera-rigs.ts'
 import {nativeCameraPreset,readRobotPresets,robotPresetProjection} from '../../robot-tools/src/presets.ts'
 import {SceneStore} from '../../scene-kit/src/store.ts'
@@ -95,19 +96,73 @@ describe('A08 保存当前画面与同一已显示Frame安装',()=>{
   camera.projectionMatrix.fromArray(projectionMatrixFromIntrinsics({fx:830,fy:720,cx:405.25,cy:291.5,width:800,height:600},camera.near,camera.far))
   return {sceneId:scene.sceneId,sceneRevision:3,worldId:'world',generation:4,frameId:'world:4:15',stepIndex:15,view:cameraStateFromView(camera,{width:800,height:600},[0,0,0]),camera:describeCameraView(camera,{width:800,height:600}),bodies:[{entityId:'arm',bodyName:'wrist',worldFromBody:{positionM:[1,2,3],quaternionXyzw:[0,0,0,1]},frameId:'world:4:15',stepIndex:15}]}
  }
- test('无world保存世界画面，真实pose/偏心非方形像素K/裁剪和重开都保留',()=>{
+ /** 自由观察相机：真实 three 相机 + 画布尺寸，状态里没有镜头声明（`view.intrinsics` 不存在）。 */
+ const plainSample=(width:number,height:number):CameraAuthoringSnapshot=>{
+  const camera=new THREE.PerspectiveCamera(50,width/height,.03,4321);camera.position.set(5,6,7);camera.quaternion.setFromEuler(new THREE.Euler(.2,.3,.4))
+  return {sceneId:scene.sceneId,sceneRevision:3,view:cameraStateFromView(camera,{width,height},[0,0,0]),camera:describeCameraView(camera,{width,height})}
+ }
+ /** 相机自己声明了偏心/非方形像素 K：状态里带 `intrinsics`，画布尺寸只影响显示缩放。 */
+ const declaredSample=(width:number,height:number):CameraAuthoringSnapshot=>{
+  const declared={fx:830,fy:720,cx:405.25,cy:291.5,width:800,height:600},scaled=scaleIntrinsics(declared,width,height)
+  const camera=new THREE.PerspectiveCamera(50,width/height,.03,4321);camera.position.set(5,6,7);camera.quaternion.setFromEuler(new THREE.Euler(.2,.3,.4))
+  camera.projectionMatrix.fromArray(projectionMatrixFromIntrinsics(scaled,camera.near,camera.far))
+  return {sceneId:scene.sceneId,sceneRevision:3,view:cameraStateFromView(camera,{width,height},[0,0,0]),camera:describeCameraView(camera,{width,height})}
+ }
+ test('无world保存世界画面，真实pose/偏心非方形像素K/裁剪和重开都保留，分辨率取Scene默认值',()=>{
   const shot=sample(),draft=cameraDraftFromSample(scene,shot),commit=sceneCameraCommit(scene,draft,[],'saved')
   const patch=commit.patch[0]!;if(patch.op!=='add')throw Error('未新增')
   const reopened=sceneCamerasOfScene(JSON.parse(JSON.stringify([patch.entity])))[0]!
   expect(patch.entity.transform.position).toEqual([5,6,7]);expect(patch.entity.transform.quaternion).toEqual(shot.camera.quaternion)
   expect(reopened.component.mount).toBeUndefined();expect(reopened.component.near).toBe(.03);expect(reopened.component.far).toBe(4321)
-  for(const key of ['fx','fy','cx','cy','width','height']as const)expect(reopened.component.intrinsics![key]).toBeCloseTo(shot.camera.intrinsics[key],10)
+  // 声明镜头按 Scene 默认分辨率 640×480 采用：FOV 与主点占比保留，但不把画布 800×600 当物理分辨率。
+  const expected=scaleIntrinsics(shot.camera.intrinsics,640,480)
+  expect([reopened.component.width,reopened.component.height]).toEqual([640,480])
+  for(const key of ['fx','fy','cx','cy','width','height']as const)expect(reopened.component.intrinsics![key]).toBeCloseTo(expected[key],10)
+  expect(fovXFromIntrinsics(reopened.component.intrinsics!)).toBeCloseTo(fovXFromIntrinsics(shot.camera.intrinsics),10)
+  expect(fovYFromIntrinsics(reopened.component.intrinsics!)).toBeCloseTo(fovYFromIntrinsics(shot.camera.intrinsics),10)
   expect(sceneCameraDraftOf(reopened.entity).intrinsics).toEqual(reopened.component.intrinsics)
+ })
+ test('新相机分辨率不随画布视口变化：无声明K时恒为Scene默认640×480，声明K也只缩放不继承视口',()=>{
+  const sizes=[[676,890],[1440,960],[800,600]] as const
+  const plain=sizes.map(([width,height])=>cameraDraftFromSample(scene,plainSample(width,height)))
+  for(const draft of plain){
+   expect([draft.width,draft.height]).toEqual(['640','480'])
+   expect([draft.intrinsics?.width,draft.intrinsics?.height]).toEqual([640,480])
+   expect(Number(draft.fovYDeg)).toBeCloseTo(50,10)
+  }
+  // 三种视口得到同一份 K：FOV/主点都只由视角决定，与视口像素无关（只留浮点末位差）。
+  for(const other of [plain[1]!,plain[2]!])for(const key of ['fx','fy','cx','cy','width','height']as const)expect(plain[0]!.intrinsics![key]).toBeCloseTo(other.intrinsics![key],10)
+  // 保存后 Scene 声明同样是 640×480（不是 676×890），录制/预览因此读取到的是相机分辨率。
+  const patch=sceneCameraCommit(scene,plain[0]!,[],'sized').patch[0]!;if(patch.op!=='add')throw Error('未新增')
+  const component=sceneCamerasOfScene([patch.entity])[0]!.component
+  expect([component.width,component.height]).toEqual([640,480])
+  for(const key of ['fx','fy','cx','cy','width','height']as const)expect(component.intrinsics![key]).toBeCloseTo(plain[0]!.intrinsics![key],10)
+  // 相机确实声明了 K（状态里带非普通镜头）时采用它的镜头形状，但仍不把视口像素当分辨率。
+  const base={fx:830,fy:720,cx:405.25,cy:291.5,width:800,height:600},expectedLens=scaleIntrinsics(base,640,480)
+  const declared=sizes.map(([width,height])=>cameraDraftFromSample(scene,declaredSample(width,height)))
+  for(const draft of declared){
+   expect([draft.width,draft.height]).toEqual(['640','480'])
+   expect([draft.intrinsics?.width,draft.intrinsics?.height]).toEqual([640,480])
+   expect(fovXFromIntrinsics(draft.intrinsics!)).toBeCloseTo(fovXFromIntrinsics(expectedLens),8)
+   expect(fovYFromIntrinsics(draft.intrinsics!)).toBeCloseTo(fovYFromIntrinsics(expectedLens),8)
+  }
+ })
+ test('新建相机写入Scene后，固定机位录制来源是640×480，不读取采样视口',()=>{
+  const shot=plainSample(676,890),patch=sceneCameraCommit(scene,cameraDraftFromSample(scene,shot),[],'camera').patch[0]!
+  if(patch.op!=='add')throw Error('未新增')
+  const camera={...(patch.entity.components.camera as SceneCameraComponent),mount:{entityId:'arm',bodyName:'wrist',positionM:[0,0,0] as [number,number,number],quaternionXyzw:[0,0,0,1] as [number,number,number,number]}}
+  const withCamera={...scene,entities:[...scene.entities,{...patch.entity,components:{...patch.entity.components,camera}}]}
+  // 引擎回执可能仍带旧参考/视口 K；Recording 来源必须优先 Scene 的 640×480 声明。
+  const row={cameraName:'camera/当前画面相机',resolvedCameraName:'camera/当前画面相机',entityId:'camera',parentEntityId:'arm',parentBodyName:'wrist',cameraSource:'scene-camera',available:true,width:676,height:890,intrinsics:shot.camera.intrinsics}
+  const option=recordingSourceOptions(withCamera,{cameras:[row]}).find(option=>option.cameraName==='camera/当前画面相机')!
+  expect([option.width,option.height]).toEqual([640,480])
  })
  test('当前画面挂wrist保存瞬间不吸原点，原负例world5/6/7对应local4/4/4',()=>{
   const shot=sample(),draft=cameraDraftFromSample(scene,shot,{world,mount:{entityId:'arm',bodyName:'wrist'}})
   expect(draft.position).toBe('4 4 4');expect(draft.quaternion).toBe(shot.camera.quaternion.join(' '))
   expect(sceneCameraDraftAtBody(robot,shot.bodies!,'wrist',shot.view).position).toBe('4 4 4')
+  // 同一安装路径也不把当前画布 800×600 当相机分辨率。
+  expect([sceneCameraDraftAtBody(robot,shot.bodies!,'wrist',shot.view).width,sceneCameraDraftAtBody(robot,shot.bodies!,'wrist',shot.view).height]).toEqual(['640','480'])
   expect(()=>sceneCameraDraftAtBody(robot,shot.bodies!,'wrist')).toThrow('真实位姿')
  })
  test('Frame或Scope不一致拒绝，不与最新轮询body拼出虚假同帧安装',()=>{
@@ -127,7 +182,9 @@ describe('A08 保存当前画面与同一已显示Frame安装',()=>{
    const restored=await store.commit(cameraInstallationCommit(reopened,restoredCameraDraft(edited),[],'saved','scene-baseline'))
    const camera=restored.entities.find(entity=>entity.entityId==='saved')!
    expect(camera.transform.position).toEqual(shot.camera.position);expect(camera.transform.quaternion).toEqual(shot.camera.quaternion)
-   for(const key of ['fx','fy','cx','cy','width','height']as const)expect((camera.components.camera as SceneCameraComponent).intrinsics![key]).toBeCloseTo(shot.camera.intrinsics[key],10)
+   const restoredLens=scaleIntrinsics(shot.camera.intrinsics,640,480)
+   for(const key of ['fx','fy','cx','cy','width','height']as const)expect((camera.components.camera as SceneCameraComponent).intrinsics![key]).toBeCloseTo(restoredLens[key],10)
+   expect([(camera.components.camera as SceneCameraComponent).width,(camera.components.camera as SceneCameraComponent).height]).toEqual([640,480])
    expect((camera.components.camera as SceneCameraComponent).near).toBe(.03);expect((camera.components.camera as SceneCameraComponent).far).toBe(4321)
    await expect(store.commit(cameraInstallationCommit(reopened,restoredCameraDraft(edited),[],'saved','scene-baseline'))).rejects.toThrow('请求基于')
    expect(await store.snapshot(scene.sceneId)).toEqual(restored)
@@ -158,7 +215,7 @@ describe('A08 保存当前画面与同一已显示Frame安装',()=>{
  })
  test('SSR世界相机保存入口无World可用，并显示当前画面自动采样；不是GUI验收',()=>{
   const markup=renderToStaticMarkup(createElement(SceneCameraPanel,{api:{clientId:'window'}as any,scene,readOnly:false,tr:(zh:string)=>zh,perform:()=>{},commit:async()=>scene,sampleCurrent:sample,saveInstallation:async()=>({snapshot:scene,entityId:'saved'}),pilot:()=>{},returnView:()=>{},selectCamera:()=>{},prepareWorld:async()=>undefined,sceneSpecs:[],refresh:async()=>undefined}))
-  expect(markup).toContain('保存时自动采当前完整画面');expect(markup).toContain('>保存固定相机</button>');expect(markup).not.toContain('disabled="">保存固定相机')
+  expect(markup).toContain('保存时自动采当前完整画面');expect(markup).toContain('>保存相机</button>');expect(markup).not.toContain('disabled="">保存相机')
  })
  test('组件effect/事件夹具：选机器人、打开/新建/保存世界相机均不prepare；明确挂载才prepare',()=>{
   // 隔离进程替换hooks，执行真实组件的effect与事件；无DOM/Kit，不能签原生冷启动或像素。
@@ -185,7 +242,7 @@ describe('A08 保存当前画面与同一已显示Frame安装',()=>{
    const button=label=>{const target=nodes(tree).find(node=>node.type==='button'&&text(node)===label);if(!target||target.props.disabled)throw Error('按钮不可用:'+label);return target};
    await render();const opened=prepareCalls;
    button('从当前视角新建世界相机').props.onClick();await render();const worldNew=prepareCalls;
-   button('保存固定相机').props.onClick();await Promise.all(tasks.splice(0));await render();const worldSave=prepareCalls;
+   button('保存相机').props.onClick();await Promise.all(tasks.splice(0));await render();const worldSave=prepareCalls;
    button('把当前画面挂到所选机器人').props.onClick();await Promise.all(tasks.splice(0));await render();
    console.log(JSON.stringify({opened,worldNew,worldSave,explicitMount:prepareCalls,mode:saveCalls[0]?.mode,hasMount:Boolean(saveCalls[0]?.mount),hasPrepareButton:nodes(tree).some(node=>node.type==='button'&&text(node)==='读取真实连杆（需物理）')}));
   `

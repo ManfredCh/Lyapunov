@@ -5,7 +5,10 @@
  * 供应商与中央服务都是本地确定性应答：**不发真实请求、不产生任何费用**。
  * 身份判据与 `packages/generate-image/src/operations.ts` 同口径（本地记录输入指纹 + 服务端请求体指纹）。
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
+
+// CI 沙箱（bwrap）里模块冷启动/文件系统比本机慢：默认 5s 单测上限会把正常用例判成超时。
+setDefaultTimeout(30_000)
 import { createHash } from "node:crypto"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -14,7 +17,9 @@ import { runGeneration } from "../src/operations.ts"
 import { preflightGeneration } from "../src/provider.ts"
 
 const API = "https://api.test"
-const OLD_MESH = "https://cdn.example.test/old.glb"
+// 公网 IP 字面量：转存守卫 assertPublicHttpsURL 对 IP 直接放行、不做 DNS lookup；
+// 域名形式在离线 CI 沙箱（无网络命名空间）里要等 ~23s 解析超时，会让本文件撞 120s 全局上限。
+const OLD_MESH = "https://203.0.113.10/old.glb"
 const OLD_REQUEST_ID = "tripo-identity-1"
 const OLD_INPUT = { input: { mode: "text-to-3d" as const, prompt: "上一次那次请求的提示词" } }
 const NEW_INPUT = { input: { mode: "text-to-3d" as const, prompt: "完全不同的新提示词" } }

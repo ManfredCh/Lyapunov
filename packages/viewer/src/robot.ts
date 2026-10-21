@@ -9,22 +9,93 @@ import { assetFormatOf, composeAssetReference, describeAssetReference, documentR
 
 const list = <T>(value?: T | T[]): T[] => value === undefined ? [] : Array.isArray(value) ? value : [value]
 const nums = (value: unknown, defaults: number[]) => typeof value === "string" ? value.trim().split(/\s+/).map(Number) : defaults
+/** 展示层炸开的位移尺度：整机包围盒对角线的这个比例 × spread。纯显示，不写任何原生矩阵。 */
+const EXPLODE_RADIUS_FACTOR = 0.35
 /** 重复的顶层段（解析器给成数组时）按出现顺序逐段取值；G1 原件就是两段 `<asset>`、两段 `<worldbody>`。 */
 const sectionItems = (sections: any, key: string): any[] => list<any>(sections).flatMap(section => list<any>(section?.[key]))
 /** 段属性合并成一份（后出现的段覆盖先出现的），供 `compiler.angle`／`meshdir` 这类读取。 */
 const sectionAttributes = (sections: any): Record<string, any> => Object.assign({}, ...list<any>(sections))
+/**
+ * STL 的存储法线不可全信。MuJoCo 装载 STL 时**忽略文件里的 facet normal**、按三角形环绕
+ * 方向自算顶点法线；`STLLoader` 却把存储法线逐字拷进 `normal` 属性。真件 unitree_go1 的
+ * hip/thigh/thigh_mirror/calf 四个 STL 存储法线**整批是零向量**（Unitree 导出件的已知形态），
+ * 直接采用 ⇒ 腿在 PBR 下没有光照方向可算、渲染成纯黑（trunk.stl 法线正常 ⇒ 出现
+ * "机身亮、四腿全黑"）。这里按 MuJoCo 同一条口径修复：**多数**面的存储法线对不上环绕
+ * 方向（零向量或反向）时按环绕方向重算（非索引几何的 `computeVertexNormals` 逐面取
+ * 环绕法线，索引几何同样以 index 序为准）；一致或仅个别面异常的件原样不动。
+ * 法线缺失时同样重算（否则 PBR 无光照方向可算）。
+ */
+function repairStlNormals(geometry: THREE.BufferGeometry): void {
+  const position = geometry.getAttribute("position")
+  if (!position || position.count < 3) return
+  const normal = geometry.getAttribute("normal")
+  if (!normal) { geometry.computeVertexNormals(); return }
+  const index = geometry.getIndex()
+  const count = index ? index.count : position.count
+  const vertexOf = (i: number): number => index ? index.getX(i) : i
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const winding = new THREE.Vector3(), edge = new THREE.Vector3(), stored = new THREE.Vector3()
+  let bad = 0, checked = 0
+  for (let i = 0; i + 2 < count; i += 3) {
+    const i0 = vertexOf(i), i1 = vertexOf(i + 1), i2 = vertexOf(i + 2)
+    a.fromBufferAttribute(position, i0); b.fromBufferAttribute(position, i1); c.fromBufferAttribute(position, i2)
+    winding.copy(b).sub(a); edge.copy(c).sub(a); winding.cross(edge)
+    if (winding.lengthSq() < 1e-24) continue   // 退化面（顶点共线）不计票
+    checked++
+    stored.fromBufferAttribute(normal, i0)
+    if (winding.dot(stored) <= 0) bad++        // 零向量或背向：都对不上环绕方向
+  }
+  if (bad > checked / 2) geometry.computeVertexNormals()
+}
 interface Joint { node: THREE.Object3D; base: THREE.Matrix4; axis: THREE.Vector3; kind: string; origin: THREE.Vector3 }
+/**
+ * 一个**真实部件**（R-011 部件级选择的最小身份）。
+ *
+ * 身份不靠显示名：`partId` 由"类型 + 文档里的下标路径"构成（`body:0.2.1` / `link:3`），
+ * 同一份文档里两个同名 body/link 也各有各的 id；`name`/`path` 只用于展示。
+ *
+ * **展示层与原生层分离**：`node` 是原生 body/link 节点（FK/相机挂载/TCP/碰撞全部读它，炸开不改它）；
+ * `presentation` 是它的可视几何所在的子组，炸开偏移只写 `presentation.position`，因此原生矩阵
+ * 一个数都不动。世界位姿由原生 `node` 决定，展开姿态不会被下一帧 FK 覆盖，也不会回灌给 sim。
+ */
+export interface RobotPart {
+  partId: string
+  name: string
+  kind: "body" | "link"
+  /** 从机器人根到该部件的原生名字路径（仅展示用，不参与身份）。 */
+  path: string[]
+  /** 这个部件有自己的可视几何（可被炸开展示）；纯变换节点为 false。 */
+  hasVisual: boolean
+  /** `hierarchy` = 真实 body/link 关节层级；`single` = 单网格容器（不虚构可拆面）。 */
+  granularity: "hierarchy" | "single"
+  /** 原生节点（FK 真相所在）。 */
+  node: THREE.Object3D
+  /** 展示层节点：可视几何挂在这里，炸开偏移只写它。 */
+  presentation: THREE.Object3D
+}
 export interface RobotVisual {
   root: THREE.Group
   rootFrameInverse: THREE.Matrix4
   setJoints(names: string[], positions: number[]): void
   setBodyWorldPoses(poses: unknown, documentWorldMatrix?: THREE.Matrix4): void
-  /** body 名 → 场景图节点（相机视锥 S2 结构化挂载用：挂到它下面即随 FK 走，不逐帧重算）。 */
+  /** body 名 → 场景图节点（相机视锥 S2 结构化挂载用：挂到它下面即随 FK 走，不逐帧重算）。MJCF body 与 URDF link 同名共用。 */
   bodyNode(bodyName: string): THREE.Object3D | undefined
   projectedDocumentMatrix(): THREE.Matrix4 | undefined
   resetPose(): void
   setCollisionVisible(visible: boolean): void
   warnings: string[]
+  /** 真实部件目录（MJCF body / URDF link），身份稳定、与显示名无关。 */
+  parts: RobotPart[]
+  /**
+   * 只读展示层炸开：`spread` 0→1。每次调用先**把全部展示偏移归零**、按当前装配位姿重算基准，
+   * 再从头写入新偏移，因此天然可逆、不会逐帧累加。原生 `node` 矩阵（FK/相机/碰撞）一个数都不改。
+   * `spread=0` 等价于 `restore`（全部归零）。
+   */
+  setExplodeSpread(spread: number): void
+  /** 当前展示层展开比例（0 = 合拢）。 */
+  explodeSpread(): number
+  /** 当前实际写入的展示偏移（partId → 该部件展示组的局部平移），供观察元数据/验收读取。 */
+  explodeOffsets(): ReadonlyMap<string, [number, number, number]>
 }
 
 /**
@@ -47,7 +118,7 @@ export interface RobotVisualOptions {
 export async function buildRobotVisual(input: any, resolveURI: (uri: string) => Promise<string> | string, options: RobotVisualOptions = {}): Promise<RobotVisual> {
   const root = new THREE.Group()
   const joints = new Map<string, Joint>()
-  const bodies = new Map<string, { node: THREE.Object3D; base: THREE.Matrix4 }>()
+  const bodies = new Map<string, { node: THREE.Object3D; base: THREE.Matrix4; stages?: THREE.Object3D[] }>()
   const hiddenCollisionGeoms: THREE.Object3D[] = []
   let projectingBodies = false
   const warnings: string[] = []
@@ -55,6 +126,54 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
   let frameAnchor: THREE.Object3D | undefined
   /** 实际建出的可视节点数（MJCF 的 geom 容器、URDF 的 visual 容器）。0 就是"没有内容可显示"。 */
   let visualNodes = 0
+  /** 真实部件目录（原生节点 + 展示层组）。 */
+  const parts: RobotPart[] = []
+  let explodeSpreadValue = 0
+  const presentationOffsets = new Map<string, [number, number, number]>()
+  /**
+   * 展示层炸开：先把全部展示组归零、刷新世界矩阵取**装配基准**，再按"部件中心相对机器人中心"
+   * 的确定方向写入平移。方向与半径都来自这一次的原生矩阵（不是上一帧的展示结果），所以反复
+   * 0→中间→最大→0 不会累计漂移；`spread=0` 就是完全合拢。
+   */
+  function setExplodeSpread(spread: number): void {
+    const value = Number.isFinite(spread) ? Math.max(0, Math.min(1, spread)) : 0
+    for (const part of parts) part.presentation.position.set(0, 0, 0)
+    presentationOffsets.clear()
+    root.updateWorldMatrix(true, true)
+    if (value <= 0) { explodeSpreadValue = 0; return }
+    // 基准只用**部件自己的可视几何**（不含 worldbody 的静态地面/墙）：用整棵 root 会让一块 20 m
+    // 的参考地板把机器人包围盒撑大，展开位移量级失控。每个部件中心也只取自己的展示组（不含子树）。
+    const partBoxes = new Map<string, THREE.Box3>()
+    const robotBox = new THREE.Box3()
+    for (const part of parts) {
+      if (!part.hasVisual) continue
+      part.presentation.updateWorldMatrix(true, false)
+      const partBox = new THREE.Box3().setFromObject(part.presentation)
+      if (partBox.isEmpty()) continue
+      partBoxes.set(part.partId, partBox)
+      robotBox.union(partBox)
+    }
+    if (robotBox.isEmpty()) { explodeSpreadValue = value; return }
+    const center = robotBox.getCenter(new THREE.Vector3())
+    const radius = Math.max(robotBox.getSize(new THREE.Vector3()).length() * 0.5, 1e-6)
+    const distance = radius * EXPLODE_RADIUS_FACTOR * value
+    for (const part of parts) {
+      const partBox = partBoxes.get(part.partId)
+      if (!partBox) continue
+      const direction = partBox.getCenter(new THREE.Vector3()).sub(center)
+      if (direction.lengthSq() < 1e-12) continue
+      direction.normalize().multiplyScalar(distance)
+      const parent = part.presentation.parent
+      if (!parent) continue
+      parent.updateWorldMatrix(true, false)
+      const basis = new THREE.Matrix4().copy(parent.matrixWorld)
+      basis.setPosition(0, 0, 0)
+      part.presentation.position.copy(direction.applyMatrix4(basis.invert()))
+      presentationOffsets.set(part.partId, part.presentation.position.toArray() as [number, number, number])
+    }
+    explodeSpreadValue = value
+    root.updateWorldMatrix(true, true)
+  }
   // 贴图与基色是**相乘**关系（MuJoCo 的 "texture color is combined with the object color in
   // GL_MODULATE mode"），所以基色仍按材质/geom 的 rgba 走，贴图只负责纹理细节。
   const material = (rgba?: string, map?: THREE.Texture | null) => {
@@ -140,7 +259,11 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
     const { locator, based } = documentReferenceLocator(file, input.baseUri)
     if (!based && !hasLocatorScheme(file)) noteUnresolved(file)
     const url = await resolveURI(locator)
-    if (format === "stl") return new THREE.Mesh(await new STLLoader().loadAsync(url), material())
+    if (format === "stl") {
+      const geometry = await new STLLoader().loadAsync(url)
+      repairStlNormals(geometry)
+      return new THREE.Mesh(geometry, material())
+    }
     if (format === "obj") return new OBJLoader().loadAsync(url)
     if (format === "dae") return (await new ColladaLoader().loadAsync(url)).scene
     // GLB：`robotDependencies` 已把 `.glb` 收进依赖闭包（媒体路由候选集里因此有它），
@@ -373,12 +496,19 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
         }))
       }
     }
-    function body(item: any, parent: THREE.Object3D, childClass?: string): void {
+    function body(item: any, parent: THREE.Object3D, childClass?: string, parentPath: string[] = [], indexPrefix: number[] = [], childIndex = 0): void {
       const node = new THREE.Group()
       node.name = item.name ?? "body"
       pose(node, item, degrees)
       node.updateMatrix()
-      if (item.name) bodies.set(item.name, { node, base: node.matrix.clone() })
+      /**
+       * 本 body 自己的关节层级。`setBodyWorldPoses` 收到的目标是 MuJoCo 的 **body 世界位姿**，
+       * 它已经把该 body 自己的关节运动算进去了；而可视 geom 挂在关节 stage 之下。投影身体位姿时
+       * 必须把 stage 归零，否则同一段关节运动会再作用一次到可视几何上（body 节点本身是对的，
+       * 只有展示层被多转了一次 ⇒ 肘/腕/夹爪出现缝隙）。把 stage 登记在这里，投影时精确归零。
+       */
+      const stages: THREE.Object3D[] = []
+      if (item.name) bodies.set(item.name, { node, base: node.matrix.clone(), stages })
       parent.add(node)
       if (input.rootBody ? item.name === input.rootBody : parent === root && !frameAnchor) frameAnchor = node
       let movable: THREE.Object3D = node
@@ -388,20 +518,40 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
         const stage = new THREE.Group()
         movable.add(stage)
         stage.updateMatrix()
+        stages.push(stage)
         joints.set(spec.name, { node: stage, base: stage.matrix.clone(), axis: new THREE.Vector3(...nums(spec.axis, [0, 0, 1]) as [number, number, number]).normalize(), kind: spec.type ?? "hinge", origin: new THREE.Vector3(...nums(spec.pos, [0, 0, 0]) as [number, number, number]) })
         movable = stage
       }
-      for (const geom of list<any>(item.geom)) geomNode(geom, movable, item.childclass ?? childClass)
-      for (const child of list<any>(item.body)) body(child, movable, item.childclass ?? childClass)
+      // 展示层：本 body 自己的可见 geom 挂在这个子组下；子 body 仍挂原生 movable（FK 链不变）。
+      const presentation = new THREE.Group()
+      presentation.name = `presentation:${node.name}`
+      movable.add(presentation)
+      const partId = `body:${[...indexPrefix, childIndex].join(".")}`
+      if (item.name) { node.userData.partId = partId; presentation.userData.partId = partId }
+      parts.push({ partId, name: item.name ?? "body", kind: "body", path: [...parentPath, item.name ?? "body"], hasVisual: list<any>(item.geom).length > 0, granularity: "hierarchy", node, presentation })
+      for (const geom of list<any>(item.geom)) geomNode(geom, presentation, item.childclass ?? childClass)
+      list<any>(item.body).forEach((child, index) => body(child, movable, item.childclass ?? childClass, [...parentPath, item.name ?? "body"], [...indexPrefix, childIndex], index))
     }
     for (const geom of sectionItems(doc.worldbody, "geom")) geomNode(geom, root)
-    for (const item of sectionItems(doc.worldbody, "body")) body(item, root)
+    sectionItems(doc.worldbody, "body").forEach((item, index) => body(item, root, undefined, [], [], index))
   } else if (input.format === "urdf") {
     const links = new Map<string, THREE.Group>()
-    for (const link of list<any>(input.document.link)) {
+    /** link 名 → 源文档下标：partId 的**稳定身份**，不随呈现次序或根/子声明顺序改变。 */
+    const linkOrder = new Map<string, number>()
+    /** link 名 → 自己的展示组（炸开偏移只写它；原生 link 矩阵不动）。 */
+    const presentations = new Map<string, THREE.Group>()
+    const hasVisual = new Map<string, boolean>()
+    list<any>(input.document.link).forEach((link, linkIndex) => {
       const node = new THREE.Group(); node.name = link.name; links.set(link.name, node)
+      linkOrder.set(link.name, linkIndex)
+      // URDF 的 link 就是真实部件：登记进 bodies（与 MJCF body 同一张表），这样 `bodyNode()`
+      // 对 URDF 也能给出真实节点（相机挂载/动态几何/部件选择共用这一条查询），resetPose 一并覆盖。
+      bodies.set(link.name, { node, base: node.matrix.clone() })
+      const presentation = new THREE.Group(); presentation.name = `presentation:${link.name}`; node.add(presentation)
+      presentations.set(link.name, presentation)
+      hasVisual.set(link.name, list<any>(link.visual).length > 0)
       for (const visual of list<any>(link.visual)) {
-        const container = new THREE.Group(); pose(container, visual.origin ?? {}); node.add(container)
+        const container = new THREE.Group(); pose(container, visual.origin ?? {}); presentation.add(container)
         visualNodes++
         const geom = visual.geometry
         if (geom?.mesh) tasks.push(loadMesh(geom.mesh.filename).then(mesh => { mesh.scale.fromArray(nums(geom.mesh.scale, [1, 1, 1])); container.add(mesh) }).catch(error => { warnings.push(String(error)) }))
@@ -409,13 +559,34 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
         else if (geom?.cylinder) container.add(primitive({ type: "cylinder", size: `${geom.cylinder.radius} ${Number(geom.cylinder.length) / 2}` }))
         else if (geom?.sphere) container.add(primitive({ type: "sphere", size: geom.sphere.radius }))
       }
-    }
+    })
+    /** 真实关节声明的父子关系：parent link → child link（按关节声明顺序）。 */
+    const childLinks = new Map<string, string[]>()
+    const childNames = new Set<string>()
     for (const item of list<any>(input.document.joint)) {
       const parent = links.get(item.parent?.link), child = links.get(item.child?.link)
       if (!parent || !child) { warnings.push(`URDF_LINK_MISSING: ${item.name}`); continue }
       const node = new THREE.Group(); pose(node, item.origin ?? {}); node.updateMatrix(); parent.add(node); node.add(child)
       if (["revolute", "continuous", "prismatic"].includes(item.type)) joints.set(item.name, { node, base: node.matrix.clone(), axis: new THREE.Vector3(...nums(item.axis?.xyz, [1, 0, 0]) as [number, number, number]).normalize(), kind: item.type === "prismatic" ? "slide" : "hinge", origin: new THREE.Vector3() })
+      childNames.add(item.child!.link)
+      const siblings = childLinks.get(item.parent!.link) ?? []
+      siblings.push(item.child!.link)
+      childLinks.set(item.parent!.link, siblings)
     }
+    // 父先子后呈现：从真实根 link 沿关节树 DFS，`path` 反映实际关节层级；`partId` 仍绑定源文档下标
+    // （`link:<源下标>`）。因此 child 在 root 之前声明时，呈现次序会按父子重排，身份一个都不变。
+    const visited = new Set<string>()
+    const appendLink = (name: string, path: string[]): void => {
+      if (visited.has(name)) return
+      visited.add(name)
+      const node = links.get(name), presentation = presentations.get(name)
+      if (!node || !presentation) return
+      parts.push({ partId: `link:${linkOrder.get(name)}`, name, kind: "link", path: [...path, name], hasVisual: hasVisual.get(name) === true, granularity: "hierarchy", node, presentation })
+      for (const child of childLinks.get(name) ?? []) appendLink(child, [...path, name])
+    }
+    for (const link of list<any>(input.document.link)) if (!childNames.has(link.name)) appendLink(link.name, [])
+    // 环/重复父级在合法 URDF 里不存在；真遇到时也把未呈现的 link 如实列出，不静默丢节点。
+    for (const link of list<any>(input.document.link)) if (!visited.has(link.name)) appendLink(link.name, [])
     for (const node of links.values()) if (!node.parent) root.add(node)
   } else throw new Error("UNSUPPORTED_ROBOT_VISUAL_FORMAT")
   await Promise.all(tasks)
@@ -427,7 +598,7 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
   root.updateWorldMatrix(true, true)
   const rootBase = root.matrix.clone()
   const rootFrameInverse = frameAnchor ? frameAnchor.matrixWorld.clone().invert() : new THREE.Matrix4()
-  return { root, rootFrameInverse, warnings,
+  return { root, rootFrameInverse, warnings, parts,
     projectedDocumentMatrix() {
       if (!projectingBodies || root.matrixAutoUpdate) return undefined
       root.updateWorldMatrix(true, false)
@@ -436,6 +607,8 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
     setCollisionVisible(visible) { for (const node of hiddenCollisionGeoms) node.visible = visible },
     resetPose() {
       projectingBodies = false
+      // 回到装配姿态时展示层一并合拢：不留"位姿复位了但几何还散着"的中间态。
+      setExplodeSpread(0)
       for (const { node, base } of [{ node: root, base: rootBase }, ...bodies.values(), ...joints.values()]) {
         node.matrix.copy(base)
         base.decompose(node.position, node.quaternion, node.scale)
@@ -443,6 +616,9 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
         node.matrixWorldNeedsUpdate = true
       }
     },
+    setExplodeSpread,
+    explodeSpread: () => explodeSpreadValue,
+    explodeOffsets: () => new Map(presentationOffsets),
     bodyNode: (bodyName: string) => bodies.get(bodyName)?.node,
     setBodyWorldPoses(poses, documentWorldMatrix) {
       const finiteVector = (value: unknown, size: number): value is number[] => Array.isArray(value) && value.length === size && value.every(x => typeof x === "number" && Number.isFinite(x))
@@ -465,14 +641,30 @@ export async function buildRobotVisual(input: any, resolveURI: (uri: string) => 
         root.matrixAutoUpdate = false
         root.matrixWorldNeedsUpdate = true
       }
-      // bodies 按源树父先子后的顺序登记。Sim 给世界位姿，渲染节点只保存相对父节点的局部矩阵。
-      for (const [name, { node }] of bodies) {
+      // 必须按**实际 Object3D 父子顺序**投影，而不是 `bodies` 的登记顺序：URDF 允许 child link 在
+      // root 之前声明，按登记顺序先算 child 会把"父矩阵还没更新"的旧值当成父世界矩阵，局部矩阵就错了
+      // （真实现象：root 给 x=10、child 给 x=12，读回 child=22）。按深度排序后父一定先于子，
+      // 局部矩阵 = 父实际世界矩阵⁻¹ × 目标世界矩阵；原生节点本身不被展示偏移污染。
+      const depthOf = (node: THREE.Object3D): number => { let depth = 0; for (let cursor = node.parent; cursor; cursor = cursor.parent) depth++; return depth }
+      const ordered = [...bodies.entries()].sort((left, right) => depthOf(left[1].node) - depthOf(right[1].node))
+      for (const [name, { node, stages }] of ordered) {
         const target = targets.get(name)
         if (!target || !node.parent) continue
         node.parent.updateWorldMatrix(true, false)
         node.matrix.copy(node.parent.matrixWorld).invert().multiply(target)
         node.matrixAutoUpdate = false
         node.matrixWorldNeedsUpdate = true
+        // `target` 是 MuJoCo 的 body 世界位姿，**已经包含本 body 自己的关节运动**。可视 geom 与
+        // 子 body 都挂在关节 stage 下；`setJoints` 写在 stage 上的那份运动若继续生效，就会在
+        // 原生 body 位姿之上再叠加一次（重复 FK）：body 节点/相机挂载仍对，画面里的外壳却被
+        // 多转了一个关节角（真实 Panda 的肘 link4、腕 link7、手前 link6 因此出现缝隙）。
+        // 投影 body 位姿时把本 body 的 stage 归零，让展示层与原生 body 同帧；下一帧 `setJoints`
+        // 会按 `base` 重新写入，合拢/炸开仍只动 presentation。
+        for (const stage of stages ?? []) {
+          stage.matrix.identity()
+          stage.matrix.decompose(stage.position, stage.quaternion, stage.scale)
+          stage.matrixWorldNeedsUpdate = true
+        }
       }
     },
     setJoints(names, positions) {

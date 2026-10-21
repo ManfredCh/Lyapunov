@@ -70,6 +70,24 @@
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
     },
     {
+      "path": "packages/asset-bake/test/pointcloud-bake.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R011 真实Node ToolRegistry/Jobs与既有Python、搬移dist外部验收；命令行指定输出/Python/plugin，不属于默认离线用例。"
+    },
+    {
+      "path": "packages/asset-bake/test/pointcloud-bake.smoke.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R011 真实算法与MuJoCo外部SDK用例；明确指定既有Python单独运行，不跳过或用离线结果冒充。"
+    },
+    {
       "path": "packages/asset-bake/test/sdf-consumer-claim.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -156,15 +174,6 @@
       "reason": "建模产物只读检查：纯stdlib Python读取确切GLB容器、贴图引用、UV和失败事实；无Blender/网络/凭据。静态容器检查不代签真实重载或视觉质量。"
     },
     {
-      "path": "packages/blender/test/material-readback.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "blender"
-      ],
-      "decision": "exclude",
-      "reason": "真实Blender导出/重载验收，需要BLENDER_EXECUTABLE；默认离线CI不运行。人工/VM受影响测试使用同一原生入口运行，不把skip记通过。"
-    },
-    {
       "path": "packages/blender/test/blender-run.test.ts",
       "declaredRunner": "node:test",
       "markers": [
@@ -221,6 +230,15 @@
       ],
       "decision": "exclude",
       "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/blender/test/material-readback.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "blender"
+      ],
+      "decision": "exclude",
+      "reason": "真实Blender导出/重载验收，需要BLENDER_EXECUTABLE；默认离线CI不运行。人工/VM受影响测试使用同一原生入口运行，不把skip记通过。"
     },
     {
       "path": "packages/blender/test/photo-registration.test.ts",
@@ -398,6 +416,48 @@
       "reason": "本地纯逻辑：账户异步结果身份、支付方式和错误文案归一化；不访问支付服务"
     },
     {
+      "path": "packages/desktop/test/browser-root.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "E27 纯关闭分类、代次/操作UUID元信息与真实Browser结构mock释放负例；临时自有文件和mock，不启Chrome/GUI或网络"
+    },
+    {
+      "path": "packages/desktop/test/data-root.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯数据根合同：不同 desktop 数据根的 userData/window-state/runtime 路径保持隔离；不启动 Electron、不访问用户数据。"
+    },
+    {
+      "path": "packages/desktop/test/exit-coordinator.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "纯退出生命周期：取消/并发单次flush-stop-close、保存失败、update/system和有界错误回执；仅注入回调，不启动Electron或Host"
+    },
+    {
+      "path": "packages/desktop/test/guest-controller.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实账户控制器的游客/迟到验证生命周期，使用假store/fetcher/host，无账号/网络/收费请求"
+    },
+    {
+      "path": "packages/desktop/test/guest-credentials.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "同原生credentials seam的游客transport内存provider；仅Context与假grant，拒模型引用，不读凭据文件或环境"
+    },
+    {
+      "path": "packages/desktop/test/guest-own-provider.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客真实原生settings/credentials/默认选择与adapter→自有localhost假模型、独立重开持久化及产品URL/route/discovery/redirect零请求负例；无真实模型/Billing/GUI"
+    },
+    {
       "path": "packages/desktop/test/restart-recovery.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -412,11 +472,11 @@
       "reason": "纯开关合同：软件回退固定为 X11 ANGLE/SwiftShader，不使用 no-sandbox、disable-gpu-sandbox 或 ignore-gpu-blocklist；不启动 Electron。"
     },
     {
-      "path": "packages/desktop/test/data-root.test.ts",
+      "path": "packages/desktop/test/workspace-boot-recovery.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "纯数据根合同：不同 desktop 数据根的 userData/window-state/runtime 路径保持隔离；不启动 Electron、不访问用户数据。"
+      "reason": "Alpha4：真实DOM启动标记的原生失败返回/重试、成功dispose与清理；临时DOM，无账号、模型、网络或用户窗口。"
     },
     {
       "path": "packages/generate-hunyuan/test/artifact-transfer.test.ts",
@@ -538,6 +598,20 @@
       "reason": "客户端生成客户端用例 —— 【W11 从误删中恢复】：原在 services/lyapunov-api/test/，边界收敛时被一并删除，但它【只 import 被保留的客户端模块】、零服务端依赖，本可逐字移入。Lead 登记。"
     },
     {
+      "path": "packages/lyapunov-api-client/test/search-client.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实ToolRegistry/web_search与Peiri中央provider的隔离HTTP fixture；不读取供应商key、不联网或收费，覆盖一次请求/缺会话/未配置/错误响应。"
+    },
+    {
+      "path": "packages/lyapunov-api-client/test/search-readiness-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F7/G8：真实localhost已认证能力DTO、same-intent与只读恢复桥，无供应商、中央真实账务或凭据外传。"
+    },
+    {
       "path": "packages/lyapunov-api-client/test/world-generation-contract.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -643,6 +717,13 @@
       "reason": "R-fix#7（P8 验收更正）：lyapunov-share 取件的有界超时 + 四条真缺陷的回归。常量仍为 SHARE_FETCH_TIMEOUT_MS=30_000 / SHARE_FETCH_ATTEMPTS=3 / SHARE_FETCH_STALL_MS=30_000（与 W25 的 POLICY_FETCH_*、W16 的 fetchMambaLicense 一一对应），但口径已按 R-fix#7 更正：①取消在 4 条路径（两个出网点 × {联网阶段, 读正文/解析阶段}）原样传播 SHARE_CANCELLED_BY_CALLER（改前 identity()/request() 都吞成 SHARE_AUTH_REQUIRED / SHARE_*_INVALID_RESPONSE）；②isTransientShareStatus 两条调用点共用同一个判定（消除 P8 的『只有 /v1/me 重试』不对称），瞬时状态一律重试到上界后抛五要素齐的 ShareFetchError(retryable=true)；③非瞬时 4xx 也记进尝试轨迹；④attemptDeadline 只覆盖『发出请求（含请求体上传）→ 拿到应答头』，拿到头即 clear() 解除，正文改由 readBoundedText 的『30s 无数据到达』窗口约束（真 loopback 三点读数：头快/正文 2000ms·上限 500ms ⇒ 读得完 2043ms；头 700ms 才到·上限 200ms ⇒ 219ms 失败；正文停摆·窗口 300ms·上限 5s ⇒ 302ms 失败）。另钉 preview-route 状态码映射：取消 ⇒ 404（不是 401）、真认证失败 ⇒ 401、上游 5xx 不是 401。读数（2026-09-27 收口批复跑）：**本条目对应的单文件**＝36 pass / 0 fail / 267 expect；整包（2 文件）＝37 pass / 0 fail / 270 expect。★**别把整包数当单文件读数**：「27 pass/203 expect」是整包、「26 pass/200 expect」是单文件，这两版都已过期（本条目只声明这一个文件）。负对照**重做，且跑的就是交付版**：变异 A（ATTEMPTS 3→1）7 pass/4 fail；B1（只去 connect 超时）8 pass/3 fail/15.32s，停摆用例 [205ms] 仍通过；B2（两半都去）7 pass/4 fail/20.10s，多出的第 4 条正是『正文永不吐字节』5000ms 超时。★P8 原文『去每次尝试超时+去停摆上限 3 fail』**不成立**：『去停摆上限』那半是半截 no-op（脚本 str.replace 按独立语句写，未命中交付版的单行箭头体，静默未改），3 fail 只对应 connect 超时那半；本轮另补一条判别性用例专门钉停摆上限。未覆盖：没有真实分享服务端点，全部上游是桩；包内出网点 1 处（src/fetch.ts:121），全仓同形裸 fetch 仍有 ≥6 处；packages/lyapunov-share/dist/plugin.js 未重建（grep -c transientStatus = 2 ⇒ 运行时若加载 dist 走的仍是旧口径），且 cordis.patch.yml 里本插件 disabled: true（2026-09-27 维护队复核这两条仍成立）。"
     },
     {
+      "path": "packages/lyapunov-shell/test/animation-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 E26：实际SSR控件与共用动画handler，默认静止/明确视觉试播/恢复，合成Viewer，无GPU或真实世界。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/app-side.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -664,6 +745,20 @@
       "reason": "React SSR 初始加载文案测试，不启动浏览器、不访问账户或网络。"
     },
     {
+      "path": "packages/lyapunov-shell/test/brand-welcome.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-019：仓内真实PNG字节/深浅欢迎组件、短句一次选择与稳定身份、Linux desktop名称配对；离线SSR与源码接线，不触碰登录、账号、联网或当前窗口。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/camera-compare-ident.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7A2 RGB/相机Depth/LiDAR比较身份判据与缺件诚实性：同帧只在 frame/step/world 三者真实相同时成立（step 不同给 Δstep/Δt，缺字段判身份不完整）；换机位/换 world 后旧钉住采集作废退回直播；缺 RGB-D 或 LiDAR 时不渲染 img/canvas（SSR 结构断言），并回归 visibleLidarResult 旧 world 回执不显示。离线、无浏览器 DOM 夹具，真机像素验收不在本文件。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/camera-list-ui.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -671,11 +766,46 @@
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
     },
     {
+      "path": "packages/lyapunov-shell/test/camera-mount-projection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P19 R-005：真实相机安装 mount 穿过机器 UI 出站投影的回归。真实 camera_scene_save 回执字段先过 commandRouteResponse/uiCommandFields，再喂给 cameraDraftOfScene/sceneCameraDraftOf/restoredCameraDraft，断言 camera.mount 与 installation.baseline.mount 保留、其它返回 Scene snapshot 的命令一致、同版本重复投影不丢；负例钉住计费/取件 mount、用户自定组件、假相机（无 fovYDeg）、token 与机器路径仍不可见，且 mount 仍在全局内部字段表中。离线纯逻辑，不触网不启引擎。实测 8 pass / 0 fail。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/capability-facts.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "GATE-C-20260927 真实检查后改判 include：行为测试用**注入的 hasTool** 与本地技能目录事实，只钉环境路由提示文本；不启动 Blender/Unity、不联网、无需凭据（原标记 blender,unity 是词法误标）。本机实跑：6 pass / 0 fail / 16 expect。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/capture-route.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7B A→B→C 路线回归：路线读入校验（段数/名字/停留/场景）、有序编辑（加入/上移下移/删除/停留与段时长）、机位缺失与镜头类型不可插值（普通镜头 vs 照片内参、画幅不同）都拒绝并给具体原因；时间轴采样验证位置 lerp（米）、四元数 slerp（xyzw）、FOV 线性插值、target 恒在视线上、停留/段边界与总时长可复算。纯函数、离线。P7B 复核补：路线来源版本 emptyRoute 用创建时的源版本、保存按当刻真实版本钉定并可读回；空名/少于两站/非法段时长/跨场景旧草稿 `prepareCaptureRouteForSave` 一律拒绝且不产出可保存 route。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/capture-session-lifecycle.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7B 复核修复：连续视频会话生命周期归属回归（真 React hook + jsdom + 受控 Viewer/MediaRecorder/API 替身）。覆盖正常停止按原 API 保存并转发一次；重复 Stop 不重复保存、Cancel 不产出记录；Viewer 关闭终结 Recorder/流并按 renderer-closed 保存已有字节；切 Scene/切 API 的迟到保存仍上传原 owner 但不转发新 Scene/新会话；A→B→A 按会话对象实例判断；保存失败保留 orphan 字节且不标成功。MediaRecorder 为组件边界替身，真实浏览器视频解码由主控在 Edge 独立验证。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/capture-video.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7B 连续视频核心回归：容器/编码/后缀只按 MediaRecorder 实际报告解析（WebM 不会改后缀成 MP4，未知容器给 .bin）；只挑平台真实支持的 WebM 编码；正常录制产出真实字节/时长并释放记录器；缺 MediaRecorder、缺画布、记录器报错都有具名/不完整结果；记录整形保留真实字节与相机采样；上传封包（4 字节 meta 长度 + meta JSON + 原始字节）可原样解析。离线，真实浏览器 WebM 解码由主控在 Edge 独立验证。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/collision-frame-request.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：实际碰撞首几何/后位姿的窄请求、session绑定和无选择/非法选项明确拒绝。"
     },
     {
       "path": "packages/lyapunov-shell/test/computer-use-input-scope.test.ts",
@@ -713,11 +843,25 @@
       "reason": "W4/DEV-006：真实桌面输入类工具的宿主级单飞。钉住本次修复——单飞日志原先在整条链结束后才算 waited，导致首个动作自己占用桌面的时间被记成假等待；现改为真正轮到自己执行那一刻取等待时长，并新增排队计数、失败路径同样释放。6 pass/34 expect。（GATE-AB-20260927 实测更新：本包已长到 15 pass / 0 fail / 105 expect，发布门 `minPass` 由 12 上调到 15；此前的 6/34 是 2026-09-26 那一版的读数，按纪律保留不删。）"
     },
     {
+      "path": "packages/lyapunov-shell/test/desktop-locale-activation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha4：真实Cordis注入边界与Electron桥接分支的locale激活；离线临时Context，不触碰账号、模型、网络或用户窗口。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/domain-command-summary.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/domain-instance-projection.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R007：四域共用当前Scene真实资源实例根投影，核旧版本、显隐与未放置状态；SSR仅证明控件输出，最终桌面操作另验。"
     },
     {
       "path": "packages/lyapunov-shell/test/domain-pointer-rules-turn.test.ts",
@@ -734,18 +878,18 @@
       "reason": "Round71 closed-set natural-language engine install classification and next-turn one-time confirmation tests; pure local logic, no process/install/engine/EULA side effect."
     },
     {
-      "path": "packages/lyapunov-shell/test/isaac-local-discovery.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "本地Isaac候选有限扫描与真实Python无import探测、选择持久读回、standalone兼容和包内安装自检隔离；不启动Kit或GPU，不下载SDK。"
-    },
-    {
       "path": "packages/lyapunov-shell/test/engine-panel-decision.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "W4：引擎面板可解释（detail 带上游 resolveEngine() 原话，两次调用分别答'实际装配值'与'清掉启动参数后按偏好/默认会选谁'，UI 零推导；runningEngine 与 preference 两个独立显示位）；并含防变旧用例——直接读 packages/sim-newton/python/worker.py 的 CAPABILITIES 核对 Newton 第一切片能力范围。2026-09-27 收口批复跑实测 5 pass / 0 fail / 50 expect（用例数仍 5；「5 pass/37 expect」与「40 expect」两版都已过期 —— 收口批实测该文件改名/加断言后断言数 40→50）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/entity-editor-exit.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha6.2退出：现成SDK jsdom/真实React EntityEditor+WorkSurface跨Object-Scene-关闭/取消选择、临时SceneStore CAS/历史磁盘、原ExitCoordinator；未提交稿/冲突Return-Retry-Force、在途单写、选择归属注销、clean/unknown。隐藏常驻仅编辑器，物理面板按原需卸载。仅本地逻辑/临时文件，无模型/网络/引擎进程，非VM实际退出证明。"
     },
     {
       "path": "packages/lyapunov-shell/test/env-panel-enable.test.ts",
@@ -790,11 +934,34 @@
       "reason": "2026-09-24 按真实副作用复核：离线输入/附件/技能矩阵与真实 Shell pre-step 接线，Blender 仅为工具可见性字符串，未运行可执行。插件强制 rules 路由并恢复环境，原生 Context/JobsLocal 持有清理，安装器回执工厂隔离到逐例临时根；无真实模型、网络、GPU 或安装。"
     },
     {
+      "path": "packages/lyapunov-shell/test/execution-graph-native.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：原生Session/Agent/Tools/JobRegistry与同代观察/Stop/交接，合成Adapter离线无真实模型或GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/execution-graph.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：原生历史只读投影、图像ContentBlock、真实归属与unknown进展门，纯离线。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/external-install-session.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "设置中的外部工具创建全新原生会话、仅向新绑定提交自然语言安装请求及失败处理；无下载、网络或真实模型调用。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/flight-panel.dom.fixture.tsx",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018实际Electron DOM夹具，明确display与build，命令为控件参数替身，不冒真实物理。"
     },
     {
       "path": "packages/lyapunov-shell/test/gpu-misdiagnosis-guard.test.ts",
@@ -825,6 +992,41 @@
       "reason": "BASE-SERVED-ROOT-MISMATCH 回归（F1/F2/F3，在途 lane 新建；preflight UNCLASSIFIED 报出后由 CI-REDS-CLEAR 单补登记）：根因是「存在性问的树 ≠ 浏览器问的树」——<base> 指向的服务根与页面目录没有关系，本地找不到只能说明映射错了树，不能说明素材不存在（真机现场：素材服务 ready + 206，而页面同块计划里同时报缺件）。离线。★复跑两次（bun 1.3.13，2026-09-27 03:3x / 03:4x，mtime 2026-09-27 01:58:19、20718 B、sha256 1d633edfc3344833…）：两次均 13 pass / 0 fail / 68 expect；静态站点 66。★本单只补清单，不接进发布门 CASES。"
     },
     {
+      "path": "packages/lyapunov-shell/test/import-purpose.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：实际React用途控件/显式导入选项与本地记录映射，纯离线，不烘焙原件/不出网。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/isaac-local-discovery.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本地Isaac候选有限扫描与真实Python无import探测、选择持久读回、standalone兼容和包内安装自检隔离；不启动Kit或GPU，不下载SDK。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/latest-control-queue.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：原生连续关节目标首末合并、停止清队列、错误和迟到结果不回填。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/lidar-compare-ui.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7A LiDAR比较面板可见性判据回归：纯函数 visibleLidarResult 同时核对世界身份（adoptableReceipt：Scene/world/代次）与相机身份。主控真实组件复现的换机位 A→B 后旧 A scan 仍显示为 B 当前量测，在本文件钉为不得显示；离线、无浏览器/引擎。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/lidar-scan-ownership.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7A2 切换机位后的扫描状态归属回归：真 React LidarScanPanel + jsdom + 受控 API Promise，按**请求实例**（scope 对象 + controller）而非 key 字符串收口。覆盖正常完成可再扫、A 未完成时切 B 后 B 立即可操作且旧 A 迟到完成不改 B、A1 未完成→B→A 再发 A2 时 A1 迟到 finally 不清 A2 的 busy、旧机位迟到失败不显示为新机位错误、当前失败如实显示、卸载中止在途请求并作废迟到回执。api.request 为替身，原生射线/真实浏览器验收不在此文件。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/local-correction.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -853,6 +1055,27 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "packages/lyapunov-shell/test/manual-events.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：真实SDK Commands追加原run/done、gesture投影稳定一节点、跨scope/Stop/late done及公共隐私/模型null、完整目标限位与SSR禁提交。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/manual-gesture.dom.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：现有私有SDK jsdom纯合成DOM，真实React pointer-up.final target/settle/gesture ID和scope取消；无桌面、浏览器、Kit/GPU或网络。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/model-diagnostic-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F5：真实localhost typed SSE/未知费用与原生retry负例，无外网或收费。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/model-download-routing.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -860,11 +1083,39 @@
       "reason": "按真实副作用复核：纯路由/授权/文案函数与合成元数据，不调用模型、不下载权重、不读取凭据；Lead 离线运行 5 pass。"
     },
     {
+      "path": "packages/lyapunov-shell/test/note-icon-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P14：Note 图标来源回归。判据——WorkbenchIcon id=annotation 真渲染确认稿单一路径（stroke-width 1.65、round 端点/连接、单条 path），不再内联 Tabler message-2 的两道文字线，data-icon-library 标 lyapunov；其余 Tabler 图标线宽 1.7/来路不变；SOURCE.json 的 annotation 元数据为自绘（icons.annotation=lyapunov-note、path 与 NOTE_ICON_PATH 一致、pathSha256 对得上），其余 Tabler 来源 url 不动；viewer 的 ANNOTATION_MARKER_PATH 与 shell 工具栏消费同一份共享常量，旧 HEAD/TAIL 已退场。离线：renderToStaticMarkup + 读本包 SOURCE.json/viewer 源码，不连模型/引擎/网络。2026-10-16 实测 4 用例/0 fail/34 expect，文件 4255 B、sha256 00ef929e6f0e33b99610d83f3771c432dc180cfe4e0f538418fc7533f2234d4b、mtime 2026-10-16 22:11:19。登记：P14 执行方。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/notes-bar.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P8 R-007／用户批注 6/14/15/16：Notes 底部浮条回归。判据——有标记时只有当前正文输入 + Send/删除/结束小图标，列表/坐标/说明/截图收进默认收起的 details；不再有 Start annotating / Capture for the model 大按钮与右列整列教程；无标记只一行短提示；空场景/无实体、只读、回放、Viewer 关闭各有具体短状态。交互：自动聚焦、IME 组合回车不提交（isComposing）、普通回车提交（blur）、Escape 不丢草稿且不冒泡到 document、发送等待真实回执期间禁用显示…、删除与列表选中走原回调且 index/annotationId 同源。离线 jsdom + 真 React 组件 + 注入回调替身；不发真实截图/不连模型/不启引擎。2026-10-16 实测 6 用例/0 fail/31 expect，文件 8096 B、sha256 fc5ceff8f367479c0cb01b4dfd70fe4623ce6514402a897fbb6a93b36b0e5301、mtime 2026-10-16 13:30:23。登记：P8 执行方。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/notes-focus.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P8 焦点返修：Notes 浮条正文的显式编辑焦点请求回归。判据——焦点只由 workbench 发出的 focusRequest（带自增 token）驱动，不是 activeId 变的副作用；同一条标记 blur 后重选（activeId 不变、token 变）仍重新聚焦；请求身份（annotationId + sceneId）与当前正文不符时不聚焦，迟到的请求不抢别的输入焦点；刷新装载旧标记（无请求）不自动聚焦。离线 jsdom + 真 React 组件。★jsdom 不实现浏览器 mousedown 默认聚焦，本文件不冒充真机；该半条由真机验收与 .rc-evidence/p8-focus-fix 的真实 Edge 事件序覆盖。2026-10-16 实测 4 用例/0 fail/10 expect，文件 6357 B、sha256 7a4eb96b133b32a1cb5f32b1e3df8e0916ab2489c93e6e95dc3598081c9f002e、mtime 2026-10-16 14:01:30。登记：P8 焦点返修执行方。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/notification-no-replay.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/npy-preview.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7A2 NPY显示辅助回归：只认实际原生小端 <f4/<f8、二维 C 顺序，大端/整型/半精度/fortran_order/一维三维/截断正文显式失败；有限与 NaN/±Inf 分开统计；相机Depth灰度与LiDAR range按声明量程的比例色可从原数组复算，无返回用独立洋红。已知几何取自 P7A 真实产物回执（forward 8.9m、east 3.9m、floor 1.697m、无返回 NaN），原生 fixture 在盘则直解，否则用同组记录值构造等价 NPY，两条路径断言同一几何。离线、不启动浏览器/引擎。"
     },
     {
       "path": "packages/lyapunov-shell/test/orientation-check.test.ts",
@@ -881,11 +1132,67 @@
       "reason": "真 DSH AgentLoop/Session 事件：活动回合 next-step 图像消息与 Stop 清待处理 Inbox；MockAdapter 不出网、不计费。"
     },
     {
+      "path": "packages/lyapunov-shell/test/p21-capture-default.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P21：真实 ContinuousCapturePanel + jsdom——完整路线编辑默认关闭、展开后加站/排序/录制/预览 handler 真实可用、收起再展开草稿不丢；录制中 Stop/Cancel 与失败/孤立字节常驻可见。无网络/引擎/GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/p21-native-layout.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P21：无 DOM 的纯判据/初始化顺序——公开 collapse 必须早于 Scene tab 注册与首次 openRightbar；窄视口（974）不误展开、同一页只折一次（用户再展开/拖拽不被抢）、DOM 已折叠不重复 toggle；Viewer 让列判据。无网络/引擎/GPU/凭据。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/p21-native-workspace.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P21：真实 Workbench + jsdom——Native 且有真实 Inspector 才给 Viewer 让列（.lya-wb-canvas paddingRight 280），Notes/关闭工具 0 空白；Capture 首屏三层 details 默认关闭、长帮助与“三张截图”教程不上屏、展开保存视角仍可点。SDK jsdom + viewer/HTTP 替身，不出网不触引擎。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/pack-library-actions.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "本地纯逻辑（CCMM-09 按真实副作用复核）：只覆盖能力包面板的客户端编排与错误传播（文件头自证：不跑 python、不下载权重），载入/装配端口注入。无出网、无供应商、无计费。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-binding-settings.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：实际SSR绑定参数、显式全域采样/精度预算、过限和策略限制，纯离线。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06物理产品入口：同world/generation/revision/frame读回、机器人只读、固定/质量/用途、初始化重叠提示与单CAS同步/取消；16 pass/83 expect，SSR/回调与隔离port，不代签GUI或原生物理。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/physics-test-space.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：物理任务卡只认明确测试kind、保留既有引擎装配合同和正确world options。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/plugin-marketplace.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "只读原生MCP/技能目录projection、合法路径发现、真实React DOM搜索/类型/可用性/详情/关联选择与原配置委托；本地临时文件与localhost夹具，不下载、不访问模型/平台Billing、不启动客户Blender或Unity。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/policy-library-panel.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "策略VLA原生侧栏命令顺序、分类与失败展示，只验证声明范围内的静态和端口行为。"
     },
     {
       "path": "packages/lyapunov-shell/test/privacy-boundary.test.ts",
@@ -895,6 +1202,13 @@
       "reason": "无外部标记：离线纯逻辑。用合成标记核对命令/会话出站投影，不碰真实凭据、不出网、不计费。"
     },
     {
+      "path": "packages/lyapunov-shell/test/project-open.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha8 工程重开：真实 SceneOperations 验证显式副本保留同 ID 冲突保护、原场景与资源，错误传播。离线临时目录。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/provider-installer.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -902,11 +1216,74 @@
       "reason": "原生 JobsLocal + 临时目录 + 假 subprocess handle 验证安装收尾/回执；不执行安装脚本、下载或真实供应商。"
     },
     {
+      "path": "packages/lyapunov-shell/test/rc-assembly-attach.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5 R-012：Attach to 二级面板行为回归（真 React 组件 + jsdom）。覆盖：源/目标四项身份由 describeTarget 的真实 body/site 收口；Preview 把选择原样交给宿主（面板不自己编 world/scene/revision/generation）；结果区显示两侧安装面与真实帧身份；Apply 的入参就是预览返回的 applyInput（同一 robot_set_base 路径）；Cancel 清预览并通知宿主清理 ghost、返回原上下文；内部非根且无 site 时显示 R-013 先提取提示且 Apply 在预览前禁用。preview/apply 是替身——真实只读预览数学与拒绝面在 robot-tools/assembly-preview.test.ts，真实浏览器布局与 Viewer ghost 由主控独立核验；本文件不冒充浏览器/LLM 端到端。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/rc-assembly-recovery.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RC P3 R-014：真实 RobotAuthoringPanel DOM 覆盖 Assembly saved·Physics sync required 阶段状态、Retry sync、局部 Undo、历史冲突行禁用并显示原因、Undo 冲突报错，以及切实体后旧异步回执不串用（busy 复位）。P3 审查补覆盖：保存后 robotDetail=UNAVAILABLE 仍显示已保存阶段且原始诊断进按需详情；同步 reason 与历史冲突 reason 进 details，主状态保持简短英文。SDK jsdom + 注入回调替身，不出网不触引擎；真实原生回读由 sim-mujoco 原生用例单独证明。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/rc-components.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RC P2 R-011：真实 ComponentsPanel DOM（部件树选中驱动 Viewer、展开档位与 Restore view 写回真实端口、不可炸开/空部件如实说明），presentation-capture 白名单整形（缺 displayOnly 拒绝、仅炸开时给模型一句话），captureForObserver 把同帧 presentation 原样带进观察载荷。SDK jsdom + 注入 viewer/采集替身；离线，无外部标记。展示层几何本身由 packages/viewer/test/robot-visual.test.ts 对真实 THREE 矩阵证明。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/rc-navigation-tools.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RC P1 R-001/R-009/R-010：真实 ToolRail DOM 点击切 Physics、引擎仅切偏好、旧 tool=asset 迁移与 plugin ui_action 工具枚举一致；离线 jsdom，无外部标记。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/rc-robot-library.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RC P4 R-004：真实 React DOM 覆盖 Robot Library 首屏状态（已登记/可用/模型未随包提供）、库条目登记与加入场景回调、已导入分类、实例清单空态与进入详情、原子动作 Start/Stop 接线与 Freeze/Restore 目标级后端缺失的明确不可用，以及 Policy 主路径（当前策略/兼容/目标、check→prepare→apply 的单一下一步、应用重建 world 影响说明、切实例不串旧状态）。P4 审查补覆盖：兼容回执带 scene/entity/world/代次/版本/kind/identity 上下文，未知或跨实例回执不授予兼容；prepared 但 ready/worldBound/missing 不满足时禁用 Apply 并给准确英文下一步；缺 world 时禁用为「先准备物理世界」；无桌面选择器时首屏路径输入走同一 importLocalPolicy→policy_load_local 链；Start 不冒充全 world 准备且 Prepare physics 是独立动作（真实 Workbench 断言 Start 禁用与原因）。SDK jsdom + 注入 command 替身，不出网不触引擎；真实轨标签宽度由独立浏览器脚本核验。P5：首屏改为可浏览列表（不自动选中模型），点条目进同栏二级详情、顶部返回列表，模型名/状态与 Add to scene 主动作在首屏、模型字段与来源折叠；断言相应改为列表/详情互斥且主动作在折叠字段之前，修复 P4 把 CTA 排到 11 行列表之后（真实 1669×942 中 y≈1332、不在首屏）的回退。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/rc-workbench-flow.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "RC P1 R-001/R-002/R-003/R-009：真实 Workbench DOM 覆盖 Objects 清单/二级 Inspector 进出与草稿保持、Environment 二级、独立 Physics、域内导入；SDK jsdom + 注入 viewer/HTTP 替身，不出网不触引擎。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/reconcile-command-http.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Scope/Session/CommandRegistry与本机HTTP机器投影、跨会话/缺资源/隐私负例，无模型/供应商/GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/recording-channels.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7C：录制通道产物回放渲染判据。RGB 真 img + 会话授权 mediaURL；相机深度 NPY canvas 不冒充 RGB；LiDAR range 显示真实有效/无返回统计，二进制 valid/hitGeom 只给下载不画图；无通道统计不占位。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/recording-panel-missing-visibility.test.tsx",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "D2 回归：录制**缺件**用户在面板上看得到（ZERO-CONSUMER-FIELD-AUDIT-20260926 D2）。缺陷形状（审计原文）：missingCount/missing 由 recordingSummary()（robot-workflows/src/recording-files.ts:33）一直在算、由 register(recordings)（plugin.ts:2053）一直在发（面板每 1.5s 轮询），而客户端 recording-panel.tsx 的 Pick<...> **缺这两个键** ⇒ 全仓 0 读 ⇒ 缺件对用户不可见。两层证据缺一不可（渲染层 + 挂载层，与本仓 D1/D3 回归同一形状）：渲染层用 renderToStaticMarkup 渲染「渲染与判据共用的同一个」组件，把用户看到的那句话（含 lya-warning 色与 missingCount 真总数）逐字钉住。★该文件于 2026-09-27 03:37:08 由在途 lane 落盘；静止后复跑两次（bun 1.3.13，03:41）：两次均 5 pass / 0 fail / 19 expect；静态站点 19；8541 B、sha256 2e5f828b60f7c014…。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/recording-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7C：固定机位 Recording 来源/通道纯判据。钉住同名 body/相机的两台机器人按完整机位身份分开、世界固定机位不进 Recording 清单、Scene 未读回原生标 unavailable、无来源/未选禁用开始、开始请求固定真实来源与通道、未采到通道不显示完成、作业来源按服务端 source 投影。"
     },
     {
       "path": "packages/lyapunov-shell/test/render-failure.test.ts",
@@ -923,11 +1300,53 @@
       "reason": "媒体路由接受「基址标记 + 相对引用」的用例（W5 RESOURCE-ROUTE-BASE-TOKEN 单新建）。由 preflight 的 UNCLASSIFIED 报出，Lead 登记。"
     },
     {
+      "path": "packages/lyapunov-shell/test/robot-camera-installation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A09-010：既有Scene安装操作的结构化位置/normal/up/FOV、真实命中祖先与同帧body FK锚点、局部安装不改机器人、Viewer原点锁位/朝向/FOV草稿/ACK/退出和readonly导航检查；使用Three实际数学/场景图与原型，不联网、不启动SDK或GPU。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/robot-camera-scope.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "V9 真实Native返修三：机器人机位 scope 的 jsdom 组件回归。已选机器人且无草稿时只给机位清单/短空态与 Add camera；New camera 同栏二级页使用英文默认 Camera、Robot 固定当前实例、Mount 只列真实 native body（无 World camera/Infinite ground）；缺 body 时 Save 禁用且提交路径拒绝；world scope 仍可新建/保存世界固定相机。离线、无浏览器 GUI/WebGL。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/robot-library.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "机器人库薄投影与原资源库登记重开去重、许可阻断；最小本地闭包，不联网、不运行机器人、不代表真实UI验收。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-camera-panel-draft.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P13 R-005：机位草稿 owner 回归（真 React + jsdom）。用真 SceneCameraPanel 走完整 UI 流程（Add camera→选 wrist_3_link→手填 pos/rot/160x120→Save body installation），断言 RPC 输入 mode=draft、parentEntityId/bodyName/position/quaternion/width/height 与界面保存前值一致，世界读回刷新不覆写；并锁住显式“Save current-view installation”仍按当前画面采样。P19 追加：真实 camera_scene_save 回执先过 commandRouteResponse 投影，再喂给真 Panel，锁定保存后仍显示所选机器人/wrist_3_link、同版本轮询不覆写、再次选择与恢复基线。离线，不触网不触引擎。实测 3 pass / 0 fail。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-node-controls.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：真实场景CAS下删除导入子树、显隐与素材回收/恢复；失败和会话变更不误报提交。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/scene-robot-asset-locators.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "DEV-PROJ-02：交给浏览器的场景里，机器人文档资产引用必须先换成『已授权件的媒体标记』（plugin.ts 的 projectSceneForBrowser，state/scene 两条路由共用）。此前出站投影只认字符串形状、看不见『这条引用相对哪份文档写』，于是两种形状在浏览器里都换不回字节：相对引用（meshdir=meshes + file=a.stl）的基址已是标记 ⇒ 客户端只能把 meshes/a.stl 原样交给媒体路由（ROBOT_VISUAL_REFERENCE_UNRESOLVED）；域内绝对路径被投影成域引用，而路由按『标记／绝对件』等值匹配 ⇒ 匹配不上。用真夹具（scene-kit/test/fixtures/mjcf-duplicate-sections 的 XML 与 STL 真在磁盘上，生产者是 scene-kit 自己的 robotVisual + parseAsset）钉三件事：①走这一层之后文档引用是标记，且标记能在该 Scene 的已授权候选集里换回磁盘上的那一件；②负对照——同一个域内绝对引用不走这一层（= 今天 HEAD 的 projectPathsOnly 直出）就换不回字节，还原修改点即精确变红；③候选集外的件一条都不改（不放宽授权）。另含接线门（形状门，不是行为门）：state 与 scene 两条路由的场景载荷都经 projectSceneOutbound，不再有 projectPathsOnly(scene,…) 直出。离线，只读仓内夹具。2026-09-27 维护队实测 5 用例 / 0 fail / 25 expect。登记：维护队（preflight 的 UNCLASSIFIED 报出）。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R005：生命周期单次初始化、首帧/代次、取消、失败不loop、状态渲染；固定隔离port夹具，不冒真实SDK。"
     },
     {
       "path": "packages/lyapunov-shell/test/session-context-cross.test.ts",
@@ -972,11 +1391,32 @@
       "reason": "原生资源打开确认：地址、方式、可见性与窗口会话归属。"
     },
     {
+      "path": "packages/lyapunov-shell/test/viewer-context-menu.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-10-09: real DOM bilingual viewer menu and original workspace manifest write/readback with structured entity/resource provenance; no live model or desktop."
+    },
+    {
+      "path": "packages/lyapunov-shell/test/viewer-feedback-content.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "2026-09-29: synthetic scene/window fixtures use native Inbox, attachment storage and pi-ai request conversion to check actual image bytes, pins, session/revision ownership, cancellation and size errors; no live model or desktop."
+    },
+    {
       "path": "packages/lyapunov-shell/test/viewer-observe.ts",
       "declaredRunner": "plain",
       "markers": [],
       "decision": "include",
       "reason": "真实 Cordis/ToolRuntime/附件存储 + 模拟窗口的原生观察协议脚本；方向检查新增同会话图片投递、UI/Tool 去重、Stop 迟到图、相机与组根分支。单独 bun --no-env-file 进程运行，脚本自身 process.exit；不启 GUI/GPU/公网。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/web-fetch-failure.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线原生Tools/Web/PTC消费者，provider与ready均受控；覆盖可用/未知/不可用搜索建议，保原类别和地址/取消边界，不发起回退网络或真实收费。"
     },
     {
       "path": "packages/lyapunov-shell/test/workbench-camera-initial-framing.test.ts",
@@ -1007,6 +1447,13 @@
       "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
     },
     {
+      "path": "packages/lyapunov-terminal/test/rc2-terminal.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha5 原生 RC2 Terminal 的离线 Inbox、V4工具消息、同源URL及原生 RemoteStream 的首锚点/断流/恢复测试；仅内存流和临时上下文，不连接真实远端、不调用模型、不读取凭据或启动物理。"
+    },
+    {
       "path": "packages/lyapunov-terminal/test/startup-model-selection.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1028,6 +1475,26 @@
       "reason": "W10/DEV-032 接线与话术通用化：宿主 action='html-plan' 复用既有 target() 越界校验；界面不再自持上限（第二份 grep=0）、开不开由 plan.choices[].enabled 决定；环境话术的 GPU 专用句已下移到 GPU_STATE_WORDING['device-hidden']，宿主 GL 与桌面行不再吃到 GPU 那句话。全离线（SSR + 源码静态契约）。Lead 登记。"
     },
     {
+      "path": "packages/lyapunov-workspace/test/geometry-import.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014真实Blender转换OBJ/FBX/纹理副本、搬移原目录、warm缓存与MuJoCo碰撞；实际plain脚本，需要输出/原件夹具目录参数及既有Blender/MuJoCo Python，不计默认离线通过。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/geometry-workspace.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "blender",
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014真实Node24 transform-types、ToolRegistry/Commands、回环HTTP、Blender、副本闭包、跨会话/readOnly和保存重开；实际plain脚本需输出/原件夹具目录参数与已有SDK/Blender，单独验收。"
+    },
+    {
       "path": "packages/lyapunov-workspace/test/gltf-glb-content-sniff.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1040,6 +1507,20 @@
       "markers": [],
       "decision": "include",
       "reason": "转换缓存版本及依赖变化的本地文件验证，不启动Blender。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/native-document-exit.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 C6/F6：实际FileDocument草稿/保存冲突与退出参与者，假fetch、临时文件，无Host/账户/外网。"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/native-files-patch.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 C6：固定基线补丁正向、二次精确幂等、本体/未知源码拒绝；临时目录与git，仅仅读已固定SDK。"
     },
     {
       "path": "packages/lyapunov-workspace/test/restart-tab-notice.test.ts",
@@ -1099,6 +1580,48 @@
       "markers": [],
       "decision": "include",
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/policy-registry/test/g1-23-75.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "固定75观测/23关节映射、真实IMU重力/驱动字段、重复地面拒绝及错误权重阻断；合成帧仅证契约，真实权重行走与停止另有原生独立验收。"
+    },
+    {
+      "path": "packages/policy-registry/test/g1-local-reuse.smoke.ts",
+      "declaredRunner": "plain",
+      "markers": [],
+      "decision": "exclude",
+      "reason": "普通脚本需固定299424B真实权重fixture，缺少时明确失败；主控独立运行并核实际六项幂等读回，默认六条纯契约仍include。"
+    },
+    {
+      "path": "packages/policy-registry/test/guest-services.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客owner拒packs/robot-download与产品metadata，保本地工具登记；mock fetch计数和Job计数均0，无网络"
+    },
+    {
+      "path": "packages/policy-registry/test/load-state.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "策略四类状态与真实模型依赖预检，固定本地夹具，不联网不动作。"
+    },
+    {
+      "path": "packages/policy-registry/test/local-policy-file.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "明确本地权重格式的有界只读检查，不执行未知权重。"
+    },
+    {
+      "path": "packages/policy-registry/test/local-policy-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08登记包根与裸文件来源负例：未知目录不扫描，自声明哈希不能冒固定75来源；本地临时文件，不网络/推理/动作。"
     },
     {
       "path": "packages/policy-registry/test/mirror-archive-body-timeout-shape.test.ts",
@@ -1242,6 +1765,20 @@
       "timeoutMs": 600000
     },
     {
+      "path": "packages/policy-registry/test/robot-download.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "统一下载清单、固定来源字节、本地复用和首错误回退，本地fetch夹具，不使用产品鉴权。"
+    },
+    {
+      "path": "packages/policy-registry/test/runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08有限managed/显式策略解释器与Sourcekind依赖选择负例；临时探针报文替身，不下载/真实SDK/推理/GPU或动作，真实Host/native另验。"
+    },
+    {
       "path": "packages/policy-registry/test/tier-roster.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1301,6 +1838,41 @@
       "reason": "R-fix#4 复核更正：原写 net_fetch/realmodel，但该文件头明写【网络无关】（合成夹具、全用替身）。真正原因是【需要产品策略 python】：它在加载期解析 `.runtime/sim-python/bin/python`，接进门会让发布门依赖某台开发机的运行时根（违反 gate「不判真机、不碰 .runtime」的边界）。负对照证明它是硬失败而非 skip：LYAPUNOV_POLICY_PYTHON=/nonexistent/python ⇒ 3 pass / 4 fail（ENOENT 于 adapter.ts:344）。残余洞口：该路径不受 case-integrity 保护。Lead 更正。原 reason：not-run：需要出网抓取（net_fetch）；调用真实供应商模型/计费（realmodel）"
     },
     {
+      "path": "packages/robot-tools/test/assembly-actions.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5 定向收口：源安装点窄元数据、真实检查读回、Replace 一次多实体 CAS 与多条目受保护 Undo。真实 SceneStore（临时私有目录）+ 注入 sim 替身，不触引擎/网络/HTTP。覆盖：robot_assembly_mount 按 robot_describe 校验 site/body 并绑定 resourceId/version，资源版本变化后读取 stale 且不存在 site 明确拒绝；robot_assembly_check 无 world 只有声明（checked.relativePose=false）、有 world 时读回 native 绑定/相对位姿/关节/接触/动作回执与从 baseBinding 派生的挂接清单；robot_assembly_replace 新末端固定、旧末端停放到**明确给出的离开挂载位的固定 pose**（一次 CAS 一个 revision），并拒绝全零四元数/非有限数/未给停放位/非真根 oldBodyName/目标不匹配/停放与挂载重合/observe 期间 world 代次或资源变化（全部 CAS 前零写入）；robot_assembly_undo 的多条目形态同次恢复双方并保留后来无关编辑；history 可发现同一 operationId 的新旧双方，重建 SceneStore 后仍能整组成组 Undo，任一方被后续编辑则整组冲突拒绝。"
+    },
+    {
+      "path": "packages/robot-tools/test/assembly-extract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-013／§2.10 内部子树真实拆分的场景动作层回归：真实 SceneStore（临时私有目录）+ 注入的成对派生替身，钉一次 CAS 同时切 remaining 资源版本与 join 独立 part 实体、成对 components.subtreeExtract 标记、按真实关节名的 controller 迁移与跨切口明确拒绝、无结构投影格式（USD kind=source）具名 unsupported、过期 CAS 与派生期间源实体被改在提交前零写入拒绝、重组恢复原资源版本并移除独立件、既有历史发现成对拆分且受保护局部 Undo 保留第三物体与后加文本、独立件绑定被改后整组拒绝。真实 MuJoCo 派生/独立重载由 packages/scene-kit/test/subtree-native.test.ts 覆盖，本文件不冒充原生运行。"
+    },
+    {
+      "path": "packages/robot-tools/test/assembly-history.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-014：真实 SceneStore（临时私有目录）复用既有不可变版本历史的局部装配 Undo。覆盖：绑定变化→后来的无关编辑→局部 Undo 保留无关编辑与其它实体；目标绑定被后来编辑/stale revision/资源身份变化一律拒绝且零写入；关闭并重建 SceneStore 后历史仍能定位；历史缺失与版本缺失明确不可撤销、不猜 before。P3 审查补覆盖：跨模型资源替换的绑定变化历史标不可局部 Undo 且执行入口拒绝；历史缺页不跨缺失版本拼成一次变化（historyComplete=false，执行入口 ROBOT_ASSEMBLY_HISTORY_GAP）；保存后 describe 读回失败仍返回 saved 回执与 revision（robotDetail=UNAVAILABLE）；外来 scene world 不 sync、外来 worldId 同数字 Frame 在 sync 与 UNCHANGED 两条分支都拒绝。只写系统临时目录，无 world/HTTP/引擎副作用。"
+    },
+    {
+      "path": "packages/robot-tools/test/assembly-mount-readonly.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5 定向收口：robot_assembly_mount 的真实工具派发门禁（真 cordis ToolRegistry + 真 scene-kit 插件 + 真 SceneStore 临时 dataRoot；只注入 sandboxPolicy 模式与会话归属）。覆盖：save/clear 属持久写，在 read-only 会话被 SCENE_POLICY_READ_ONLY 拒绝且零落盘；不带 save/clear 的纯读查询在 read-only 会话照常返回，并保持 expectedRevision 检查（过期请求报 SCENE_REVISION_MISMATCH 而非策略门禁）；可写会话保存后只读会话仍能读到已保存点；同一 Host 的另一会话读不到本会话的 scene/save point。不触引擎/网络/HTTP，只写系统临时目录。"
+    },
+    {
+      "path": "packages/robot-tools/test/assembly-preview.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5 R-012／§2.9：只读装配预览的正负行为与数学。sim 是只暴露 listWorlds/describe/observe 的替身、scene 只暴露 snapshot ⇒ 预览若偷偷 commit/sync/start/step 会直接抛错（读取无写入的负证据）；不触引擎、不联网、不写 Scene。覆盖：T_A_B 由同一 4×4 齐次式合成（非零平移 + 非单位旋转 + T_pair，公式反推与矩阵逆一致）；mountBodyFixedToRoot 根/固定链通过、移动内链拒绝；真实 site 解析出 applyInput 且状态 PREVIEW/not applied；显式源安装面 + T_pair；缺目标/自绑定/环/内部移动 site/非法 pose/过期帧/不可编辑根/world 代次过期/场景未同步/缺安装面全部结构化拒绝；插件 schema 登记了 sourceMount/targetMount/world/scene/revision/generation。主控独立原生挂接/碰撞读回在 sim-mujoco 与根探针，本文件不冒充引擎实测。"
+    },
+    {
       "path": "packages/robot-tools/test/camera-family-scope.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1354,6 +1926,14 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "packages/robot-tools/test/subtree-native-motion.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "envgate：R-013 内部子树拆分的真实原生动作闭环（真实 MuJoCo 3.13 worker，无模型替身；缺解释器整组 skip，不记为原生通过）。修复后钉：①原生 helper 重载核对的 source→part 名映射驱动控制器迁移，part.controller.jointKp/jointKd 必须落到 part_j2/part_j3/part_j4（不是源名 j2/j3/j4）；②保留的切口关节 part_j2 与内部 slide part_j3 经正常 robot_move/sim.execute 真实到目标并读回；③固定切口的 part 经真实 robot_set_base 以 fixed 原生刚性挂到另一真实机器人 body 后，carrier 父运动带动 part 且挂接后内部关节仍可驱动；④重组恢复源资源真实 j1..j4 与源控制器映射（无 fixed weld 冒充）。★per-entry 超时：两个用例各自真实 open/extract/sync/attach/execute，合计实测约 7s，但冷启动与负载高时可显著变慢；按 ManifestEntry.timeoutMs 单列 300000ms（仍在 MAX_ENTRY_TIMEOUT_MS 上界内，挂住照样记 timeout + 退出码 1），reason 带『per-entry 超时』是 harness timeoutProblems() 的写前纪律。",
+      "timeoutMs": 300000
+    },
+    {
       "path": "packages/robot-workflows/test/fleet-fork-engagement-fields.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1361,11 +1941,43 @@
       "reason": "D5（ZERO-CONSUMER-FIELD-AUDIT-20260926 D5）：measureForkPocketEngagement 逐叉孔行里那个「带符号侧向误差」字段——审计给的两个选项（删／接诊断导出）本单裁定**删**，判据（Lead 逐字）是「改完那个字段要么有消费点、要么不存在」。为什么删：产品 src 0 个读取点、它不是数据出口（唯一带它出去的路径在工具出口被 render 裁成 {phase,frameId,stepIndex}）、幅值已被 transverse_error_m 覆盖（剩下丢的只是符号）、而「接诊断导出」要先新增一条交付面。★**在途实证**：本单实测到它**正在被写**——2026-09-27 03:30:36 是 6612 B，03:31:00 变成 7084 B ⇒ 按「验静止」等到 03:34 两次检查 mtime/sha 不变才登记（**没有**把中间态登记进去）。静止后复跑两次（bun 1.3.13，03:41）：两次均 5 pass / 0 fail / 23 expect；静态站点 17；7084 B、sha256 ce6b0a0d9061e166…。★本单只补清单，不接进发布门 CASES。"
     },
     {
+      "path": "packages/robot-workflows/test/flight-controller.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R018：真实观察/映射/来源/世界绑定的无SDK合同；实际原生飞行与GUI另验。"
+    },
+    {
+      "path": "packages/robot-workflows/test/flight-native.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018明确已有MuJoCo/Python、官方模型外部夹具，主控单独运行，不skip。"
+    },
+    {
+      "path": "packages/robot-workflows/test/flight-tools.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A06 R018真实Tool/Command/Jobs与既有MuJoCo外部验收，需指定输出/Python与已构建插件。"
+    },
+    {
       "path": "packages/robot-workflows/test/pick-place-args-validation.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/robot-workflows/test/recording-channels.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7C：固定机位 Recording 逐通道产物判据（纯文件层，不启动物理）。RGB/相机Z深度/LiDAR range 分源登记、只按实际落盘计数、缺件进 missing 且可读回、未采到通道 frames=0 且保留 unavailable 原因、summary 发布 source/channels。"
     },
     {
       "path": "packages/robot-workflows/test/recording-root.test.ts",
@@ -1380,6 +1992,20 @@
       "markers": [],
       "decision": "include",
       "reason": "本地集成（CCMM-09 按真实副作用复核）：本机 HTTP 夹具服务器 + 按 ZIP 规范自拼的夹具（node:zlib crc32/deflateRawSync）；传输钩子注入。不发往公网（文件头自证）。"
+    },
+    {
+      "path": "packages/scene-kit/test/collision-reference-lifecycle.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Resource/Scene CAS迁移、版本/缓存身份/终态/旧unsafe拒绝；两个真实小GLB算法CPU用例需显式解释器，没有时单列skip不当通过。"
+    },
+    {
+      "path": "packages/scene-kit/test/default-robots.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5-model-catalog：Robot Library 本体/演示分离回归。真实本地 pack 目录 + 供给 inventory + 真 ResourceLibrary，覆盖本体 asset.model 选择/SHA/DOF、旧 demo 资源保留、policy adapter 来源、重复初始化幂等、缺件/路径不合法/inventory SHA 不符拒绝。文件系统/临时目录夹具，无网络、无外部引擎。"
     },
     {
       "path": "packages/scene-kit/test/fault-recovery.test.ts",
@@ -1424,6 +2050,13 @@
       "reason": "无外部标记：离线纯逻辑 + 临时目录里的真实 .ply 字节。验证 parseAsset 把已识别的首相机坐标标记写进 metadata（冲突/无标记不写）、gaussianSourceTransform 对 v2 用 Rx(−90)/对 v3 与普通沿用既有 +90、applySplatMountFacts 装入 frame 与源坐标适配且显式 visualSourceTransform 优先、applySplatPreviewFacts 在换到未知/另一版本时清掉旧 frame hint。不访问供应商、网络、GPU 或真实资产。"
     },
     {
+      "path": "packages/scene-kit/test/geometry-source-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R013/R014：OBJ/FBX分类与登记转换同源、真实临时OBJ/MTL路径和缺件拒绝、MAX明确转换要求；3 pass/13 expect，只使用仓内逻辑/临时文件，无Blender、网络或模型依赖。"
+    },
+    {
       "path": "packages/scene-kit/test/glb-material-facts.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1436,6 +2069,20 @@
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/scene-kit/test/infinite-ground.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "011：Scene无限地面创建、锁定、显隐、CAS删除与历史、首次物理入口和UI locale的离线检查。"
+    },
+    {
+      "path": "packages/scene-kit/test/legacy-resource-source.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R006：真实临时 ResourceLibrary/SceneStore 旧引用来源恢复、原件缺失/字节变化拒绝、正常CAS历史与幂等；不读用户目录或网络。"
     },
     {
       "path": "packages/scene-kit/test/map-compare-candidates.test.ts",
@@ -1522,6 +2169,13 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "packages/scene-kit/test/physicalization-budget-contract.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F1：真实Resource/Scope/HTTP参数、缓存身份与预算、算法公开进度及失败收尾，小件/临时根，无外网/Kit/GPU。"
+    },
+    {
       "path": "packages/scene-kit/test/physicalize-usage.test.ts",
       "declaredRunner": "bun:test",
       "markers": [
@@ -1529,6 +2183,20 @@
       ],
       "decision": "exclude",
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/scene-kit/test/physics-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R009：真实GLB层级矩阵规范化、同版本碰撞绑定及已有配置/CAS拒绝，真实派生/引擎另验。"
+    },
+    {
+      "path": "packages/scene-kit/test/physics-state.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06共同物理：真实临时Scene/CAS固定动态、质量与重力/碰撞开关保留、历史保存重开、不同几何替换与原字节不变；5 pass/27 expect，纯本地文件/逻辑，无SDK进程或GPU。"
     },
     {
       "path": "packages/scene-kit/test/portable-environment.test.ts",
@@ -1637,6 +2305,20 @@
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
     },
     {
+      "path": "packages/scene-kit/test/scene-package-import.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：自包含工程正规CAS导入、原始来源元数据、缺件一次拒绝和尺寸保留。"
+    },
+    {
+      "path": "packages/scene-kit/test/scene-ptc-input.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A06 R008：真实run_code调度与ToolRegistry输入flat/nested严格边界；PTC程序执行器夹具不冒真实Node外部执行。"
+    },
+    {
       "path": "packages/scene-kit/test/scene-replace-tool.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1672,6 +2354,13 @@
       "reason": "本地传输夹具验证流式下载、取消/重试、内容识别与分享页解析；无真实外网请求。"
     },
     {
+      "path": "packages/scene-kit/test/sog-zip.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "本机小型 SOG ZIP 夹具：真实流式封装/成员校验、截断伪 WebP、CRC 改写、目标已存在和预取消；无公网或 GPU。"
+    },
+    {
       "path": "packages/scene-kit/test/splat-acquisition.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1684,20 +2373,6 @@
       "markers": [],
       "decision": "include",
       "reason": "离线 3DGS 碰撞路由合同：哈希匹配的配对 mesh 进入可信绑定/挂载 collision，失配降级 candidate，纯 splat 保持视觉-only；无公网、GPU 或物理 worker。"
-    },
-    {
-      "path": "packages/sim-mujoco/test/scene-collision-binding.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "离线 MuJoCo collisionPatches 编译合同：可信 splat binding 生成 hfield/box patch，candidate 对齐在 worker 前被拒；无真实 worker/GPU。"
-    },
-    {
-      "path": "packages/scene-kit/test/sog-zip.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "本机小型 SOG ZIP 夹具：真实流式封装/成员校验、截断伪 WebP、CRC 改写、目标已存在和预取消；无公网或 GPU。"
     },
     {
       "path": "packages/scene-kit/test/ssog-manifest.test.ts",
@@ -1728,6 +2403,21 @@
       "reason": "本机 HTTP 小型 SOG/SSOG 夹具与真实 SceneOperations/ToolRuntime：默认/显式 LOD、多块环境资源、一次 CAS、预算/取消/部分登记、单文件真假 SOG 与模型参数；无公网/GPU。"
     },
     {
+      "path": "packages/scene-kit/test/subtree-format-matrix.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-013 源格式支持矩阵（interpreter-free）：真实 ResourceLibrary + 只读 inspectRobotSubtreeResource。①USD/USDA/USDC 当前只收件为 kind=source、没有结构 body/link 投影，必须给具名 SUBTREE_FORMAT_UNSUPPORTED 且不新增任何资源版本，绝不按扩展名开放提取按钮；②URDF mimic 横跨切口（part 侧 j4 模仿 remaining 侧 j1）给具名 SUBTREE_CROSS_EDGE_DEPENDENCY 且零派生版本。真实 MJCF/URDF 闭合提取与四类跨切口（tendon/equality/actuator/contact-exclude）由 envgate 的 subtree-native.test.ts 覆盖。"
+    },
+    {
+      "path": "packages/scene-kit/test/subtree-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "envgate：R-013 真实原生内部子树拆分（已安装 MuJoCo 3.13 MjSpec，经 packages/scene-kit/python/mjcf_subtree.py）。设置 LYAPUNOV_MUJOCO_PYTHON 或使用仓内默认 .runtime/sim-python；缺解释器时显式 skip、不记为原生通过。真实 Panda 内手拆分为 remaining 7q/7actuator 与 part 2q/1actuator/1tendon/1equality，两侧显式保全 integrator=implicitfast(3)，各自复制 67 个 mesh 的资产闭包并从 CAS 入口离开原模型目录独立重载；原件与旧版本 SHA/可验证性不变。跨切口 fixed tendon/actuator 小样给具名 SUBTREE_CROSS_EDGE_DEPENDENCY 且零派生版本；任务私有 URDF 小样以原格式产出两份可独立重载派生并记录切口关节 j2。不下载厂商资源、不改 SDK。★per-entry 超时：Panda 内手与 part 落位两条用例各自真实打包 67 mesh 资产闭包并做原生重载/编译，Bun 默认 5000ms 单例上限会截断；已在测试内对这两条 `test` 显式声明 120000ms 单例预算，manifest 侧单列 180000ms 作为进程等待上限（仍在上界内，挂住照样记 timeout + 退出码 1），reason 带『per-entry 超时』是 harness timeoutProblems() 的写前纪律。",
+      "timeoutMs": 180000
+    },
+    {
       "path": "packages/scene-kit/test/unity-exchange.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1747,6 +2437,15 @@
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
+    },
+    {
+      "path": "packages/sim-contract/test/infinite-ground-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要明确指定已有MuJoCo/Newton CPU解释器；逐引擎实测无限地面远域接触、隐藏、删除及重开负对照和原生去重。"
     },
     {
       "path": "packages/sim-contract/test/isaac-startup-budget.test.ts",
@@ -1919,11 +2618,28 @@
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
     },
     {
+      "path": "packages/sim-isaac/test/lidar-scan.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P7A 模拟LiDAR的 Isaac 接线回归：假 worker 只实现 NDJSON 行协议（不启动 Kit/PhysX/RTX），断言 provider.scanLidar 发出 `lidar_scan` 并原样透传 cameraName/射线图案/outputDir，且 worker 结构化拒绝时如实抛错、不返回占位量测。真实 PhysX raycast_closest 几何读取由主控独立 pilot 与 Isaac worker 端到端复验，不在本文件冒充。"
+    },
+    {
       "path": "packages/sim-isaac/test/lifecycle.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
       "reason": "延迟 launch hook 与假的 worker 路径验证 dispose-before-spawn 和 worldId 并发预留，不启动 Isaac 或 GPU。"
+    },
+    {
+      "path": "packages/sim-isaac/test/model-origin.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate",
+        "isaac"
+      ],
+      "decision": "exclude",
+      "reason": "专门验收：需显式选择含真实 pxr/Gf/numpy 的已安装解释器；只执行真实 USD 的资源原点/原生根平移、旋转、缩放、锚点与错根拒绝，不启动 Kit/PhysX，不出网、不改原件。正常 Host/managed SDK 的真实 PhysX 首帧、sync/reset、基座约束与视觉后代验收由候选回执单列，不能由此离线数值用例代签。"
     },
     {
       "path": "packages/sim-isaac/test/provider-capability.test.ts",
@@ -1944,16 +2660,6 @@
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）；调用真实供应商模型/计费（realmodel）"
     },
     {
-      "path": "packages/sim-isaac/test/model-origin.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "envgate",
-        "isaac"
-      ],
-      "decision": "exclude",
-      "reason": "专门验收：需显式选择含真实 pxr/Gf/numpy 的已安装解释器；只执行真实 USD 的资源原点/原生根平移、旋转、缩放、锚点与错根拒绝，不启动 Kit/PhysX，不出网、不改原件。正常 Host/managed SDK 的真实 PhysX 首帧、sync/reset、基座约束与视觉后代验收由候选回执单列，不能由此离线数值用例代签。"
-    },
-    {
       "path": "packages/sim-isaac/test/scene-adapter-transform.test.ts",
       "declaredRunner": "bun:test",
       "markers": [
@@ -1962,6 +2668,15 @@
       ],
       "decision": "exclude",
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）；需要 Isaac 仿真栈（isaac）"
+    },
+    {
+      "path": "packages/sim-isaac/test/scene-camera-mount.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：R015真实pxr USD装配、实际worker/adapter AST挂载与同帧标定/拒绝事务；bun:test声明，需明确LYAPUNOV_ISAAC_PY或已有Isaac Python中的pxr，缺环境明确失败，无skip。已独立3 pass/17 expect仅证明CPU USD/源码层，不代表Kit/PhysX/RTX/GUI；默认离线不计通过。"
     },
     {
       "path": "packages/sim-isaac/test/worker-robot-metadata.test.ts",
@@ -2016,6 +2731,24 @@
       "reason": "not-run：需要 Blender 可执行与实例（blender）；依赖本机 lane 环境变量/凭据（envgate）"
     },
     {
+      "path": "packages/sim-mujoco/test/collision-topology.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "A05：真实MuJoCo NDJSON RPC需本机SDK，单独明确运行并记录，默认离线CI不冒充已验。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/lidar-scan.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：P7A 模拟LiDAR真实原生射线（MuJoCo mj_multiRay）逐射线几何/单位/量程/有效性/命中geom/预览复算、相机Depth与LiDAR range分源比较、挂载相机运动与旧代次拒绝；node:test声明，需已有MuJoCo Python及OSMesa离屏渲染（相机Depth比较用），不依赖Isaac。独立命令 MUJOCO_GL=osmesa LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-transform-types --test packages/sim-mujoco/test/lidar-scan.test.ts，实测3/3、0skip。"
+    },
+    {
       "path": "packages/sim-mujoco/test/mirrored-collision.test.ts",
       "declaredRunner": "node:test",
       "markers": [
@@ -2023,6 +2756,15 @@
       ],
       "decision": "exclude",
       "reason": "not-run：依赖本机 lane 环境变量/凭据（envgate）"
+    },
+    {
+      "path": "packages/sim-mujoco/test/native-deformable.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要原生 MuJoCo 3.13 worker 与 LYAPUNOV_MUJOCO_PYTHON 指定的本机解释器（envgate）；默认离线 CI 不供给此环境，需单独明确执行；缺解释器时跳过，不记为原生运行通过。"
     },
     {
       "path": "packages/sim-mujoco/test/native-worldbody-only.test.ts",
@@ -2049,6 +2791,29 @@
       ],
       "decision": "exclude",
       "reason": "外部未运行：真实MuJoCo Scene/native body相机注册、运动、RGB/深度、Stop/reset和旧代次拒绝；node:test声明，需已有MuJoCo/Pillow Python及可用离屏渲染环境，不依赖Isaac。独立命令使用Node transform-types并核实际零skip。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/scene-collision-binding.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "离线 MuJoCo collisionPatches 编译合同：可信 splat binding 生成 hfield/box patch，candidate 对齐在 worker 前被拒；无真实 worker/GPU。"
+    },
+    {
+      "path": "packages/sim-mujoco/test/urdf-camera-installation.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "A09-010外部相机验收：需明确LYAPUNOV_MUJOCO_PYTHON与离屏GL；实际MuJoCo3.13解析URDF Gazebo sensor、完整原件标定、Scene body相机共存、RGB-D像素/深度及FOV恢复。缺环境明确失败、不skip；主控需独立执行，默认离线不计通过。"
+    },
+    {
+      "path": "packages/sim-newton/test/camera.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Newton 原生 CPU 相机模块回归：射线 RGB、米制轴向深度、挂载外参与同一步读取；沿既有 Newton 无外部标记分类纳入。所选解释器（LYAPUNOV_NEWTON_PYTHON，未设置则候选 .runtime/newton-env/bin/python）不存在时明确跳过，跳过不记为原生运行通过；最终 worker 消费链另行验收。"
     },
     {
       "path": "packages/sim-newton/test/capability-truth.test.ts",
@@ -2078,6 +2843,34 @@
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/viewer/test/animation-reference.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 E26：静态同版本源参考、明确视觉试播与停止恢复、未知轴/单位/版本负例；Three与合成对象离线，无WebGL/Host/GPU。"
+    },
+    {
+      "path": "packages/viewer/test/annotation-marker.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P14：批注标记确认稿几何回归（替换 P8 的圆弧+短尾几何）。判据——画布 Sprite 贴图与截图像素叠加共用用户 2026-10-16 确认稿的单一路径 NOTE_ICON_PATH（M12 3.5a8.5 8.5 0 1 1 0 17H5a1 1 0 0 1-1-1v-7A8.5 8.5 0 0 1 12 3.5Z，尾部落点锚 (5,20.5)），且 ANNOTATION_MARKER_PATH 逐字节等于 contracts 共享常量；paintAnnotationMarker 填充默认 #f2f4f7/选中 #78a9ff、1.1 单位外描边 #10151d/#15213a，旧 #ffd34d/#4fb3ff 与内部文字线彻底退场；buildAnnotationMarker 的 Sprite.center 与贴图第一个 translate（锚点像素位置）逐像素一致，不再固定横向中心 0.5；drawAnnotationPins 复用同一路径、编号落在气泡中心、caption 深色小条贴气泡右缘；annotationScreenScale 与相机距离成正比（屏幕恒定尺寸）。真 THREE 透视相机与真 annotations.ts，Path2D/Image/canvas 用离线记录替身；不量真实浏览器像素、不连模型/引擎。2026-10-16 实测 5 用例/0 fail/37 expect，文件 8029 B、sha256 68d68ea12f0510e7786b3ae032d74f55c68db2355be7c03f1d79ec047ab27198、mtime 2026-10-16 22:11:05。登记：P14 执行方。"
+    },
+    {
+      "path": "packages/viewer/test/annotation-pointer-focus.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P8 焦点返修：Viewer 批注左键命中才吞默认动作（preventDefault）的回归。判据——handleAnnotationPointer 只在批注模式 + 左键 + 未拖 gizmo 且真的命中标记/表面时才 preventDefault；命中标记交 onAnnotationSelect、命中表面交 onAnnotationCreate，空白点击/非左键/非批注模式一律不动默认行为也不动回调；applyAnnotationHit 三态返回值就是 preventDefault 的唯一判据。无 WebGL：Object.create(SceneViewer.prototype) 直接调产品源码，箭头监听器只做一次转发。不冒充真实事件序，那一半由真机验收覆盖。2026-10-16 实测 5 用例/0 fail/24 expect，文件 4302 B、sha256 2ce8c74fe182187cd1919977d1a1adcd631b02ea984b72521e7ed88a74a6d907、mtime 2026-10-16 14:04:14。登记：P8 焦点返修执行方。"
+    },
+    {
+      "path": "packages/viewer/test/assembly-ghost.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P5 R-012／§2.9：Viewer 临时装配 ghost 的真实行为。真 THREE 图 + 真 SceneViewer 原型（Object.create，不建 WebGL，与既有 robot-visual/camera-view 同手法），buildRobotVisual 消费 box geom 文档。覆盖：ghost 克隆真实几何（共享 geometry 不被复制、共享材质一个数不改），克隆材质独立透明；按 rootFrameInverse 原生根偏移与目标 body 世界矩阵精确对齐；源炸开态拒绝预览（ASSEMBLY_PREVIEW_SOURCE_EXPLODED）；缺源/缺目标 body/非法 pose 明确 UNAVAILABLE；重复预览替换旧 ghost；清理移除 ghost 与 marker 且不 dispose 共享 geometry，幂等。离线、无 HTTP/引擎副作用。"
     },
     {
       "path": "packages/viewer/test/asset-locator-pairing.test.ts",
@@ -2122,6 +2915,41 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "packages/viewer/test/capture-stream-frames.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P13 R-005 / P23：连续视频画布真实取帧节奏与时间轴（结构替身，不伪造计数）。支持帧级重建时画面仍来自真实画布手动取帧，但帧时间戳换成捕获墙钟微秒（不再名义 1/fps）；不支持时退回平台自动帧率并释放手动流；stop/dispose 清定时器/读写端/生成器/源轨道。离线。实测 5 pass / 0 fail。"
+    },
+    {
+      "path": "packages/viewer/test/capture-timeline-restamp.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P23 独立回归：连续视频时间轴必须以墙钟为准。可控时钟喂稀疏真实帧（合成时间戳 0/33/66 ms、真实墙钟相隔 300/600 ms），断言重打后 VideoFrame 时间戳为 0/300000/900000 µs、逐帧不丢；负例钉住没有帧级重建能力时回退路径不调用手动取帧（避免名义时间戳压缩）。离线、确定性，不触网不启 GPU。实测 2 pass / 0 fail。"
+    },
+    {
+      "path": "packages/viewer/test/collision-topology.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：真实引擎已编译形状到Three几何与世界位姿、选择/代际/版本清理。"
+    },
+    {
+      "path": "packages/viewer/test/context-menu-target.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "P13 右键菜单实体目标回归：真 Three 射线拾取 + 真视口尺寸，右键实体 B（当前选中 A）时菜单/批注目标是 B 而非 A；右键空处不开菜单也不阻止默认。离线。实测 2 pass / 0 fail。"
+    },
+    {
+      "path": "packages/viewer/test/entity-visibility.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A05：Three对象真实父子显隐、灯可见性与资源不重加载。"
+    },
+    {
       "path": "packages/viewer/test/environment-viewer.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -2136,6 +2964,20 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "packages/viewer/test/first-person-speed.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "第一人称相机真实按键事件与位移：默认速度、Shift加速和释放、失焦停止及组合归一化；不创建GUI或GPU上下文。"
+    },
+    {
+      "path": "packages/viewer/test/gaussian-first-camera.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "无外部标记：离线纯逻辑 + 真实 three 数学。验证首相机位姿由文件坐标标记与真实 matrixWorld（放置/旋转/缩放）导出、退化/非有限拒绝；openDefaultView 对唯一已识别实体的默认机位（含 entityId 与多实体歧义回退）不调用 bbox 中心；wrapSourceCoordinates 的 v2 Rx(−90) 与显式 sourceTransform/已烘焙优先；auto 画质仅对已识别高精场景提上限且用户显式画质与软件渲染优先。使用显式 WebGL 替身读数，不创建真实 GUI/GPU。"
+    },
+    {
       "path": "packages/viewer/test/gltf-draco-decoder.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -2148,6 +2990,13 @@
       "markers": [],
       "decision": "include",
       "reason": "根因判据：**viewer 的 glTF 读取路径必须带 KTX2（KHR_texture_basisu）与 meshopt（EXT_meshopt_compression）解码器**，而且解码器字节来自产品自己（内联/模块自带）。现场（GLB-DRACO-RENDER-20260926 §7 第 3 条）：DRACO 修好之后渲染路径**仍然没有**接这两个解码器，与 DRACO 修前**同形**——client.tsx:36-37 只是把 KTX2Loader/MeshoptDecoder **对外转出**（那是给 workspace 用的公开面），index.ts 一处都没 new 过 ⇒ **转出 ≠ 接上**，带这两个扩展的 .glb 整件加载失败。★**在途实证**：该文件在本单登记窗口内被改过多次（03:36:58 的 21441 B → 03:39:11 的 21650 B → 03:43:26 的 22219 B → **03:53:59 的 22545 B**）⇒ 按「验静止」等到 03:54:29 起连续 11 次采样（间隔 15 s、共 2.5 min）mtime/sha 逐条不变，两次复跑**都落在 03:53:59 那份字节**（两次读数一致）；16 pass / 0 fail / 80 expect；静态站点 59；22545 B、sha256 4cf5c08a7cc1f86f…。★**2026-09-27 P29-R5 按实测订正本行的身份与站点**：原文写的是 21650 B / 旧指纹 509d3919… / 静态站点 58 —— 那是 03:39:11 那一版，已过期（该旧指纹在现树 1149 个文件里已无任何文件以它开头）；**行为读数（16 pass / 80 expect）不受影响**，两次复跑与旧版逐字相同。★本单只补清单，不接进发布门 CASES。"
+    },
+    {
+      "path": "packages/viewer/test/grid-gizmo-display.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "V9 真实Native返修三：地面/网格点状 z-fighting 的显示层判据（网格抬升 2mm、只读深度、renderOrder，网格仍可见，不改 Scene/碰撞）；以及默认选中只显示细轮廓、显式 setTransformEditing(true) 才挂 TransformControls、退出脱开且不提交 Scene。离线 Three 原型，无 GUI/WebGL。"
     },
     {
       "path": "packages/viewer/test/lod-runtime-reading.test.ts",
@@ -2169,6 +3018,29 @@
       "markers": [],
       "decision": "include",
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
+    },
+    {
+      "path": "packages/viewer/test/material-render.fixture.ts",
+      "declaredRunner": "plain",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "外部未运行：A06 R013/R014实际浏览器DOM/WebGL材质像素、纹理UV和骨骼归属读取；plain浏览器entry需Bun构建及sandbox Electron/本地素材服务，裸bun无DOM不能冒充执行，通过需另收真实渲染回执。"
+    },
+    {
+      "path": "packages/viewer/test/observer-mode.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 F3/F4：真实Viewer原型/Three/Orbit/FrameProjection与合成canvas/gizmo，统一退出、稳定编辑ACK和scope，无WebGL/GUI/GPU。"
+    },
+    {
+      "path": "packages/viewer/test/placement-mode-input.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "R-010放置独占输入：禁用/脱离旧gizmo、同步不重挂、取消恢复状态且不提交实体；Native零写入另验"
     },
     {
       "path": "packages/viewer/test/projection-consumer.test.ts",
@@ -2227,20 +3099,6 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
-      "path": "packages/viewer/test/first-person-speed.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "第一人称相机真实按键事件与位移：默认速度、Shift加速和释放、失焦停止及组合归一化；不创建GUI或GPU上下文。"
-    },
-    {
-      "path": "packages/viewer/test/gaussian-first-camera.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "无外部标记：离线纯逻辑 + 真实 three 数学。验证首相机位姿由文件坐标标记与真实 matrixWorld（放置/旋转/缩放）导出、退化/非有限拒绝；openDefaultView 对唯一已识别实体的默认机位（含 entityId 与多实体歧义回退）不调用 bbox 中心；wrapSourceCoordinates 的 v2 Rx(−90) 与显式 sourceTransform/已烘焙优先；auto 画质仅对已识别高精场景提上限且用户显式画质与软件渲染优先。使用显式 WebGL 替身读数，不创建真实 GUI/GPU。"
-    },
-    {
       "path": "script/administrator-engine.test.ts",
       "declaredRunner": "plain",
       "markers": [],
@@ -2255,6 +3113,13 @@
       ],
       "decision": "exclude",
       "reason": "not-run：需要 Blender 可执行与实例（blender）"
+    },
+    {
+      "path": "script/browser-patch-composition.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "E27 精确三补丁postimage组合正负例；复制自己的只读源码至临时目录，不修改SDK或共享缓存，无网络/Host"
     },
     {
       "path": "script/creative-tool-install-catalog.test.ts",
@@ -2362,6 +3227,34 @@
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
+      "path": "script/guest-model-patch.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "固定227→d756 guest签定源码版本升级/幂等、改源码/缺文件/改完整patch/改增量/改manifest/混合态拒绝；仅读当前自有SDK源复制至mkdtemp，绝不修改真实SDK、无Host/模型/网络"
+    },
+    {
+      "path": "script/guest-own-provider-patch.test.mjs",
+      "declaredRunner": "node:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "d756后继七源/二十文件完整Own/Root合法增量与二次幂等、源码改字/旧组合改字/缺件/签名/混合态拒；仅复制自有源至临时目录，无Host或网络"
+    },
+    {
+      "path": "script/guest-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "游客路径、装配与env隔离，临时目录/合成父env与真实纯配置函数，无GPU/Host/模型/外网"
+    },
+    {
+      "path": "script/link-upstream.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Alpha5 固定 SDK 与产品 workspace 唯一实例的离线依赖解析、冷依赖安装后的幂等链接、已登记 cache 归属及外部未知链接保护；只在自有临时目录测试，不联网、不读取凭据、不启动物理或生产服务。"
+    },
+    {
       "path": "script/managed-provider-discovery.test.ts",
       "declaredRunner": "node:test",
       "markers": [],
@@ -2388,6 +3281,20 @@
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "script/policy-cpu-runtime.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "独立CPU策略解释器解析、Host路径过滤和已有安装器离线路由/managed收尾；真实安装独立验收。"
+    },
+    {
+      "path": "script/prepare-viewer-test-assets.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "A08 依赖供给：固定7件真实离线缓存复用、缺件/坏LICENSE/坏目标拒绝，临时自有目录无网络回退。"
     },
     {
       "path": "script/release-gate.test.ts",
@@ -2440,13 +3347,6 @@
       "reason": "原生 runtimePaths/ensureWorkspaceMapping/SceneOperations 在唯一临时树验证布局与 fail-closed 检查；CLI --ci 不读取开发运行根，仅读取仓库素材/源码/构建物，不启动 Host、安装 provider 或联网。"
     },
     {
-      "path": "packages/lyapunov-shell/test/viewer-feedback-content.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "2026-09-29: synthetic scene/window fixtures use native Inbox, attachment storage and pi-ai request conversion to check actual image bytes, pins, session/revision ownership, cancellation and size errors; no live model or desktop."
-    },
-    {
       "path": "script/verify-packs-symlink.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -2454,592 +3354,39 @@
       "reason": "临时目录文件与 symlink 的遍历、路径约束及 checksum 回归，不改真实能力包。"
     },
     {
-      "path": "packages/lyapunov-shell/test/scene-node-controls.test.tsx",
+      "path": "packages/viewer/test/placement-ghost.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "A05：真实场景CAS下删除导入子树、显隐与素材回收/恢复；失败和会话变更不误报提交。"
+      "reason": "V10-08/38：真实 THREE 图 + SceneViewer 原型的放置 ghost 所有权/材质/清理回归，不建 WebGL、不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
-      "path": "packages/viewer/test/entity-visibility.test.ts",
+      "path": "packages/scene-kit/test/asset-placement-preview.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "A05：Three对象真实父子显隐、灯可见性与资源不重加载。"
+      "reason": "V10-08：真实 GLB/Panda 资源上的只读放置预览，Scene/物理零写入，本地夹具不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
-      "path": "packages/scene-kit/test/scene-package-import.test.ts",
+      "path": "packages/lyapunov-shell/test/asset-preview-resource.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "A05：自包含工程正规CAS导入、原始来源元数据、缺件一次拒绝和尺寸保留。"
+      "reason": "V10-08：预览媒体路由按 session+resourceId/version 授权，越界/错版本/跨会话拒绝，本地 temp 根不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
-      "path": "packages/lyapunov-shell/test/collision-frame-request.test.ts",
+      "path": "packages/lyapunov-shell/test/scene-focus.test.tsx",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "A05：实际碰撞首几何/后位姿的窄请求、session绑定和无选择/非法选项明确拒绝。"
+      "reason": "V10 Scene focus 真实 jsdom 接线：宽窗入口/窄窗首次自动/手动退出不抢回，viewer/HTTP 替身不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     },
     {
-      "path": "packages/viewer/test/collision-topology.test.ts",
+      "path": "packages/lyapunov-shell/test/domain-command-card-dom.test.tsx",
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "A05：真实引擎已编译形状到Three几何与世界位姿、选择/代际/版本清理。"
-    },
-    {
-      "path": "packages/sim-mujoco/test/collision-topology.test.ts",
-      "declaredRunner": "node:test",
-      "markers": [
-        "realmodel"
-      ],
-      "decision": "exclude",
-      "reason": "A05：真实MuJoCo NDJSON RPC需本机SDK，单独明确运行并记录，默认离线CI不冒充已验。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/latest-control-queue.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A05：原生连续关节目标首末合并、停止清队列、错误和迟到结果不回填。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/physics-test-space.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A05：物理任务卡只认明确测试kind、保留既有引擎装配合同和正确world options。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/web-fetch-failure.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "离线原生Tools/Web/PTC消费者，provider与ready均受控；覆盖可用/未知/不可用搜索建议，保原类别和地址/取消边界，不发起回退网络或真实收费。"
-    },
-    {
-      "path": "packages/policy-registry/test/load-state.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "策略四类状态与真实模型依赖预检，固定本地夹具，不联网不动作。"
-    },
-    {
-      "path": "packages/policy-registry/test/robot-download.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "统一下载清单、固定来源字节、本地复用和首错误回退，本地fetch夹具，不使用产品鉴权。"
-    },
-    {
-      "path": "packages/policy-registry/test/local-policy-file.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "明确本地权重格式的有界只读检查，不执行未知权重。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/policy-library-panel.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "策略VLA原生侧栏命令顺序、分类与失败展示，只验证声明范围内的静态和端口行为。"
-    },
-    {
-      "path": "packages/policy-registry/test/g1-23-75.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "固定75观测/23关节映射、真实IMU重力/驱动字段、重复地面拒绝及错误权重阻断；合成帧仅证契约，真实权重行走与停止另有原生独立验收。"
-    },
-    {
-      "path": "script/policy-cpu-runtime.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "独立CPU策略解释器解析、Host路径过滤和已有安装器离线路由/managed收尾；真实安装独立验收。"
-    },
-    {
-      "path": "packages/policy-registry/test/g1-local-reuse.smoke.ts",
-      "declaredRunner": "plain",
-      "markers": [],
-      "decision": "exclude",
-      "reason": "普通脚本需固定299424B真实权重fixture，缺少时明确失败；主控独立运行并核实际六项幂等读回，默认六条纯契约仍include。"
-    },
-    {
-      "path": "packages/scene-kit/test/legacy-resource-source.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R006：真实临时 ResourceLibrary/SceneStore 旧引用来源恢复、原件缺失/字节变化拒绝、正常CAS历史与幂等；不读用户目录或网络。"
-    },
-    {
-      "path": "packages/asset-bake/test/pointcloud-bake.smoke.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A06 R011 真实算法与MuJoCo外部SDK用例；明确指定既有Python单独运行，不跳过或用离线结果冒充。"
-    },
-    {
-      "path": "packages/asset-bake/test/pointcloud-bake.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A06 R011 真实Node ToolRegistry/Jobs与既有Python、搬移dist外部验收；命令行指定输出/Python/plugin，不属于默认离线用例。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R005：生命周期单次初始化、首帧/代次、取消、失败不loop、状态渲染；固定隔离port夹具，不冒真实SDK。"
-    },
-    {
-      "path": "packages/scene-kit/test/scene-ptc-input.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R008：真实run_code调度与ToolRegistry输入flat/nested严格边界；PTC程序执行器夹具不冒真实Node外部执行。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/domain-instance-projection.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R007：四域共用当前Scene真实资源实例根投影，核旧版本、显隐与未放置状态；SSR仅证明控件输出，最终桌面操作另验。"
-    },
-    {
-      "path": "packages/lyapunov-api-client/test/search-client.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "真实ToolRegistry/web_search与Peiri中央provider的隔离HTTP fixture；不读取供应商key、不联网或收费，覆盖一次请求/缺会话/未配置/错误响应。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/brand-welcome.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "R-019：仓内真实PNG字节/深浅欢迎组件、短句一次选择与稳定身份、Linux desktop名称配对；离线SSR与源码接线，不触碰登录、账号、联网或当前窗口。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/desktop-locale-activation.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha4：真实Cordis注入边界与Electron桥接分支的locale激活；离线临时Context，不触碰账号、模型、网络或用户窗口。"
-    },
-    {
-      "path": "packages/robot-workflows/test/flight-controller.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R018：真实观察/映射/来源/世界绑定的无SDK合同；实际原生飞行与GUI另验。"
-    },
-    {
-      "path": "packages/robot-workflows/test/flight-native.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A06 R018明确已有MuJoCo/Python、官方模型外部夹具，主控单独运行，不skip。"
-    },
-    {
-      "path": "packages/robot-workflows/test/flight-tools.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A06 R018真实Tool/Command/Jobs与既有MuJoCo外部验收，需指定输出/Python与已构建插件。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/flight-panel.dom.fixture.tsx",
-      "declaredRunner": "plain",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A06 R018实际Electron DOM夹具，明确display与build，命令为控件参数替身，不冒真实物理。"
-    },
-    {
-      "path": "packages/scene-kit/test/physics-binding.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R009：真实GLB层级矩阵规范化、同版本碰撞绑定及已有配置/CAS拒绝，真实派生/引擎另验。"
-    },
-    {
-      "path": "packages/scene-kit/test/geometry-source-contract.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06 R013/R014：OBJ/FBX分类与登记转换同源、真实临时OBJ/MTL路径和缺件拒绝、MAX明确转换要求；3 pass/13 expect，只使用仓内逻辑/临时文件，无Blender、网络或模型依赖。"
-    },
-    {
-      "path": "packages/lyapunov-workspace/test/geometry-import.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "blender",
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "外部未运行：A06 R013/R014真实Blender转换OBJ/FBX/纹理副本、搬移原目录、warm缓存与MuJoCo碰撞；实际plain脚本，需要输出/原件夹具目录参数及既有Blender/MuJoCo Python，不计默认离线通过。"
-    },
-    {
-      "path": "packages/lyapunov-workspace/test/geometry-workspace.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "blender",
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "外部未运行：A06 R013/R014真实Node24 transform-types、ToolRegistry/Commands、回环HTTP、Blender、副本闭包、跨会话/readOnly和保存重开；实际plain脚本需输出/原件夹具目录参数与已有SDK/Blender，单独验收。"
-    },
-    {
-      "path": "packages/viewer/test/material-render.fixture.ts",
-      "declaredRunner": "plain",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "外部未运行：A06 R013/R014实际浏览器DOM/WebGL材质像素、纹理UV和骨骼归属读取；plain浏览器entry需Bun构建及sandbox Electron/本地素材服务，裸bun无DOM不能冒充执行，通过需另收真实渲染回执。"
-    },
-    {
-      "path": "packages/scene-kit/test/physics-state.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06共同物理：真实临时Scene/CAS固定动态、质量与重力/碰撞开关保留、历史保存重开、不同几何替换与原字节不变；5 pass/27 expect，纯本地文件/逻辑，无SDK进程或GPU。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/physics-controls.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A06物理产品入口：同world/generation/revision/frame读回、机器人只读、固定/质量/用途、初始化重叠提示与单CAS同步/取消；16 pass/83 expect，SSR/回调与隔离port，不代签GUI或原生物理。"
-    },
-    {
-      "path": "packages/sim-isaac/test/scene-camera-mount.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "外部未运行：R015真实pxr USD装配、实际worker/adapter AST挂载与同帧标定/拒绝事务；bun:test声明，需明确LYAPUNOV_ISAAC_PY或已有Isaac Python中的pxr，缺环境明确失败，无skip。已独立3 pass/17 expect仅证明CPU USD/源码层，不代表Kit/PhysX/RTX/GUI；默认离线不计通过。"
-    },
-    {
-      "path": "packages/desktop/test/exit-coordinator.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "纯退出生命周期：取消/并发单次flush-stop-close、保存失败、update/system和有界错误回执；仅注入回调，不启动Electron或Host"
-    },
-    {
-      "path": "packages/desktop/test/guest-controller.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "真实账户控制器的游客/迟到验证生命周期，使用假store/fetcher/host，无账号/网络/收费请求"
-    },
-    {
-      "path": "packages/desktop/test/workspace-boot-recovery.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha4：真实DOM启动标记的原生失败返回/重试、成功dispose与清理；临时DOM，无账号、模型、网络或用户窗口。"
-    },
-    {
-      "path": "packages/desktop/test/guest-credentials.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "同原生credentials seam的游客transport内存provider；仅Context与假grant，拒模型引用，不读凭据文件或环境"
-    },
-    {
-      "path": "script/guest-runtime.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "游客路径、装配与env隔离，临时目录/合成父env与真实纯配置函数，无GPU/Host/模型/外网"
-    },
-    {
-      "path": "packages/policy-registry/test/local-policy-source.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08登记包根与裸文件来源负例：未知目录不扫描，自声明哈希不能冒固定75来源；本地临时文件，不网络/推理/动作。"
-    },
-    {
-      "path": "packages/policy-registry/test/runtime.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08有限managed/显式策略解释器与Sourcekind依赖选择负例；临时探针报文替身，不下载/真实SDK/推理/GPU或动作，真实Host/native另验。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/manual-events.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F5：真实SDK Commands追加原run/done、gesture投影稳定一节点、跨scope/Stop/late done及公共隐私/模型null、完整目标限位与SSR禁提交。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/manual-gesture.dom.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F5：现有私有SDK jsdom纯合成DOM，真实React pointer-up.final target/settle/gesture ID和scope取消；无桌面、浏览器、Kit/GPU或网络。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/import-purpose.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F1：实际React用途控件/显式导入选项与本地记录映射，纯离线，不烘焙原件/不出网。"
-    },
-    {
-      "path": "packages/lyapunov-workspace/test/native-document-exit.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 C6/F6：实际FileDocument草稿/保存冲突与退出参与者，假fetch、临时文件，无Host/账户/外网。"
-    },
-    {
-      "path": "packages/lyapunov-workspace/test/native-files-patch.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 C6：固定基线补丁正向、二次精确幂等、本体/未知源码拒绝；临时目录与git，仅仅读已固定SDK。"
-    },
-    {
-      "path": "packages/scene-kit/test/collision-reference-lifecycle.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F1：真实Resource/Scene CAS迁移、版本/缓存身份/终态/旧unsafe拒绝；两个真实小GLB算法CPU用例需显式解释器，没有时单列skip不当通过。"
-    },
-    {
-      "path": "packages/viewer/test/observer-mode.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F3/F4：真实Viewer原型/Three/Orbit/FrameProjection与合成canvas/gizmo，统一退出、稳定编辑ACK和scope，无WebGL/GUI/GPU。"
-    },
-    {
-      "path": "packages/desktop/test/browser-root.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "E27 纯关闭分类、代次/操作UUID元信息与真实Browser结构mock释放负例；临时自有文件和mock，不启Chrome/GUI或网络"
-    },
-    {
-      "path": "script/browser-patch-composition.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "E27 精确三补丁postimage组合正负例；复制自己的只读源码至临时目录，不修改SDK或共享缓存，无网络/Host"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/reconcile-command-http.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F1：真实Scope/Session/CommandRegistry与本机HTTP机器投影、跨会话/缺资源/隐私负例，无模型/供应商/GPU。"
-    },
-    {
-      "path": "packages/viewer/test/animation-reference.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 E26：静态同版本源参考、明确视觉试播与停止恢复、未知轴/单位/版本负例；Three与合成对象离线，无WebGL/Host/GPU。"
-    },
-    {
-      "path": "packages/lyapunov-api-client/test/search-readiness-http.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F7/G8：真实localhost已认证能力DTO、same-intent与只读恢复桥，无供应商、中央真实账务或凭据外传。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/execution-graph-native.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F5：原生Session/Agent/Tools/JobRegistry与同代观察/Stop/交接，合成Adapter离线无真实模型或GPU。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/execution-graph.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F5：原生历史只读投影、图像ContentBlock、真实归属与unknown进展门，纯离线。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/model-diagnostic-http.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F5：真实localhost typed SSE/未知费用与原生retry负例，无外网或收费。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/animation-controls.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 E26：实际SSR控件与共用动画handler，默认静止/明确视觉试播/恢复，合成Viewer，无GPU或真实世界。"
-    },
-    {
-      "path": "script/prepare-viewer-test-assets.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 依赖供给：固定7件真实离线缓存复用、缺件/坏LICENSE/坏目标拒绝，临时自有目录无网络回退。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/physics-binding-settings.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F1：实际SSR绑定参数、显式全域采样/精度预算、过限和策略限制，纯离线。"
-    },
-    {
-      "path": "packages/scene-kit/test/physicalization-budget-contract.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A08 F1：真实Resource/Scope/HTTP参数、缓存身份与预算、算法公开进度及失败收尾，小件/临时根，无外网/Kit/GPU。"
-    },
-    {
-      "path": "script/guest-model-patch.test.mjs",
-      "declaredRunner": "node:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "固定227→d756 guest签定源码版本升级/幂等、改源码/缺文件/改完整patch/改增量/改manifest/混合态拒绝；仅读当前自有SDK源复制至mkdtemp，绝不修改真实SDK、无Host/模型/网络"
-    },
-    {
-      "path": "packages/desktop/test/guest-own-provider.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "游客真实原生settings/credentials/默认选择与adapter→自有localhost假模型、独立重开持久化及产品URL/route/discovery/redirect零请求负例；无真实模型/Billing/GUI"
-    },
-    {
-      "path": "packages/policy-registry/test/guest-services.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "游客owner拒packs/robot-download与产品metadata，保本地工具登记；mock fetch计数和Job计数均0，无网络"
-    },
-    {
-      "path": "script/guest-own-provider-patch.test.mjs",
-      "declaredRunner": "node:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "d756后继七源/二十文件完整Own/Root合法增量与二次幂等、源码改字/旧组合改字/缺件/签名/混合态拒；仅复制自有源至临时目录，无Host或网络"
-    },
-    {
-      "path": "packages/scene-kit/test/infinite-ground.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "011：Scene无限地面创建、锁定、显隐、CAS删除与历史、首次物理入口和UI locale的离线检查。"
-    },
-    {
-      "path": "packages/sim-contract/test/infinite-ground-runtime.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "not-run：需要明确指定已有MuJoCo/Newton CPU解释器；逐引擎实测无限地面远域接触、隐藏、删除及重开负对照和原生去重。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/robot-camera-installation.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "A09-010：既有Scene安装操作的结构化位置/normal/up/FOV、真实命中祖先与同帧body FK锚点、局部安装不改机器人、Viewer原点锁位/朝向/FOV草稿/ACK/退出和readonly导航检查；使用Three实际数学/场景图与原型，不联网、不启动SDK或GPU。"
-    },
-    {
-      "path": "packages/sim-mujoco/test/urdf-camera-installation.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "A09-010外部相机验收：需明确LYAPUNOV_MUJOCO_PYTHON与离屏GL；实际MuJoCo3.13解析URDF Gazebo sensor、完整原件标定、Scene body相机共存、RGB-D像素/深度及FOV恢复。缺环境明确失败、不skip；主控需独立执行，默认离线不计通过。"
-    },
-    {
-      "path": "script/link-upstream.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha5 固定 SDK 与产品 workspace 唯一实例的离线依赖解析、冷依赖安装后的幂等链接、已登记 cache 归属及外部未知链接保护；只在自有临时目录测试，不联网、不读取凭据、不启动物理或生产服务。"
-    },
-    {
-      "path": "packages/lyapunov-terminal/test/rc2-terminal.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha5 原生 RC2 Terminal 的离线 Inbox、V4工具消息、同源URL及原生 RemoteStream 的首锚点/断流/恢复测试；仅内存流和临时上下文，不连接真实远端、不调用模型、不读取凭据或启动物理。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/entity-editor-exit.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha6.2退出：现成SDK jsdom/真实React EntityEditor+WorkSurface跨Object-Scene-关闭/取消选择、临时SceneStore CAS/历史磁盘、原ExitCoordinator；未提交稿/冲突Return-Retry-Force、在途单写、选择归属注销、clean/unknown。隐藏常驻仅编辑器，物理面板按原需卸载。仅本地逻辑/临时文件，无模型/网络/引擎进程，非VM实际退出证明。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/plugin-marketplace.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "只读原生MCP/技能目录projection、合法路径发现、真实React DOM搜索/类型/可用性/详情/关联选择与原配置委托；本地临时文件与localhost夹具，不下载、不访问模型/平台Billing、不启动客户Blender或Unity。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/robot-library.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "机器人库薄投影与原资源库登记重开去重、许可阻断；最小本地闭包，不联网、不运行机器人、不代表真实UI验收。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/viewer-context-menu.test.tsx",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "2026-10-09: real DOM bilingual viewer menu and original workspace manifest write/readback with structured entity/resource provenance; no live model or desktop."
-    },
-    {
-      "path": "packages/sim-mujoco/test/native-deformable.test.ts",
-      "declaredRunner": "node:test",
-      "markers": [
-        "envgate"
-      ],
-      "decision": "exclude",
-      "reason": "not-run：需要原生 MuJoCo 3.13 worker 与 LYAPUNOV_MUJOCO_PYTHON 指定的本机解释器（envgate）；默认离线 CI 不供给此环境，需单独明确执行；缺解释器时跳过，不记为原生运行通过。"
-    },
-    {
-      "path": "packages/sim-newton/test/camera.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Newton 原生 CPU 相机模块回归：射线 RGB、米制轴向深度、挂载外参与同一步读取；沿既有 Newton 无外部标记分类纳入。所选解释器（LYAPUNOV_NEWTON_PYTHON，未设置则候选 .runtime/newton-env/bin/python）不存在时明确跳过，跳过不记为原生运行通过；最终 worker 消费链另行验收。"
-    },
-    {
-      "path": "packages/lyapunov-shell/test/project-open.test.ts",
-      "declaredRunner": "bun:test",
-      "markers": [],
-      "decision": "include",
-      "reason": "Alpha8 工程重开：真实 SceneOperations 验证显式副本保留同 ID 冲突保护、原场景与资源，错误传播。离线临时目录。"
+      "reason": "V10 DomainCommandCard DOM：被动成功读取静默、失败可见，SSR 纯逻辑不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
     }
   ]
 }

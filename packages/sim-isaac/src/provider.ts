@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
-import { SimError, type SimWorlds, type SimAction, type WorldOptions, type ObservationSelection, type StopSelection, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions } from '../../sim-contract/src/index.ts'
+import { SimError, type SimWorlds, type SimAction, type WorldOptions, type ObservationSelection, type StopSelection, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions, type LidarScanOptions, type FreezeSelection, type FreezeReceipt } from '../../sim-contract/src/index.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt } from '../../lyapunov-contracts/src/types.ts'
 export interface IsaacConfig {
   pythonPath?: string; workerPath?: string; cacheRoot?: string; physicsDevice?: 'cpu' | 'cuda:0'; rendering?: 'none' | 'rtx'
@@ -259,6 +259,8 @@ export class IsaacProvider implements SimWorlds {
   }
   async execute(worldId:string,action:SimAction,signal?:AbortSignal){const i=this.instance(worldId);i.handle={...i.handle,status:'running'};try{const receipt=await i.process.execute(worldId,action,signal);this.remember(receipt);return receipt}finally{if(i.handle.status==='running')i.handle={...i.handle,status:'ready'}}}
   stop(worldId:string,selection:StopSelection={}){return this.instance(worldId,true).process.stop(worldId,selection)}
+  freeze(worldId:string,selection:FreezeSelection={}):Promise<FreezeReceipt>{return this.instance(worldId,true).process.freeze(worldId,selection)}
+  restore(worldId:string,selection:FreezeSelection={}):Promise<FreezeReceipt>{return this.instance(worldId,true).process.restore(worldId,selection)}
   subscribeFrames(worldId:string,listener:(frame:Frame)=>void){return this.instance(worldId).process.subscribeFrames(worldId,listener)}
   // `geomGroups` 只在 MuJoCo 的 RGB/深度渲染里被真实消费（sim-mujoco worker 的 display_groups）；
   // Isaac 的 USD/RTX 采集没有显示组概念，worker.capture 从不读该字段。原来是原样转发=静默忽略，
@@ -282,6 +284,13 @@ export class IsaacProvider implements SimWorlds {
   projectAnnotation(worldId:string,options:CameraAnnotationOptions){return this.instance(worldId).process.projectAnnotation(worldId,options)}
   /** 把已记录的真实采集导出为自包含数据集（samples.jsonl+标定+标注+真实 PNG/NPY 副本）。 */
   exportCameraDataset(worldId:string,options:CameraDatasetExportOptions){return this.instance(worldId).process.exportCameraDataset(worldId,options)}
+  /**
+   * P7A：Isaac 侧接真实的 PhysX 场景查询 `raycast_closest`（主控已在本机 CPU/no-render 用三项已知几何
+   * 独立核过真实 Kit：floor/target/miss 距离与预期一致）。传感器位姿仍取命名相机的真实 world pose，
+   * 网格/几何来源是 PhysX collider；没有 raycast_closest 的运行时按 `SENSOR_UNAVAILABLE` 拒绝。
+   * 与 MuJoCo 同一 `SimWorlds.scanLidar` 形状，便于上层同一套比较与产物链。
+   */
+  scanLidar(worldId:string,options:LidarScanOptions){return this.instance(worldId).process.scanLidar(worldId,options)}
   assist(worldId:string,options:{mode:'attach'|'release';expectedGeneration:number;objectId:string;robotId?:string;anchorBody?:string}){return this.instance(worldId).process.assist(worldId,options)}
   hasSceneWorld(sceneId:string){if(this.closed)throw new SimError('PROVIDER_CLOSED','Provider已关闭');return [...this.instances.values()].some(i=>i.process.hasSceneWorld(sceneId))}
   async listWorlds(){if(this.closed)throw new SimError('PROVIDER_CLOSED','Provider已关闭');const worlds=await Promise.all([...this.instances.values()].map(i=>i.process.listWorlds()));return worlds.flat()}

@@ -2,7 +2,7 @@
   "packId": "franka_panda",
   "version": "2026.09.22",
   "family": "arm",
-  "asset": { "modelEntry": "asset/franka_emika_panda/scene.xml", "model": "asset/franka_emika_panda/panda.xml" },
+  "asset": { "modelEntry": "asset/franka_emika_panda/scene.xml", "model": "asset/franka_emika_panda/panda.xml", "preview": "asset/franka_emika_panda/panda.png" },
   "pieces": {
     "asset": { "ref": "ASSET_STAGING_MANIFEST.json#franka_panda" },
     "context": "ready",

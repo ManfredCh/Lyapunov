@@ -439,6 +439,24 @@ describe("① 装载器分派：按登记声明，不按 `file` 串", () => {
     expect(unsupported.every(text => text.includes(RESOURCE_TOKEN_PREFIX))).toBe(true)
     expect(countMeshes(visual)).toBe(0)
   })
+  test("投影+接线后的部件目录仍以真实 body 身份给出（file 串被换成标记也不影响身份）", async () => {
+    const { entity, candidates } = officialEntity()
+    const rewired = rewireProjected(project(entity))
+    const declarations = new Map(pairDocumentAssets(rewired).map(row => [row.file, row.mimeType]))
+    const requested: string[] = []
+    const visual = await buildRobotVisual({ ...robotInput(rewired), assetDeclarations: declarations }, tokenResolver(candidates, requested))
+    // 部件身份来自文档的真实 body 层级（下标路径），与 mesh 的 `file` 是不是不可逆标记无关。
+    expect(visual.parts.every((part: any) => part.kind === "body" && part.path.length >= 1)).toBe(true)
+    expect(new Set(visual.parts.map((part: any) => part.partId)).size).toBe(visual.parts.length)
+    for (const part of visual.parts) expect(visual.bodyNode(part.name)).toBe(part.node)
+    // 炸开只写展示组：原生 body 世界矩阵不变。
+    visual.setExplodeSpread(0.5)
+    visual.parts.forEach((part: any) => { part.node.updateWorldMatrix(true, false) })
+    const before = visual.bodyNode(visual.parts[0]!.name)!.matrixWorld.elements.slice()
+    visual.setExplodeSpread(0)
+    expect([...visual.bodyNode(visual.parts[0]!.name)!.matrixWorld.elements]).toEqual(before)
+  })
+
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

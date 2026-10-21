@@ -21,10 +21,11 @@ import {
   DISPLAY_DEFAULT_FAR_M, DISPLAY_DEFAULT_NEAR_M,
 } from "../src/camera-frustum.ts"
 import {
-  fovYFromIntrinsics, normalizeIntrinsics, principalPointOffsetPx, projectToPixel, projectionMatrixFromIntrinsics, quaternionAngleDeg,
+  cameraForward, cameraUpAxis, fovYFromIntrinsics, normalizeIntrinsics, principalPointOffsetPx, projectToPixel, projectionMatrixFromIntrinsics, quaternionAngleDeg,
   rotateByQuaternion, scaleIntrinsics,
   type ViewerCameraIntrinsics, type ViewerQuat, type ViewerVec3,
 } from "../src/camera-view.ts"
+import {captureRoutePathSegments, captureRouteStationGeometry, captureRouteStationsGeometry} from "../src/capture-route-display.ts"
 
 /** 图像四角＝像素网格真实边缘（像素中心口径：首/末像素中心在 0 与 W−1，边缘在 ±0.5；投影矩阵 NDC ±1 落点）。 */
 const CORNER_PIXELS = (k: ViewerCameraIntrinsics): Array<[number, number]> => [
@@ -416,4 +417,86 @@ describe("intrinsicsFromFovy 与 fovy 往返（fovy 路径与 worker 同式）",
     expect(() => intrinsicsFromFovy(180)).toThrow(/CAMERA_FRUSTUM_INVALID/)
     expect(() => intrinsicsFromFovy("45")).toThrow(/CAMERA_FRUSTUM_INVALID/)
   })
+})
+
+// ── V9 返修一：Capture 路线站点的显示几何（真实 pose/镜头、缺站不猜） ──
+const near=(a:number,b:number,digits=9)=>expect(Math.abs(a-b)).toBeLessThan(1e-9)
+const qx90:ViewerQuat=[Math.SQRT1_2,0,0,Math.SQRT1_2]
+const K={fx:600,fy:610,cx:319,cy:239,width:640,height:480}
+
+describe("路线站点显示几何",()=>{
+ it("真实四元数决定前向/up，像平面中心按同一四元数投到世界系",()=>{
+  const station=captureRouteStationGeometry({key:"A-Front",position:[1,2,3],quaternion:qx90,fovDeg:60,frameWidth:1920,frameHeight:1080},0,0)
+  expect(station.available).toBe(true)
+  expect(station.selected).toBe(true)
+  expect(station.intrinsicsSource).toBe("fov-derived")
+  near(station.forward![0],cameraForward(qx90)[0]);near(station.forward![1],cameraForward(qx90)[1]);near(station.forward![2],cameraForward(qx90)[2])
+  near(station.up![0],cameraUpAxis(qx90)[0]);near(station.up![1],cameraUpAxis(qx90)[1]);near(station.up![2],cameraUpAxis(qx90)[2])
+  // qx90 把相机 −Z（前向）转到 +Y，把相机 +Y（up）转到 +Z。
+  near(station.forward![1],1);near(station.up![2],1)
+  expect(station.frustum).toBeDefined()
+  expect(station.frustum!.lineVertices.length).toBeGreaterThan(0)
+  // 像平面中心是相机局部 [0,0,-imagePlaneM] 经同一 quaternion 变换后的世界点。
+  const local=[0,0,-station.frustum!.imagePlaneM] as [number,number,number]
+  const world=rotateByQuaternion(qx90,local)
+  near(station.frustum!.imageCenter[0],local[0]);near(station.frustum!.imageCenter[2],local[2])
+  near(world[1],station.frustum!.imagePlaneM)
+ })
+ it("声明内参优先；fov 只在没有内参时派生",()=>{
+  const declared=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],intrinsics:K,fovDeg:40,frameWidth:1920,frameHeight:800},0)
+  expect(declared.intrinsicsSource).toBe("declared")
+  expect(declared.intrinsics!.fx).toBe(600)
+  const derived=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],fovDeg:40,frameWidth:1920,frameHeight:1080},0)
+  expect(derived.intrinsicsSource).toBe("fov-derived")
+ })
+ it("fov-only 站点按真实 Capture 画幅投影（2.4:1 而非 4:3），坏/缺画幅不画",()=>{
+  const wide=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],fovDeg:60,frameWidth:1920,frameHeight:800},0)
+  expect(wide.available).toBe(true)
+  expect(wide.intrinsicsSource).toBe("fov-derived")
+  expect(wide.intrinsics!.width).toBe(1920)
+  expect(wide.intrinsics!.height).toBe(800)
+  // 垂直 fov 不变，像平面宽高比必须来自真实画幅（1920/800），不能回落成 640/480。
+  expect(wide.frustum!.imageWidth/wide.frustum!.imageHeight).toBeCloseTo(1920/800,9)
+  const tall=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],fovDeg:60,frameWidth:800,frameHeight:1920},0)
+  expect(tall.available).toBe(true)
+  expect(tall.frustum!.imageWidth/tall.frustum!.imageHeight).toBeCloseTo(800/1920,9)
+  for(const frame of [{frameWidth:0,frameHeight:800},{frameWidth:1920,frameHeight:-1},{frameWidth:1920.5,frameHeight:800},{frameWidth:1920,frameHeight:Number.NaN}]){
+   const bad=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],fovDeg:60,...frame},0)
+   expect(bad.available).toBe(false)
+   expect(bad.intrinsics).toBeUndefined()
+   expect(bad.unavailableReason).toContain("画幅")
+  }
+  const missing=captureRouteStationGeometry({position:[0,0,0],quaternion:[0,0,0,1],fovDeg:60},0)
+  expect(missing.available).toBe(false)
+  expect(missing.unavailableReason).toContain("画幅")
+ })
+ it("缺失/坏机位按原始索引标不可用，不从数组里平铺掉；路径在缺口断开",()=>{
+  const stations=captureRouteStationsGeometry([
+   {key:"missing"},
+   {key:"valid-a",position:[1,0,0],quaternion:[0,0,0,1],fovDeg:50,frameWidth:1920,frameHeight:1080},
+   {key:"valid-b",position:[2,0,0],quaternion:[0,0,0,1],fovDeg:50,frameWidth:1920,frameHeight:1080},
+  ],2)
+  expect(stations.map(row=>row.available)).toEqual([false,true,true])
+  expect(stations.map(row=>row.selected)).toEqual([false,false,true])
+  expect(stations[0]!.position).toBeUndefined()
+  expect(stations[0]!.unavailableReason).toContain("位置")
+  const segments=captureRoutePathSegments(stations)
+  expect(segments).toHaveLength(1)
+  expect(segments[0]).toEqual([[1,0,0],[2,0,0]])
+ })
+ it("坏四元数/缺镜头不猜 identity/默认 fov",()=>{
+  const badQuat=captureRouteStationGeometry({position:[1,2,3],quaternion:[0,0,0,0],fovDeg:50},0)
+  expect(badQuat.available).toBe(false)
+  expect(badQuat.quaternion).toBeUndefined()
+  expect(badQuat.position).toBeUndefined()
+  const noLens=captureRouteStationGeometry({position:[1,2,3],quaternion:[0,0,0,1]},0)
+  expect(noLens.available).toBe(false)
+  expect(noLens.intrinsicsSource).toBe("none")
+ })
+ it("显式 unavailable 即使带齐位姿也不画",()=>{
+  const station=captureRouteStationGeometry({position:[1,2,3],quaternion:[0,0,0,1],fovDeg:50,available:false,unavailableReason:"引擎拒绝"},0)
+  expect(station.available).toBe(false)
+  expect(station.frustum).toBeUndefined()
+  expect(station.unavailableReason).toBe("引擎拒绝")
+ })
 })

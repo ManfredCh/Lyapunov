@@ -88,3 +88,11 @@ test('显式splat真实派生可绑定，不隐式造盒或动态质量',()=>{
  expect(plan.rootEntityId).toBe('splat')
  expect(plan.patch[0]!.op==='update'&&plan.patch[0]!.changes.components!.rigidBody).toEqual({type:'static'})
 })
+test('D2 未命名GLB网格默认英文Node N，GLTF明确命名（含中文）原样保留',()=>{
+ const parsed:any={kind:'mesh',metadata:{nodes:[{mesh:0},{name:'Explicit Mesh',mesh:1},{name:'节点 7',mesh:2}],scenes:[{nodes:[0,1,2]}],scene:0}}
+ const entities=glbEntities(ref,parsed,'root','box'),byNode=(index:number)=>entities.find(entity=>entity.entityId===`root:node:${index}`)!
+ expect(byNode(0).name).toBe('Node 0')
+ expect(byNode(1).name).toBe('Explicit Mesh')
+ expect(byNode(2).name).toBe('节点 7')
+ expect(entities.some(entity=>entity.name==='节点 0')).toBe(false)
+})

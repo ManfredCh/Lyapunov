@@ -9,7 +9,8 @@ import {robotDownloadPreflight,type RobotDownloadManifest} from './robot-downloa
 /** 用户明确选中的目录只读根 bundle.json，不递归查找或从机器人原件推断策略。 */
 export async function resolveLocalPolicyPath(path:string):Promise<string>{
  const selected=resolve(path)
- let info;try{info=await stat(selected)}catch{throw Error('POLICY_FILE_MISSING: 选定文件或目录不存在')}
+ // 把**实际提交的路径**回显出来：这条错误以前只说"不存在"，用户/验收方无法判断是自己打错了还是路径被截断。
+ let info;try{info=await stat(selected)}catch{throw Error(`POLICY_FILE_MISSING: 选定文件或目录不存在：${selected}`)}
  if(info.isDirectory()){
   const bundle=join(selected,'bundle.json')
   try{if((await stat(bundle)).isFile())return bundle}catch{}

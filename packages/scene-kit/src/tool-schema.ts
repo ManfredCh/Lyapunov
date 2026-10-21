@@ -102,6 +102,23 @@ export const sceneMountParameters:ParameterSchemaSpec={input:{
 }}
 
 /**
+ * asset_placement_preview：只读放置预览。与 scene_mount 共用落点/底面对齐与纯节点构造，但不提交
+ * Scene、不调度物理化、不写资源版本；返回临时 Entity 数据与资源身份（含本次 placement token）。
+ */
+export const assetPlacementPreviewParameters:ParameterSchemaSpec={input:{
+  type:'object',required:true,additionalProperties:false,
+  description:"Read-only placement preview for a registered resource version. Reuses the same resource verification, mount transform/bottom alignment and pure node construction as scene_mount, but never commits a Scene, schedules physicalization or writes a resource version. Returns temporary Entity data plus resource identity for Viewer authoring only; the UI must still use scene_mount to confirm once.",
+  properties:{
+    sceneId:{type:'string',required:true,description:"Current Scene ID; echoed back for stale-result ownership."},
+    resourceId:{type:'string',required:true,description:"Stable resource ID returned by asset_list."},
+    version:{type:'integer',required:true,description:"Exact registered resource version to preview."},
+    token:{type:'string',description:"Opaque placement token from this authoring gesture, echoed for ownership checks."},
+    transform:{type:'object',additionalProperties:false,properties:{position:{type:'array',items:{type:'number'}},quaternion:{type:'array',items:{type:'number'}},scale:{type:'array',items:{type:'number'}}}},
+    alignBottomToSurface:{type:'boolean',description:"Same semantics as scene_mount: default true aligns the bounding-box bottom to transform.position; false places the model origin exactly."},
+  },
+}}
+
+/**
  * scene_replace_resource 是局部替换（ENV-29）的唯一入口，字段按 operations.replaceResource 的实际读取面
  * 写全：sceneId/entityId/expectedRevision/resourceId/version/fromResourceId/fromVersion。
  * fromResourceId/fromVersion 只用于"实体上有多条不同引用时指定要换掉哪一条"，不是通用来源版本查询；

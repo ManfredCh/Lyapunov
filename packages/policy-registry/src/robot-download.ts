@@ -6,7 +6,7 @@ import { policyDirectory, policyFile, type PolicyManifest } from './source.ts'
 import { IMPLEMENTED_POLICY_ADAPTERS } from './pack-contract.ts'
 import { G1_23_75_ID } from './g1-23-75.ts'
 export function registeredRobotDownloads() {
-  return IMPLEMENTED_POLICY_ADAPTERS.map(a => ({ adapterId: a.id, packId:a.packs[0], label: `${a.packs.join('/')} · ${a.id === G1_23_75_ID ? '23DOF / 75 维观测 · ' : a.id === 'unitree-g1-12dof-v1' ? '12DOF · ' : ''}${a.adapter}`, identity: { provider: 'github' as const, modelId: a.modelId, revision: a.revision }, files: [...a.requires.files, ...(a.requires.prefixes ?? []).map(p => p + '/')], downloadModelId: a.id === 'unitree-g1-12dof-v1' ? 'unitree_g1_12dof_motion' : a.id === G1_23_75_ID ? 'unitree_g1_23dof_75obs' : a.id==='wtw-go1-torchscript-v1'?'unitree_go1_wtw_control':a.id==='inria-go2-onnx-v1'?'unitree_go2_onnx_control':null, fallback: { action: 'web_fetch', retryable: false, urls: a.requires.files.map(path => ({ path, url: `${a.id===G1_23_75_ID?'https://media.githubusercontent.com/media/':'https://raw.githubusercontent.com/'}${a.modelId}/${a.revision}/${path}` })), directories: (a.requires.prefixes ?? []).map(path => ({ path, url: `https://github.com/${a.modelId}/tree/${a.revision}/${path}` })) } }))
+  return IMPLEMENTED_POLICY_ADAPTERS.map(a => ({ adapterId: a.id, packId:a.packs[0], label: `${a.packs.join('/')} · ${a.id === G1_23_75_ID ? '23DOF / 75-dim observation · ' : a.id === 'unitree-g1-12dof-v1' ? '12DOF · ' : ''}${a.adapter}`, identity: { provider: 'github' as const, modelId: a.modelId, revision: a.revision }, files: [...a.requires.files, ...(a.requires.prefixes ?? []).map(p => p + '/')], downloadModelId: a.id === 'unitree-g1-12dof-v1' ? 'unitree_g1_12dof_motion' : a.id === G1_23_75_ID ? 'unitree_g1_23dof_75obs' : a.id==='wtw-go1-torchscript-v1'?'unitree_go1_wtw_control':a.id==='inria-go2-onnx-v1'?'unitree_go2_onnx_control':null, fallback: { action: 'web_fetch', retryable: false, urls: a.requires.files.map(path => ({ path, url: `${a.id===G1_23_75_ID?'https://media.githubusercontent.com/media/':'https://raw.githubusercontent.com/'}${a.modelId}/${a.revision}/${path}` })), directories: (a.requires.prefixes ?? []).map(path => ({ path, url: `https://github.com/${a.modelId}/tree/${a.revision}/${path}` })) } }))
 }
 
 export type RobotDownloadFetcher=(url:string,init?:RequestInit)=>Promise<Response>
@@ -56,37 +56,37 @@ function fileSource(f:RobotDownloadFile,m:RobotDownloadManifest):{revision:strin
 
 export function robotDownloadManifest(value:unknown,options:{assetOnly?:boolean;localRegistration?:boolean}={}):RobotDownloadManifest {
   let m=value as RobotDownloadManifest
-  if(!m||!['g1-policy-download/v1','robot-download/v1'].includes(m.schema))fail('ROBOT_DOWNLOAD_PROTOCOL_UNSUPPORTED','下载清单协议未登记')
+  if(!m||!['g1-policy-download/v1','robot-download/v1'].includes(m.schema))fail('ROBOT_DOWNLOAD_PROTOCOL_UNSUPPORTED','Download manifest protocol not registered')
   const ready=options.assetOnly?m.pieceReadiness?.asset:m
   // 明确本地登记只读来源与格式；完整包的联网分发仍要求 downloadReady/许可原规则。
-  if(!options.localRegistration&&(ready?.downloadReady!==true||options.assetOnly&&(ready.missingFiles?.length||ready.missingLicense?.length))){const missing={missingFiles:Array.isArray(ready?.missingFiles)?ready.missingFiles.filter(p=>typeof p==='string'):[],missingLicense:Array.isArray(ready?.missingLicense)?ready.missingLicense.filter(p=>typeof p==='string'):[]};throw new RobotDownloadFailure('ROBOT_DOWNLOAD_NOT_READY',`该具体型号${options.assetOnly?'本体资产':'完整包'}尚无已核下载闭包${missing.missingFiles.length?'；缺文件：'+missing.missingFiles.join('、'):''}${missing.missingLicense.length?'；许可未核：'+missing.missingLicense.join('、')+'，补齐许可前不取件':''}`,m.fallback,missing)}
-  if(m.serverSideInference!==false)fail('ROBOT_DOWNLOAD_LOCAL_INFERENCE_REQUIRED','此接口只分发文件，本地推理')
-  if(m.source?.provider!=='github'||!/^[\w.-]+\/[\w.-]+$/.test(m.source.modelId)||!/^[a-f0-9]{40}$/.test(m.source.resolvedRevision))fail('ROBOT_DOWNLOAD_SOURCE_INVALID','需要固定公开来源与完整 revision')
+  if(!options.localRegistration&&(ready?.downloadReady!==true||options.assetOnly&&(ready.missingFiles?.length||ready.missingLicense?.length))){const missing={missingFiles:Array.isArray(ready?.missingFiles)?ready.missingFiles.filter(p=>typeof p==='string'):[],missingLicense:Array.isArray(ready?.missingLicense)?ready.missingLicense.filter(p=>typeof p==='string'):[]};throw new RobotDownloadFailure('ROBOT_DOWNLOAD_NOT_READY',`This exact model has no verified download closure for ${options.assetOnly?'the body asset':'the complete bundle'}${missing.missingFiles.length?'; missing files: '+missing.missingFiles.join(', '):''}${missing.missingLicense.length?'; license unchecked: '+missing.missingLicense.join(', ')+', no fetch before the license is resolved':''}`,m.fallback,missing)}
+  if(m.serverSideInference!==false)fail('ROBOT_DOWNLOAD_LOCAL_INFERENCE_REQUIRED','This endpoint only distributes files; inference is local')
+  if(m.source?.provider!=='github'||!/^[\w.-]+\/[\w.-]+$/.test(m.source.modelId)||!/^[a-f0-9]{40}$/.test(m.source.resolvedRevision))fail('ROBOT_DOWNLOAD_SOURCE_INVALID','A pinned public source and a full revision are required')
   const expected=registeredRobotDownloads().find(row=>row.downloadModelId===m.packId)
-  if(options.assetOnly&&!expected)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','本体下载型号未登记；不能用基础T0别名替代具体SKU',m.fallback)
-  if(expected&&m.adapter?.id!==expected.adapterId)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','下载型号与适配器身份不一致',m.fallback)
-  if(expected&&(m.source.modelId!==expected.identity.modelId||m.source.resolvedRevision!==expected.identity.revision))fail('ROBOT_DOWNLOAD_PREFLIGHT_BLOCKED','下载型号与固定来源身份不一致',m.fallback)
+  if(options.assetOnly&&!expected)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','Body download model not registered; a base T0 alias cannot stand in for the exact SKU',m.fallback)
+  if(expected&&m.adapter?.id!==expected.adapterId)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','Download model and adapter identity differ',m.fallback)
+  if(expected&&(m.source.modelId!==expected.identity.modelId||m.source.resolvedRevision!==expected.identity.revision))fail('ROBOT_DOWNLOAD_PREFLIGHT_BLOCKED','Download model and pinned-source identity differ',m.fallback)
   if(m.adapter){const a=m.adapter
-    if(!Number.isSafeInteger(a.controlledJointCount)||a.controlledJointCount<1||!Array.isArray(a.jointNames)||a.jointNames.length!==a.controlledJointCount||new Set(a.jointNames).size!==a.jointNames.length||a.jointNames.some(n=>typeof n!=='string'||!n)||!Array.isArray(a.registeredAdapterRequires)||!Array.isArray(a.deploymentClosure))fail('ROBOT_DOWNLOAD_ADAPTER_INVALID','适配器关节与依赖闭包声明无效',m.fallback)
-    if(a.id===G1_23_75_ID&&(a.controlledJointCount!==23||a.observationDim!==undefined&&a.observationDim!==75||a.actionDim!==undefined&&a.actionDim!==23)||a.id==='unitree-g1-12dof-v1'&&a.controlledJointCount!==12)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','G1 12/23DOF 与 75 维契约不能混用',m.fallback)
+    if(!Number.isSafeInteger(a.controlledJointCount)||a.controlledJointCount<1||!Array.isArray(a.jointNames)||a.jointNames.length!==a.controlledJointCount||new Set(a.jointNames).size!==a.jointNames.length||a.jointNames.some(n=>typeof n!=='string'||!n)||!Array.isArray(a.registeredAdapterRequires)||!Array.isArray(a.deploymentClosure))fail('ROBOT_DOWNLOAD_ADAPTER_INVALID','Adapter joints or dependency closure declaration is invalid',m.fallback)
+    if(a.id===G1_23_75_ID&&(a.controlledJointCount!==23||a.observationDim!==undefined&&a.observationDim!==75||a.actionDim!==undefined&&a.actionDim!==23)||a.id==='unitree-g1-12dof-v1'&&a.controlledJointCount!==12)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','G1 12/23DOF and the 75-dim contract cannot be mixed',m.fallback)
   }
   if(options.assetOnly){
     const model=m.assetModel,expectedAsset=assetSource(m.adapter?.id)
-    if(!model||!expectedAsset||model.source?.repository!==expectedAsset.repository||model.source.revision!==expectedAsset.revision||model.source.path!==expectedAsset.path||model.sha256!==expectedAsset.sha256||model.source.url!==`https://raw.githubusercontent.com/${expectedAsset.repository}/${expectedAsset.revision}/${expectedAsset.path}`||policyFile(model.entry)!==model.entry||!Array.isArray(model.controlledJointNames)||model.controlledJointNames.length!==m.adapter?.controlledJointCount||new Set(model.controlledJointNames).size!==model.controlledJointNames.length||model.controlledJointNames.some(n=>!m.adapter!.jointNames.includes(n)))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','本体入口、固定原件身份或关节合同不符',m.fallback)
+    if(!model||!expectedAsset||model.source?.repository!==expectedAsset.repository||model.source.revision!==expectedAsset.revision||model.source.path!==expectedAsset.path||model.sha256!==expectedAsset.sha256||model.source.url!==`https://raw.githubusercontent.com/${expectedAsset.repository}/${expectedAsset.revision}/${expectedAsset.path}`||policyFile(model.entry)!==model.entry||!Array.isArray(model.controlledJointNames)||model.controlledJointNames.length!==m.adapter?.controlledJointCount||new Set(model.controlledJointNames).size!==model.controlledJointNames.length||model.controlledJointNames.some(n=>!m.adapter!.jointNames.includes(n)))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','Body entry, pinned original identity or joint contract mismatch',m.fallback)
     m={...m,files:Array.isArray(m.files)?m.files.filter(f=>f.piece==='asset'):[]}
   }
-  if(!Array.isArray(m.files)||!m.files.length)fail('ROBOT_DOWNLOAD_FILES_EMPTY','清单缺少文件')
+  if(!Array.isArray(m.files)||!m.files.length)fail('ROBOT_DOWNLOAD_FILES_EMPTY','Manifest has no files')
   const names=new Set<string>()
   for(const f of m.files){
-    if(policyFile(f.path)!==f.path||names.has(f.path)||!Number.isSafeInteger(f.bytes)||f.bytes<0||!/^[a-f0-9]{64}$/.test(f.sha256))fail('ROBOT_DOWNLOAD_FILE_INVALID','文件清单路径、大小或校验身份无效')
-    if(f.gitBlob!=null&&!/^[a-f0-9]{40}$/.test(f.gitBlob))fail('ROBOT_DOWNLOAD_FILE_INVALID','Git blob 身份无效')
-    if(f.sourceGitBlob!==undefined&&!/^[a-f0-9]{40}$/.test(f.sourceGitBlob))fail('ROBOT_DOWNLOAD_FILE_INVALID','来源 pointer Git blob 身份无效')
+    if(policyFile(f.path)!==f.path||names.has(f.path)||!Number.isSafeInteger(f.bytes)||f.bytes<0||!/^[a-f0-9]{64}$/.test(f.sha256))fail('ROBOT_DOWNLOAD_FILE_INVALID','File manifest path, size or verification identity is invalid')
+    if(f.gitBlob!=null&&!/^[a-f0-9]{40}$/.test(f.gitBlob))fail('ROBOT_DOWNLOAD_FILE_INVALID','Git blob identity is invalid')
+    if(f.sourceGitBlob!==undefined&&!/^[a-f0-9]{40}$/.test(f.sourceGitBlob))fail('ROBOT_DOWNLOAD_FILE_INVALID','Source pointer Git blob identity is invalid')
     if(options.assetOnly){const companion=assetSource(m.adapter?.id)!;if(f.sourceRepository!==companion.repository||f.sourceRevision!==companion.revision||typeof f.sourcePath!=='string'||!(f.sourcePath.startsWith(posix.dirname(companion.path)+'/')||f.sourcePath==='LICENSE')||/\.(?:pt|pth|jit|onnx|safetensors|pkl)$/i.test(f.sourcePath))fail('ROBOT_DOWNLOAD_ASSET_FILE_INVALID',`asset件不是登记本体来源：${f.path}；不能把策略重标成asset绕过许可`,m.fallback)}
     fileSource(f,m)
     names.add(f.path)
   }
-  if(m.files.reduce((n,f)=>n+f.bytes,0)>128*1024*1024)fail('ROBOT_DOWNLOAD_PACKAGE_TOO_LARGE','此入口仅处理小型机器人资源包，不下载大型 SDK')
-  if(options.assetOnly&&!m.files.some(f=>f.path===m.assetModel!.entry&&f.sha256===m.assetModel!.sha256&&f.sourceRepository===m.assetModel!.source.repository&&f.sourceRevision===m.assetModel!.source.revision&&f.sourcePath===m.assetModel!.source.path))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','本体原件不在asset文件清单内',m.fallback)
+  if(m.files.reduce((n,f)=>n+f.bytes,0)>128*1024*1024)fail('ROBOT_DOWNLOAD_PACKAGE_TOO_LARGE','This endpoint only handles small robot resource packs, not large SDKs')
+  if(options.assetOnly&&!m.files.some(f=>f.path===m.assetModel!.entry&&f.sha256===m.assetModel!.sha256&&f.sourceRepository===m.assetModel!.source.repository&&f.sourceRevision===m.assetModel!.source.revision&&f.sourcePath===m.assetModel!.source.path))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','Body original is not in the asset file manifest',m.fallback)
   return m
 }
 
@@ -108,23 +108,23 @@ export function robotDownloadPreflight(m:RobotDownloadManifest,input:{runtimeMod
 
 export async function installRobotDownload(input:{endpoint:string;modelId:string;token?:string;dataDirectory:string;signal:AbortSignal;fetcher?:RobotDownloadFetcher;localFiles?:ReadonlyMap<string,string>;timeoutMs?:number;manifest?:RobotDownloadManifest;pieces?:['asset']}) {
   const assetOnly=input.pieces?.length===1&&input.pieces[0]==='asset'
-  if(input.pieces&&!assetOnly)fail('ROBOT_DOWNLOAD_PIECES_INVALID','仅允许明确asset单件；完整包沿既有asset+policy入口')
+  if(input.pieces&&!assetOnly)fail('ROBOT_DOWNLOAD_PIECES_INVALID','Only an explicit single asset is allowed; complete bundles use the existing asset+policy path')
   const endpoint=new URL(input.endpoint)
-  if(endpoint.protocol!=='https:'&&!(endpoint.protocol==='http:'&&['localhost','127.0.0.1'].includes(endpoint.hostname)))fail('ROBOT_DOWNLOAD_ENDPOINT_INVALID','下载端点需 HTTPS 或本机测试地址')
+  if(endpoint.protocol!=='https:'&&!(endpoint.protocol==='http:'&&['localhost','127.0.0.1'].includes(endpoint.hostname)))fail('ROBOT_DOWNLOAD_ENDPOINT_INVALID','Download endpoint must be HTTPS or a local test address')
   const base=input.endpoint.replace(/\/$/,'')
-  if(!/^[a-z0-9_.-]+$/i.test(input.modelId))fail('ROBOT_DOWNLOAD_MODEL_ID_INVALID','必须明确选择具体型号')
+  if(!/^[a-z0-9_.-]+$/i.test(input.modelId))fail('ROBOT_DOWNLOAD_MODEL_ID_INVALID','An exact model must be selected explicitly')
   const registeredModel=registeredRobotDownloads().find(row=>row.downloadModelId===input.modelId),bodySource=assetOnly?assetSource(registeredModel?.adapterId):undefined
   let fallback=input.manifest?.fallback??(bodySource?{action:'web_fetch',retryable:false,urls:[{path:bodySource.path,url:`https://raw.githubusercontent.com/${bodySource.repository}/${bodySource.revision}/${bodySource.path}`}],directories:[{path:posix.dirname(bodySource.path),url:`https://github.com/${bodySource.repository}/tree/${bodySource.revision}/${posix.dirname(bodySource.path)}`}]}:registeredModel?.fallback)
-  if(!input.token&&!input.manifest)fail('ROBOT_DOWNLOAD_AUTH_REQUIRED','联网取件需要既有产品账号鉴权',fallback)
+  if(!input.token&&!input.manifest)fail('ROBOT_DOWNLOAD_AUTH_REQUIRED','Network fetch requires existing product-account authentication',fallback)
   const fetcher=input.fetcher??fetch
   const responseBody=async(r:Response,kind:'json'|'bytes'):Promise<any>=>{
     let timer:ReturnType<typeof setTimeout>|undefined
     try{return await Promise.race([kind==='json'?r.json():r.arrayBuffer(),new Promise((_,reject)=>{timer=setTimeout(()=>{void r.body?.cancel().catch(()=>{});reject(new RobotDownloadFailure('ROBOT_DOWNLOAD_BODY_TIMEOUT','读取下载响应超时；不重试，转准确来源 web_fetch',fallback))},input.timeoutMs??10000)})])}
-    catch(e){if(e instanceof RobotDownloadFailure)throw e;fail('ROBOT_DOWNLOAD_RESPONSE_INVALID','下载响应不是有效清单或完整字节',fallback)}finally{if(timer)clearTimeout(timer)}
+    catch(e){if(e instanceof RobotDownloadFailure)throw e;fail('ROBOT_DOWNLOAD_RESPONSE_INVALID','Download response is not a valid manifest or complete bytes',fallback)}finally{if(timer)clearTimeout(timer)}
   }
   const request=async(path:string,init:RequestInit={}):Promise<Response>=>{
     input.signal.throwIfAborted()
-    if(!input.token)fail('ROBOT_DOWNLOAD_AUTH_REQUIRED','联网取件需要既有产品账号鉴权',fallback)
+    if(!input.token)fail('ROBOT_DOWNLOAD_AUTH_REQUIRED','Network fetch requires existing product-account authentication',fallback)
     const signal=AbortSignal.any([input.signal,AbortSignal.timeout(input.timeoutMs??10000)])
     try{
       const r=await fetcher(`${base}${path}`,{...init,signal,headers:{...init.headers,Authorization:`Bearer ${input.token}`}})
@@ -137,11 +137,11 @@ export async function installRobotDownload(input:{endpoint:string;modelId:string
         throw new RobotDownloadFailure(code,detail,error?.fallback??body?.fallback??fallback,missing)
       }
       return r
-    }catch(e){if(e instanceof RobotDownloadFailure)throw e;if(input.signal.aborted)throw input.signal.reason;return fail('ROBOT_DOWNLOAD_TRANSPORT_FAILED','取件连接失败或超时；不重试，转准确来源 web_fetch',fallback)}
+    }catch(e){if(e instanceof RobotDownloadFailure)throw e;if(input.signal.aborted)throw input.signal.reason;return fail('ROBOT_DOWNLOAD_TRANSPORT_FAILED','Fetch connection failed or timed out; no retry, switch to exact-source web_fetch',fallback)}
   }
   const m=robotDownloadManifest(input.manifest??await responseBody(await request(`/models/${encodeURIComponent(input.modelId)}/manifest`),'json'),{assetOnly})
   fallback=m.fallback
-  if(m.packId!==input.modelId)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','清单型号与请求不同',m.fallback)
+  if(m.packId!==input.modelId)fail('ROBOT_DOWNLOAD_MODEL_MISMATCH','Manifest model differs from the request',m.fallback)
   const checked=assetOnly?undefined:robotDownloadPreflight(m)
   if(checked&&(checked.missingFiles.length||checked.unknownAdapter||checked.wrongSource))fail('ROBOT_DOWNLOAD_PREFLIGHT_BLOCKED',JSON.stringify(checked),m.fallback)
   // 来源/型号已经核对后才补UI精确链接。不能把服务端rawBase对象覆盖登记链接后留下空列表，
@@ -164,8 +164,8 @@ export async function installRobotDownload(input:{endpoint:string;modelId:string
   if(pending.length){
     if(!input.token)fail('ROBOT_DOWNLOAD_LOCAL_BYTES_MISSING',JSON.stringify({missingFiles:pending.map(f=>f.path)}),m.fallback)
     const opened=await responseBody(await request('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({packId:m.packId,pieces:assetOnly?['asset']:['asset','policy']})}),'json') as {mountId:string;files:RobotDownloadFile[];assetModel?:RobotDownloadManifest['assetModel']}
-    if(!opened.mountId||!Array.isArray(opened.files))fail('ROBOT_DOWNLOAD_OPEN_INVALID','open 缺固定快照文件清单',m.fallback)
-    if(assetOnly&&!sameAssetModel(opened.assetModel,m.assetModel))fail('ROBOT_DOWNLOAD_OPEN_MISMATCH','open与manifest本体来源/关节身份不符',m.fallback)
+    if(!opened.mountId||!Array.isArray(opened.files))fail('ROBOT_DOWNLOAD_OPEN_INVALID','open is missing the pinned snapshot file manifest',m.fallback)
+    if(assetOnly&&!sameAssetModel(opened.assetModel,m.assetModel))fail('ROBOT_DOWNLOAD_OPEN_MISMATCH','open and manifest body source/joint identity differ',m.fallback)
     for(const f of pending){
       const listed=opened.files.find(x=>x.path===f.path)
       if(!listed||listed.bytes!==f.bytes||listed.sha256!==f.sha256)fail('ROBOT_DOWNLOAD_OPEN_MISMATCH',`快照身份与 manifest 不符：${f.path}`,m.fallback)
@@ -181,7 +181,7 @@ export async function installRobotDownload(input:{endpoint:string;modelId:string
   const xmlPath=assetOnly?m.assetModel!.entry:m.adapter?.modelEntry??pin?.requires.files.find(p=>p.endsWith('.xml'))
   const xmlData=xmlPath?staged.get(xmlPath):undefined
   if(xmlPath&&!xmlData)fail('ROBOT_DOWNLOAD_MODEL_DEPENDENCY_MISSING',`本体入口缺失：${xmlPath}`,m.fallback)
-  if(assetOnly){const actuator=xmlData!.toString('utf8').match(/<actuator>([\s\S]*?)<\/actuator>/)?.[1]??'',joints=[...actuator.matchAll(/\bjoint=["']([^"']+)["']/g)].map(x=>x[1]);if(joints.length!==m.assetModel!.controlledJointNames.length||joints.some((n,i)=>n!==m.assetModel!.controlledJointNames[i]))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','assetModel受控关节与真实XML顺序不符',m.fallback)}
+  if(assetOnly){const actuator=xmlData!.toString('utf8').match(/<actuator>([\s\S]*?)<\/actuator>/)?.[1]??'',joints=[...actuator.matchAll(/\bjoint=["']([^"']+)["']/g)].map(x=>x[1]);if(joints.length!==m.assetModel!.controlledJointNames.length||joints.some((n,i)=>n!==m.assetModel!.controlledJointNames[i]))fail('ROBOT_DOWNLOAD_ASSET_MODEL_INVALID','assetModel controlled joints do not match the real XML order',m.fallback)}
   const meshdir=xmlData?.toString('utf8').match(/<compiler[^>]*meshdir=["']([^"']+)["']/)?.[1]
   // 源 XML 可声明 meshes/；只去目录尾分隔符，原始相对段仍先过准入，不能让 join 吞掉 ..。
   const meshPrefix=xmlPath&&meshdir?posix.join(posix.dirname(policyFile(xmlPath)),policyFile(meshdir.replace(/\/+$/,''))):pin?.requires.prefixes?.[0]
@@ -190,7 +190,7 @@ export async function installRobotDownload(input:{endpoint:string;modelId:string
     const prefix=policyFile(meshPrefix.replace(/\/+$/,''))
     const dependencies=[...xml.matchAll(/<mesh[^>]*file=["']([^"']+)["']/g)].map(x=>{
       const path=policyFile(posix.join(prefix,policyFile(x[1])))
-      if(!path.startsWith(prefix+'/'))fail('ROBOT_DOWNLOAD_MODEL_DEPENDENCY_INVALID','网格依赖超出声明目录',m.fallback)
+      if(!path.startsWith(prefix+'/'))fail('ROBOT_DOWNLOAD_MODEL_DEPENDENCY_INVALID','Mesh dependency escapes the declared directory',m.fallback)
       return path
     })
     const missing=[...new Set(dependencies)].filter(p=>!staged.has(p))

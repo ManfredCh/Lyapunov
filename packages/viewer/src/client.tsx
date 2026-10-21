@@ -10,7 +10,7 @@
  * 这里只做再导出：viewer 的公开面仍是 `packages/viewer/src/index.ts` 那一套，行为零变化。
  */
 export { createViewer, SceneViewer, applyWorldPoses, WebGLUnavailableError } from "./index.ts"
-export type { ViewerOptions, ViewerDisplaySettings, ViewerViewState, ViewerObserverState, ViewerCameraAuthoringSample, ViewerCameraEdit, CollisionTopologyStatus } from "./index.ts"
+export type { ViewerOptions, ViewerDisplaySettings, ViewerViewState, ViewerObserverState, ViewerCameraAuthoringSample, ViewerCameraEdit, CollisionTopologyStatus, ViewerPart, ViewerPartSelection, PresentationCaptureFace, ViewerAssemblyGhostSpec, ViewerAssemblyGhostResult, ViewerAssemblyPreviewFace, ViewerParkingGhostSpec, ViewerParkingGhostResult, ViewerParkingPreviewFace, ViewerSurfaceMountPick, ViewerPlacementPreviewSpec, ViewerPlacementPreviewResult } from "./index.ts"
 export type { ViewerAnnotation, ViewerAnnotationAnchor } from "./annotations.ts"
 export { projectSceneCameraRigs, currentCameraFrame } from "./scene-camera-rigs.ts"
 

@@ -9,6 +9,11 @@ import { MuJoCoProvider, type MuJoCoConfig } from './provider.ts'
 export const name = 'lyapunov-sim-mujoco'
 export const inject: string[] = []
 export interface MuJoCoPluginConfig extends MuJoCoConfig {
+  /**
+   * 引擎要读的只读根：代码/SDK 根，以及场景资源根（worlds/assets/robots/cache、产品 packs）。
+   * 由宿主装配按数据布局给出；workspace-write 的 bwrap 会用空 tmpfs 遮住 /tmp，
+   * 启动接线只把这些声明过的根以只读挂回，不解开整个 /tmp。
+   */
   readOnlyRoots?: string[]
   /**
    * 本部署的产品会话产物父根（截图与录像存储，例如 captureRoot/recordingRoot）。只为**媒体中转**

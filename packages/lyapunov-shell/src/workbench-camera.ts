@@ -20,7 +20,7 @@
 import type { ViewerViewState } from "@lyapunov/viewer/client"
 import type { Entity, SceneCameraComponent, SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { intrinsicsFromFovy, mountLocalFrom, rigidPoseOf, type RigidPose } from "../../viewer/src/camera-frustum.ts"
-import { cameraForward, cameraRequestFromState, cameraUpAxis, fovYFromIntrinsics, MAX_CAMERA_NAME, normalizeIntrinsics, scaleIntrinsics, type NamedCamera, type ViewerCameraRequest, type ViewerQuat } from "../../viewer/src/camera-view.ts"
+import { cameraForward, cameraRequestFromState, cameraUpAxis, fovYFromIntrinsics, MAX_CAMERA_NAME, normalizeIntrinsics, scaleIntrinsics, type NamedCamera, type ViewerCameraIntrinsics, type ViewerCameraRequest, type ViewerQuat } from "../../viewer/src/camera-view.ts"
 /**
  * 命名相机的**格式面**原样再导出给界面用：界面（`workbench.tsx`）与工具（本模块）读写的是同一份
  * 解析/合成/增删函数，于是"界面存的"和"工具读的"不可能是两种形状。这里只是转口，不二次加工。
@@ -31,7 +31,7 @@ import { captureForObserver, requireDisplayedScene, type ObserveLoadState, type 
 
 /** camera_list 原生 body 读回，供明确选择挂载目标；不是模型名字预设表。 */
 export interface CameraMountBody { entityId: string; bodyName: string; bodyPath?: string; worldFromBody?: RigidPose; frameId?: string; stepIndex?: number }
-export interface SceneCameraDraft { name: string; position: string; quaternion: string; fovYDeg: string; width: string; height: string; near: string; far: string; parentEntityId: string; bodyName: string; intrinsics?: import('../../viewer/src/camera-view.ts').ViewerCameraIntrinsics }
+export interface SceneCameraDraft { name: string; position: string; quaternion: string; fovYDeg: string; width: string; height: string; near: string; far: string; parentEntityId: string; bodyName: string; intrinsics?: ViewerCameraIntrinsics }
 export function sceneCamerasOfScene(entities: readonly Entity[] | undefined): Array<{ entity: Entity; component: SceneCameraComponent }> {
   return (entities ?? []).flatMap(entity => {
     const camera = entity.components.camera
@@ -52,6 +52,19 @@ export function sceneCameraDraftOf(entity?: Entity): SceneCameraDraft {
     quaternion: (mount?.quaternionXyzw ?? entity?.transform.quaternion ?? [0, 0, 0, 1]).join(" "), fovYDeg: String(component?.fovYDeg ?? 50),
     width: String(component?.width ?? component?.intrinsics?.width ?? 640), height: String(component?.height ?? component?.intrinsics?.height ?? 480),
     near: String(component?.near ?? 0.01), far: String(component?.far ?? 100), parentEntityId: mount?.entityId ?? "", bodyName: mount?.bodyName ?? "", ...(component?.intrinsics?{intrinsics:component.intrinsics}:{}) }
+}
+/**
+ * 从当前画面新建相机时的像素 K：分辨率取 Scene 草稿的契约默认值（`sceneCameraDraftOf()` = 640×480），
+ * **不继承当前画布/视口像素**；FOV 是视角属性，仍由调用方从采样给出。
+ *
+ * `declared` 只接受相机**自己声明**的 K（`ViewerViewState.intrinsics`：只有 fov+aspect 装不下时才存在，
+ * 见 `cameraStateFromView`/`isPlainLens`）。自由观察相机的 `ViewerCameraMeasurement.intrinsics` 是画布测量值，
+ * 不应传进来。声明的 K 按默认分辨率等比缩放（保留 fovX/fovY 与主点占比），而不是把它的像素宽高当分辨率。
+ */
+export function sceneCameraLensAtDefaultResolution(fovYDeg: number, declared?: unknown): ViewerCameraIntrinsics {
+  const draft = sceneCameraDraftOf(), width = Number(draft.width), height = Number(draft.height)
+  if (declared === undefined) return intrinsicsFromFovy(fovYDeg, width, height)
+  return normalizeDraftLens({ ...draft, intrinsics: normalizeIntrinsics(declared) }, width, height, fovYDeg)!
 }
 /** 名称只用于给真实 body 加可读标签；不能由标签生成不存在的挂载点。 */
 export function cameraMountLabel(bodyName: string): { zh: string; en: string; priority: number } {
@@ -81,9 +94,11 @@ export function sceneCameraDraftAtBody(entity: Entity, bodies: readonly CameraMo
   if(!view)throw new Error('CAMERA_VIEW_REQUIRED: 挂载当前画面需要Viewer真实位姿，未创建body原点替代')
   const pose = mountLocalFrom({ positionM: view.position, quaternionXyzw: view.quaternion }, worldFromBody)
   const draft = sceneCameraDraftOf(), label = cameraMountLabel(bodyName)
+  // 与 cameraDraftFromSample 同一条镜头口径：视口像素不是相机分辨率；只有相机自己声明的 K 才按默认分辨率缩放采用。
+  const lens = view.intrinsics === undefined ? undefined : sceneCameraLensAtDefaultResolution(view.fovDeg !== undefined ? view.fovDeg : fovYFromIntrinsics(normalizeIntrinsics(view.intrinsics)), view.intrinsics)
   return { ...draft, name: `${entity.name || "机器人"} · ${label.zh}相机`.replaceAll("/", "·").slice(0, MAX_CAMERA_NAME),
     parentEntityId: entity.entityId, bodyName, position: pose.positionM.join(" "), quaternion: pose.quaternionXyzw.join(" "),
-    fovYDeg: view.fovDeg !== undefined ? String(view.fovDeg) : draft.fovYDeg, near:String(view.near??draft.near),far:String(view.far??draft.far),...(view.intrinsics?{intrinsics:view.intrinsics,width:String(view.intrinsics.width),height:String(view.intrinsics.height)}:{}) }
+    fovYDeg: view.fovDeg !== undefined ? String(view.fovDeg) : draft.fovYDeg, near:String(view.near??draft.near),far:String(view.far??draft.far),...(lens?{intrinsics:lens,width:String(lens.width),height:String(lens.height)}:{}) }
 }
 const cameraNumbers = (text: string, size: number): number[] => {
   const values = text.trim().split(/[\s,]+/).filter(Boolean).map(Number)

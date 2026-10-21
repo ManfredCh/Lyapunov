@@ -12,6 +12,8 @@ import { identityTransform, SCENE_COORDINATES, sceneCollisionAlignmentGate } fro
 import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 import { atomicJSON, fileTransaction, readJSON, safeId } from "./persistence.ts"
 import { glbEntities, localPath, parseAsset, robotVisual, sourceTransform, gaussianSourceTransform, assetBounds } from "./formats.ts"
+import { authorizedAssetIndex, robotDocumentAssetLocators, ROBOT_VISUAL_MIME_BY_EXTENSION, type AuthorizedAssetIndex } from "./robot-visual-assets.ts"
+import { resourceToken } from "../../lyapunov-contracts/src/product-paths.ts"
 import type {SourceTexturePolicy} from './geometry-source-deps.ts'
 import { compareGlbGeometry, glbGeometryFacts, type GlbGeometryFacts } from "./mesh-geometry.ts"
 import { resolveSceneLayout, type ResolvedSceneLayout, type SceneLayout } from "./layout.ts"
@@ -95,6 +97,70 @@ export function applySplatMountFacts(resource: ResourceRecord, components: Entit
     const alignment = sceneCollisionAlignmentGate({ binding: resource.sceneGeometryBinding })
     if (alignment.ok && components.collision === undefined) components.collision = { shape: "mesh", frame: "mujoco-z-up-meters", binding: alignment.binding } satisfies SceneMeshCollisionComponent
   }
+}
+
+/**
+ * 放置预览与正式挂载共用这一份“落点 → 真实实体 transform”换算：
+ * 显式 position + 默认底面对齐时用碰撞产物包围盒（没有则视觉 aabb）抬起，否则按模型原点。
+ * 预览只读调用它，不调度物理化、不写资源版本、不提交 Scene。
+ */
+async function resolveMountPlacement(resource: ResourceRecord, input: { transform?: Transform; alignBottomToSurface?: boolean }): Promise<{ resource: ResourceRecord; transform?: Transform }> {
+ let resolved = resource
+ let transform = input.transform ?? resource.mountTransform
+ if (input.alignBottomToSurface !== false && input.transform?.position && transform) {
+  // 旧登记版本只在已核原件闭包上重测本次 native bounds，不改库、原件或资源版本。
+  if (!resolved.physicalization?.collisionBounds && resolved.parsed.kind === 'robot' && ['urdf', 'mjcf'].includes(String(resolved.parsed.metadata.format)) && !resolved.parsed.metadata.aabb) {
+   const measured = await parseAsset(localPath(resolved.ref.original.uri), resolved.ref.source)
+   if (measured.kind !== 'robot' || measured.metadata.format !== resolved.parsed.metadata.format) throw Error(resolved.parsed.metadata.format === 'urdf' ? 'URDF_BOUNDS_SOURCE_FORMAT_MISMATCH' : 'MJCF_BOUNDS_SOURCE_FORMAT_MISMATCH')
+   // verify 与重读间也不得换原件或依赖；不将任意新几何元数据借给旧资源版本。
+   const expected = new Map(resolved.parsed.dependencies.map(d => [resolve(d.path), d.sha256]))
+   if (measured.dependencies.length !== expected.size || measured.dependencies.some(d => !d.sha256 || expected.get(resolve(d.path)) !== d.sha256)) throw Error('NATIVE_BOUNDS_SOURCE_CHANGED')
+   resolved = { ...resolved, parsed: { ...resolved.parsed, metadata: { ...resolved.parsed.metadata, ...measured.metadata } } }
+  }
+  // 落地对齐优先用碰撞产物包围盒（物理基准，含凸包/盒组真实外形）；物理化未完成或无产物时退回视觉 aabb。
+  const bounds = resolved.physicalization?.collisionBounds ?? assetBounds(resolved.parsed, resolved.ref.source, resolved.parsed.kind === "splat" ? effectiveSplatSourceTransform(resolved) : undefined)
+  if (!bounds) { const facts = resolved.parsed.metadata.boundsFacts as { issue?: string } | undefined; throw new Error(`PROTOTYPE_BOUNDS_UNAVAILABLE: 资源 ${resolved.ref.resourceId}@${resolved.ref.version} 没有可用的几何包围盒，默认的"底面贴到 position 高度"无法执行——造型/底面/尺度都不可判定，因此不把这份原型复制进场景（ENV-21：原型不通过不铺开）。可采取的动作：先核对原型原件（几何范围/底面/法线/材质/尺度）后重新导入；确实要按原点精确落位时显式传 alignBottomToSurface:false。${facts?.issue ? ' ' + facts.issue : ''}`) }
+  const matrix = new Matrix4().compose(new Vector3(), new Quaternion(...transform.quaternion), new Vector3(...transform.scale))
+  let lift = Infinity
+  for (const x of [bounds.min[0], bounds.max[0]]) for (const y of [bounds.min[1], bounds.max[1]]) for (const z of [bounds.min[2], bounds.max[2]]) lift = Math.min(lift, new Vector3(x, y, z).applyMatrix4(matrix).z)
+  transform = { ...transform, position: [transform.position[0], transform.position[1], transform.position[2] - lift] }
+ }
+ return { resource: resolved, transform }
+}
+
+/** 预览媒体候选：只来自这一条已登记资源版本的原件/表示与依赖闭包。 */
+function previewAssetCandidates(resource: ResourceRecord): string[] {
+ const out: string[] = []
+ for (const representation of [resource.ref.original, ...resource.ref.representations]) out.push(representation.uri)
+ for (const dependency of resource.parsed.dependencies) out.push(dependency.path, pathToFileURL(dependency.path).href)
+ return out
+}
+
+const ABSOLUTE_REFERENCE = /^([A-Za-z]:[\\/]|\/)/
+/**
+ * URDF 的 `<mesh filename>` 不在 MJCF 的 `document.asset` 段里：只对预览把已授权依赖换成标记，
+ * 并登记同一条表示（含 mimeType），否则标记没有真名后缀，Viewer 无法分派装载器。
+ */
+function rewriteUrdfMeshReferences(value: unknown, directory: string, authorized: AuthorizedAssetIndex, added: Array<{uri:string;mimeType:string;role:string}>): unknown {
+ if (Array.isArray(value)) return value.map(item => rewriteUrdfMeshReferences(item, directory, authorized, added))
+ if (!value || typeof value !== "object") return value
+ const source = value as Record<string, unknown>
+ const out: Record<string, unknown> = {}
+ for (const [key, item] of Object.entries(source)) {
+  if (key === "filename" && typeof item === "string" && item) {
+   let absolute: string | undefined
+   try { absolute = item.startsWith("file:") ? localPath(item) : ABSOLUTE_REFERENCE.test(item) ? resolve(item) : resolve(directory, item) } catch { absolute = undefined }
+   const candidate = absolute ? authorized.get(absolute) : undefined
+   const mimeType = ROBOT_VISUAL_MIME_BY_EXTENSION[item.slice(item.lastIndexOf(".")).toLowerCase()]
+   if (candidate && mimeType) {
+    if (!added.some(row => row.uri === candidate)) added.push({ uri: candidate, mimeType, role: "visual" })
+    out[key] = resourceToken(candidate)
+   } else out[key] = item
+   continue
+  }
+  out[key] = rewriteUrdfMeshReferences(item, directory, authorized, added)
+ }
+ return out
 }
 
 /**
@@ -813,28 +879,10 @@ export class SceneOperations {
     }
     const entityId = input.entityId ?? `entity_${randomUUID()}`
     let entities: Entity[]
-    let transform=input.transform??resource.mountTransform
-    if(input.alignBottomToSurface!==false&&input.transform?.position&&transform){
-      // 旧登记版本只在已核原件闭包上重测本次 native bounds，不改库、原件或资源版本。
-      if(!resource.physicalization?.collisionBounds&&resource.parsed.kind==='robot'&&['urdf','mjcf'].includes(String(resource.parsed.metadata.format))&&!resource.parsed.metadata.aabb){
-        const measured=await parseAsset(localPath(resource.ref.original.uri),resource.ref.source)
-        if(measured.kind!=='robot'||measured.metadata.format!==resource.parsed.metadata.format)throw Error(resource.parsed.metadata.format==='urdf'?'URDF_BOUNDS_SOURCE_FORMAT_MISMATCH':'MJCF_BOUNDS_SOURCE_FORMAT_MISMATCH')
-        // verify 与重读间也不得换原件或依赖；不将任意新几何元数据借给旧资源版本。
-        const expected=new Map(resource.parsed.dependencies.map(d=>[resolve(d.path),d.sha256]))
-        if(measured.dependencies.length!==expected.size||measured.dependencies.some(d=>!d.sha256||expected.get(resolve(d.path))!==d.sha256))throw Error('NATIVE_BOUNDS_SOURCE_CHANGED')
-        resource={...resource,parsed:{...resource.parsed,metadata:{...resource.parsed.metadata,...measured.metadata}}}
-      }
-      // 落地对齐优先用碰撞产物包围盒（物理基准，含凸包/盒组真实外形）；物理化未完成或无产物时退回视觉 aabb。
-      // 泼溅件现在也带 aabb（formats.ts 解码自身点云），落地对齐一视同仁；仍以碰撞产物包围盒优先。
-      // 已识别 splat 的视觉 aabb 必须与 applySplatMountFacts 写进 visual 的源坐标适配用同一矩阵
-      // （含显式 visualSourceTransform 与单位缩放），否则会出现"画面方向对、模型高度错"。
-      const bounds=resource.physicalization?.collisionBounds??assetBounds(resource.parsed,resource.ref.source,resource.parsed.kind==="splat"?effectiveSplatSourceTransform(resource):undefined)
-      if(!bounds){const facts=resource.parsed.metadata.boundsFacts as {issue?:string}|undefined;throw new Error(`PROTOTYPE_BOUNDS_UNAVAILABLE: 资源 ${input.resourceId}@${resource.ref.version} 没有可用的几何包围盒，默认的"底面贴到 position 高度"无法执行——造型/底面/尺度都不可判定，因此不把这份原型复制进场景（ENV-21：原型不通过不铺开）。可采取的动作：先核对原型原件（几何范围/底面/法线/材质/尺度）后重新导入；确实要按原点精确落位时显式传 alignBottomToSurface:false。${facts?.issue?' '+facts.issue:''}`)}
-      const matrix=new Matrix4().compose(new Vector3(),new Quaternion(...transform.quaternion),new Vector3(...transform.scale))
-      let lift=Infinity
-      for(const x of [bounds.min[0],bounds.max[0]])for(const y of [bounds.min[1],bounds.max[1]])for(const z of [bounds.min[2],bounds.max[2]])lift=Math.min(lift,new Vector3(x,y,z).applyMatrix4(matrix).z)
-      transform={...transform,position:[transform.position[0],transform.position[1],transform.position[2]-lift]}
-    }
+    // 预览与挂载共用同一份落点/底面对齐换算（见 `resolveMountPlacement`）。
+    const placement=await resolveMountPlacement(resource,{...(input.transform?{transform:input.transform}:{}),...(input.alignBottomToSurface!==undefined?{alignBottomToSurface:input.alignBottomToSurface}:{})})
+    resource=placement.resource
+    const transform=placement.transform
     const defaults = resource.componentDefaults ? structuredClone(resource.componentDefaults) : {}
     if (resource.parsed.kind === "mesh") {
       entities = glbEntities(resource.ref, resource.parsed, entityId, resource.name, transform)
@@ -870,6 +918,68 @@ export class SceneOperations {
   }
 
   /** 同一公开 SSOG 层：资源全部已登记/核对后，一次 CAS 挂一个组根及每块各一可视子实体。 */
+  /**
+   * 只读放置预览：用**与 `mount` 同一份**资源核对、落点/底面对齐和纯节点构造，返回临时 Entity
+   * 数据与资源身份；不调度物理化、不写资源版本、不提交 Scene、不创建 Scene 实体。
+   *
+   * 只构造 Viewer 能真实显示的 mesh/robot；splat/原生 USD/source 明确 Unavailable，不用虚构
+   * 立方体冒充。返回的实体里 MJCF/URDF 文档引用已按该版本依赖闭包换成媒体标记，供预览媒体路由
+   * 在同一份授权集合里等值取回。
+   */
+  async previewMount(input: { sceneId: string; resourceId: string; version?: number; token?: string; transform?: Transform; alignBottomToSurface?: boolean }): Promise<{
+   status: "PREVIEW" | "UNAVAILABLE"; reason?: string; sceneId: string; token?: string; resourceId: string; version: number; name: string; kind: string; mimeType?: string;
+   transform?: Transform; entities?: Entity[]
+  }> {
+   const resource = await this.resources.get(input.resourceId, input.version)
+   if (resource.ref.resourceId !== input.resourceId || input.version !== undefined && resource.ref.version !== input.version) throw new Error("PHYSICS_BIND_RESOURCE_MISMATCH")
+   if (resource.deletedAt) throw new Error("RESOURCE_IN_TRASH")
+   const verification = await this.resources.verify(input.resourceId, resource.ref.version)
+   if (!verification.valid) throw new Error(`RESOURCE_UNAVAILABLE: ${JSON.stringify(verification)}`)
+   const identity = { sceneId: input.sceneId, ...(input.token ? { token: input.token } : {}), resourceId: resource.ref.resourceId, version: resource.ref.version, name: resource.name, kind: resource.parsed.kind, ...(resource.parsed.mimeType ? { mimeType: resource.parsed.mimeType } : {}) }
+   const mimeType = String(resource.parsed.mimeType ?? resource.ref.original.mimeType ?? "")
+   if (resource.parsed.kind === "splat") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_SPLAT_UNSUPPORTED", ...identity }
+   if (resource.parsed.kind === "source") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_SOURCE_UNSUPPORTED", ...identity }
+   if (mimeType === "model/vnd.usd" || resource.parsed.kind === "robot" && mimeType === "model/vnd.usd") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_NATIVE_USD_UNSUPPORTED", ...identity }
+   if (resource.parsed.kind !== "mesh" && resource.parsed.kind !== "robot") return { status: "UNAVAILABLE", reason: `ASSET_PREVIEW_KIND_UNSUPPORTED: ${resource.parsed.kind}`, ...identity }
+   const placement = await resolveMountPlacement(resource, { ...(input.transform ? { transform: input.transform } : {}), ...(input.alignBottomToSurface !== undefined ? { alignBottomToSurface: input.alignBottomToSurface } : {}) })
+   const previewResource = placement.resource
+   const transform = placement.transform ?? identityTransform()
+   const entityId = `preview_${randomUUID()}`
+   let entities: Entity[]
+   if (previewResource.parsed.kind === "mesh") {
+    entities = glbEntities(previewResource.ref, previewResource.parsed, entityId, previewResource.name, transform)
+    const defaults = previewResource.componentDefaults ? structuredClone(previewResource.componentDefaults) : {}
+    if (Object.keys(defaults).length) entities[0]!.components = { ...entities[0]!.components, ...defaults }
+   } else {
+    const sourcePath = localPath(previewResource.ref.original.uri)
+    const components: Entity["components"] = { visual: { kind: "robot", robot: await robotVisual(sourcePath) } }
+    if (previewResource.parsed.metadata.format === "mjcf") components.mujoco = { sourcePath }
+    components.articulation = { source: previewResource.ref.original, format: previewResource.parsed.metadata.format }
+    entities = [{ entityId, name: previewResource.name, transform, resources: [previewResource.ref], components }]
+   }
+   // 文档内引用只对这条资源版本已核的依赖闭包发媒体标记；路由仍按同一候选集等值匹配。
+   const authorized = authorizedAssetIndex(previewAssetCandidates(previewResource))
+   const robotDirectory = dirname(localPath(previewResource.ref.original.uri))
+   entities = entities.map(entity => {
+    const robot = entity.components.visual?.robot as { format?: unknown; document?: unknown } | undefined
+    if (robot?.format === "urdf" && robot.document && typeof robot.document === "object") {
+     const added: Array<{uri:string;mimeType:string;role:string}> = []
+     const document = rewriteUrdfMeshReferences(robot.document, robotDirectory, authorized, added)
+     const owner = entity.resources.findIndex(ref => [ref.original, ...ref.representations].some(rep => ["application/x-urdf+xml", "application/x-mjcf+xml"].includes(rep.mimeType)))
+     const resources = entity.resources.map((ref, index) => {
+      if (index !== (owner >= 0 ? owner : 0) || !added.length) return ref
+      const representations = [...ref.representations]
+      const existing = new Set(representations.map(rep => rep.uri))
+      for (const row of added) if (!existing.has(row.uri)) { representations.push(row); existing.add(row.uri) }
+      return { ...ref, representations }
+     })
+     return { ...entity, resources, components: { ...entity.components, visual: { ...entity.components.visual, robot: { ...robot, document } } } }
+    }
+    return robotDocumentAssetLocators(entity, authorized).entity as Entity
+   })
+   return { status: "PREVIEW", ...identity, transform, entities }
+  }
+
   async mountSogCollection(input: { sceneId: string; name: string; entityId?: string; parentId?: string; transform?: Transform; resources: Array<{ resourceId: string; version: number; name: string }> }, signal?: AbortSignal): Promise<{ snapshot: SceneSnapshot; groupEntityId: string; entityIds: string[] }> {
     signal?.throwIfAborted()
     if (!input.resources.length) throw new Error("SSOG_COLLECTION_EMPTY: 无可挂载资源")

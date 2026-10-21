@@ -3,6 +3,9 @@ import type {RobotDescription,WorldOptions} from '../../sim-contract/src/index.t
 import {uncontrolledFreeRootEntityIds} from './physics-test-space.ts'
 
 export type SceneWorldPhase='idle'|'initializing'|'syncing'|'ready'|'running'|'paused'|'unsynced'|'failed'|'blocked'|'closed'
+/** 明确 Close 后发布的内置中文固定句。它是**内置状态**而不是诊断：界面语言投影在
+ *  `scene-world-status.tsx::sceneWorldStatusDetail` 复用同一常量，不新造第二套 i18n 或错误码。 */
+export const SCENE_WORLD_CLOSED_PUBLIC_MESSAGE='物理世界已关闭；场景保留，重新启动需明确操作。'
 export interface SceneWorldState {phase:SceneWorldPhase;sceneId?:string;sceneRevision?:number;worldId?:string;generation?:number;engine?:string;code?:string;detail?:string;missing?:string[];worldPhysics?:WorldHandle['worldPhysics'];clock?:WorldHandle['clock']}
 export interface SceneWorldReconciliation {snapshot:SceneSnapshot;pending:boolean;issues:Array<{entityId:string;resourceId?:string;version?:number;reason:string}>}
 export interface SceneWorldPort {
@@ -164,7 +167,7 @@ export class SceneWorldLifecycle {
   this.attempt={key,attemptKey,controller,promise};return promise
  }
  cancel(){const key=this.key,syncing=this.attempt?.operation==='sync';if(key)this.closed.add(key);this.attempt?.controller.abort();this.publish(syncing?{phase:'unsynced',code:'WORLD_SYNC_WAIT_CANCELLED',detail:'已取消等待同步，已提交编辑保留；原生状态由后续读回确定，可点击同步当前场景重新核对。'}:{phase:'closed',code:'WORLD_START_CANCELLED',detail:'已取消本次初始化；不会自动重试。'})}
- markClosed(){if(this.key)this.closed.add(this.key);this.attempt?.controller.abort();this.publish({phase:'closed',detail:'物理世界已关闭；场景保留，重新启动需明确操作。'})}
+ markClosed(){if(this.key)this.closed.add(this.key);this.attempt?.controller.abort();this.publish({phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE})}
  leave(){this.attempt?.controller.abort();this.key=undefined}
 }
 /** 手调初值来自当前物理帧；缺测量不生成零关节目标。 */

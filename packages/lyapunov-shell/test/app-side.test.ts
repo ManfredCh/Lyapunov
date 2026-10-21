@@ -84,8 +84,11 @@ test('默认保留一个原产品rail且没有执行图按钮；文件页只在�
   ))})
   expect(host.querySelector('button[aria-label="执行图"]')).toBeNull()
   expect(host.querySelectorAll('nav[aria-label="工作台工具"]')).toHaveLength(1)
-  expect(host.querySelectorAll('nav[aria-label="工作台工具"] button')).toHaveLength(11)
+  expect(host.querySelectorAll('nav[aria-label="工作台工具"] button')).toHaveLength(13)
   expect(host.querySelector('button[aria-label="场景"]')).not.toBeNull()
+  // RC R-001/R-008/R-009：Physics 是独立入口，泛用 Library 退出一级轨。
+  expect(host.querySelector('button[aria-label="物理"]')).not.toBeNull()
+  expect(host.querySelector('button[aria-label="素材"]')).toBeNull()
   expect(sceneOpened).toBe(0)
   expect(host.textContent).toContain('/tmp/private')
   expect(flow?.open).toBe(false);expect(adopted).toEqual([])

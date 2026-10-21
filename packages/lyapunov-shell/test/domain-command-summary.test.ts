@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from "bun:test"
 
-import { domainCommandSummary } from "../src/domain-command-card.tsx"
+import { domainCommandSummary, commandCardView, isPassiveSuccessRead } from "../src/domain-command-card.tsx"
 import { ActionCards } from "../src/robot-control-panel.tsx"
 import {commandRouteResponse} from '../../lyapunov-contracts/src/command-privacy.ts'
 import {createSessionOutboundProjection} from '../../lyapunov-contracts/src/session-event-projection.ts'
@@ -66,8 +66,9 @@ describe("R5：动作回执摘要", () => {
     expect(info.summary).not.toContain("执行完成")
     expect(info.summary).toContain("1/1 个动作未进入容差")
     expect(info.summary).toContain("容差 0.03")
-    // step 区间照旧给出（原回执在展开区完整保留，摘要是压缩不是替换）
-    expect(info.summary).toContain("step 50182 → 50831")
+    // 默认 headline 不再常驻技术 step；完整回执仍在机器结果/展开详情里。
+    expect(info.summary).not.toContain("step 50182")
+    expect(info.summary).not.toMatch(/\bstep\b|\brev\b|\bg\d/)
     expect(info.tone).toBe("warning")
   })
 
@@ -86,7 +87,8 @@ describe("R5：动作回执摘要", () => {
 
   test("停止回执照旧按 stopped 读数（停止＝取消确认，不是精确保持的证明）", () => {
     const info = domainCommandSummary("sim_stop", JSON.stringify({ stopped: true, stepIndex: 23979 }), "success", false)
-    expect(info.summary).toBe("已停止 · step 23979")
+    expect(info.summary).toBe("已停止")
+    expect(info.summary).not.toContain("step")
     expect(info.tone).toBe("ok")
   })
 
@@ -146,5 +148,146 @@ describe("R5：机器人面板「动作结果」卡片（紧挨提交动作的�
   test("未完成时不伪造结果：等待中的卡片写明请求已提交", () => {
     const text = texts(ActionCards({ actions: [{ id: "a2", label: "robot_move", waiting: true }], tr: (cn: string) => cn })).join(" | ")
     expect(text).toContain("请求已提交，等待引擎结果…")
+  })
+})
+
+describe("P17：产品命令的显示投影不再掉回 SDK 原始长命令行", () => {
+  const en = (name: string, value: unknown) => domainCommandSummary(name, JSON.stringify(value), "success", true)
+
+  test("ui_engine_switch / ui_action_ack / policy_download_sources / scene_import_resolve / scene_reconcile_physics 给短语义摘要", () => {
+    const engine = en("ui_engine_switch", { runningEngine: "mujoco", preference: "isaac", restartRequired: true })
+    expect(engine.summary).toContain("Isaac")
+    expect(engine.summary).toContain("next start")
+    expect(engine.tone).toBe("ok")
+    expect(en("ui_action_ack", { acked: 3 }).summary).toContain("3 UI actions acknowledged")
+    const sources = en("policy_download_sources", { models: [{}, {}], localEntries: [{}] })
+    expect(sources.summary).toContain("2 sources")
+    expect(sources.summary).toContain("1 local")
+    const blocked = en("scene_import_resolve", { kind: "blocked", reason: "ENTRY_REQUIRED: choose a specific file" })
+    expect(blocked.tone).toBe("warning")
+    expect(blocked.summary).toContain("ENTRY_REQUIRED")
+    expect(en("scene_import_resolve", { kind: "file" }).summary).toContain("File entry")
+    const reconcile = en("scene_reconcile_physics", { snapshot: { revision: 4, entities: 2 }, pending: false, issues: [{ entityId: "e" }] })
+    expect(reconcile.summary).toContain("Physics reconcile")
+    expect(reconcile.tone).toBe("warning")
+    // 对账干净且非等待 ⇒ ok；不把成功标成 warning。
+    expect(en("scene_reconcile_physics", { snapshot: { revision: 4, entities: 2 }, pending: false, issues: [] }).tone).toBe("ok")
+  })
+
+  test("7 个此前缺失的命令都有产品短名与语义摘要，不再显示裸命令名", () => {
+    for (const name of ["scene_import_resolve", "scene_reconcile_physics", "scene_prepare_world", "policy_download_sources", "ui_action_ack", "ui_engine_switch", "policy_activate"]) {
+      const view = commandCardView({ name, args: "{}", outcomeText: JSON.stringify({ kind: "file" }), kind: "success" }, { english: true, allowRaw: false, mode: "formal" })
+      expect(view.title).not.toBe(name)
+      expect(view.title.trim().length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe("P21：UI 常用动作/相机 UI 命令不再掉回 SDK 原始命令行", () => {
+  const en = (name: string, value: unknown) => domainCommandSummary(name, JSON.stringify(value), "success", true)
+  const title = (name: string) => commandCardView({ name, args: "{}", outcomeText: "{}", kind: "success" }, { english: true, allowRaw: false, mode: "formal" }).title
+
+  test("sim_set_paused / robot_freeze / robot_restore：短语义状态，失败（not-frozen/mismatched）按 warning 上屏", () => {
+    expect(title("sim_set_paused")).toBe("Pause / resume simulation")
+    expect(en("sim_set_paused", { worldId: "w", engineId: "mujoco", worldGeneration: 3, appliedSceneRevision: 5, status: "paused" }).summary).toBe("Paused")
+    expect(en("sim_set_paused", { status: "running", worldGeneration: 4 }).summary).toBe("Resumed")
+    expect(title("robot_freeze")).toBe("Freeze robot")
+    expect(en("robot_freeze", { status: "frozen", frozenEntityIds: ["a"] }).tone).toBe("ok")
+    expect(en("robot_freeze", { status: "already-frozen", frozenEntityIds: ["a", "b"] }).summary).toContain("2 entities")
+    expect(en("robot_freeze", { status: "mismatched", freezeId: "f", reason: "freezeId mismatch" }).tone).toBe("warning")
+    expect(en("robot_freeze", { status: "mismatched", reason: "freezeId mismatch" }).summary).toContain("freezeId mismatch")
+    expect(en("robot_restore", { status: "restored", restoredEntityIds: ["a"] }).tone).toBe("ok")
+    // “没到目标”不得被绿化：not-frozen 是 restore 的失败态。
+    expect(en("robot_restore", { status: "not-frozen", reason: "not frozen" }).tone).toBe("warning")
+  })
+
+  test("policy_load_local / policy_load_state：就绪/未就绪与缺失项数都上屏；未就绪不是 ok", () => {
+    expect(title("policy_load_state")).toBe("Policy load state")
+    const ready = en("policy_load_state", { category: "direct_execution", ready: true, applyEligible: true, missing: [], modelId: "resnet-policy" })
+    expect(ready.summary).toContain("Ready")
+    expect(ready.summary).toContain("Direct execution")
+    expect(ready.summary).toContain("appliable")
+    expect(ready.tone).toBe("ok")
+    const blocked = en("policy_load_state", { category: "missing_files_or_runtime", ready: false, applyEligible: false, missing: [{ code: "RUNTIME_MISSING" }, { code: "POLICY_FILE_NOT_VERIFIED" }] })
+    expect(blocked.summary).toContain("Not ready")
+    expect(blocked.summary).toContain("Missing files or runtime")
+    expect(blocked.summary).toContain("2 missing")
+    expect(blocked.tone).toBe("warning")
+    const incompatible = en("policy_load_state", { category: "model_incompatible", ready: false, missing: [] })
+    expect(incompatible.summary).toContain("Model incompatible")
+    expect(incompatible.tone).toBe("warning")
+  })
+
+  test("camera_scene_save / list / adjust / multi / annotation / dataset / lidar：短标题与真实读数", () => {
+    expect(title("camera_scene_save")).toBe("Save scene camera")
+    expect(title("camera_list_ui")).toBe("List named cameras")
+    expect(title("camera_capture_multi_ui")).toBe("Multi-view capture")
+    expect(title("camera_annotation_ui")).toBe("Annotate pixel")
+    expect(title("camera_dataset_export_ui")).toBe("Export multi-view dataset")
+    expect(title("camera_lidar_scan_ui")).toBe("LiDAR scan")
+    expect(en("camera_scene_save", { snapshot: { revision: 7 }, entityId: "cam-1", worldNeedsSync: false }).summary).toBe("cam-1")
+    expect(en("camera_scene_save", { snapshot: { revision: 7 }, entityId: "cam-1", worldNeedsSync: true }).tone).toBe("warning")
+    expect(en("camera_list_ui", { cameras: [{}, {}, {}], sceneRevision: 4, generation: 9 }).summary).toBe("3 named cameras")
+    expect(en("camera_adjust_ui", { override: true, referenceFrame: "parent", parentBodyName: "wrist", fovyDeg: 42.5 }).summary).toContain("Override applied")
+    expect(en("camera_adjust_ui", { override: true, fovyDeg: 42.5 }).summary).toContain("fovy 42.5°")
+    expect(en("camera_adjust_ui", { override: false, referenceFrame: "world" }).summary).toContain("Override cleared")
+    const multi = en("camera_capture_multi_ui", { cameras: [{ width: 320, height: 240 }, {}], width: 320, height: 240, stepIndex: 88 })
+    expect(multi.summary).toBe("2 cameras · 320×240")
+    expect(multi.tone).toBe("ok")
+    const annotation = en("camera_annotation_ui", { pixel: [12, 34], worldPointM: [1, 2, 3], depthM: 2.5 })
+    expect(annotation.summary).toContain("pixel [12, 34]")
+    expect(annotation.summary).toContain("[1.000, 2.000, 3.000] m")
+    expect(annotation.summary).toContain("depth 2.500 m")
+    const dataset = en("camera_dataset_export_ui", { shellCaptureIds: ["a", "b"], outputDir: "/captures/datasets/d1" })
+    expect(dataset.summary).toContain("2 multi-view captures")
+    const lidar = en("camera_lidar_scan_ui", { cameraName: "e1/wrist", rayCount: 100, validCount: 97, rangeMinM: 0.5, rangeMaxM: 4.25 })
+    expect(lidar.summary).toBe("e1/wrist · 97/100 valid rays · 0.50–4.25 m")
+  })
+
+  test("失败仍按原判据上屏：error 分支不被新映射掩盖", () => {
+    const failed = domainCommandSummary("sim_set_paused", "WORLD_NOT_FOUND: no such world", "error", true)
+    expect(failed.tone).toBe("error")
+    expect(failed.summary).toContain("WORLD_NOT_FOUND")
+  })
+})
+
+describe("V10：装配/底座命令映射与被动读取折叠", () => {
+  const view=(name:string,value:unknown,english=false)=>commandCardView({name,args:"{}",outcomeText:JSON.stringify(value),kind:"success"},{english,allowRaw:false,mode:"formal"})
+  const summary=(name:string,value:unknown,english=false)=>domainCommandSummary(name,JSON.stringify(value),"success",english)
+
+  test("robot_assembly_preview / check / history / undo / set_base 有产品短名和简短结果",()=>{
+    expect(view("robot_assembly_preview",{}).title).toBe("预览装配")
+    expect(summary("robot_assembly_preview",{status:"PREVIEW",applied:false,revision:8,generation:3,source:{name:"Hand"},target:{name:"Panda",bodyName:"attachment"}}).summary).toContain("Hand → Panda/attachment")
+    expect(summary("robot_assembly_preview",{status:"PREVIEW",applied:false,revision:8,generation:3,source:{name:"Hand"},target:{name:"Panda",bodyName:"attachment"}}).summary).not.toContain("applyInput")
+    expect(view("robot_assembly_check",{}).title).toBe("检查装配读回")
+    expect(summary("robot_assembly_check",{checked:{binding:true,relativePose:true,joints:false,contacts:false,actionReceipt:false},attachments:[{},{}]}).summary).toContain("2/5")
+    expect(summary("robot_assembly_history",{entries:[{},{}],revision:9,historyComplete:false,reason:"gap"}).tone).toBe("warning")
+    expect(view("robot_assembly_undo",{}).title).toBe("撤销装配变化")
+    expect(summary("robot_assembly_undo",{saved:true,revision:10,syncRequired:true}).summary).toContain("物理待同步")
+    expect(view("robot_set_base",{}).title).toBe("固定 / 恢复机器人底座")
+    expect(summary("robot_set_base",{saved:true,revision:10,sync:"SYNCED",status:"UPDATED"}).summary).toContain("底座已保存")
+    expect(summary("robot_set_tcp",{saved:true,revision:11,status:"UNCHANGED",syncRequired:false,sync:"SYNCED"}).summary).toContain("无变化")
+  })
+
+  test("被动成功读取不逐行铺 Chat；失败仍显示",()=>{
+    expect(isPassiveSuccessRead("policy_download_sources","success")).toBe(true)
+    expect(isPassiveSuccessRead("policy_metadata",null)).toBe(true)
+    expect(isPassiveSuccessRead("robot_description","success")).toBe(true)
+    expect(isPassiveSuccessRead("robot_assembly_history","success")).toBe(true)
+    expect(isPassiveSuccessRead("policy_download_sources","error")).toBe(false)
+    expect(isPassiveSuccessRead("robot_assembly_history","error")).toBe(false)
+    expect(isPassiveSuccessRead("asset_placement_preview","success")).toBe(true)
+    expect(isPassiveSuccessRead("asset_placement_preview","error")).toBe(false)
+    expect(isPassiveSuccessRead("robot_assembly_check","success")).toBe(false)
+  })
+  test("V10 默认 headline 无 rev/generation/step/UUID；失败原因仍可见",()=>{
+    const success=domainCommandSummary("scene_inspect",JSON.stringify({name:"room",snapshot:{revision:7,entities:[{},{}]}}),"success",true)
+    expect(success.summary).toBe("room · 2 entities")
+    expect(success.summary).not.toMatch(/\brev\b|\bgeneration\b|\bstep\b|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+    const uuid=domainCommandSummary("camera_scene_save",JSON.stringify({entityId:"123e4567-e89b-12d3-a456-426614174000",snapshot:{revision:4}}),"success",true)
+    expect(uuid.summary).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+    const failed=domainCommandSummary("policy_load_state","POLICY_RUNTIME_UNAVAILABLE: torch missing","error",true)
+    expect(failed.tone).toBe("error")
+    expect(failed.summary).toContain("POLICY_RUNTIME_UNAVAILABLE")
   })
 })

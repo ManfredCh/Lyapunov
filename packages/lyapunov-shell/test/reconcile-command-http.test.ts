@@ -31,7 +31,7 @@ test('registered HTTP command回机器Scene/CAS结果；原生Scope隔离和未�
  ctx.provide('subprocess',{} as never)
  await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Sessions);await ctx.plugin(Commands);await ctx.plugin(JobsLocal)
  for(const id of ['owned','other']){const workspace=join(root,id);await mkdir(workspace);const session=ctx.sessions.create(SessionId(id),{meta:{cwd:workspace}});agents.set(id,{id:session.id,session,ctx:createScope(ctx,{session:id}).ctx,send:()=>{},steer:()=>{},inject:()=>{}} as unknown as Agent)}
- await ctx.plugin(scenePlugin,{dataRoot:join(root,'data')})
+ await ctx.plugin(scenePlugin,{dataRoot:join(root,'data'),productRoot:join(root,'no-bundled-product')})
  const operations=(ctx.get('scene') as scenePlugin.SceneService).forSession('owned')
  const initial=await operations.create({sceneId:'s'})
  const secret='PRIVATE_MARKER_'+Math.random().toString(36).slice(2)

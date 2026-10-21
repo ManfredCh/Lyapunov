@@ -1,0 +1,27 @@
+<mujoco model="cross-tendon">
+  <worldbody>
+    <body name="base">
+      <body name="arm" pos="0 0 0.2">
+        <joint name="j1" type="hinge" axis="0 0 1"/>
+        <geom type="capsule" size="0.02 0.1"/>
+        <body name="hand" pos="0 0 0.2">
+          <joint name="j2" type="hinge" axis="0 0 1"/>
+          <geom type="capsule" size="0.02 0.05"/>
+          <body name="finger" pos="0 0 0.1">
+            <joint name="j3" type="hinge" axis="0 0 1"/>
+            <geom type="capsule" size="0.01 0.02"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <fixed name="cross">
+      <joint joint="j1" coef="1"/>
+      <joint joint="j3" coef="1"/>
+    </fixed>
+  </tendon>
+  <actuator>
+    <general name="crossdrive" tendon="cross" gainprm="1"/>
+  </actuator>
+</mujoco>

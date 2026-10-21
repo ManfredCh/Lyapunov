@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import type { AssetRecord, BuiltinAssetRecord } from "./workbench-api.ts"
 import type { Translate } from "./entity-editor.tsx"
 import type {Entity,SceneSnapshot} from "../../lyapunov-contracts/src/types.ts"
@@ -12,17 +12,31 @@ export function assetPlacementOf(asset:AssetRecord):AssetPlacement{
  const nativeUsd=asset.ref.original.mimeType==='model/vnd.usd'
  return {resourceId:asset.ref.resourceId,version:asset.ref.version,name:asset.name,alignBottomToSurface:asset.parsed?.kind!=='robot'&&!nativeUsd,...nativeUsd?{nativeUsd:true}:{}}
 }
-export function assetPlacementInput(sceneId:string,asset:AssetPlacement,point:Vec3){
- return {sceneId,resourceId:asset.resourceId,version:asset.version,alignBottomToSurface:asset.alignBottomToSurface,transform:{position:point,quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as Vec3}}
+export function assetPlacementInput(sceneId:string,asset:AssetPlacement,point:Vec3,resolved?:{position:Vec3;quaternion:[number,number,number,number];scale:Vec3}){
+ // 预览已按与确认同一份 origin/bottom 换算得到最终 transform；确认时原样提交，避免二次换算错位。
+ const transform=resolved??{position:point,quaternion:[0,0,0,1] as [number,number,number,number],scale:[1,1,1] as Vec3}
+ return {sceneId,resourceId:asset.resourceId,version:asset.version,alignBottomToSurface:resolved?false:asset.alignBottomToSurface,transform}
 }
 /** 放置选择属于当前待放实例；组件没有跨取消/Scene/session保留的独立偏好。 */
-export function AssetPlacementBar({asset,point,tr,alignment,confirm,cancel}:{asset:AssetPlacement;point?:Vec3;tr:Translate;alignment(value:boolean):void;confirm():void;cancel():void}){
- return <div className="lya-placement-bar" style={{flexWrap:'wrap'}} aria-label={tr('放置素材','Place asset')}>
+export function AssetPlacementBar({asset,point,status='idle',reason,tr,alignment,confirm,cancel,confirming}:{asset:AssetPlacement;point?:Vec3;status?:'idle'|'loading'|'ready'|'unavailable';reason?:string;tr:Translate;alignment(value:boolean):void;confirm():void;cancel():void;confirming?:boolean}){
+ const stateText=status==='loading'?tr('正在加载真实预览…','Loading real preview…')
+  :status==='ready'?tr('预览就绪','Preview ready')
+  :status==='unavailable'?tr('预览不可用','Preview unavailable')
+  :point?tr('正在准备预览','Preparing preview'):tr('点击场景选择位置','Click a spot in the scene')
+ // 设计稿 placement：底部浮条只保留「素材名 · Cancel · Place object」；预览状态与选项收进 ⋯ 折叠。
+ return <div className="lya-placement-bar" aria-label={tr('放置素材','Place asset')} role="status" data-testid="asset-placement-bar" data-preview-status={status} title={stateText}>
   <strong title={asset.name}>{asset.name}</strong>
-  {asset.nativeUsd&&<span className="lya-help">{tr('原生 USD 默认按源原点放置；启动对应引擎后读取可变形体或粒子状态。','Native USD defaults to its source origin; start the matching engine to read deformable or particle state.')}</span>}
-  <label title={tr('模型原点放在点击位置；底面对齐需要可用的模型几何范围。','Model origin goes at the clicked point; bottom alignment requires available model geometry bounds.')}>{tr('放置基准','Placement basis')} <select aria-label={tr('放置基准','Placement basis')} value={asset.alignBottomToSurface?'bottom':'origin'} onChange={event=>alignment(event.target.value==='bottom')}><option value="origin">{tr('模型原点','Model origin')}</option><option value="bottom">{tr('底面对齐','Align bottom')}</option></select></label>
-  {point?<span className="lya-placement-point">{point.map(value=>value.toFixed(2)).join(', ')}</span>:<span className="lya-muted">{tr('点击场景选择位置','Click a spot in the scene')}</span>}
-  {point&&<button className="lya-primary" onClick={confirm}>{tr('确认放置','Confirm placement')}</button>}<button onClick={cancel}>{tr('取消','Cancel')}</button>
+  <span className="lya-spacer"/>
+  <button data-testid="asset-placement-cancel" onClick={cancel}>{tr('取消','Cancel')}</button>
+  {point&&<button className="lya-primary" data-testid="asset-placement-confirm" disabled={status==='loading'||confirming} onClick={confirm}>{confirming?tr('正在放置…','Placing…'):tr('放置物体','Place object')}</button>}
+  <details className="lya-placement-options" data-testid="asset-placement-options">
+   <summary aria-label={tr('放置选项','Placement options')} title={tr('放置选项','Placement options')}>⋯</summary>
+   <span className="lya-placement-state" data-testid="asset-placement-state">{stateText}</span>
+   <label title={tr('模型原点放在点击位置；底面对齐需要可用的模型几何范围。','Model origin goes at the clicked point; bottom alignment requires available model geometry bounds.')}>{tr('放置基准','Placement basis')} <select aria-label={tr('放置基准','Placement basis')} value={asset.alignBottomToSurface?'bottom':'origin'} onChange={event=>alignment(event.target.value==='bottom')}><option value="origin">{tr('模型原点','Model origin')}</option><option value="bottom">{tr('底面对齐','Align bottom')}</option></select></label>
+   <span className="lya-placement-point" data-testid="asset-placement-point">{point?point.map(value=>value.toFixed(2)).join(', '):tr('尚未选择位置','No position yet')}</span>
+   {reason&&<p className="lya-help lya-error" role="alert">{reason}</p>}
+   {asset.nativeUsd&&<p className="lya-help">{tr('原生 USD 默认按源原点放置；启动对应引擎后读取可变形体或粒子状态。','Native USD defaults to its source origin; start the matching engine to read deformable or particle state.')}</p>}
+  </details>
  </div>
 }
 
@@ -83,6 +97,9 @@ type Props = {
   canMount: boolean
   available: boolean
   importPanel?: ReactNode
+  /** 限定到某个业务类别（R-008）：Objects/Environment/Robots 各自的二级“资源管理”只显示本类资源，
+   *  但复用同一份 AssetRecord/ResourceLibrary；不传＝聚合视图（回收站仍可按需查看）。 */
+  domain?: AssetDomain
   tr: Translate
   scene?: SceneSnapshot
   sceneReadOnly?: boolean
@@ -157,9 +174,12 @@ function BuiltinGroup({ category, items, assets, busy, available, tr, importBuil
 /** 素材的主路径是复用到场景；维护动作随每个素材按需展开。 */
 export function AssetLibraryPanel(p: Props) {
   const { tr } = p
-  return <section className="lya-library" aria-label={tr("素材库", "Asset library")}>
+  // 域限定：只按真实 kind/origin 过滤，不复制资源列表；聚合视图（无 domain）保持原样。
+  const domainAssets = p.domain ? p.assets.filter(asset => inAssetDomain(p.domain!, asset)) : p.assets
+  const domainBuiltin = p.domain ? p.builtin.filter(item => item.category === DOMAIN_BUILTIN_CATEGORY[p.domain!]) : p.builtin
+  return <section className="lya-library" aria-label={tr("素材库", "Asset library")} data-domain={p.domain}>
     <header className="lya-library-heading">
-      <div><span className="lya-eyebrow">{tr("可重复使用", "REUSABLE ASSETS")}</span><h3>{tr("你的素材", "Your library")}<span className="lya-count">{p.assets.length}</span></h3></div>
+      <div><span className="lya-eyebrow">{tr("可重复使用", "REUSABLE ASSETS")}</span><h3>{tr("你的素材", "Your library")}<span className="lya-count">{domainAssets.length}</span></h3></div>
       <button className="lya-icon-button" disabled={p.loading} onClick={p.refresh} aria-label={tr("刷新素材库", "Refresh asset library")} title={tr("刷新素材库", "Refresh asset library")}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 6.2A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.8 5.8"/></svg>
       </button>
@@ -174,13 +194,13 @@ export function AssetLibraryPanel(p: Props) {
       <button type="submit" disabled={p.loading} aria-label={tr("搜索素材", "Search assets")}>{tr("搜索", "Find")}</button>
     </form>
     <div className="lya-library-filter"><label><input type="checkbox" checked={p.includeDeleted} onChange={event => p.setIncludeDeleted(event.target.checked)}/>{tr("包括回收站", "Include trash")}</label>{p.loading && <span role="status">{tr("正在读取…", "Loading…")}</span>}</div>
-    {!p.loading && p.assets.length === 0 ? <div className="lya-library-empty">
+    {!p.loading && domainAssets.length === 0 ? <div className="lya-library-empty">
       <div className="lya-library-empty-mark"><AssetMark robot={false}/></div>
       <strong>{p.query ? tr("没有找到匹配的素材", "No matching assets") : tr("把第一份素材放进来", "Start your library")}</strong>
       <p>{p.query ? tr("试试其他名称或标签。", "Try another name or tag.") : tr("导入本地模型，或在环境中寻找可用素材。", "Import a local model or find an asset in Environment.")}</p>
       {!p.query && <button className="lya-text-link" onClick={p.browseEnvironment}>{tr("去环境中寻找", "Explore environments")} <span aria-hidden="true">↗</span></button>}
     </div> : <div className="lya-library-list" aria-busy={p.loading}>
-      {p.assets.map(asset => <article className="lya-asset-card" data-deleted={Boolean(asset.deletedAt)} key={asset.ref.resourceId + ":" + asset.ref.version}>
+      {domainAssets.map(asset => <article className="lya-asset-card" data-deleted={Boolean(asset.deletedAt)} key={asset.ref.resourceId + ":" + asset.ref.version}>
         <div className="lya-asset-overview">
           <div className="lya-asset-mark" data-kind={asset.parsed?.kind}><AssetMark robot={asset.parsed?.kind === "robot"}/></div>
           <div className="lya-asset-description"><strong title={asset.name}>{asset.name}</strong><span>{formatOf(asset)}<i aria-hidden="true">·</i>{tr("版本", "Version")} {asset.ref.version}{asset.deletedAt && <em>{tr("回收站", "In trash")}</em>}</span></div>
@@ -201,11 +221,11 @@ export function AssetLibraryPanel(p: Props) {
         <AssetSceneInstances asset={asset} controls={p} available={p.available} busy={p.loading} tr={tr}/>
       </article>)}
     </div>}
-    {p.builtin.length > 0 && <div className="lya-builtin" aria-label={tr("内置素材", "Built-in assets")}>
-      <div className="lya-panel-title"><strong>{tr("内置素材", "Built-in assets")} {p.builtin.length}</strong></div>
+    {domainBuiltin.length > 0 && <div className="lya-builtin" aria-label={tr("内置素材", "Built-in assets")}>
+      <div className="lya-panel-title"><strong>{tr("内置素材", "Built-in assets")} {domainBuiltin.length}</strong></div>
       {(["robot", "background", "object"] as const).map(category => {
-        const items = p.builtin.filter(item => item.category === category)
-        return items.length > 0 && <BuiltinGroup key={category} category={category} items={items} assets={p.assets} busy={p.builtinBusy} available={p.available} tr={tr} importBuiltin={p.importBuiltin}/>
+        const items = domainBuiltin.filter(item => item.category === category)
+        return items.length > 0 && <BuiltinGroup key={category} category={category} items={items} assets={domainAssets} busy={p.builtinBusy} available={p.available} tr={tr} importBuiltin={p.importBuiltin}/>
       })}
     </div>}
   </section>
@@ -240,7 +260,7 @@ const DOMAIN_BUILTIN_CATEGORY: Record<AssetDomain, string> = { robot: "robot", o
  * 数据与素材面板同源（同一份 assets/builtin 状态与同一套动作），域面板不是第二份库：
  * 素材面板仍是含来源分组/搜索/回收站的聚合视图，这里只按域取子集。
  */
-export function DomainAssetList({ domain, assets, builtin, busy, available, canMount, tr, importBuiltin, mount, openLibrary, instanceControls }: {
+type DomainAssetListProps = {
   domain: AssetDomain
   assets: AssetRecord[]
   builtin: BuiltinAssetRecord[]
@@ -253,24 +273,49 @@ export function DomainAssetList({ domain, assets, builtin, busy, available, canM
   /** 次要入口：本地文件导入表单位于聚合素材面板；添加素材的主路径始终是本列表。 */
   openLibrary?: () => void
   instanceControls?: AssetInstanceControls
-}) {
-  const label = domain === "robot" ? tr("机器人库", "Robot library") : domain === "environment" ? tr("环境库", "Environment library") : domain === "scene" ? tr("场景资源", "Scene resources") : tr("小物件库", "Object library")
+  /** V8-07：选中资源后再由底部 Place 进入放置；行内不再各放一个主按钮。 */
+  selectionMode?: boolean
+  selectedKey?: string
+  onSelect?(asset: AssetRecord): void
+}
+
+export function DomainAssetList(props: DomainAssetListProps & {selectionHeader?: React.ReactNode}) {
+  return props.domain === "object" && props.selectionMode
+    ? <ObjectAssetPicker {...props}/>
+    : <DomainAssetRows {...props}/>
+}
+
+function ObjectAssetPicker(props: DomainAssetListProps & {selectionHeader?: React.ReactNode}) {
+  const [query, setQuery] = useState("")
+  // 设计稿 object-assets：Search assets → Import file → IMPORTED 行。
+  return <div className="lya-object-asset-picker">
+    <input type="search" className="lya-wide lya-object-asset-search" data-testid="object-asset-search" aria-label={props.tr("搜索资源", "Search assets")} placeholder={props.tr("搜索资源", "Search assets")} value={query} onChange={event => setQuery(event.target.value)}/>
+    {props.selectionHeader}
+    <DomainAssetRows {...props} query={query}/>
+  </div>
+}
+
+function DomainAssetRows({ domain, assets, builtin, busy, available, canMount, tr, importBuiltin, mount, openLibrary, instanceControls, selectionMode=false, selectedKey, onSelect, query="" }: DomainAssetListProps & {query?: string}) {
+  // 设计稿 object-assets：物件选择页的分组标题是 `IMPORTED` 且不带计数。
+  const label = selectionMode && domain === "object" ? tr("已导入", "IMPORTED") : domain === "robot" ? tr("机器人库", "Robot library") : domain === "environment" ? tr("环境库", "Environment library") : domain === "scene" ? tr("场景资源", "Scene resources") : tr("小物件库", "Object library")
   const empty = domain === "robot" ? tr("还没有可用的机器人：内置库为空，也没有导入过机器人模型。", "No robots yet: the built-in list is empty and none was imported.")
     : domain === "environment" ? tr("还没有可用的环境：内置库为空，也没有下载过环境素材。", "No environments yet: the built-in list is empty and none was downloaded.")
     : domain === "scene" ? tr("当前库还没有场景资源。拖入场景文件即可导入。","No scene resources yet. Import a scene file to add one.") : tr("还没有可用的小物件：内置库为空，也没有导入过模型。", "No objects yet: the built-in list is empty and no model was imported.")
-  const builtinItems = builtin.filter(item => item.category === DOMAIN_BUILTIN_CATEGORY[domain])
-  // 回收站里的素材不在这里出现（聚合素材面板仍可按“包括回收站”查看与恢复）。
-  const imported = assets.filter(asset => !asset.deletedAt && inAssetDomain(domain, asset))
-  return <div className="lya-domain" aria-label={label}>
-    <div className="lya-section"><span>{label}</span><span className="lya-section-side">{builtinItems.length + imported.length}</span></div>
+  const needle = query.trim().toLowerCase()
+  const matches = (values: string[]) => values.some(value => value.toLowerCase().includes(needle))
+  const builtinItems = builtin.filter(item => item.category === DOMAIN_BUILTIN_CATEGORY[domain] && matches([item.displayName, item.kind]))
+  // 仅过滤当前域的显示，不改资源、版本或外层选择；取消搜索可恢复同一选择。
+  const imported = assets.filter(asset => !asset.deletedAt && inAssetDomain(domain, asset) && matches([asset.name, formatOf(asset), ...asset.tags]))
+  return <div className="lya-domain" aria-label={label} data-selection-mode={selectionMode||undefined}>
+    <div className="lya-section"><span>{label}</span>{!(selectionMode && domain === "object") && <span className="lya-section-side">{builtinItems.length + imported.length}</span>}</div>
     {builtinItems.map(item => <BuiltinAssetRow key={item.assetId} item={item} imported={builtinImported(item, assets)} busy={busy} available={available} tr={tr} importBuiltin={importBuiltin}/>)}
-    {imported.map(asset => <div key={asset.ref.resourceId + ":" + asset.ref.version} className="lya-domain-asset"><div className="lya-env-card">
+    {imported.map(asset => {const key=`${asset.ref.resourceId}:${asset.ref.version}`,selected=selectionMode&&selectedKey===key;return <div key={key} className="lya-domain-asset" data-selected={selected||undefined}>{selectionMode?<button type="button" className="lya-object-asset-row" aria-label={tr("选择资源 ", "Select asset ")+asset.name} aria-pressed={selected} disabled={!canMount} title={`${asset.name} · ${formatOf(asset)} · ${tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}`} onClick={()=>onSelect?.(asset)}><AssetMark robot={asset.parsed?.kind === "robot"}/><span className="lya-object-asset-name">{asset.name}</span><span className="lya-object-asset-choice">{selected?tr("已选中","Selected"):tr("选择","Select")}</span></button>:<div className="lya-env-card">
       <span className="lya-env-thumb" aria-hidden="true"><AssetMark robot={asset.parsed?.kind === "robot"}/></span>
-      <div className="lya-env-main" title={asset.name}><strong>{asset.name}</strong><span>{tr("已导入", "In library")}{" · "}{tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}{" · "}{formatOf(asset)}{asset.sizeBytes ? ` · ${formatAssetSize(asset.sizeBytes)}` : ""}</span></div>
+      <div className="lya-env-main" title={asset.name}><strong>{asset.name}</strong><span title={tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}>{formatOf(asset)}{asset.sizeBytes ? ` · ${formatAssetSize(asset.sizeBytes)}` : ""}</span></div>
       <div className="lya-env-actions"><button className="lya-chip lya-chip-accent" disabled={!canMount} title={tr("点击后在 3D 场景中点选位置", "Click, then pick a spot in the 3D scene")} onClick={() => mount(asset)}>{tr("加入场景", "Add to scene")}</button></div>
-    </div><AssetPhysicsStatus asset={asset} controls={instanceControls??{}} available={available} busy={busy} tr={tr}/>{instanceControls&&<AssetSceneInstances asset={asset} controls={instanceControls} available={available} busy={busy} tr={tr}/>}</div>)}
+    </div>}<details className="lya-advanced" data-testid="domain-asset-details"><summary>{asset.physicalization?.status==="pending"?tr("详情 · 碰撞待准备","Details · Colliders pending"):asset.physicalization?.status==="failed"?tr("详情 · 碰撞失败","Details · Collider failed"):tr("详情","Details")}</summary>{selectionMode&&<p className="lya-help">{formatOf(asset)} · {tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}{asset.sizeBytes?` · ${formatAssetSize(asset.sizeBytes)}`:""}</p>}<AssetPhysicsStatus asset={asset} controls={instanceControls??{}} available={available} busy={busy} tr={tr}/>{instanceControls&&<AssetSceneInstances asset={asset} controls={instanceControls} available={available} busy={busy} tr={tr}/>}</details></div>})}
     {imported.length > 0 && !canMount && <p className="lya-help">{tr("选择可编辑场景后即可加入。", "Choose an editable scene to add these.")}</p>}
-    {builtinItems.length === 0 && imported.length === 0 && <p className="lya-help">{empty}</p>}
-    {openLibrary && <button className="lya-text-link" onClick={openLibrary}>{tr("在素材库导入本地文件", "Import a local file")} <span aria-hidden="true">↗</span></button>}
+    {builtinItems.length === 0 && imported.length === 0 && <p className="lya-help" role="status">{needle?tr("没有匹配的资源", "No matching assets"):empty}</p>}
+    {openLibrary && !selectionMode && <button className="lya-text-link" onClick={openLibrary}>{tr("在素材库导入本地文件", "Import a local file")} <span aria-hidden="true">↗</span></button>}
   </div>
 }

@@ -27,6 +27,8 @@ test('完整目录只解析根bundle，不递归猜策略；无bundle给精确�
   await expect(resolveLocalPolicyPath(root)).rejects.toThrow('POLICY_BUNDLE_REQUIRED')
   await writeFile(join(root,'bundle.json'),'{}');expect(await resolveLocalPolicyPath(root)).toBe(join(root,'bundle.json'))
   await expect(resolveLocalPolicyPath(join(root,'nested','config.json'))).rejects.toThrow('POLICY_FILE_MISSING')
+// 错误必须回显**实际提交的路径**：验收/排障时要能一眼看出是打错了还是路径被截断。
+ await expect(resolveLocalPolicyPath(join(root,'nested','config.json'))).rejects.toThrow(join(root,'nested','config.json'))
  }finally{await rm(root,{recursive:true,force:true})}
 })
 test('entryId仅解析本账户既有缓存；缺id与越界符号链接不授文件访问',async()=>{

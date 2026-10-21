@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot name="mimic_cross">
+  <link name="base_link"><inertial><mass value="1"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="arm_link"><inertial><mass value="1"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="hand_link"><inertial><mass value="0.5"/><inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/></inertial></link>
+  <link name="finger_a"><inertial><mass value="0.05"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial></link>
+  <link name="finger_b"><inertial><mass value="0.05"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial></link>
+  <joint name="j1" type="revolute"><parent link="base_link"/><child link="arm_link"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="10" velocity="1"/></joint>
+  <joint name="j2" type="revolute"><parent link="arm_link"/><child link="hand_link"/><axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="10" velocity="1"/></joint>
+  <joint name="j3" type="revolute"><parent link="hand_link"/><child link="finger_a"/><axis xyz="0 0 1"/><limit lower="0" upper="1" effort="10" velocity="1"/></joint>
+  <joint name="j4" type="revolute"><parent link="hand_link"/><child link="finger_b"/><axis xyz="0 0 1"/><limit lower="0" upper="1" effort="10" velocity="1"/><mimic joint="j1" multiplier="1" offset="0"/></joint>
+</robot>

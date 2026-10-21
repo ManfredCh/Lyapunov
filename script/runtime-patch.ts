@@ -120,6 +120,18 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   // 分域布局（worlds/assets/robots/cache/catalog）：给了 domains 就按三类分治落盘 + 新导入按类别
   // 落进对应域目录（materialized）；未给时回落旧单根与旧存储行为，保证老运行根逐路径不变。
   const d=input.domains
+  // 引擎真正要读的**场景资源根**：分治布局下四个域随运行根走，旧单根布局下以及迁移残留都可能在
+  // sceneRoot；产品自带包还要加 packs/materials。它们可能落在 /tmp（隔离 QA 的 desktop-data、便携
+  // 运行根），而 workspace-write 的 bwrap 会把 /tmp 换成空 tmpfs：宿主上绝对路径与兄弟文件都齐全，
+  // worker 里却打不开（实测：panda.xml 及其 assets/ 在 /tmp 数据根下，worker 报 ParseXML 打不开绝对
+  // 路径）。这里把**实际存在**的资源根交给启动接线，由它按原生 argv 以只读挂回；不存在的根不挂，
+  // 不把缺失目录伪装成可用。
+  const resourceReadRoots=()=>[...new Set([
+    ...(d?[d.worldsRoot,d.assetsRoot,d.robotsRoot,d.cacheRoot]:[]),
+    input.sceneRoot,
+    join(PRODUCT_ROOT,"packs"),
+    join(PRODUCT_ROOT,"materials"),
+  ].filter(existsSync))]
   // algorithmPython：碰撞派生（asset-bake 的 bake.py）由 scene-kit 的派生队列发起，隔离/管理员 Host
   // （终端入口就是 isolated）里 LYAPUNOV_ALGORITHM_PYTHON 不进环境，所以在这里与 sim/motion provider
   // 同一处解析后作为**显式非秘密配置**传进去——不放宽任何隔离白名单，解释器路径就是配置值。
@@ -166,7 +178,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
       // productRoots：Shell 与 robot-workflows 按 `<根>/sessions/<会话键>` 写截图与录像的父根
       // （唯一规则是 lyapunov-contracts 的 sessionNamespace）。会话内部的采集/录制目录落在原生
       // 工作区授权根之外，所以这两处是 sim-mujoco 媒体中转的唯一边界，必须与实际写盘用的根逐字相同。
-      add("sim-mujoco",{pythonPath:mujocoPython,workerPath:join(PRODUCT_ROOT,"packages/sim-mujoco/python/worker.py"),readOnlyRoots:runtimeReadRoots(mujocoPython),productRoots:[captureRoot,recordingRoot],...(renderBackend?{renderBackend}:{})})
+      add("sim-mujoco",{pythonPath:mujocoPython,workerPath:join(PRODUCT_ROOT,"packages/sim-mujoco/python/worker.py"),readOnlyRoots:[...runtimeReadRoots(mujocoPython),...resourceReadRoots()],productRoots:[captureRoot,recordingRoot],...(renderBackend?{renderBackend}:{})})
     }
     // Newton：独立环境（自带 mujoco~=3.12.0 pin，与产品 mujoco 3.13.0 冲突），provider 走 Warp；
     // 无 NVIDIA GPU 的机器由 provider 内部退回 cpu（见 packages/sim-newton/README.md）。

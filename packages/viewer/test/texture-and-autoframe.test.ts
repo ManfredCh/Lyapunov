@@ -25,7 +25,7 @@ import { describe, expect, test } from "bun:test"
 import * as THREE from "three"
 
 import { buildRobotVisual, type RobotVisual } from "../src/robot.ts"
-import { objectWorldBounds, subjectEntityIds } from "../src/framing.ts"
+import { objectWorldBounds, subjectEntityIds, markAuthoringHelper } from "../src/framing.ts"
 
 /** 2×2 PNG（红/蓝对角），真实字节，走 data URL。 */
 const PNG_2X2 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFUlEQVR4nAXBAQEAAACAEP9PF4JQDBvyA/3bepXKAAAAAElFTkSuQmCC"
@@ -348,6 +348,40 @@ describe("DEV-034 自动取景：只覆盖可见有限几何", () => {
     const { root } = wallScene()
     const size = objectWorldBounds(root, new WeakMap(), false).getSize(new THREE.Vector3())
     expect(Math.max(size.x, size.y, size.z)).toBeGreaterThan(2)
+  })
+
+  test("作者辅助子树（挂在 body 下的相机视锥/标记）不参与模型边界；真实大 mesh 不被误删", () => {
+    const root = new THREE.Group()
+    const body = new THREE.Group()
+    const model = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial())
+    model.name = "panda_link"
+    body.add(model)
+    // 真实 Native：相机视锥会被挂到 robot body 下；这里还带一个 50 m 外的小视锥，autoFrame=false 时曾把它也算进 bbox。
+    const helper = new THREE.Group()
+    const bigFrustum = new THREE.Mesh(new THREE.BoxGeometry(100, 100, 100), new THREE.MeshBasicMaterial())
+    const farFrustum = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial())
+    farFrustum.position.set(50, 0, 0)
+    helper.add(bigFrustum, farFrustum)
+    markAuthoringHelper(helper)
+    body.add(helper)
+    root.add(body)
+    root.updateMatrixWorld(true)
+    for (const autoFrame of [true, false]) {
+      const size = objectWorldBounds(root, new WeakMap(), autoFrame).getSize(new THREE.Vector3())
+      // 1 m 模型；helper 若被计入，非自动取景会到 ~110 m，自动取景也会被 50 m 外的视锥拉到 ~50 m。
+      expect(size.x).toBeCloseTo(1, 6)
+      expect(size.y).toBeCloseTo(1, 6)
+      expect(size.z).toBeCloseTo(1, 6)
+    }
+    // 同一形状的 mesh 若是真实模型（未标记），绝不能被当成 helper 删掉。
+    const realModel = new THREE.Group()
+    const realMesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshStandardMaterial())
+    realMesh.position.set(50, 0, 0)
+    realModel.add(realMesh)
+    realModel.updateMatrixWorld(true)
+    const realSize = objectWorldBounds(realModel, new WeakMap(), false).getSize(new THREE.Vector3())
+    expect(realSize.x).toBeCloseTo(10, 6)
+    expect(objectWorldBounds(realModel, new WeakMap(), false).max.x).toBeCloseTo(55, 6)
   })
 
   test("兜底：整场都是超大几何时不产生空包围盒（退回未过滤结果，避免 frameBounds 直接不取景）", () => {

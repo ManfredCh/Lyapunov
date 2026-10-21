@@ -383,41 +383,45 @@ export interface CaseSpec {
 // minPass = 实测通过用例数（冻结下限）；minAssert = 实测断言读数（expect() 调用数；plain 脚本用自报用例数）。
 export const CASES: readonly CaseSpec[] = [
   { id: 'app-side-panel-boundary', path: 'packages/lyapunov-shell/test/app-side.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '应用层侧面板按工作台边界定位，保留工具轨并处理窄面与出界；仅本地几何，真实 GUI 另验', minPass: 4, minAssert: 21, minSites: 13, citedBy: 0 },
+    purpose: '应用层侧面板按工作台边界定位，保留工具轨并处理窄面与出界；仅本地几何，真实 GUI 另验', minPass: 6, minAssert: 21, minSites: 13, citedBy: 0 },
   { id: 'linux-user-installer', path: 'distribution/linux/install.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '用户安装入口的校验、续传、失败保留 current、导入隔离与 Conda 不支持前缀的下载前拒绝；临时路径/loopback/替身载荷，真实 SDK 与物理另验', minPass: 12, minAssert: 63, minSites: 57, citedBy: 0 },
+    purpose: '用户安装入口的校验、续传、失败保留 current、导入隔离与 Conda 不支持前缀的下载前拒绝；临时路径/loopback/替身载荷，真实 SDK 与物理另验', minPass: 41, minAssert: 63, minSites: 57, citedBy: 0 },
   { id: 'manual-control-gesture', path: 'packages/lyapunov-shell/test/manual-events.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A08 F5真实Commands逐事件保留、gesture节点稳定/跨scope/Stop/真实false、完整目标限位与隐私', minPass: 8, minAssert: 121, minSites: 97, citedBy: 0 },
   { id: 'manual-control-pointer', path: 'packages/lyapunov-shell/test/manual-gesture.dom.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A08 F5现有jsdom合成DOM的真实React pointer/final/settle/scope行为，无桌面/GPU', minPass: 1, minAssert: 26, minSites: 26, citedBy: 0 },
   // A06 2026-10-01：八条按 a4a51eb 候选逐文件实跑冻结；只有上调，无删除/下调。
   { id: 'legacy-resource-source', path: 'packages/scene-kit/test/legacy-resource-source.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 4, minAssert: 19, minSites: 18, citedBy: 0 },
-  { id: 'domain-instance-projection', path: 'packages/lyapunov-shell/test/domain-instance-projection.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 5, minAssert: 86, minSites: 51, citedBy: 0 },
-  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 23, minAssert: 29, minSites: 29, citedBy: 0 },
+  // P16（2026-10-16）：P13 新增放置回归后 `floor-drift` 唯一实测差异为 minPass 6 < 实测 pass=7
+  //   ⇒ 只把这一个 id 的下限上调到实测值 7（不降下限、不删 id、不免除）。
+  // V11（2026-10-21）：`floor-drift` 点名 minPass 8 < 实测 10（删掉 2 条仍然绿）⇒ 连同 minAssert/minSites
+  //   一起按实测值上调（rcui-v11-20261020T220730Z 门读数 10 pass / 208 expect，静态站点 117）。**上调，不是放宽。**
+  { id: 'domain-instance-projection', path: 'packages/lyapunov-shell/test/domain-instance-projection.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；V10新增已解析预览位姿与确认一致性，实际GUI/SDK单独签收', minPass: 10, minAssert: 208, minSites: 117, citedBy: 0 },
+  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 32, minAssert: 29, minSites: 29, citedBy: 0 },
   { id: 'scene-ptc-input', path: 'packages/scene-kit/test/scene-ptc-input.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 1, minAssert: 8, minSites: 6, citedBy: 0 },
   { id: 'peiri-search-client', path: 'packages/lyapunov-api-client/test/search-client.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 10, minAssert: 93, minSites: 43, citedBy: 0 },
-  { id: 'brand-welcome', path: 'packages/lyapunov-shell/test/brand-welcome.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 3, minAssert: 27, minSites: 23, citedBy: 0 },
+  { id: 'brand-welcome', path: 'packages/lyapunov-shell/test/brand-welcome.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 6, minAssert: 27, minSites: 23, citedBy: 0 },
   { id: 'flight-controller', path: 'packages/robot-workflows/test/flight-controller.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 4, minAssert: 18, minSites: 18, citedBy: 0 },
-  { id: 'physics-binding', path: 'packages/scene-kit/test/physics-binding.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 8, minAssert: 68, minSites: 22, citedBy: 0 },
+  { id: 'physics-binding', path: 'packages/scene-kit/test/physics-binding.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 9, minAssert: 68, minSites: 22, citedBy: 0 },
   { id: 'geometry-source-contract', path: 'packages/scene-kit/test/geometry-source-contract.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'OBJ/FBX分类与登记转换同源、真实MTL原名和缺件拒绝、MAX明确转换要求；真实Blender/材质渲染另验', minPass: 3, minAssert: 13, minSites: 10, citedBy: 0 },
   { id: 'physics-state', path: 'packages/scene-kit/test/physics-state.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '同实例物理owner、固定/动态质量与开关、真实Scene CAS/历史保存重开和不同几何替换；原生worker另验', minPass: 5, minAssert: 27, minSites: 27, citedBy: 0 },
+    purpose: '同实例物理owner、固定/动态质量与开关、真实Scene CAS/历史保存重开和不同几何替换；原生worker另验', minPass: 7, minAssert: 27, minSites: 27, citedBy: 0 },
   { id: 'physics-controls', path: 'packages/lyapunov-shell/test/physics-controls.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '物理控件同帧/版本读回、机器人只读、质量不猜、绑定用途与单CAS同步/取消；真实GUI另验', minPass: 17, minAssert: 83, minSites: 80, citedBy: 0 },
+    purpose: '物理控件同帧/版本读回、机器人只读、质量不猜、绑定用途与单CAS同步/取消；真实GUI另验', minPass: 19, minAssert: 83, minSites: 80, citedBy: 0 },
   { id: 'environment-routing-selection', path: 'packages/lyapunov-shell/test/environment-routing-selection.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '当前选择与口语建造/修改、显式Blender/Peiri与组合路线、停止/只方案/导入继续守原阶段；真实生成另验', minPass: 14, minAssert: 112, minSites: 44, citedBy: 0 },
+    purpose: '当前选择与口语建造/修改、显式Blender/Peiri与组合路线、停止/只方案/导入继续守原阶段；真实生成另验', minPass: 22, minAssert: 112, minSites: 44, citedBy: 0 },
   { id: 'isaac-local-discovery', path: 'packages/lyapunov-shell/test/isaac-local-discovery.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: '本地Isaac SDK无导入探测、显式保存与优先级、standalone兼容以及安装收尾只验包内SDK', minPass: 9, minAssert: 61, minSites: 56, citedBy: 0 },
   { id: 'viewer-first-person-speed', path: 'packages/viewer/test/first-person-speed.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '第一人称默认移速、左右Shift加速与释放、失焦停止、相机目标同步和组合归一化', minPass: 15, minAssert: 35, minSites: 30, citedBy: 0 },
+    purpose: '第一人称默认移速、左右Shift加速与释放、失焦停止、相机目标同步和组合归一化', minPass: 17, minAssert: 35, minSites: 30, citedBy: 0 },
   { id: 'viewer-splat-runtime', path: 'packages/viewer/test/splat-runtime.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: '泼溅 LOD 数据源、真实中心边界、分片让出与取消、交互预算和图形读数语义；实机性能另行验收', minPass: 20, minAssert: 150, minSites: 125, citedBy: 0 },
   { id: 'render-failure', path: 'packages/lyapunov-shell/test/render-failure.test.ts', theme: 'silent-degradation', runner: 'bun:test', ci: 'run',
     // minPass 6 → 10（2026-09-27，GATE-FLOOR-DRIFT 实测点出来的 9 条之一）
-    purpose: '渲染失败必须走到可见的失败面，不得静默降级成空白/成功', minPass: 10, minAssert: 26, claimPass: 6, minSites: 26, citedBy: 2 },
+    purpose: '渲染失败必须走到可见的失败面，不得静默降级成空白/成功', minPass: 13, minAssert: 26, claimPass: 6, minSites: 26, citedBy: 2 },
   { id: 'capability-truth', path: 'packages/sim-newton/test/capability-truth.test.ts', theme: 'silent-degradation', runner: 'bun:test', ci: 'run',
     // GATE-AB-20260927：降级分支改用 `CUDA_VISIBLE_DEVICES=''` + `NVIDIA_VISIBLE_DEVICES=''` 的**可验证隔离**，
     //   不再由宿主有没有 CUDA 决定跑不跑（GPU 主机上原来 expect 97 < 下限 100）。实测 11 pass / 109 expect / sites 70。
-    purpose: '能力声明与真实可用性一致（capability truth）', minPass: 11, minAssert: 109, claimPass: 11, minSites: 70, citedBy: 1 },
+    purpose: '能力声明与真实可用性一致（capability truth）', minPass: 18, minAssert: 109, claimPass: 11, minSites: 70, citedBy: 1 },
   { id: 'gpu-device-hidden-notice', path: 'packages/sim-isaac/test/gpu-device-hidden-notice.test.ts', theme: 'silent-degradation', runner: 'bun:test', ci: 'run',
     // GATE-AB-20260927：宿主观测与合同测试分清——五态合同分支改用合成夹具（宿主无关），
     //   原 GPU 可见宿主上 expect 只有 16 < 下限 31 的漂移消失。实测：设备隐藏宿主 11 pass / 71 expect；
@@ -458,19 +462,19 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'session-context-cross', path: 'packages/lyapunov-shell/test/session-context-cross.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
     purpose: '跨会话上下文可区分，不串味', minPass: 5, minAssert: 64, claimPass: 2, minSites: 48, citedBy: 2 },
   { id: 'session-history', path: 'packages/lyapunov-shell/test/session-history.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
-    purpose: '会话历史恢复：窗口与意图不丢', minPass: 26, minAssert: 127, claimPass: 21, minSites: 125, citedBy: 1 },
+    purpose: '会话历史恢复：窗口与意图不丢', minPass: 27, minAssert: 127, claimPass: 21, minSites: 125, citedBy: 1 },
   { id: 'conversation-history', path: 'packages/lyapunov-shell/test/conversation-history.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
-    purpose: '会话标题/意图判定（单帧夹具 vs 多帧现实的回归）', minPass: 7, minAssert: 27, claimPass: 7, minSites: 27, citedBy: 1 },
+    purpose: '会话标题/意图判定（单帧夹具 vs 多帧现实的回归）', minPass: 8, minAssert: 27, claimPass: 7, minSites: 27, citedBy: 1 },
   { id: 'privacy-boundary', path: 'packages/lyapunov-shell/test/privacy-boundary.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
     // GATE-AB-20260927：`floor-drift` 点名 minPass 29 < 实测 31（删掉 2 条仍然绿）⇒ 连同 minAssert
     //   332 → 365、minSites 118 → 146 一起上调到实测值（只提高，不下调）。
-    purpose: '隐私边界：绝对路径与合成标记不外泄', minPass: 41, minAssert: 365, minSites: 146, citedBy: 2 },
+    purpose: '隐私边界：绝对路径与合成标记不外泄', minPass: 44, minAssert: 365, minSites: 146, citedBy: 2 },
   { id: 'host-projection-candidate', path: 'packages/lyapunov-shell/test/host-projection-candidate.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
     purpose: '候选出站投影：合成标记不入正文', minPass: 9, minAssert: 195, minSites: 63, citedBy: 3 },
   { id: 'target-window', path: 'packages/lyapunov-shell/test/target-window.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
     purpose: '定向动作只投目标窗口，别的窗口确认不出队', minPass: 7, minAssert: 34, claimPass: 7, minSites: 27, citedBy: 1 },
   { id: 'history-boundary', path: 'packages/lyapunov-session-undo/test/history-boundary.test.ts', theme: 'undo-boundary', runner: 'bun:test', ci: 'run',
-    purpose: '撤销边界不后退、失败现场可定位', minPass: 5, minAssert: 11, claimPass: 5, minSites: 11, citedBy: 1 },
+    purpose: '撤销边界不后退、失败现场可定位', minPass: 6, minAssert: 11, claimPass: 5, minSites: 11, citedBy: 1 },
   // claimPass 由 6 更正为 5（2026-09-26 勘误，见 bugfixHistory/SESSION-UNDO-CHAIN-20260926.md §9）：
   //   原声明"test/worktree-snapshots.test.ts（6 例）"是把**冷恢复两分支**（同一条 `recover()` 用例内）数成了
   //   两条。该文件的 5 条 `test(` 站点、`bun test` 的 `5 pass / 0 fail`、以及本门 undo-boundary 主题
@@ -478,7 +482,7 @@ export const CASES: readonly CaseSpec[] = [
   //   `minPass` 始终是"实测通过数"（本表 66 条里 65 条 minPass==实测，唯一例外 viewer-texture-and-autoframe
   //   是实测 22 > 下限 15），所以下限 5 本来就是对的那个；错的是 claimPass。**不是为了让门变绿而下调下限。**
   { id: 'worktree-snapshots', path: 'packages/lyapunov-session-undo/test/worktree-snapshots.test.ts', theme: 'undo-boundary', runner: 'bun:test', ci: 'run',
-    purpose: '工作树快照五类变更 + 会话私有运行目录不进撤销域', minPass: 5, minAssert: 31, claimPass: 5, minSites: 31, citedBy: 2 },
+    purpose: '工作树快照五类变更 + 会话私有运行目录不进撤销域', minPass: 14, minAssert: 31, claimPass: 5, minSites: 31, citedBy: 2 },
   // minPass 45 → 46 → 47（2026-09-27 00:5x / 01:1x，GATE-CLOSER 单，按 `floor-drift` 自己的修法**上调到实测值**）：
   //   45 → 46：ORDER-DEPENDENT-GPU-PROBE 单在这个文件里 +1 条用例（「探测顺序无关」，6 expect），
   //   实测 **46 pass / 0 fail / 364 expect**（单独跑 = 门里跑 = 反序跑，逐项相同）。
@@ -508,7 +512,7 @@ export const CASES: readonly CaseSpec[] = [
     // 24 → 25（GATE-CLOSER，同一判据再点一次：实测 25 pass / 0 fail / 123 expect；**上调，不是放宽**）
     purpose: '打包取件有界 + 缓存命中 0 网络（W16）', minPass: 25, minAssert: 61, claimPass: 14, minSites: 61, citedBy: 2 },
   { id: 'payload-contract', path: 'distribution/linux/payload-contract.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
-    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 19, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
+    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 24, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
   { id: 'vla-official-scene-binding', path: 'packages/policy-registry/test/vla-official-scene-binding.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
     purpose: '官方策略取件与场景绑定', minPass: 6, minAssert: 9, claimPass: 6, minSites: 9, citedBy: 1 },
   { id: 'operations-bounded-fetch', path: 'packages/lyapunov-share/test/operations-bounded-fetch.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
@@ -527,16 +531,16 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'dev032-html-plan-wiring', path: 'packages/lyapunov-workspace/test/dev032-html-plan-wiring.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'DEV-032 HTML 计划接线', minPass: 5, minAssert: 31, claimPass: 4, minSites: 31, citedBy: 1 },
   { id: 'portability', path: 'packages/lyaup-migrations/test/portability.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '迁移可移植性（含回退边界）', minPass: 11, minAssert: 121, claimPass: 11, minSites: 121, citedBy: 1 },
+    purpose: '迁移可移植性（含回退边界）', minPass: 15, minAssert: 121, claimPass: 11, minSites: 121, citedBy: 1 },
   { id: 'migrate-workspace-layout', path: 'script/migrate-workspace-layout.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: '工作区布局迁移', minPass: 11, minAssert: 117, claimPass: 11, minSites: 76, citedBy: 1 },
   { id: 'runtime-patch', path: 'script/runtime-patch.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 8 → 16（2026-09-27，GATE-FLOOR-DRIFT 实测点出来的 9 条之一）
-    purpose: '运行补丁替身与源码守卫', minPass: 26, minAssert: 172, claimPass: 8, minSites: 161, citedBy: 1 },
+    purpose: '运行补丁替身与源码守卫', minPass: 32, minAssert: 172, claimPass: 8, minSites: 161, citedBy: 1 },
   { id: 'g17-legacy-residue', path: 'script/gates/g17-legacy-residue.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'g17 哑探针的失败能力单测（(?:…) 在 POSIX ERE 下无效）', minPass: 12, minAssert: 44, claimPass: 12, minSites: 34, citedBy: 1 },
   { id: 'package-linux', path: 'script/package-linux.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 13, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
+    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 20, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
   { id: 'g19-building-robot-task', path: 'packages/scene-kit/test/g19-building-robot-task.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'G19 建筑-机器人任务链', minPass: 2, minAssert: 30, minSites: 31, citedBy: 2 },
   { id: 'g19-building-scale-animation', path: 'packages/scene-kit/test/g19-building-scale-animation.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
@@ -544,11 +548,11 @@ export const CASES: readonly CaseSpec[] = [
     waiveSkip: 1,
     waiveSkipReason: '物理侧派生要求 LYAPUNOV_ALGORITHM_PYTHON；A06同版完整门已真实执行8/8且无skip。未设变量时的1skip仅保留历史环境说明，7pass低于当前8下限必须RED，不得算通过' },
   { id: 'open-cancel', path: 'packages/sim-mujoco/test/open-cancel.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '打开中途取消不留下半个会话', minPass: 4, minAssert: 28, minSites: 29, citedBy: 1 },
+    purpose: '打开中途取消不留下半个会话', minPass: 7, minAssert: 28, minSites: 29, citedBy: 1 },
   { id: 'formal-model', path: 'packages/lyapunov-product-bundle/test/formal-model.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '正式模型面', minPass: 2, minAssert: 6, minSites: 6, citedBy: 1 },
+    purpose: '正式模型面', minPass: 3, minAssert: 6, minSites: 6, citedBy: 1 },
   { id: 'session-launch', path: 'packages/sim-contract/test/session-launch.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
-    purpose: '会话启动契约', minPass: 30, minAssert: 93, minSites: 93, citedBy: 1 },
+    purpose: '会话启动契约', minPass: 31, minAssert: 93, minSites: 93, citedBy: 1 },
   { id: 'isaac-startup-budget', path: 'packages/sim-contract/test/isaac-startup-budget.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
     purpose: 'Isaac 启动预算（契约层）', minPass: 6, minAssert: 33, minSites: 34, citedBy: 2 },
   { id: 'scene-adapter-transform', path: 'packages/sim-isaac/test/scene-adapter-transform.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
@@ -570,7 +574,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'viewer-texture-and-autoframe', path: 'packages/viewer/test/texture-and-autoframe.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 由 15 上调到 27（2026-09-27，GATE-FLOOR-DRIFT，验收报告 §4-N8 点名的那一条）：
     // DEV-034 把该文件从 15 条长到 27 条，下限留在 15 就等于"删掉 12 条用例仍然绿"。
-    purpose: '2D 纹理真的进材质 + 自动取景只看可见有限几何（DEV-034）', minPass: 30, minAssert: 42, minSites: 42, citedBy: 2 },
+    purpose: '2D 纹理真的进材质 + 自动取景只看可见有限几何（DEV-034）', minPass: 31, minAssert: 42, minSites: 42, citedBy: 2 },
   // ↓ 2026-09-26 第二轮 caseset-coverage 反查又点出的 4 条 DRIFT（同一机制、同一理由：不接进门，发布门就不跑它）。
   //   四条都实测于本轮（bun 1.3.13 / 工作树 HEAD b1b6427）：minPass=实测通过数、minAssert=实测 expect 读数、
   //   minSites=门的 countAssertSites 静态站点数。四条都**无外部标记**（不起 python/不联网/不碰真机），
@@ -580,10 +584,10 @@ export const CASES: readonly CaseSpec[] = [
     // minPass 由 27 上调到 39（2026-09-27，GATE-FLOOR-DRIFT）：R-fix#3/#8 把这个文件从 27 pass 长到 39 pass。
     purpose: 'GitHub 取件的匿名配额隐式依赖与凭据入口：一次取件 3 个 api 请求、token 只发 api.github.com、403 配额与权限可分、429 限流不重试（W26/W26-R1）', minPass: 39, minAssert: 136, minSites: 136, citedBy: 3 },
   { id: 'scene-kit-formats-mjcf-sections', path: 'packages/scene-kit/test/formats-mjcf-sections.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '重复 MJCF 顶层段与 include 组合的归一化（DEV-030）：并段后网格/body/关节仍在、meshdir 生效、类边界不被并掉', minPass: 16, minAssert: 62, minSites: 60, citedBy: 1 },
+    purpose: '重复 MJCF 顶层段与 include 组合的归一化（DEV-030）：并段后网格/body/关节仍在、meshdir 生效、类边界不被并掉', minPass: 17, minAssert: 62, minSites: 60, citedBy: 1 },
   { id: 'viewer-projection-consumer', path: 'packages/viewer/test/projection-consumer.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 18 → 19（2026-09-27，GATE-FLOOR-DRIFT 实测点出来的 9 条之一）
-    purpose: '出站投影的消费侧回归（DEV-PROJ-01）：`res:<指纹>` 之后装载器/基址/格式分派不得再拿定位符串猜语义（P15 实测打坏的 5 处消费点）', minPass: 19, minAssert: 91, minSites: 79, citedBy: 3 },
+    purpose: '出站投影的消费侧回归（DEV-PROJ-01）：`res:<指纹>` 之后装载器/基址/格式分派不得再拿定位符串猜语义（P15 实测打坏的 5 处消费点）', minPass: 20, minAssert: 91, minSites: 79, citedBy: 3 },
   { id: 'viewer-splat-support', path: 'packages/viewer/test/splat-support.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'splat 成因分类（DEV-025）：格式不支持/解码器缺失/依赖缺失/配准轴向/正常分开，稳定码与异常文本归类', minPass: 12, minAssert: 47, minSites: 34, citedBy: 1 },
   // ↓ 2026-09-26 19:18 追加的 3 条：`bugfixHistory/SIX-UNCONFIRMABLE-20260926.md` 落地后派生集**长大**
@@ -612,7 +616,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'test-ci-harness-cli', path: 'script/test-ci.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
     // minPass 18 → 28（GATE-CLOSER，`floor-drift` 实测点名：18 < 28 ⇒ 删掉 10 条仍然绿。**上调，不是放宽**）
     // 28 → 33（GATE-CLOSER 再次点名：28 < 33；01:48 单跑实测 33 pass / 0 fail / 133 expect、sites=119。**只上调**）
-    purpose: 'CI harness（= `bun run preflight` 的引擎）的分类与失败传播：不跑≠通过（未审标记 fail-closed）、纳入缺件必须 exit 2 并点名、真 CLI 退出码 0/2 与真子进程（CCMM-07/09）', minPass: 33, minAssert: 133, claimPass: 18, minSites: 119, citedBy: 1 },
+    purpose: 'CI harness（= `bun run preflight` 的引擎）的分类与失败传播：不跑≠通过（未审标记 fail-closed）、纳入缺件必须 exit 2 并点名、真 CLI 退出码 0/2 与真子进程（CCMM-07/09）', minPass: 34, minAssert: 133, claimPass: 18, minSites: 119, citedBy: 1 },
   // ↓ 2026-09-27 00:5x 追加两条（GATE-CLOSER 单）。两条都是**在飞 lane 造的用例、因不在写域没人接进门**：
   //   `caseset-coverage` 会把它们判 DRIFT（"新增回归用例必须接进门，或写进 COVERAGE_WAIVERS 并给理由"），
   //   而 `manifest-gate-gap` 只登记"有多少条不进门"，不替谁接线。两条都**离线可跑**（无 python/无网络/
@@ -1024,51 +1028,67 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   // 主控 b58073b 再逐文件实跑物理状态/控件、口语选路、实例和发行回归，新增/增长只上调。
   // A08 Source a2f217f：同版全门九项新增行为按真实pass只上调；89项不删，SDK缺PY的skip不降门。
   // A08 发布登记：正式 harness 同版实跑新增侧面板 4/21/13、用户安装入口 12/63/57；原 89 项不删不降。
-  at: '2026-10-02T10:42:30Z',
-  digest: '8b69645315ac',
+  // G7/P11 门维护（2026-10-16T09:41:44Z，执行方）：正常门 `floor-drift` 点名 25 条 GREEN 用例
+  //   minPass 低于实测（P0～P10 累积新增覆盖，删除检测已失效）；另加正式环境
+  //   `LYAPUNOV_ALGORITHM_PYTHON` 后 portability 由 13/15 转绿、下限 11→15。共 26 条按实测成功读数
+  //   同时上调 `CASES.minPass` 与冻结 `pass`（旧 id 一个不删、不降）；`minAssert`/`minSites`/
+  //   `MANIFEST_GAP_FROZEN`/`COVERAGE_WAIVERS`/`SKIP_WAIVERS` 与判据语义均未改。
+  //   digest 由 8b69645315ac 重算为 59d203f6ed2a（91 条，只增不删）。
+  // P16（2026-10-16T14:51:27Z，执行方）：`floor-drift` 唯一实测差异为 domain-instance-projection
+  //   `minPass 6 < 实测 pass=7`（P13 新增放置回归）。仅把该 id 的 CASES.minPass 与冻结 pass 同抬
+  //   6 → 7；旧 id 一个不删、不降，`minAssert`/`minSites`/`MANIFEST_GAP_FROZEN`/waiver/判据语义均未改。
+  //   digest 由 `floorBaselineDigest` 按排序后 `id=pass` 重算：59d203f6ed2a → 362bb53baf41（91 条，只增不删）。
+  // V9：依据主控同版零失败实测，仅上调19/31；91个既有id不删不降，判据与排除项不变。
+  // V10主控：新增放置预览与确认同位姿回归，domain-instance-projection只上调7→8。
+  // V11（2026-10-21）：domain-instance-projection 随 CASES.minPass 同抬 8→10；digest 按排序后 id=pass 重算
+  //   e0a1545aaa91 → a6b92a64bcac（91 条，只增不删、不降）。
+  at: '2026-10-21T06:40:00Z',
+  digest: 'a6b92a64bcac',
   // A07：仅上调场景生命周期8→11、上下文2→4；87项未删除，摘要同步实测冻结表。
   pass: {
-  'app-side-panel-boundary': 4, 'linux-user-installer': 12,
+  'app-side-panel-boundary': 6, 'linux-user-installer': 41,
   // A08 F5：新增gesture8 / pointer1，并按真实路由复测仅上调双会话12→13；其他冻结行原样保留。
   'manual-control-gesture': 8, 'manual-control-pointer': 1,
   'legacy-resource-source': 4,
-  'domain-instance-projection': 5,
-  'scene-world-lifecycle': 23,
+  // P16：随 CASES.minPass 同抬 6 → 7（只上调，不删/不降）。
+  // V11：随 CASES.minPass 同抬 8 → 10（floor-drift 点名，只上调）。
+  'domain-instance-projection': 10,
+  'scene-world-lifecycle': 32,
   'scene-ptc-input': 1,
   'peiri-search-client': 10,
-  'brand-welcome': 3,
+  'brand-welcome': 6,
   'flight-controller': 4,
-  'physics-binding': 8,
+  'physics-binding': 9,
   'geometry-source-contract': 3,
-  'physics-state': 5,
-  'physics-controls': 17,
-  'environment-routing-selection': 14,
+  'physics-state': 7,
+  'physics-controls': 19,
+  'environment-routing-selection': 22,
 
-  'behavior-evidence': 5, 'blender-executable': 7, 'capability-truth': 11,
-  'computer-use-input-scope': 62, 'conversation-history': 7, 'cua-input-single-flight': 16,
+  'behavior-evidence': 5, 'blender-executable': 7, 'capability-truth': 18,
+  'computer-use-input-scope': 62, 'conversation-history': 8, 'cua-input-single-flight': 16,
   'desktop-restart-recovery': 19, 'dev032-html-plan-wiring': 5, 'domain-pointer-rules-turn': 4,
   'engine-panel-decision': 11, 'engine-preference': 59, 'engine-selection-consistency': 6,
-  'environment-readiness': 50, 'environment-routing': 96, 'episode-record-fields': 6, 'formal-model': 2,
+  'environment-readiness': 50, 'environment-routing': 96, 'episode-record-fields': 6, 'formal-model': 3,
   'g17-legacy-residue': 12, 'g19-building-robot-task': 2, 'g19-building-scale-animation': 8,
   'gate-drivers-mechanism': 29, 'gpu-device-hidden-notice': 11, 'gpu-misdiagnosis-guard': 23,
-  'history-boundary': 5, 'host-projection-candidate': 9, 'html-preview-entry': 50,
+  'history-boundary': 6, 'host-projection-candidate': 9, 'html-preview-entry': 50,
   'isaac-entry-lifecycle': 8, 'isaac-orphan-close-failure': 3, 'isaac-startup-budget': 6,
   'isaac-startup-budget-entry': 7, 'isaac-startup-budget-wiring': 4, 'job-record-hunyuan': 11,
   'job-record-marble': 3, 'mamba-license': 25, 'migrate-workspace-layout': 11,
-  'model-download-routing': 5, 'notification-no-replay': 3, 'open-cancel': 4,
-  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 13, 'payload-contract': 19,
-  'policy-source-bounded-fetch': 8, 'policy-source-github-quota': 39, 'portability': 11,
-  'prepare-env-guard': 3, 'privacy-boundary': 41, 'provider-installer': 28, 'render-failure': 10,
-  'runtime-patch': 26, 'scene-adapter-transform': 7, 'scene-kit-formats-mjcf-sections': 16,
-  'scene-projection': 8, 'session-context-cross': 5, 'session-history': 26, 'session-launch': 30,
+  'model-download-routing': 5, 'notification-no-replay': 3, 'open-cancel': 7,
+  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 20, 'payload-contract': 24,
+  'policy-source-bounded-fetch': 8, 'policy-source-github-quota': 39, 'portability': 15,
+  'prepare-env-guard': 3, 'privacy-boundary': 44, 'provider-installer': 28, 'render-failure': 13,
+  'runtime-patch': 32, 'scene-adapter-transform': 7, 'scene-kit-formats-mjcf-sections': 17,
+  'scene-projection': 8, 'session-context-cross': 5, 'session-history': 27, 'session-launch': 31,
   'session-ownership-two-sessions': 13, 'share-export': 1, 'target-window': 7, 'terminal-options': 30,
-  'test-ci-harness-cli': 33, 'unity-mcp': 11, 'viewer-projection-consumer': 19,
-  'viewer-splat-support': 12, 'viewer-texture-and-autoframe': 30, 'vla-official-scene-binding': 6,
-  'workbench-camera-initial-framing': 11, 'worker-robot-metadata': 11, 'worktree-snapshots': 5,
+  'test-ci-harness-cli': 34, 'unity-mcp': 11, 'viewer-projection-consumer': 20,
+  'viewer-splat-support': 12, 'viewer-texture-and-autoframe': 31, 'vla-official-scene-binding': 6,
+  'workbench-camera-initial-framing': 11, 'worker-robot-metadata': 11, 'worktree-snapshots': 14,
   // CI-FIX 单（2026-09-27）：随 4 条用例接进门**新增**的冻结基线（真实实测通过数，只增不减、不删除/不降低既有条目）。
   'computer-use-wording': 15, 'policy-archive-level3-wiring': 13,
   'policy-source-json-body-timeout-shape': 5, 'robot-glb-ktx2-texture': 13,
-  'isaac-local-discovery': 9, 'viewer-first-person-speed': 15, 'viewer-splat-runtime': 20,
+  'isaac-local-discovery': 9, 'viewer-first-person-speed': 17, 'viewer-splat-runtime': 20,
   },
 }
 
@@ -2561,14 +2581,36 @@ function bunBin(): string {
 
 /**
  * 执行器与参数。**必须按清单声明的 runner 选**：
- * `bun:test`/`node:test` ⇒ `bun --no-env-file test <file>`（裸 node --test 在本树跑不起来，见 test-ci.ts 实测）；
- * `plain` ⇒ `bun --no-env-file <file>`；`python` ⇒ `TESTCI_PYTHON ?? python3 <file>`。
+ * `bun:test`/`node:test` ⇒ `bun test --no-env-file --tsconfig-override=<root tsconfig> <file>`；
+ * `plain` ⇒ `bun run --no-env-file --tsconfig-override=<root tsconfig> <file>`；
+ * `python` ⇒ `TESTCI_PYTHON ?? python3 <file>`（参数一个字不动）。
  * 选错执行器的后果本单实测过：plain 脚本按 `bun test` 跑 ⇒ **exit 0 + 0 读数**，是最危险的一种假绿灯。
+ *
+ * ## tsconfig 注入（G7-NORMAL-GATE-TSCONFIG）
+ *
+ * 注入方式**照抄 `script/test-ci.ts::commandFor`**（同一条执行器口径），因为子进程以 `--root` 为 cwd 时
+ * Bun 会顺着 `node_modules` 的符号链走到**别的项目**的 `.upstream`：本机实测，不传 override 时
+ * `@deepseek-ai/dsh-app-boot` / `@deepseek-ai/cordis` 解析到
+ * `/home/.../alpha8-release-<日期>/source/.upstream/...`，`packages/lyaup-migrations/test/portability.test.ts`
+ * 于是 **13 pass / 2 fail**；同源码在 `test-ci` 里带 override ⇒ **15/15**。
+ * 配置语义**以当前 root 为准**：
+ *  · root 有 `tsconfig.json` ⇒ 明确 `--tsconfig-override=<root>/tsconfig.json`（`resolve()` 出的绝对路径，
+ *    不硬编码本机路径）；
+ *  · root 没有 ⇒ **不**指向一个不存在的文件、也**不**越过 root 去读另一个项目的配置 —— `--root`/`--cases`
+ *    临时夹具模式走这一支（与改前的 argv 逐字相同）。
+ * `--no-env-file`、退出码、计数与日志传递一律保持。
+ *
+ * **导出**：回归测试要拿本门**实际会起的 argv** 驱动真实子进程（只做字符串检查不够，见
+ * `script/release-gate.test.ts` 的 `caseExec · 真实 CLI 解析口径`）。
  */
-function caseExec(spec: CaseSpec): { cmd: string; args: string[] } {
-  if (spec.runner === 'plain') return { cmd: bunBin(), args: ['--no-env-file', spec.path] }
+export function caseExec(spec: CaseSpec, root: string): { cmd: string; args: string[] } {
   if (spec.runner === 'python') return { cmd: process.env.TESTCI_PYTHON?.trim() || 'python3', args: [spec.path] }
-  return { cmd: bunBin(), args: ['--no-env-file', 'test', spec.path] }
+  const tsconfig = resolve(root, 'tsconfig.json')
+  const hasTsconfig = existsSync(tsconfig)
+  const flags = ['--no-env-file', ...(hasTsconfig ? [`--tsconfig-override=${tsconfig}`] : [])]
+  if (spec.runner === 'plain') return { cmd: bunBin(), args: hasTsconfig ? ['run', ...flags, spec.path] : [...flags, spec.path] }
+  // bun:test 与 node:test 都用 bun test（裸 node --test 在本树跑不起来，见 test-ci.ts 实测）
+  return { cmd: bunBin(), args: hasTsconfig ? ['test', ...flags, spec.path] : [...flags, 'test', spec.path] }
 }
 
 function tscBin(root: string): { cmd: string; pre: string[]; display: string } {
@@ -2751,7 +2793,7 @@ function runCases(specs: CaseSpec[], root: string, quiet: boolean, timeoutMs: nu
       continue
     }
     const source = readFileSync(full, 'utf8')
-    const { cmd, args } = caseExec(spec)
+    const { cmd, args } = caseExec(spec, root)
     const r = run(cmd, args, root, timeoutMs)
     const reading: CaseReading = {
       spec,

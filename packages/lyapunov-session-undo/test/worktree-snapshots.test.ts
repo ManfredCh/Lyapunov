@@ -272,12 +272,19 @@ process.exit(result.status ?? 1)
     const userFile = path(root, 'user.txt')
     writeFileSync(userFile, 'real-user-before')
     const wrapper = hashTimeRemoval(dirname(storageRoot), userFile), previousPath = process.env.PATH
+    const previousLocale = process.env.LC_ALL, previousLanguage = process.env.LANG
     process.env.PATH = wrapper.bin + ':' + previousPath
+    // 产品自有的 Git 子进程继承宿主 locale；断言用的是 Git 的英文诊断，必须把子进程 locale 固定成 C。
+    process.env.LC_ALL = 'C'; process.env.LANG = 'C'
     try {
       await expect(store.capture()).rejects.toThrow("could not open 'user.txt'")
       expect(existsSync(path(storageRoot, 'operation.lock'))).toBe(false)
       expect(existsSync(path(storageRoot, 'capture.json'))).toBe(false)
-    } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath
+      if (previousLocale === undefined) delete process.env.LC_ALL; else process.env.LC_ALL = previousLocale
+      if (previousLanguage === undefined) delete process.env.LANG; else process.env.LANG = previousLanguage
+    }
     writeFileSync(userFile, 'real-user-restored')
     expect((await store.captureReported()).report.files).toBe(1)
   }, 30_000)

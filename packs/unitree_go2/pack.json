@@ -2,7 +2,7 @@
   "packId": "unitree_go2",
   "version": "2026.09.22",
   "family": "quadruped",
-  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/go2.xml" },
+  "asset": { "modelEntry": "asset/scene.xml", "model": "asset/go2.xml", "preview": "asset/go2.png" },
   "pieces": {
     "asset": { "ref": "ASSET_STAGING_MANIFEST.json#unitree_go2" },
     "context": "ready",

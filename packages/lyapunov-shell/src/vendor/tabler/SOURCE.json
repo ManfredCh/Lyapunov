@@ -15,12 +15,15 @@
   "robot": "robot-face",
   "object": "assembly",
   "camera": "camera",
+  "capture": "camera-plus",
+  "recording": "player-record",
+  "physics": "wave-sine",
   "asset": "folder-open",
   "file": "files",
   "terminal": "terminal-2",
   "deliverable": "stack-2",
   "engine": "cpu",
-  "annotation": "message-2"
+  "annotation": "lyapunov-note"
  },
  "iconSources": {
   "robot": {
@@ -50,20 +53,68 @@
    "note": "物理引擎切换入口用；路径数据逐字节等于该 revision 的 Tabler outline/cpu.svg（MIT）。"
   },
   "annotation": {
-   "name": "message-2",
-   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/message-2.svg",
-   "fetchedAt": "2026-09-17T23:26:38Z",
-   "httpStatus": 200,
-   "bytes": 516,
-   "sha256": "35d02bef771d2be43e8be5f4554b0a375e47b753372d6913a2cf07198a7fd08d",
-   "svgVersion": "1.0",
-   "svgUnicode": "eaec",
+   "name": "lyapunov-note",
+   "origin": "Lyapunov 自绘（P14 用户确认稿），非 Tabler 原图。原 Tabler outline/message-2 自本版起不再内联。",
+   "approvedAt": "2026-10-16",
+   "approvalArtifact": "UI/redesign/note-icon-review-20261016/note.svg",
+   "viewBox": "0 0 24 24",
+   "path": "M12 3.5a8.5 8.5 0 1 1 0 17H5a1 1 0 0 1-1-1v-7A8.5 8.5 0 0 1 12 3.5Z",
+   "sha256": "ccdc9ef2399b84aaa49524cd1a16c5ab5fd2d7cb2c93acdec10fcce264271013",
+   "pathSha256": "d024cf1ab5166c55b50e9133fb6bb8362ffaeb0024906a4fa2cfbb75e81776c1",
+   "pathSha256Method": "path 的 d 值原文（无换行）的 sha256",
+   "toolbar": "fill none + stroke currentColor，宽 1.65，round join/cap；实际 16px。原内部两道文字线已删除。",
+   "marker": "同一 path 填充：默认 #f2f4f7、选中 #78a9ff；外描边 1.1 个 viewBox 单位，默认 #10151d、选中 #15213a；尾部落点锚点取 viewBox (5,20.5)。",
+   "sharedIn": "packages/lyapunov-contracts/src/note-icon.ts（纯常量，无 React/THREE 依赖）；工具栏 SVG、Scene Sprite 贴图、批注 PNG 都消费这一份。",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"annotation\"（引用共享 path，单条 path，strokeWidth=1.65）",
+   "note": "3D 批注入口与场景标记用；几何逐字节等于用户 2026-10-16 确认稿 note.svg 的 d 值（自绘，非 Tabler），不适用 MIT 再分发来源。"
+  },
+  "capture": {
+   "name": "camera-plus",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/camera-plus.svg",
+   "bytes": 594,
+   "sha256": "08de0d88dbcc204e3b720cc7bf583331fb000157b1b3087a363e2f0eb2617c12",
+   "svgVersion": "1.11",
+   "svgUnicode": "ec3b",
    "paths": [
-    "M8 9h8",
-    "M8 13h6",
-    "M9 18h-3a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-3l-3 3l-3 -3"
+    "M12 20h-7a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v3.5",
+    "M16 19h6",
+    "M19 16v6",
+    "M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"
    ],
-   "note": "3D 批注入口用（Tabler category=Communication，tags 含 comment）；路径数据逐字节等于该 revision 的 Tabler outline/message-2.svg（MIT）。"
+   "pathsSha256": "27556e9d2ac0009c9b8be3fc88eb6cca1d934f238ea74895b2da21f7d9d8cb7a",
+   "pathsSha256Method": "各条 path 的 d 值以换行连接后的 sha256",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"capture\"（四条 path 的 d 逐字节一致）",
+   "note": "RC Capture（自由视角拍摄）入口用；几何逐字节取自该 revision 的 Tabler outline/camera-plus.svg（MIT）。本 vendor 集只把官方 stroke-width=2 统一为 1.7（尺寸/颜色/圆头端点/连接见 icons.tsx 的 common），path 的 d 与官方原件一致。"
+  },
+  "recording": {
+   "name": "player-record",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/player-record.svg",
+   "bytes": 408,
+   "sha256": "81f485ff2895bebb886ee4bc69cdbfce30f61e26a391f6ca736282026ea701ad",
+   "svgVersion": "1.28",
+   "svgUnicode": "ed47",
+   "paths": [
+    "M5 12a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"
+   ],
+   "pathsSha256": "898f8343395670d62788f48432415a9d85f588ea9b2fdb3260db58446338f15a",
+   "pathsSha256Method": "各条 path 的 d 值以换行连接后的 sha256",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"recording\"（单条 path 的 d 逐字节一致）",
+   "note": "RC Recording（记录作业）入口用；几何逐字节取自该 revision 的 Tabler outline/player-record.svg（MIT）。本 vendor 集只把官方 stroke-width=2 统一为 1.7（见 icons.tsx 的 common），path 的 d 与官方原件一致。"
+  },
+  "physics": {
+   "name": "wave-sine",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/wave-sine.svg",
+   "bytes": 496,
+   "sha256": "645bf8e3ed9b6491c667eaa44daee2098ab7718933dd47e7f5cec19cd51a979e",
+   "svgVersion": "1.19",
+   "svgUnicode": "ecd4",
+   "paths": [
+    "M21 12h-2c-.894 0 -1.662 -.857 -1.761 -2c-.296 -3.45 -.749 -6 -2.749 -6s-2.5 3.582 -2.5 8s-.5 8 -2.5 8s-2.452 -2.547 -2.749 -6c-.1 -1.147 -.867 -2 -1.763 -2h-2"
+   ],
+   "pathsSha256": "ffd29bf45c8e59556375ce3b394aec19a2f1d0145a03f343e7af7e5e9b541e6e",
+   "pathsSha256Method": "各条 path 的 d 值以换行连接后的 sha256",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"physics\"（单条 path 的 d 逐字节一致）",
+   "note": "RC Physics（物理世界独立面板）入口用；几何逐字节取自该 revision 的 Tabler outline/wave-sine.svg（MIT）。本 vendor 集只把官方 stroke-width=2 统一为 1.7（见 icons.tsx 的 common），path 的 d 与官方原件一致。"
   }
  },
  "revisionChecks": {
@@ -81,5 +132,6 @@
    "bytes": 594
   }
  },
- "unchangedIcons": "除 robot→robot-face 与新增 annotation→message-2 外，其余 9 枚（box/world/assembly/camera/folder-open/files/terminal-2/stack-2/cpu）的 path 数据与新增前逐字节相同。"
+ "unchangedIcons": "除 robot→robot-face 与新增 annotation（P8 起为 message-2，P14 起改为 Lyapunov 自绘 note）外，其余 9 枚（box/world/assembly/camera/folder-open/files/terminal-2/stack-2/cpu）的 path 数据与新增前逐字节相同。",
+ "exceptions": "annotation 自 P14 起是 Lyapunov 自绘图形，不属于 Tabler Icons，也不在 MIT 许可覆盖范围内；该枚的路径/锚点由 packages/lyapunov-contracts/src/note-icon.ts 唯一定义，见上方 iconSources.annotation。"
 }

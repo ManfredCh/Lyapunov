@@ -42,7 +42,7 @@ beforeEach(async () => {
   await ctx.plugin(Tools)
   await ctx.plugin(Sessions)
   await ctx.plugin(Commands)
-  await ctx.plugin(scenePlugin, { dataRoot })
+  await ctx.plugin(scenePlugin, { dataRoot, productRoot: join(dataRoot, 'no-bundled-product') })
   // 两个都是**真实会话**（原生 SessionId），身份来自会话本身而不是测试自编的字符串。
   ctx.sessions.create(SessionId(SESSION_A))
   ctx.sessions.create(SessionId(SESSION_B))

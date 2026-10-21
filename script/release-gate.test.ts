@@ -27,6 +27,7 @@ import { join } from 'node:path'
 import {
   aggregate,
   ARGS_EXIT,
+  caseExec,
   CASES,
   collectOfflineCi,
   COVERAGE_WAIVERS,
@@ -469,6 +470,71 @@ describe('取数路径 · 子进程尾部（preflight UNPROVEN 的真因）', ()
   test('取数路径夹具清场', () => {
     rmSync(dir, { recursive: true, force: true })
   })
+})
+
+// ── 1c. 执行器 argv：tsconfig 注入与真实 CLI 对照（G7-NORMAL-GATE-TSCONFIG）────
+
+/**
+ * 修复的缺陷（复现证据在 `.rc-evidence/g7-runner/`）：`caseExec` 过去只发
+ * `bun --no-env-file test <file>`，而 **`test-ci` 对同一个 Bun 子进程显式传
+ * `--tsconfig-override=<root>/tsconfig.json`**。差别不是"多一个 flag"：本树
+ * `node_modules/@deepseek-ai/dsh-app-boot` / `cordis` 是指向**另一个项目** `.upstream` 的符号链，
+ * 不带 override 时 Bun 顺着它解析出第二份 SDK 实例，`packages/lyaup-migrations/test/portability.test.ts`
+ * 在门内 13 pass / 2 fail，而同源码在 `test-ci` 里 15/15（修复不碰原迁移用例的任何断言）。
+ *
+ * 本组**不做纯字符串自证**：它拿 `caseExec()` 真正会起的 argv 驱动真实子进程，钉两条性质：
+ *  1. **解析实例一致**：真实 portability 经门内 argv ⇒ 15 pass / 0 fail（且 argv 带当前 root 的 override）；
+ *  2. **错误仍传播**：真实失败的 bun:test 夹具经门内 argv ⇒ 非 0 退出码 + fail 读数，override 不吞错；
+ *  3. **root 无 tsconfig**（`--root`/`--cases` 夹具模式）：不注入 override、不指向不存在的文件，真实夹具照跑照通过。
+ */
+describe('caseExec · 真实 CLI 解析口径（G7-NORMAL-GATE-TSCONFIG）', () => {
+  test('真实 portability：门内 argv 解析回本 root 一份实例（15 pass / 0 fail）', () => {
+    const s = spec({ id: 'portability', path: 'packages/lyaup-migrations/test/portability.test.ts' })
+    const { cmd, args } = caseExec(s, ROOT)
+    // 单实例在 argv 上**可机器核对**的一面：必须带当前 root 的 tsconfig（与 test-ci 同口径，非硬编码）。
+    const override = args.find((a) => a.startsWith('--tsconfig-override='))
+    expect(override).toBe(`--tsconfig-override=${join(ROOT, 'tsconfig.json')}`)
+    // 且它指向的文件真实存在（"不指向一个不存在的文件"这条在带 override 的一支也成立）。
+    expect(existsSync(override!.slice('--tsconfig-override='.length))).toBe(true)
+    const r = run(cmd, args, ROOT, 120_000)
+    const c = parseCaseOutput(r.out)
+    expect(c.fail).toBe(0)
+    expect(c.pass).toBe(15)
+    expect(r.code).toBe(0)
+  }, 120_000)
+
+  test('错误仍传播：真实失败的 bun:test 夹具经门内 argv ⇒ 非 0 + fail 读数', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gate-caseexec-red-'))
+    const f = join(dir, 'red.test.ts')
+    writeFileSync(f, "import { expect, test } from 'bun:test'\ntest('红', () => { expect(1).toBe(2) })\n")
+    try {
+      const { cmd, args } = caseExec(spec({ id: 'red-fixture', path: f }), dir)
+      // dir 无 tsconfig ⇒ 走"不注入 override"的那一支（同时证明夹具模式没有被这次修复搅动）。
+      expect(args.some((a) => a.startsWith('--tsconfig-override='))).toBe(false)
+      const r = run(cmd, args, dir, 120_000)
+      const c = parseCaseOutput(r.out)
+      expect(r.code).not.toBe(0)
+      expect(c.fail).toBeGreaterThanOrEqual(1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 120_000)
+
+  test('root 无 tsconfig：不注入 override、不指向不存在文件，真实夹具照跑照通过', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gate-caseexec-green-'))
+    const f = join(dir, 'green.test.ts')
+    writeFileSync(f, "import { expect, test } from 'bun:test'\ntest('绿', () => { expect(1).toBe(1) })\n")
+    try {
+      const { cmd, args } = caseExec(spec({ id: 'green-fixture', path: f }), dir)
+      // 不注入 override：root 没有 tsconfig，就不指向一个不存在的文件、也不越过 root 去读别的项目配置。
+      expect(args.some((a) => a.startsWith('--tsconfig-override='))).toBe(false)
+      const r = run(cmd, args, dir, 120_000)
+      expect(r.code).toBe(0)
+      expect(parseCaseOutput(r.out).pass).toBe(1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 120_000)
 })
 
 // ── 2. 判定：每条非绿都要说清是哪一条、差多少 ────────────────────────────────

@@ -2,7 +2,7 @@
   "packId": "leap_hand",
   "version": "2026.09.22",
   "family": "hand",
-  "asset": { "modelEntry": "asset/scene_left.xml", "model": "asset/left_hand.xml" },
+  "asset": { "modelEntry": "asset/scene_left.xml", "model": "asset/left_hand.xml", "preview": "asset/right_hand.png" },
   "pieces": {
     "asset": { "ref": "ASSET_STAGING_MANIFEST.json#leap_hand" },
     "context": "ready",

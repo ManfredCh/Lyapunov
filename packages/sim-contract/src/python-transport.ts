@@ -6,7 +6,7 @@ import { cp, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { pathWithin as writablePathWithin } from '../../lyapunov-contracts/src/writable-boundary.ts'
-import { SimError, type SimWorlds, type WorldOptions, type ObservationSelection, type StopSelection, type SimAction, type RobotDescription, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions } from './index.ts'
+import { SimError, type SimWorlds, type WorldOptions, type ObservationSelection, type StopSelection, type SimAction, type RobotDescription, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions, type LidarScanOptions, type FreezeSelection, type FreezeReceipt } from './index.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt } from '../../lyapunov-contracts/src/types.ts'
 
 /**
@@ -760,6 +760,14 @@ export class ProcessSimProvider implements SimWorlds {
     let set=this.stopListeners.get(worldId);if(!set)this.stopListeners.set(worldId,set=new Set())
     set.add(listener);return()=>{set!.delete(listener);if(!set!.size)this.stopListeners.delete(worldId)}
   }
+  /** 当前 world/generation 的原生 Freeze 保持：worker 只停止目标动作并启用预分配 inactive 约束。 */
+  freeze(worldId: string, selection: FreezeSelection = {}) {
+    return this.request<FreezeReceipt>('freeze', { worldId, selection })
+  }
+  /** 解除本次原生保持：只关 eq_active，不改 gains/limits、不自动恢复旧动作/旧速度。 */
+  restore(worldId: string, selection: FreezeSelection = {}) {
+    return this.request<FreezeReceipt>('restore', { worldId, selection })
+  }
   subscribeFrames(worldId: string, listener: (frame: Frame) => void) {
     let set = this.listeners.get(worldId)
     if (!set) this.listeners.set(worldId, set = new Set())
@@ -879,6 +887,11 @@ export class ProcessSimProvider implements SimWorlds {
     // 文件已由宿主发布；同步 worker 的登记路径，标注与导出才能继续消费这次真实采集。
     await this.request('capture_publish', { worldId, captureId: result.captureId, fromDir, toDir })
   }
+  private async publishLidar(worldId: string, result: Record<string, unknown>, fromDir: string, toDir: string): Promise<void> {
+    if (typeof result.captureId !== 'string') return
+    // LiDAR产物登记与相机采集分开（不同通道），发布后同步 worker 的 range/valid/hitGeom/preview 位置。
+    await this.request('lidar_publish', { worldId, captureId: result.captureId, fromDir, toDir })
+  }
   async capture(worldId: string, options: CaptureOptions) {
     await this.requireUserFacingWrite('sensor_capture')
     return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('capture', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishCapture(worldId, result, from, to), 'sensor_capture')
@@ -893,6 +906,11 @@ export class ProcessSimProvider implements SimWorlds {
   async exportCameraDataset(worldId: string, options: CameraDatasetExportOptions) {
     await this.requireUserFacingWrite('camera_dataset_export')
     return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('camera_dataset_export', { worldId, options: { ...options, outputDir } }), undefined, 'camera_dataset_export')
+  }
+  /** 可选模拟LiDAR量测：真实原生物理射线；写入用户可见产物，走与相机采集同一套暂存/发布边界。 */
+  async scanLidar(worldId: string, options: LidarScanOptions) {
+    await this.requireUserFacingWrite('lidar_scan')
+    return this.stageMedia(options.outputDir, outputDir => this.request<Record<string, unknown>>('lidar_scan', { worldId, options: { ...options, outputDir } }), (result, from, to) => this.publishLidar(worldId, result, from, to), 'lidar_scan')
   }
   /**
    * 释放本 Provider 的 worker：发出 shutdown、关 stdin、等进程真实退出——等多久由 Kit 自己决定，

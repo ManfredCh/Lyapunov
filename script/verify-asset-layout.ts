@@ -613,7 +613,7 @@ async function runSplatAndRouterChecks(productRoot: string, fixtureWorld?: { pat
   const boundsModule = join(productRoot, "packages/scene-kit/src/splat-bounds.ts")
   check("splat-bounds 模块存在且导出 splatBounds", /export async function splatBounds/.test(readText(boundsModule)), boundsModule)
   const operations = readText(join(productRoot, "packages/scene-kit/src/operations.ts"))
-  check("落地对齐不再只认 mesh", /const bounds=resource\.physicalization\?\.collisionBounds\?\?assetBounds\(resource\.parsed,resource\.ref\.source,resource\.parsed\.kind==="splat"\?effectiveSplatSourceTransform\(resource\):undefined\)/.test(operations),
+  check("落地对齐不再只认 mesh", /constbounds=(\w+)\.physicalization\?\.collisionBounds\?\?assetBounds\(\1\.parsed,\1\.ref\.source,\1\.parsed\.kind==="splat"\?effectiveSplatSourceTransform\(\1\):undefined\)/.test(operations.replace(/\s+/g,"")),
     /kind==="mesh"\?assetBounds/.test(operations) ? "仍限定 kind===\"mesh\"" : "collisionBounds ?? assetBounds(...)" )
 
   // 行为检查：真解码内置街道件，断言换算到实体本地后的底面与抬升量。

@@ -263,6 +263,6 @@ test('正式命令回执只给入口名，原选择目录正确续链且不回�
 test('策略已经登记但当前实例兼容失败仍保留登记回执并给具体错误',async()=>{
  const h=harness();h.port.loadPolicy=async filePath=>({filePath,entry:{id:'policy-entry',label:'bundle',filePath,sourceBytesVerified:true,registeredAt:new Date().toISOString(),available:true},face:{failure:{status:'BLOCKED',code:'ROBOT_CONTRACT_INCOMPATIBLE',message:'当前实例关节不匹配'}}})
  const result=await importLocalFiles(h.port,['/bundle.json'],'library')
- expect(result.policyFiles).toEqual(['bundle.json']);expect(result.errors[0]).toContain('策略已登记')
+ expect(result.policyFiles).toEqual(['bundle.json']);expect(result.errors[0]).toContain('Policy registered')
  expect(result.errors[0]).toContain('ROBOT_CONTRACT_INCOMPATIBLE');expect(h.calls).toHaveLength(0)
 })

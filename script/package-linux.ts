@@ -274,7 +274,7 @@ stampDesktopAppVersion(stage,product.version)
 // 发行产物名（`lyapunov-dsh-<版本>-linux-x64`）、目录名与判定用的都是同一身份串，这里对齐。
 await writeFile(join(stage,'package.json'),JSON.stringify({name:'lyapunov-dsh',version:product.version,license:product.license,private:true,type:'module'},null,2)+'\n')
 const robotSupply=await stageDefaultT0Robots(root,stage,process.env.LYAPUNOV_ROBOT_STAGING_ROOT??root)
-if(robotSupply.models.length!==9)throw Error('DEFAULT_T0_SUPPLY_INCOMPLETE: '+JSON.stringify(robotSupply.blocked)+'；请提供许可与哈希闭包齐全的 LYAPUNOV_ROBOT_STAGING_ROOT')
+if(robotSupply.models.length!==11)throw Error('DEFAULT_T0_SUPPLY_INCOMPLETE: '+JSON.stringify(robotSupply.blocked)+'；请提供许可与哈希闭包齐全的 LYAPUNOV_ROBOT_STAGING_ROOT')
 const policySupply=await stageDefaultRobotPolicies(root,stage,process.env.LYAPUNOV_ROBOT_POLICY_STAGING_ROOT??join(root,'.runtime/default-policy-sources'))
 const defaultPolicyFiles=new Set(policySupply.allowedFiles)
 console.log(JSON.stringify({phase:'default-robot-policies',entries:policySupply.entries.map(row=>({packId:row.packId,bytes:row.bytes})),blocked:policySupply.blocked}))

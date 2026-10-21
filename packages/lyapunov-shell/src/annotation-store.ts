@@ -82,7 +82,7 @@ export function annotationPromptText(input:{sceneId?:string;sceneRevision?:numbe
   const size=pose?`${String(pose.imageWidth)}×${String(pose.imageHeight)} px`:"尺寸见附件"
   blocks.push(`# 3D 视口批注 — ${size}`)
   blocks.push("")
-  blocks.push("附件是一张 3D 视图截图。编号圆点已烧进图像像素，指向模型表面上的具体位置。")
+  blocks.push("附件是一张 3D 视图截图。编号标记（与视口同源的 SVG 标记）已烧进图像像素，指向模型表面上的具体位置。")
   // 坐标约定抄自社区惯例（Pinpoint）：像素在前、归一化在后，并说明像素属于哪张图的网格。
   // 像素最稳（实测归一化在小目标上误差更大），归一化抗缩放——两个都给，并写清以哪个为准。
   blocks.push(`坐标为**左上角原点**：先给像素 (x, y)，再给归一化 (x, y)（0–1）。像素以附件 PNG 的网格为准；若图被缩放或裁切过，以归一化值为准。图像尺寸 ${size}。`)

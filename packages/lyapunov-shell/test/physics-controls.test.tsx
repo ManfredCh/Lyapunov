@@ -105,6 +105,19 @@ test('paused/ready/manual状态不因可操作或历史step号宣称running',()=
  expect(sceneWorldPhaseLabel('ready',cn=>cn)).toBe('物理世界就绪')
  const html=renderToStaticMarkup(<SceneWorldStatus state={worldLifecycleState(w,frame())} tr={cn=>cn} retry={()=>{}} cancel={()=>{}}/>);expect(html).toContain('物理世界已暂停');expect(html).not.toContain('运行中')
 })
+test('物理页有明确标题与单一 World 状态；不再重复两块状态',()=>{
+ const w=world(),html=renderToStaticMarkup(<WorldPhysicsPanel scene={scene()} world={w} frame={frame(w)} state={worldLifecycleState(w,frame(w))} worlds={[w]} disabled={false} tr={cn=>cn} start={()=>{}} sync={()=>{}} pause={()=>{}} stop={()=>{}} close={()=>{}} prepare={()=>{}} saveGravity={()=>{}} selectWorld={()=>{}} cancel={()=>{}} enginePreference="isaac"/>)
+ expect(html).toContain('<h2 class="lya-page-title">物理</h2>')
+ expect(html).toContain('data-testid="world-engine-preference"')
+ expect(html).toContain('isaac')
+ expect(html).toContain('世界 · 物理世界已暂停')
+ expect(html).not.toContain('data-testid="world-phase"')
+ // V10-31：默认只给配置重力 XYZ、时间步与一个主启停；读回/地面/碰撞进具名折叠。
+ expect(html).toContain('data-testid="world-gravity-inputs"')
+ expect(html).toContain('data-testid="world-timestep"')
+ expect(html).toContain('data-testid="world-readback-details"')
+ expect(html.split('data-testid="world-physics-advanced"').length-1).toBe(1)
+})
 test('自由根准备说明只随当前暂停世界显示，明确被动继续和reset，不宣称站稳/自起身',()=>{
  const s=scene();s.entities[0]!.components={mujoco:{sourcePath:'/fixture/free.xml'},visual:{robot:{format:'mjcf',document:{worldbody:{body:{name:'pelvis',freejoint:''}}}}}}
  const w={...world(),supportsPause:true}

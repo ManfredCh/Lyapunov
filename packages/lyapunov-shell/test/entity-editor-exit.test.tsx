@@ -147,7 +147,13 @@ test('真实WorkSurface切Object到Scene或关闭只隐藏唯一editor，退出�
   const click=async(text:string)=>{await f.React.act(async()=>{f.Simulate.click([...f.host.querySelectorAll('button')].find(row=>row.textContent===text)!)})}
   await click('Object');await f.edit('dirty-across-tools')
   const originalNode=f.name();expect((await f.participants.summary()).participants).toBe(1)
+  // retained editor 可见时空 active 包装层不挂载、不占 flex/gap：只有一个可见 panel-slot。
+  expect(f.host.querySelectorAll('.lya-panel-slot:not([hidden])')).toHaveLength(1)
+  expect(f.host.querySelector('.lya-panel-slot:not([hidden])')!.contains(originalNode)).toBe(true)
+  expect(f.host.querySelector('[data-testid="physics-transient"]')).toBeNull()
   await click('Scene')
+  expect(f.host.querySelectorAll('.lya-panel-slot:not([hidden])')).toHaveLength(1)
+  expect(f.host.querySelector('.lya-panel-slot:not([hidden])')!.textContent).toContain('Scene content')
   expect(f.name()).toBe(originalNode);expect(f.name().closest('[hidden]')).not.toBeNull();expect(f.name().closest('[inert]')).not.toBeNull()
   expect((f.name().closest('[hidden]') as HTMLElement).style.display).toBe('none');expect(f.host.querySelectorAll('.lya-property-editor')).toHaveLength(1)
   expect(f.host.querySelector('[data-testid="physics-transient"]')).toBeNull();expect((await f.participants.summary()).dirtyDrafts).toBe(1)
@@ -197,7 +203,7 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
  const activePanels=()=>[...host.querySelectorAll<HTMLElement>('.lya-wb-panel')].filter(p=>!p.hidden&&!p.closest('[hidden],[inert]'))
  const activeNames=()=>activePanels().flatMap(p=>[...p.querySelectorAll<HTMLInputElement>('input.lya-entity-name')])
  try{
-  await React.act(async()=>draw());await click('Reset fixture tools');await click('Object');expect(host.querySelectorAll('nav[aria-label="Workbench tools"]')).toHaveLength(1)
+  await React.act(async()=>draw());await click('Reset fixture tools');await click('Objects');expect(host.querySelectorAll('nav[aria-label="Workbench tools"]')).toHaveLength(1)
   expect(activePanels()).toHaveLength(1);expect((await participants.summary()).participants).toBe(1)
   const a=activeNames()[0]!;await React.act(async()=>Simulate.change(a,{target:{value:'unsaved-a'}} as any));expect((await participants.summary()).dirtyDrafts).toBe(1)
   await click('Session B')
@@ -212,9 +218,9 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
   // 浏览器Tab的候选集合必须排除hidden/inert分支；真正Chromium按键仍由VM验收。
   const tabbable=[...host.querySelectorAll<HTMLElement>('input,select,button')].filter(e=>!e.closest('[hidden],[inert]'))
   expect(tabbable).not.toContain(a);expect(tabbable).not.toContain(b);expect((await participants.summary()).dirtyDrafts).toBe(2)
-  await click('Object');expect(activeNames()[0]).toBe(a);expect(a.value).toBe('unsaved-a')
-  await click('Object');expect(activePanels()).toHaveLength(0);expect(transientLive.size).toBe(0);expect((await participants.summary()).dirtyDrafts).toBe(2)
-  await click('Session B');await click('Object');expect(activeNames()[0]).toBe(b);expect(b.value).toBe('unsaved-b')
+  await click('Objects');expect(activeNames()[0]).toBe(a);expect(a.value).toBe('unsaved-a')
+  await click('Objects');expect(activePanels()).toHaveLength(0);expect(transientLive.size).toBe(0);expect((await participants.summary()).dirtyDrafts).toBe(2)
+  await click('Session B');await click('Objects');expect(activeNames()[0]).toBe(b);expect(b.value).toBe('unsaved-b')
   const coordinator=new ExitCoordinator({summary:()=>participants.summary(),confirm:async()=>true,flush:()=>participants.flush(),stop:()=>participants.stop(),close:async()=>{},exit:()=>{},failed:async()=>undefined,shutdownTimeoutMs:100})
   let result:Awaited<ReturnType<ExitCoordinator['request']>>|undefined;await React.act(async()=>{result=await coordinator.request('window')})
   expect(result).toMatchObject({decision:'closed',cleanup:'confirmed'});expect(writes.map(v=>v.owner).sort()).toEqual(['a','b'])
@@ -274,4 +280,14 @@ test('原生材料稿随已发布WorkSurface隐藏保留，关闭面板后退出
   await f.React.act(async()=>{release();await pending;await result})
   expect(f.writes).toHaveLength(1);expect((await f.participants.summary()).dirtyDrafts).toBe(0)
  }finally{await f.close()}
+})
+
+// 设计稿 object-properties：干净状态首屏不常驻提交行；只有草稿脏时才出现 Apply / Reload。
+test('干净属性稿首屏没有 Apply / Reload，编辑后才出现',async()=>{
+ const f=await fixture()
+ try{
+  expect(f.host.querySelector('[data-testid="entity-apply-menu"]')).toBeNull()
+  await f.edit('draft-trigger')
+  expect(f.host.querySelector('[data-testid="entity-apply-menu"]')).not.toBeNull()
+ } finally { await f.close() }
 })

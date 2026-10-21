@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import queue
 import sys
+import struct
+import zlib
 import threading
 import time
 import uuid
@@ -245,13 +247,15 @@ class World:
         self.clock=options.get('clock','realtime')
         if self.clock not in ('manual','realtime'):raise SceneError('INVALID_ARGUMENT','clock 必须为 manual 或 realtime')
         self.control_owners={}
-        self.id=options.get('worldId',str(uuid.uuid4()));self.options=options;self.generation=0;self.revision=-1;self.scene=None;self.signature=None;self.status='unavailable';self.index=0;self.sim_time=0.;self.actions={};self.receipts={};self.requests={};self.entities={};self.contacts={};self.assisted={};self.assist_advances=0;self.contact_subscription=None;self.camera=None;self.frame_rendered=False;self.camera_overrides={}
+        self.id=options.get('worldId',str(uuid.uuid4()));self.options=options;self.generation=0;self.revision=-1;self.scene=None;self.signature=None;self.status='unavailable';self.index=0;self.sim_time=0.;self.actions={};self.receipts={};self.requests={};self.entities={};self.contacts={};self.assisted={};self.assist_advances=0;self.frozen={};self.contact_subscription=None;self.camera=None;self.frame_rendered=False;self.camera_overrides={}
         self.paused=options.get('startPaused',False)
         if not isinstance(self.paused,bool):raise SceneError('INVALID_ARGUMENT','startPaused 必须为 boolean')
         # 本 world 生命周期内真实落盘的采集记录（captureId → 回执/逐相机标定/RGB+深度 uri/标注），
         # 供 camera_project_annotation 与 camera_dataset_export 只引用**真实发生过**的采集；
         # 没有 RTX 时这里如实为空（采集本身按 SENSOR_UNAVAILABLE 拒绝），不造空壳记录。
         self.captures={}
+        # 模拟LiDAR登记：captureId → 真实 range/valid/hitGeom/preview 元数据（发布后只改 uri）。
+        self.lidar_scans={}
         self.dt=positive(options.get('timestepS',.002),'timestepS');self.factor=positive(options.get('realtimeFactor',1),'realtimeFactor');self.frame_hz=positive(options.get('frameRateHz',30),'frameRateHz');self.last_frame=0.;self.next_tick=time.monotonic()
         self.adapter=SceneAdapter(os.environ['LYAPUNOV_ISAAC_CACHE']);self.timeline=omni.timeline.get_timeline_interface()
         self.stage_id=0;self.sleep_query=True;self.import_warnings=[];self.glb_imports=[]
@@ -404,7 +408,7 @@ class World:
         signature=signatures(scene)
         if not force and signature==self.signature and self.status in ('ready','running'):
             self.scene=copy.deepcopy(scene);self.revision=scene['revision'];return self.handle()
-        self.stop({});self.control_owners.clear();self.status='unsynced';self.assisted.clear();self.contact_subscription=None;self.native_error_subscription=None;self.native_failure=None
+        self.stop({});self.control_owners.clear();self.status='unsynced';self.assisted.clear();self.contact_subscription=None;self.native_error_subscription=None;self.native_failure=None;self.frozen={}
         self.timeline.stop();self.timeline.commit();self.timeline.set_auto_update(False);self.timeline.commit()
         self.entities={};self.contacts={};gc.collect()
         try:
@@ -1457,6 +1461,8 @@ class World:
         motions=action['motions']if action['kind']=='batch'else[action];ids=[m['entityId']for m in motions]
         if not ids or len(set(ids))!=len(ids):raise SceneError('INVALID_ARGUMENT','batch实体为空或重复')
         occupied={m['entityId']for a in self.actions.values()for m in a['motions']}
+        frozen=sorted({m['entityId']for m in motions if m['entityId']in self.frozen})
+        if frozen:raise SceneError('ROBOT_FROZEN','目标实体处于原生 Freeze 保持中；先 robot_restore 再执行：'+', '.join(frozen))
         if occupied.intersection(ids):raise SceneError('ENTITY_BUSY','目标实体有活动或排队动作')
         prepared=[self.prepare(m)for m in motions];start=action.get('startStep',self.index+1)
         controls=[m for m in prepared if m['kind']=='control']
@@ -1521,53 +1527,170 @@ class World:
         try:self.thrust_mapping(e)
         except SceneError:return False
         return True
+    def _motion_effect(self,aid,m,status):
+        """单个成员在**当前物理步**的逐成员事实；部分停止在停止当时调用它冻结被撤销成员，不沿用后来状态。"""
+        receipt=self.receipts[aid]
+        e=self.entry(m['entityId']);frame=self.observe({'entityIds':[m['entityId']]});actual=frame['entities'][0];effect={'entityId':m['entityId'],'kind':m['kind'],'displacementM':(np.asarray(actual['transform']['position'])-np.asarray(m['_initialPosition'])).tolist()}
+        if m['kind']=='thrust':
+            # 推力回执必须让消费者能分清“请求/计划控制/映射估算/真实可观测”，并在完成时也撤销推力。
+            effect.update(self.thrust_effect(m,e))
+        elif m['kind']=='control':
+            effect.update({'controlMode':'position-reference','stepCount':m['stepCount'],'stepsExecuted':max(0,self.index-receipt.get('startStep',self.index+1)+1),'jointNames':m['jointNames'],'referencePositions':m['positions']})
+        elif m['kind']=='gait':
+            # 步态不报"到位"：它是连续相位轨迹，参考每步都在变，末帧误差没有"到位"语义。
+            # 回执给出**实测**的关节位置、几何来源与相位参数，任务层据此判行走结果。
+            positions=actual.get('joints',{}).get('positions')or[]
+            effect.update({'jointNames':m['_jointNames'],
+                           'measuredJointPositions':[positions[e['indices'][n]]for n in m['_jointNames']],
+                           'commandedForward':m['_gaitForward'],'commandedTurn':m['_gaitTurn'],
+                           'geometrySource':'gait.calibrate（源 MJCF 经 MuJoCo mj_forward）',
+                           'frequencyHz':1.8,'strideM':.12,'liftM':.05,
+                           'stepsExecuted':max(0,self.index-receipt.get('startStep',self.index+1)+1),
+                           'targetReached':None,
+                           'targetReachedNote':'步态是连续相位轨迹，无"到位"判据；本字段恒为 null 以免被当成通过'})
+        elif m['kind']=='vehicle':
+            effect['commandedSpeedMps']=m['speedMps'];effect['wheelVelocitiesRadps']={self.resolve_actuator(e,w['actuator']):actual['joints']['velocities'][e['indices'][self.resolve_actuator(e,w['actuator'])]]for w in e['controller']['wheels']};self.apply_motion(m,m['_duration'])
+        else:
+            errors=[actual['joints']['positions'][e['indices'][n]]-v for n,v in zip(m['jointNames'],m['_points'][-1]['positions'])];effect.update({'jointErrors':errors,'targetReached':max(map(abs,errors))<=m['_tolerance'],'tolerance':m['_tolerance']})
+            if m['kind']=='gripper':effect.update({'actualWidthM':sum(actual['joints']['positions'][e['indices'][n]]for n in m['jointNames']),'targetWidthM':m['widthM']})
+        if status!='completed'and not m.get('_neutralized'):self.neutral(m['entityId'])
+        return effect
+
+    def _cancel_members(self,aid,action,hits):
+        """部分停止：只撤销命中成员，在停止当时冻结逐成员效果与 finalState；父 batch 留给其余成员继续运行。"""
+        for m in hits:
+            effect=self._motion_effect(aid,m,'cancelled')
+            effect['memberStatus']='cancelled'
+            effect['finalState']=self.observe({'entityIds':[m['entityId']],'contacts':True})
+            action.setdefault('cancelled',[]).append({'entityId':m['entityId'],'effect':effect,'reason':'STOP_CONFIRMED','endStep':self.index})
+        action['motions']=[m for m in action['motions']if not any(m is h for h in hits)]
+        if action.get('motions'):
+            if all(m['kind']=='thrust' for m in action['motions']):action['endStep']=action['start']+max(m['_steps'] for m in action['motions'])-1
+            elif all(m['kind']=='control' for m in action['motions']):action['endStep']=action['start']+action['motions'][0]['stepCount']-1
+
     def finish(self,aid,status,reason=None):
-        action=self.actions.pop(aid);receipt=self.receipts[aid];receipt.update({'status':status,'endStep':self.index});effects=[]
+        action=self.actions.pop(aid);receipt=self.receipts[aid]
+        # 部分停止过的父 batch 即使其余成员后来跑完，也不能把被撤销成员说成成功。
+        if action.get('cancelled')and status=='completed':status='cancelled';reason=reason or 'STOP_CONFIRMED_PARTIAL'
+        receipt.update({'status':status,'endStep':self.index});effects=[]
         if reason:receipt['reason']=reason
         for m in action['motions']:
-            e=self.entry(m['entityId']);frame=self.observe({'entityIds':[m['entityId']]});actual=frame['entities'][0];effect={'entityId':m['entityId'],'kind':m['kind'],'displacementM':(np.asarray(actual['transform']['position'])-np.asarray(m['_initialPosition'])).tolist()}
-            if m['kind']=='thrust':
-                # 推力回执必须让消费者能分清“请求/计划控制/映射估算/真实可观测”，并在完成时也撤销推力。
-                effect.update(self.thrust_effect(m,e))
-            elif m['kind']=='control':
-                effect.update({'controlMode':'position-reference','stepCount':m['stepCount'],'stepsExecuted':max(0,self.index-receipt.get('startStep',self.index+1)+1),'jointNames':m['jointNames'],'referencePositions':m['positions']})
-            elif m['kind']=='gait':
-                # 步态不报"到位"：它是连续相位轨迹，参考每步都在变，末帧误差没有"到位"语义。
-                # 回执给出**实测**的关节位置、几何来源与相位参数，任务层据此判行走结果。
-                positions=actual.get('joints',{}).get('positions')or[]
-                effect.update({'jointNames':m['_jointNames'],
-                               'measuredJointPositions':[positions[e['indices'][n]]for n in m['_jointNames']],
-                               'commandedForward':m['_gaitForward'],'commandedTurn':m['_gaitTurn'],
-                               'geometrySource':'gait.calibrate（源 MJCF 经 MuJoCo mj_forward）',
-                               'frequencyHz':1.8,'strideM':.12,'liftM':.05,
-                               'stepsExecuted':max(0,self.index-receipt.get('startStep',self.index+1)+1),
-                               'targetReached':None,
-                               'targetReachedNote':'步态是连续相位轨迹，无"到位"判据；本字段恒为 null 以免被当成通过'})
-            elif m['kind']=='vehicle':
-                effect['commandedSpeedMps']=m['speedMps'];effect['wheelVelocitiesRadps']={self.resolve_actuator(e,w['actuator']):actual['joints']['velocities'][e['indices'][self.resolve_actuator(e,w['actuator'])]]for w in e['controller']['wheels']};self.apply_motion(m,m['_duration'])
-            else:
-                errors=[actual['joints']['positions'][e['indices'][n]]-v for n,v in zip(m['jointNames'],m['_points'][-1]['positions'])];effect.update({'jointErrors':errors,'targetReached':max(map(abs,errors))<=m['_tolerance'],'tolerance':m['_tolerance']})
-                if m['kind']=='gripper':effect.update({'actualWidthM':sum(actual['joints']['positions'][e['indices'][n]]for n in m['jointNames']),'targetWidthM':m['widthM']})
-            effects.append(effect)
-            if status!='completed'and not m.get('_neutralized'):self.neutral(m['entityId'])
+            effects.append(self._motion_effect(aid,m,status))
+        # 被撤销成员用停止当时冻结的效果/finalState，不冒用其余成员完成时的状态。
+        for record in action.get('cancelled',[]):
+            effects.append(record['effect'])
         # 完成回执必须覆盖本动作窗口内真实发生过的辅助：只按结束瞬间的map快照会把已解除的辅助从回执上抹掉。
         receipt['finalState']=self.observe({'entityIds':[m['entityId']for m in action['motions']],'contacts':True});receipt['effect']={'motions':effects,'childrenStartSteps':{m['entityId']:receipt.get('startStep')for m in action['motions']},'executionMode':'assisted-teleport'if(self.assisted or action.get('assistedTicks'))else'physical-contact'}
+        if action.get('cancelled'):
+            receipt['cancelledMembers']=[{'entityId':r['entityId'],'status':'cancelled','reason':r['reason'],'endStep':r['endStep']}for r in action['cancelled']]
         if status!='completed':receipt['taskAchieved']=False
         emit({'event':'receipt','receipt':receipt})
     def stop(self,selection):
         if selection.get('expectedGeneration')is not None and selection['expectedGeneration']!=self.generation:raise SceneError('STALE_GENERATION','停止请求属于旧模型代次，不触碰新代次控制')
         action_id=selection.get('actionId')
         if action_id and action_id not in self.receipts:raise SceneError('ACTION_NOT_FOUND','停止请求的动作不存在')
-        affected={eid for eid in selection.get('entityIds',self.entities)if not action_id or self.control_owners.get(eid)==action_id}
-        result=[]
+        entity_filter=selection.get('entityIds');selected=set(entity_filter)if entity_filter else set(self.entities)
+        affected=set();result=[]
         for aid,action in list(self.actions.items()):
-            if selection.get('actionId')and aid!=selection['actionId']:continue
-            if selection.get('entityIds')and not any(m['entityId']in selection['entityIds']for m in action['motions']):continue
-            affected.update(m['entityId']for m in action['motions'])
-            self.finish(aid,'cancelled','STOP_CONFIRMED');result.append(self.receipts[aid])
+            if action_id and aid!=action_id:continue
+            motions=action['motions']
+            if entity_filter:
+                hits=[m for m in motions if m['entityId']in selected]
+                if not hits:continue
+                affected.update(m['entityId']for m in hits)
+                misses=[m for m in motions if not any(m is h for h in hits)]
+                if misses:
+                    # 部分停止：父 batch 留给未命中成员继续，命中成员的控制/效果在停止当时冻结。
+                    self._cancel_members(aid,action,hits);continue
+                self.finish(aid,'cancelled','STOP_CONFIRMED');result.append(self.receipts[aid])
+            else:
+                affected.update(m['entityId']for m in motions)
+                self.finish(aid,'cancelled','STOP_CONFIRMED');result.append(self.receipts[aid])
         for eid in affected:self.neutral(eid);self.control_owners.pop(eid,None)
         if self.status in ('ready','running'):self.status='running' if self.actions else 'ready'
         return {'stopped':True,'stepIndex':self.index,'receipts':result,'affectedEntityIds':sorted(affected)}
+
+    def _freeze_root_joint(self,eid,entry):
+        path=entry.get('freezeConstraintPath')
+        if not path:return None
+        prim=self.stage.GetPrimAtPath(path)
+        return UsdPhysics.FixedJoint(prim) if prim and prim.IsValid() and prim.IsA(UsdPhysics.FixedJoint) else None
+
+    def freeze(self,selection):
+        """目标级原生保持：先只停止目标实体动作，再用 articulation 原生 drive 目标+预分配外部根锚保持。
+
+        关节保持走真实 drive（目标=当前、速度目标=0），根锚是编译期预分配的 disabled FixedJoint，运行期
+        只写世界锚并切 jointEnabled；不每 tick 写 qpos/set_world_pose、不暂停整 world、不用 Scene 检查点。
+        """
+        if selection.get('expectedGeneration') is not None and selection['expectedGeneration']!=self.generation:raise SceneError('STALE_GENERATION','Freeze 请求属于旧模型代次，不触碰新代次控制')
+        from robot_authoring import pose_receipt
+        ids=selection.get('entityIds') or sorted(self.entities)
+        freeze_id=selection.get('freezeId') or ('freeze-'+uuid.uuid4().hex[:12])
+        frozen=[];already=[];missing=[];root_held={};joint_locks={};hold_pose={};scope=[]
+        for eid in ids:
+            entry=self.entities.get(eid)
+            if entry is None:missing.append(eid);continue
+            if eid in self.frozen:already.append(eid);continue
+            self.stop({'entityIds':[eid],'expectedGeneration':self.generation})
+            robot=entry.get('articulation')
+            native_limits=None
+            if robot is not None and robot.is_physics_tensor_entity_valid():
+                with use_backend('tensor',raise_on_fallback=True):
+                    positions=array(robot.get_dof_positions()).reshape(-1)
+                    lower,upper=robot.get_dof_limits()
+                    lower=array(lower).reshape(-1);upper=array(upper).reshape(-1)
+                    robot.set_dof_position_targets(positions.tolist());robot.set_dof_velocity_targets([0.]*len(positions))
+                    # 真正锁关节：把每个 DOF 的位置上下限都夹到当前坐标，由 PhysX 原生关节限位约束硬保持。
+                    # 只把 drive 目标设成当前值会因重力/负载产生稳态下垂（主控实测 0.0039rad > 1e-3），
+                    # 不是真冻结。这里不改 kp/effort，也不关重力/碰撞；原限位在 restore 时原样写回。
+                    robot.set_dof_limits(positions.tolist(),positions.tolist())
+                native_limits={'lower':lower.tolist(),'upper':upper.tolist()}
+                joint_locks[eid]=list(entry.get('names') or [])
+            else:
+                joint_locks[eid]=[]
+            root_prim_for_pose=self.stage.GetPrimAtPath(entry['path']) if entry.get('path') else None
+            pose=pose_receipt(self._native_world_matrix(root_prim_for_pose)) if root_prim_for_pose is not None and root_prim_for_pose.IsValid() else None
+            # 已挂接到父实体的实体不能被锁到 world：否则会把无关父机器人一起锁死。只锁它自己拥有的
+            # DOF 限位（上面已做），基座继续随父 body 运动。
+            binding=((entry.get('entity') or {}).get('components') or {}).get('baseBinding') or {}
+            anchor=binding.get('target') or binding.get('initialWorldPose') or {}
+            bound_to_parent=bool(anchor.get('entityId'))
+            joint=self._freeze_root_joint(eid,entry);held=False
+            if joint is not None and pose is not None and not bound_to_parent:
+                position=pose['positionM'];q=pose['quaternionXyzw']
+                joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*position));joint.CreateLocalRot0Attr().Set(Gf.Quatf(q[3],Gf.Vec3f(*q[:3])))
+                joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.,0.,0.));joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.))
+                joint.CreateJointEnabledAttr().Set(True);held=True
+                # 只清一次自由根残留速度（与 MuJoCo free 根 qvel 清零同义）：冻结前已在运动的根若带着速度
+                # 冲进新启用的根锚，会在低步频/高负载下产生瞬态漂移（实测并发时 0.042m，standalone 8e-5m）。
+                with use_backend('tensor',raise_on_fallback=True):
+                    entry['pose'].set_velocities(linear_velocities=[[0.]*3],angular_velocities=[[0.]*3])
+            self.frozen[eid]={'freezeId':freeze_id,'rootHeld':held,'jointLocks':joint_locks[eid],'scope':[eid],'holdPose':pose,'nativeLimits':native_limits}
+            frozen.append(eid);scope.append(eid);root_held[eid]=held;hold_pose[eid]=pose
+        return {'worldId':self.id,'generation':self.generation,'freezeId':freeze_id,'status':'frozen' if frozen else ('already-frozen' if already else 'not-found'),'entityIds':list(ids),'frozenEntityIds':frozen,'alreadyFrozenEntityIds':already,'missingEntityIds':missing,'scope':scope,'rootHeld':root_held,'jointLocks':joint_locks,'holdPose':hold_pose,'stillActiveActions':sorted(self.actions.keys()),'controlConfigPreserved':True}
+
+    def restore(self,selection):
+        """解除本次原生保持：只关闭本次启用的外部根锚，不改 gains/limits、不自动恢复旧动作/旧速度。"""
+        if selection.get('expectedGeneration') is not None and selection['expectedGeneration']!=self.generation:raise SceneError('STALE_GENERATION','Restore 请求属于旧模型代次，不触碰新代次控制')
+        ids=selection.get('entityIds') or sorted(self.frozen)
+        freeze_id=selection.get('freezeId')
+        restored=[];not_frozen=[];mismatched=[]
+        for eid in ids:
+            record=self.frozen.get(eid)
+            if not record:not_frozen.append(eid);continue
+            if freeze_id and record.get('freezeId')!=freeze_id:mismatched.append(eid);continue
+            entry=self.entities.get(eid)
+            if entry is not None:
+                robot=entry.get('articulation');limits=record.get('nativeLimits')
+                if robot is not None and limits and robot.is_physics_tensor_entity_valid():
+                    with use_backend('tensor',raise_on_fallback=True):
+                        # 把冻结时夹到当前坐标的 DOF 限位原样写回；不改 gains，也不自动恢复旧动作。
+                        robot.set_dof_limits(limits['lower'],limits['upper'])
+                joint=self._freeze_root_joint(eid,entry)
+                if joint is not None:joint.CreateJointEnabledAttr().Set(False)
+            del self.frozen[eid];restored.append(eid)
+        return {'worldId':self.id,'generation':self.generation,'freezeId':freeze_id,'status':'restored' if restored else ('not-frozen' if not_frozen else 'mismatched'),'entityIds':list(ids),'restoredEntityIds':restored,'notFrozenEntityIds':not_frozen,'freezeMismatchEntityIds':mismatched,'stillActiveActions':sorted(self.actions.keys()),'controlConfigPreserved':True}
+
     def tick(self):
         if self.paused:return
         if self.status not in ('ready','running'):return
@@ -2074,6 +2197,143 @@ class World:
             if prim and prim.IsValid() and prim.IsA(UsdGeom.Camera):self._restore_camera_snapshot(UsdGeom.Camera(prim),override['source']);count+=1
             self.camera_overrides.pop(path,None)
         return count
+    # --------------------------------------------------------- 模拟LiDAR（PhysX原生射线）
+    # 所有权：机位/安装仍归 Scene 相机或原生相机清单（本方法只借用它的实际 world pose，不新增传感器库）；
+    # 量测是 PhysX 场景查询的真实几何求交（omni.physx raycast_closest），不是相机深度/点云投影改名。
+    def _write_rgb_png(self,path,rgb,width,height):
+        def chunk(kind,payload):
+            data=kind+payload
+            return struct.pack('!I',len(payload))+data+struct.pack('!I',zlib.crc32(data)&0xffffffff)
+        rows=b''.join(b'\x00'+rgb[y].tobytes() for y in range(height))
+        path.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!2I5B',width,height,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b''))
+    def _lidar_pattern(self,options):
+        """校验并展开一次扫描的射线图案；方位角 0 指向 -Z（光轴/前），绕 +Y 向 +X 增大；俯仰水平为 0、向 +Y 为正。"""
+        def integer(key,default,low,high):
+            value=options.get(key,default)
+            if isinstance(value,bool) or not isinstance(value,int) or not low<=value<=high:
+                raise SceneError('INVALID_ARGUMENT',key+' 必须是 '+str(low)+'..'+str(high)+' 的整数')
+            return value
+        channels=integer('channels',16,1,512);samples=integer('horizontalSamples',360,1,4096)
+        hfov=float(options.get('horizontalFovDeg',360.0))
+        if not math.isfinite(hfov) or not 0.0<hfov<=360.0:raise SceneError('INVALID_ARGUMENT','horizontalFovDeg 必须在 (0, 360]')
+        vertical=options.get('verticalFovDeg',[-15.0,15.0])
+        if (not isinstance(vertical,(list,tuple)) or len(vertical)!=2
+                or not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(float(v)) for v in vertical)):
+            raise SceneError('INVALID_ARGUMENT','verticalFovDeg 必须是 [下界, 上界] 两个有限数')
+        lower,upper=float(vertical[0]),float(vertical[1])
+        if not lower<upper or abs(lower)>90.0 or abs(upper)>90.0:raise SceneError('INVALID_ARGUMENT','verticalFovDeg 须满足 -90 <= 下界 < 上界 <= 90')
+        range_m=float(options.get('rangeM',100.0))
+        if not math.isfinite(range_m) or range_m<=0.0:raise SceneError('INVALID_ARGUMENT','rangeM 必须是正有限米数')
+        if hfov>=360.0:
+            azimuth=(-180.0+(np.arange(samples)+0.5)*(360.0/samples)) if samples>1 else np.array([0.0])
+        else:
+            azimuth=np.linspace(-hfov/2.0,hfov/2.0,samples)
+        elevation=np.array([(lower+upper)/2.0]) if channels==1 else np.linspace(lower,upper,channels)
+        return {'channels':channels,'horizontalSamples':samples,'horizontalFovDeg':hfov,'verticalFovDeg':[lower,upper],'rangeM':range_m,'azimuthDeg':azimuth,'elevationDeg':elevation}
+    def _write_lidar_preview(self,path,ranges,range_limit):
+        """按 metadata 里记录的固定规则，从真实 range 数组生成预览 PNG（可由 npy+规则复算）：
+        有效：t=clamp(range/rangeLimit,0,1) → R=round(255·t)、G=round(255·(1−t))、B=64；无返回：RGB(0,0,0)。"""
+        rows,cols=int(ranges.shape[0]),int(ranges.shape[1])
+        rgb=np.zeros((rows,cols,3),dtype=np.uint8);valid=np.isfinite(ranges)&(ranges>=0.0)
+        t=np.zeros_like(ranges,dtype=float);t[valid]=np.clip(ranges[valid]/range_limit,0.0,1.0)
+        rgb[...,0]=np.round(255.0*t).astype(np.uint8);rgb[...,1]=np.round(255.0*(1.0-t)).astype(np.uint8);rgb[...,2]=64;rgb[~valid]=0
+        self._write_rgb_png(path,rgb,cols,rows)
+    def scan_lidar(self,options):
+        """从一台已命名机位的实际 world pose 发射 PhysX 真实射线，返回原始 range/有效性/命中几何与来源。"""
+        self.ready()
+        expected=options.get('expectedGeneration')
+        if expected is not None:
+            if isinstance(expected,bool) or not isinstance(expected,int):raise SceneError('INVALID_ARGUMENT','expectedGeneration 必须是整数')
+            if expected!=self.generation:raise SceneError('STALE_GENERATION','STALE_GENERATION: LiDAR 扫描代次已过期: 请求 '+str(expected)+'，当前 '+str(self.generation))
+        name=options.get('cameraName');resolved=self.resolve_camera_name(name)
+        pattern=self._lidar_pattern(options)
+        if options.get('geomGroups') is not None:raise SceneError('UNSUPPORTED_CAPABILITY','Isaac LiDAR 未消费 geomGroups 显示组；拒绝而不是静默忽略')
+        root=Path(options['outputDir']).resolve();root.mkdir(parents=True,exist_ok=True)
+        camera=self._camera_prim(resolved);override=self.camera_overrides.get(resolved)
+        if override is not None:self._apply_camera_override(camera,override)
+        readback=self._camera_readback(name,resolved,camera,640,480,override)
+        world_from=readback['worldFromCamera'];position=world_from['positionM'];rotation=world_from['rotationMatrix']
+        query=omni.physx.get_physx_scene_query_interface()
+        if not hasattr(query,'raycast_closest'):raise SceneError('SENSOR_UNAVAILABLE','当前 PhysX 运行时没有 raycast_closest，无法产生真实LiDAR量测')
+        forward=[-rotation[0][2],-rotation[1][2],-rotation[2][2]]
+        right=[rotation[0][0],rotation[1][0],rotation[2][0]]
+        up=[rotation[0][1],rotation[1][1],rotation[2][1]]
+        az=np.radians(np.asarray(pattern['azimuthDeg'],dtype=float));el=np.radians(np.asarray(pattern['elevationDeg'],dtype=float))
+        ca,sa,ce,se=np.cos(az),np.sin(az),np.cos(el),np.sin(el)
+        directions=(ce[:,None,None]*ca[None,:,None]*np.asarray(forward)[None,None,:]
+                    +ce[:,None,None]*sa[None,:,None]*np.asarray(right)[None,None,:]
+                    +se[:,None,None]*np.asarray(up)[None,None,:])
+        flat=directions.reshape(-1,3);nray=int(flat.shape[0])
+        distance=np.full(nray,-1.0,dtype=np.float64);hit_ids=np.full(nray,-1,dtype=np.int32);hit=np.zeros(nray,dtype=bool)
+        collision_index={};geometry_names=[]
+        origin=(float(position[0]),float(position[1]),float(position[2]))
+        for index,direction in enumerate(flat):
+            value=query.raycast_closest(origin,(float(direction[0]),float(direction[1]),float(direction[2])),float(pattern['rangeM']))
+            if not value or not value.get('hit'):continue
+            measured=float(value['distance'])
+            if not math.isfinite(measured) or measured<0.0 or measured>float(pattern['rangeM']):continue
+            distance[index]=measured;hit[index]=True
+            collision=str(value.get('collision','') or '')
+            if collision not in collision_index:collision_index[collision]=len(geometry_names);geometry_names.append(collision)
+            hit_ids[index]=collision_index[collision]
+        shape=(pattern['channels'],pattern['horizontalSamples'])
+        ranges=np.where(hit,distance,np.nan).reshape(shape).astype(np.float64)
+        valid=hit.reshape(shape);hit_shape=hit_ids.reshape(shape)
+        valid_values=ranges[valid]
+        stem=str(uuid.uuid4())
+        range_path,valid_path=root/(stem+'-range.npy'),root/(stem+'-valid.npy')
+        hit_path,preview_path=root/(stem+'-hitGeom.npy'),root/(stem+'-preview.png')
+        np.save(range_path,ranges);np.save(valid_path,valid);np.save(hit_path,hit_shape.astype(np.int32))
+        self._write_lidar_preview(preview_path,ranges,pattern['rangeM'])
+        capture_id=str(uuid.uuid4())
+        eid,local,_camera=self._camera_entity(resolved);qualified=(eid+'/'+local) if eid else str(name)
+        entry={
+            **self._camera_frame_identity(),
+            'source':'isaac-physx-raycast-closest','captureId':capture_id,'sensorId':'lidar:'+qualified,
+            'sensorKind':'simulated-lidar','sensorSource':'native-physics-raycast',
+            'cameraName':str(name),'resolvedCameraName':resolved,
+            'geometrySource':'isaac-physx-raycast-closest','selfExclusion':'none',
+            'parentBodyName':readback.get('parentBodyName'),'parentEntityId':readback.get('parentEntityId'),
+            'worldGeneration':self.generation,
+            'worldFromSensor':{'positionM':[float(v) for v in position],
+                               'quaternionXyzw':world_from.get('quaternionXyzw'),
+                               'rotationMatrix':[[float(v) for v in row] for row in rotation]},
+            'referenceFrame':override['referenceFrame'] if override is not None else ('parent' if readback.get('parentBodyName','world')!='world' else 'world'),
+            'override':override is not None,
+            'rayPattern':{'channels':pattern['channels'],'horizontalSamples':pattern['horizontalSamples'],
+                          'horizontalFovDeg':pattern['horizontalFovDeg'],'verticalFovDeg':list(pattern['verticalFovDeg']),
+                          'rangeM':pattern['rangeM'],'units':'m',
+                          'azimuthConvention':'0=forward(-Z), positive toward +X, around +Y',
+                          'elevationConvention':'0=horizontal, positive toward +Y'},
+            'rangeSemantics':'euclidean-range-meters-along-ray',
+            'cameraDepthComparison':"camera depth is axial Z along the optical axis; lidar range is Euclidean along the ray; register only with the recorded sensor pose, never rename one as the other",
+            'range':{'uri':range_path.as_uri(),'mimeType':'application/x-npy','units':'m','shape':list(shape),'noReturnValue':'nan'},
+            'valid':{'uri':valid_path.as_uri(),'mimeType':'application/x-npy','shape':list(shape)},
+            'hitGeom':{'uri':hit_path.as_uri(),'mimeType':'application/x-npy','shape':list(shape),'geomIds':{str(i):p for i,p in enumerate(geometry_names)},'noReturnValue':-1},
+            'preview':{'uri':preview_path.as_uri(),'mimeType':'image/png',
+                       'colorRule':'valid: t=clamp(range/rangeM,0,1), R=round(255*t), G=round(255*(1-t)), B=64; no-return: RGB(0,0,0)',
+                       'rowOrder':'elevation ascending','columnOrder':'azimuth sequence as returned in rayPattern'},
+            'rayCount':nray,'validCount':int(valid_values.size),'noReturnCount':int(nray-valid_values.size),
+            'rangeMinM':(float(np.min(valid_values)) if valid_values.size else None),
+            'rangeMaxM':(float(np.max(valid_values)) if valid_values.size else None),
+            'rangeMeanM':(float(np.mean(valid_values)) if valid_values.size else None),
+            'outputDir':str(root),
+        }
+        self.lidar_scans[capture_id]=entry
+        for stale in list(self.lidar_scans)[:-64]:del self.lidar_scans[stale]
+        return entry
+    def publish_lidar(self,capture_id,from_dir,to_dir):
+        """宿主发布完成后，只更新 range/valid/hitGeom/preview 的文件位置，不重新量测。"""
+        if capture_id not in self.lidar_scans:raise SceneError('LIDAR_NOT_FOUND','LiDAR 登记不存在: '+capture_id)
+        source=Path(from_dir).resolve();target=Path(to_dir).resolve();record=self.lidar_scans[capture_id];updates=[]
+        for key in ('range','valid','hitGeom','preview'):
+            metadata=record.get(key)
+            if not metadata:continue
+            path=target/Path(path_from_uri(metadata['uri'])).relative_to(source)
+            if not path.is_file():raise SceneError('LIDAR_FILE_MISSING','已发布的 LiDAR 文件不存在: '+str(path))
+            updates.append((metadata,path.as_uri()))
+        for metadata,uri in updates:metadata['uri']=uri
+        return {'captureId':capture_id,'files':len(updates)}
     def camera_adjust(self,options):
         """命名相机的临时 override：把位置/姿态/竖直视场写进本 world 的 live USD 相机 prim，clear/sync/close
         按源快照逐字恢复；源场景声明（snapshot/MJCF 与源 prim 属性）不被改写。
@@ -2288,7 +2548,7 @@ class World:
             raise SceneError(error.code,error.message)
 
     def close(self):
-        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.contact_subscription=None;self.native_error_subscription=None;self.timeline.stop();self.timeline.commit();self.entities={};gc.collect();self.status='closed'
+        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.lidar_scans.clear();self.contact_subscription=None;self.native_error_subscription=None;self.timeline.stop();self.timeline.commit();self.entities={};gc.collect();self.status='closed'
 
 requests=queue.Queue()
 def reader():
@@ -2320,10 +2580,14 @@ while running and omni.kit.app.get_app().is_running():
                     if args['actionId']not in world.receipts:raise SceneError('ACTION_NOT_FOUND','未知actionId；先观察不自动重发')
                     result=world.receipts[args['actionId']]
                 elif method=='stop':result=world.stop(args.get('selection',{}))
+                elif method=='freeze':result=world.freeze(args.get('selection',{}))
+                elif method=='restore':result=world.restore(args.get('selection',{}))
                 elif method=='capture_publish':result=world.publish_capture(args['captureId'],args['fromDir'],args['toDir'])
                 elif method=='capture':result=world.capture(args['options'])
                 elif method=='camera_list':result=world.camera_list(args.get('options'))
                 elif method=='capture_multi':result=world.capture_multi(args['options'])
+                elif method=='lidar_scan':result=world.scan_lidar(args['options'])
+                elif method=='lidar_publish':result=world.publish_lidar(args['captureId'],args['fromDir'],args['toDir'])
                 elif method=='camera_adjust':result=world.camera_adjust(args['options'])
                 elif method=='assist':result=world.assist(args['options'])
                 elif method=='camera_project_annotation':result=world.project_annotation(args['options'])

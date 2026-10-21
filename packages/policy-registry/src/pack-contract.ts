@@ -233,6 +233,15 @@ export const declaredAssetEntries = (pack: Record<string, any> | null): PackAsse
   return { modelEntry, model: isNonEmptyString(asset.model) ? String(asset.model) : modelEntry }
 }
 
+/**
+ * 包内官方预览图：`pack.json` 的 `asset.preview`（包相对路径，如 `asset/franka_emika_panda/panda.png`）。
+ * 与模型入口同一口径——内容侧显式登记、调用方复核；未登记一律 null，**不按文件名扫描/猜测**。
+ */
+export const declaredAssetPreview = (pack: Record<string, any> | null): string | null => {
+  const asset = isRecord(pack?.asset) ? pack!.asset : null
+  return isNonEmptyString(asset?.preview) ? String(asset!.preview) : null
+}
+
 export interface ResolvedAssetEntry { path: string; kind: 'mjcf' | 'urdf' | 'other' }
 
 /**

@@ -967,10 +967,14 @@ class World:
         self.receipts = {}
         self.requests = {}
         self.control_owners = {}
+        # Freeze：本 world 当前被原生保持的实体（eid → 记录）。sync/close 清空，不在新模型重用旧 eq 索引。
+        self.frozen = {}
         # 已命名相机的临时 override（渲染期生效、close/sync 清除）与真实 capture 记录
         # （captureId → 回执/逐相机标定/标注），供 camera_project_annotation 与数据集导出溯源。
         self.camera_overrides = {}
         self.captures = {}
+        # 模拟LiDAR登记：captureId → 真实 range/valid/hitGeom/preview 元数据（发布后只改 uri）。
+        self.lidar_scans = {}
         # 接触标签里的地面名（worker 自带 __ground + 源声明的地面 geom，附加后带实体前缀）。
         # 由 compile 每次重建时重填，随 handle 暴露，供接触过滤直接匹配而不猜前缀。
         self.ground_names = set()
@@ -1396,8 +1400,10 @@ class World:
                 replaced_template_ground.append(entity['entityId'])
         if explicit_ground_requested(scene,self.options)and not native_planes and not (patches and patches.get('suppressDefaultGround')):
             spec.worldbody.add_geom(name='__ground',type=mj.mjtGeom.mjGEOM_PLANE,size=[0,0,.1],pos=[0,0,0],friction=[1.2,.08,.01]);ground_names.add('__ground')
-        from robot_authoring import compile_bindings, initialize_bindings
+        from robot_authoring import compile_bindings, initialize_bindings, compile_freeze_constraints
         pending_base_bindings = compile_bindings(spec, scene, maps, poses, spec_bodies, SimError)
+        # Freeze 在编译期预分配默认 inactive 的根锚/关节锁；运行期只按当前 pose 置 eq_active。
+        compile_freeze_constraints(spec, maps, spec_bodies)
         scene_cameras = self.compile_scene_cameras(spec, scene, poses, spec_bodies, skipped)
         from static_triangle_surface import configure_static_surface_arena
         surface_arena = configure_static_surface_arena(spec, static_triangle_counts, explicit_arena_sources, SimError)
@@ -1998,6 +2004,8 @@ class World:
         self.control_owners.clear()
         self.assisted.clear()
         self.spec, self.child_specs, self.model, self.data, self.entities, self.ground_names, self.warnings, self.scene_cameras,self.replaced_template_ground,self.native_ground_names = compiled
+        # 新模型没有旧代的 Freeze eq 索引：不把旧 native 保持带到新代次。
+        self.frozen = {}
         self.scene = copy.deepcopy(scene)
         from collision_topology import patch_ownership
         self.collision_patch_owners = patch_ownership(self, collision_patches)
@@ -2561,6 +2569,9 @@ class World:
         if not motions or len({m['entityId'] for m in motions}) != len(motions):
             raise SimError('INVALID_ARGUMENT', 'batch 的实体必须非空且不重复')
         occupied = {m['entityId'] for a in self.active.values() for m in a['motions']}
+        frozen = sorted({m['entityId'] for m in motions if m['entityId'] in self.frozen})
+        if frozen:
+            raise SimError('ROBOT_FROZEN', '目标实体处于原生 Freeze 保持中；先 robot_restore 再执行：' + ', '.join(frozen))
         if any(m['entityId'] in occupied for m in motions):
             raise SimError('ENTITY_BUSY', '目标实体已有活动或已排队动作')
         prepared = [self.prepare_motion(m) for m in motions]
@@ -2602,10 +2613,33 @@ class World:
         q, v = float(self.data.qpos[j['qpos']]), float(self.data.qvel[j['dof']])
         cfg = info['controller']
         if a['mode'] == 'position':
-            ctrl = target
+            # 标准位置伺服的 ctrl 是**执行器坐标参考**：稳态平衡坐标 = ctrl/gear。必须按源 gear 把关节
+            # 坐标 target 换算到 ctrl，否则非单位 gear 会停在 target/gear（主控实测 gear=2、目标 .2rad
+            # 却停在 .0999rad，gear=-2 停在 -.0999rad）。只有核对过固定位置力律（dyntype=none、
+            # gaintype=fixed、biastype=affine、gainprm[0]==-biasprm[1]、biasprm[0]==0）才敢按 gear 换算；
+            # 旧启发式判成 position 但力律不匹配的是未知传动映射，明确拒绝，不猜参数。
+            actuator_id = a['id']
+            if not fixed_position_servo(self.model, actuator_id):
+                raise SimError('INVALID_CONTROL_MAPPING',
+                               '执行器 ' + self.model.actuator(actuator_id).name + ' 未通过固定位置力律核对（需 dyntype=none、'
+                               'gaintype=fixed、biastype=affine、gainprm[0]==-biasprm[1]、biasprm[0]==0；旧启发式判定为 position），'
+                               '无法把关节坐标参考换算成 ctrl，本通道不猜未知传动映射')
+            gear = float(self.model.actuator_gear[actuator_id, 0])
+            if gear == 0:
+                raise SimError('INVALID_CONTROL_MAPPING',
+                               '执行器 ' + self.model.actuator(actuator_id).name + ' 的 gear=0，关节坐标参考无法换算成 ctrl')
+            coordinate = target
             lift = cfg.get('lift', {})
             if lift.get('joint') == name:
-                ctrl += lift.get('gravityCompensationM', 0)
+                coordinate += lift.get('gravityCompensationM', 0)
+            ctrl = coordinate * gear
+            # 原生位置重力前馈：只在同一份 controller.gravityCompensation 语义下启用（缺省与力矩通道同口径，
+            # 显式 false 的训练 policy 不被隐式改写）。按真实编译模型的 gear/gain 把关节 bias 力矩换算到源
+            # ctrl，保留源 kp/kv/gear/forcerange 与 ctrlrange 钳制；gear/gain 为 0 时明确不换算，不猜参数。
+            if cfg.get('gravityCompensation', cfg.get('type') != 'quadruped'):
+                gain = float(self.model.actuator_gainprm[actuator_id, 0])
+                if gain:
+                    ctrl += float(self.data.qfrc_bias[j['dof']]) / (gear * gain)
         elif a['mode'] == 'velocity':
             ctrl = (target - q) * cfg.get('positionVelocityGain', 8)
         else:
@@ -2824,9 +2858,140 @@ class World:
                 'lostContactObjectIds': sorted(eid for eid in history if eid not in contacts),
                 'basis': '接触与法向力来自引擎 data.contact/mj_contactForce（按实体前缀归属）；位移/maxLiftM 为动作窗口起止实测实体根刚体位置差；不含任务成功判定'}
 
+    def _motion_effect(self, aid, active, motion, status):
+        """单个成员在**当前物理步**的逐成员事实；部分停止在停止当时调用它冻结被撤销成员，不沿用后来状态。"""
+        receipt = self.receipts[aid]
+        info = self.info(motion['entityId'])
+        displacement = (self.data.xpos[info['body']] - motion['_startPositions']).tolist()
+        effect = {'entityId': motion['entityId'], 'kind': motion['kind'], 'displacementM': displacement}
+        if motion['kind'] == 'thrust':
+            # 回执分开报告四类事实，不把估算标成实测，也不据此宣称悬停/航点等任务成功：
+            #   requestedWrench            请求（SI 体坐标语义）
+            #   ctrlPlanned / ctrlApplied  计划控制值 / 窗口内真实写入过的控制原值（从未驱动时为 null）
+            #   mappedActuatorForce / wrenchPerDrivenStep  模型映射估算（源增益×site/gear，非测量）
+            #   measuredActuatorForce      真实测得：与 measuredAtStep 同一物理步（积分完成时）的记录
+            ctrl_written = np.asarray([value for _, value in motion['_actuatorControls']], dtype=float)
+            applied = motion['_wrenchMatrix'] @ ctrl_written
+            requested = np.asarray([0.0, 0.0, motion['thrustN'], *list(motion.get('torqueNm', [0.0, 0.0, 0.0]))], dtype=float)
+            effect.update({'requestedWrench': {'forceN': requested[:3].tolist(), 'torqueNm': requested[3:].tolist(),
+                                               'frame': '实体根刚体坐标系：推力沿+z，力矩绕x/y/z（参考点=刚体坐标系原点）'},
+                           'ctrlPlanned': {name: float(value) for name, value in zip(motion['_wrenchNames'], ctrl_written)},
+                           'ctrlApplied': motion.get('_ctrlApplied'),
+                           'mappedActuatorForce': dict(motion['_actuatorForces']),
+                           'wrenchPerDrivenStep': {'forceN': applied[:3].tolist(), 'torqueNm': applied[3:].tolist(),
+                                                   'kind': 'model-mapping estimate',
+                                                   'basis': '源执行器固定增益×site/gear 映射换算自计划控制值；prepare 已校验精确表达请求，非传感器实测',
+                                                   'maxAbsDeltaFromRequest': float(np.max(np.abs(applied - requested)))},
+                           'measuredActuatorForce': motion.get('_measuredActuatorForce'),
+                           'measuredActuatorForceNote': '实测：与 measuredAtStep 同一物理步（该步真实积分完成时）读取的执行器标量力；本动作窗口从未驱动时为 null',
+                           'measuredAtStep': motion.get('_measuredAtStep'),
+                           'timingMode': motion['_timingMode'], 'actuatorSteps': motion['_steps'], 'durationS': motion['_duration'],
+                           'quantizationRule': 'durationS→max(1, round(durationS/dt))步；stepCount→显式整数步；实际时长=步数×dt',
+                           'drivenSteps': motion['_drivenSteps'], 'lastDrivenStep': motion.get('_lastDrivenStep'),
+                           # 零推力保证是支持范围（无状态固定增益、无bias/dyn/plugin/refsite、0∈ctrlrange/forcerange）的
+                           # 结论，不是对任意 source actuator 的承诺；完成/停止/关闭都调用 neutralize 写 ctrl=0。
+                           'zeroForceAfterWindow': {'guaranteed': True, 'ctrlZeroed': True,
+                                                    'basis': '支持范围内 ctrl=0 ⇒ 执行器力严格为0（无bias、无activation、无plugin/refsite）；完成/停止/关闭均经 neutralize 写0'},
+                           'rootBody': self.model.body(info['body']).name, 'freeBase': self.free_joint_state(info)})
+            # 完成即撤销推力：与 stop/close 走同一个 neutralize，不声称自动悬停；保持由外部控制器继续输出。
+            self.neutralize(motion['entityId'])
+        elif motion['kind'] == 'control':
+            effect.update({'controlMode': 'position-reference', 'stepCount': motion['stepCount'], 'stepsExecuted': max(0, self.step_index - receipt.get('startStep', self.step_index + 1) + 1), 'jointNames': motion['jointNames'], 'referencePositions': motion['positions']})
+        elif motion['kind'] == 'vehicle':
+            effect['wheelVelocitiesRadps'] = {a['joint']: float(self.data.qvel[info['joints'][a['joint']]['dof']]) for a in info['actuators'].values() if a['mode'] == 'velocity' and a['joint'] in info['joints']}
+            effect['commandedSpeedMps'] = motion['speedMps']
+            # 仅报告实测，不把轮速响应认作导航或任务成功。
+            self.apply_motion(motion, motion['_duration'])
+        elif motion['kind'] == 'gait':
+            effect.update({'controller':'planar-diagonal-trot','baseHeightM':float(self.data.xpos[info['body'],2]),'stableWalkingNotGuaranteed':True})
+            for name,target in gait.targets(info['gaitLegs'],0,0,0).items():self.set_joint(info,name,target,self.model.opt.timestep)
+        elif motion['kind'] == 'gripper':
+            cfg = info['controller']['gripper']
+            width = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in cfg['jointNames'])
+            effect.update({'actualWidthM': width, 'targetWidthM': motion['widthM'], 'targetReached': abs(width - motion['widthM']) <= motion['_tolerance']})
+        elif motion['kind'] == 'tendon':
+            # 回执必须区分三类值，不能把终点计划值冒充实际控制：
+            #  - targetLengths   请求目标（命令坐标，未被施加或只走了一部分的都按请求如实保留）
+            #  - ctrlApplied     本动作最后真实写入源 ctrl 的值；取消/停止时是插值中途的真实值，
+            #                    从未开始过的动作没有任何写入，必须是 null（不能称目标曾施加）
+            #  - holdReference   停止后的保持参考：neutralize 写回引擎的实际 ctrl 与换算坐标
+            # 只报告真实写过的控制/实测肌腱坐标；闭合只按坐标容差判定，不代表抓取成功。
+            started = active['startTime'] is not None
+            applied_steps = max([c.get('appliedSteps', 0) for c in motion['_tendonControls']] + [0])
+            last_ctrl = {c['name']: c['lastCtrl'] for c in motion['_tendonControls'] if 'lastCtrl' in c}
+            last_lengths = {c['name']: c['lastCtrl'] / c['gear'] for c in motion['_tendonControls'] if 'lastCtrl' in c}
+            measured = {c['name']: float(self.data.ten_length[c['tendonId']]) for c in motion['_tendonControls']}
+            errors = {c['name']: measured[c['name']] - c['target'] for c in motion['_tendonControls']}
+            hold = None
+            if status != 'completed':
+                # 先写中性参考，再从引擎 ctrl 读回：回执给的是真实存在的保持控制，不是计划值。
+                self.neutralize(motion['entityId'])
+                motion['_neutralized'] = True
+                hold = {'ctrl': {}, 'lengths': {}}
+                for c in motion['_tendonControls']:
+                    value = float(self.data.ctrl[c['actuatorId']])
+                    hold['ctrl'][c['name']] = value
+                    hold['lengths'][c['name']] = value / c['gear'] if c['gear'] else None
+            effect.update({'tendonNames': [c['name'] for c in motion['_tendonControls']],
+                           'targetLengths': {c['name']: c['target'] for c in motion['_tendonControls']},
+                           'started': started, 'appliedSteps': applied_steps,
+                           'ctrlApplied': last_ctrl or None, 'lastAppliedLengths': last_lengths or None,
+                           'holdReference': hold,
+                           'measuredLengths': measured, 'tendonErrors': errors,
+                           # 未开始/从未写入的动作不能报 targetReached，即使当前坐标巧合落在容差内。
+                           'targetReached': bool(started and applied_steps
+                                                 and max(map(abs, errors.values())) <= motion['_tolerance']),
+                           'tolerance': motion['_tolerance'],
+                           'gear': {c['name']: c['gear'] for c in motion['_tendonControls']}})
+        else:
+            errors = [float(self.data.qpos[info['joints'][n]['qpos']]) - target for n, target in zip(motion['jointNames'], motion['_points'][-1]['positions'])]
+            effect.update({'jointErrors': errors, 'targetReached': max(map(abs, errors)) <= motion['_tolerance'], 'tolerance': motion['_tolerance']})
+            # 控制参考与真实反馈分开：逐关节说明所用位置通道模式（原生重力前馈 / 纯参考）、实际参考、
+            # 源 gear/gain、是否受 ctrlrange 钳制，以及该步真实可观测执行器力；不改任何源参数。
+            cfg = info['controller']; controls = {}
+            for joint_name, joint_target in zip(motion['jointNames'], motion['_points'][-1]['positions']):
+                joint = info['joints'].get(joint_name); actuator = info['actuators'].get(joint['actuator']) if joint else None
+                if not joint or not actuator or actuator['mode'] != 'position':
+                    continue
+                gear = float(self.model.actuator_gear[actuator['id'], 0]); gain = float(self.model.actuator_gainprm[actuator['id'], 0])
+                enabled = bool(cfg.get('gravityCompensation', cfg.get('type') != 'quadruped')) and bool(gear and gain)
+                controls[joint_name] = {'mode': 'position-gravity-feedforward' if enabled else 'position-reference',
+                                        'reference': float(joint_target), 'gear': gear, 'gain': gain,
+                                        'ctrlLimited': bool(self.model.actuator_ctrllimited[actuator['id']]),
+                                        'measuredActuatorForce': float(self.data.actuator_force[actuator['id']])}
+            if controls:
+                effect['positionControl'] = controls
+        payload = self.motion_payload(motion)
+        if payload is not None:
+            effect['payload'] = payload
+            motion.pop('_payloadHistory', None)
+        if status != 'completed' and not motion.get('_neutralized'):
+            self.neutralize(motion['entityId'])
+        return effect
+
+    def _cancel_members(self, aid, active, hits):
+        """部分停止：只撤销命中成员，在停止当时冻结逐成员效果与 finalState；父 batch 留给其余成员继续运行。"""
+        for motion in hits:
+            effect = self._motion_effect(aid, active, motion, 'cancelled')
+            effect['memberStatus'] = 'cancelled'
+            effect['finalState'] = self.observe({'entityIds': [motion['entityId']], 'contacts': True})
+            active.setdefault('cancelled', []).append({'entityId': motion['entityId'], 'effect': effect,
+                                                       'reason': 'STOP_CONFIRMED', 'endStep': self.step_index})
+        active['motions'] = [m for m in active['motions'] if not any(m is h for h in hits)]
+        # 被撤销成员可能持有最长窗口：重算定时窗口边界，其余成员按自己剩余的窗口完成。
+        if active.get('motions'):
+            if all(m['kind'] == 'thrust' for m in active['motions']):
+                active['endStep'] = active['start'] + max(m['_steps'] for m in active['motions']) - 1
+            elif all(m['kind'] == 'control' for m in active['motions']):
+                active['endStep'] = active['start'] + active['motions'][0]['stepCount'] - 1
+
     def finish(self, aid, status, reason=None, facts=None):
         active = self.active.pop(aid)
         receipt = self.receipts[aid]
+        # 部分停止过的父 batch 即使其余成员后来跑完，也不能把被撤销成员说成成功。
+        if active.get('cancelled') and status == 'completed':
+            status = 'cancelled'
+            reason = reason or 'STOP_CONFIRMED_PARTIAL'
         receipt.update({'status': status, 'endStep': self.step_index})
         if reason:
             receipt['reason'] = reason
@@ -2835,128 +3000,155 @@ class World:
         effects = []
         if self.model is not None:
             for motion in active['motions']:
-                info = self.info(motion['entityId'])
-                displacement = (self.data.xpos[info['body']] - motion['_startPositions']).tolist()
-                effect = {'entityId': motion['entityId'], 'kind': motion['kind'], 'displacementM': displacement}
-                if motion['kind'] == 'thrust':
-                    # 回执分开报告四类事实，不把估算标成实测，也不据此宣称悬停/航点等任务成功：
-                    #   requestedWrench            请求（SI 体坐标语义）
-                    #   ctrlPlanned / ctrlApplied  计划控制值 / 窗口内真实写入过的控制原值（从未驱动时为 null）
-                    #   mappedActuatorForce / wrenchPerDrivenStep  模型映射估算（源增益×site/gear，非测量）
-                    #   measuredActuatorForce      真实测得：与 measuredAtStep 同一物理步（积分完成时）的记录
-                    ctrl_written = np.asarray([value for _, value in motion['_actuatorControls']], dtype=float)
-                    applied = motion['_wrenchMatrix'] @ ctrl_written
-                    requested = np.asarray([0.0, 0.0, motion['thrustN'], *list(motion.get('torqueNm', [0.0, 0.0, 0.0]))], dtype=float)
-                    effect.update({'requestedWrench': {'forceN': requested[:3].tolist(), 'torqueNm': requested[3:].tolist(),
-                                                       'frame': '实体根刚体坐标系：推力沿+z，力矩绕x/y/z（参考点=刚体坐标系原点）'},
-                                   'ctrlPlanned': {name: float(value) for name, value in zip(motion['_wrenchNames'], ctrl_written)},
-                                   'ctrlApplied': motion.get('_ctrlApplied'),
-                                   'mappedActuatorForce': dict(motion['_actuatorForces']),
-                                   'wrenchPerDrivenStep': {'forceN': applied[:3].tolist(), 'torqueNm': applied[3:].tolist(),
-                                                           'kind': 'model-mapping estimate',
-                                                           'basis': '源执行器固定增益×site/gear 映射换算自计划控制值；prepare 已校验精确表达请求，非传感器实测',
-                                                           'maxAbsDeltaFromRequest': float(np.max(np.abs(applied - requested)))},
-                                   'measuredActuatorForce': motion.get('_measuredActuatorForce'),
-                                   'measuredActuatorForceNote': '实测：与 measuredAtStep 同一物理步（该步真实积分完成时）读取的执行器标量力；本动作窗口从未驱动时为 null',
-                                   'measuredAtStep': motion.get('_measuredAtStep'),
-                                   'timingMode': motion['_timingMode'], 'actuatorSteps': motion['_steps'], 'durationS': motion['_duration'],
-                                   'quantizationRule': 'durationS→max(1, round(durationS/dt))步；stepCount→显式整数步；实际时长=步数×dt',
-                                   'drivenSteps': motion['_drivenSteps'], 'lastDrivenStep': motion.get('_lastDrivenStep'),
-                                   # 零推力保证是支持范围（无状态固定增益、无bias/dyn/plugin/refsite、0∈ctrlrange/forcerange）的
-                                   # 结论，不是对任意 source actuator 的承诺；完成/停止/关闭都调用 neutralize 写 ctrl=0。
-                                   'zeroForceAfterWindow': {'guaranteed': True, 'ctrlZeroed': True,
-                                                            'basis': '支持范围内 ctrl=0 ⇒ 执行器力严格为0（无bias、无activation、无plugin/refsite）；完成/停止/关闭均经 neutralize 写0'},
-                                   'rootBody': self.model.body(info['body']).name, 'freeBase': self.free_joint_state(info)})
-                    # 完成即撤销推力：与 stop/close 走同一个 neutralize，不声称自动悬停；保持由外部控制器继续输出。
-                    self.neutralize(motion['entityId'])
-                elif motion['kind'] == 'control':
-                    effect.update({'controlMode': 'position-reference', 'stepCount': motion['stepCount'], 'stepsExecuted': max(0, self.step_index - receipt.get('startStep', self.step_index + 1) + 1), 'jointNames': motion['jointNames'], 'referencePositions': motion['positions']})
-                elif motion['kind'] == 'vehicle':
-                    effect['wheelVelocitiesRadps'] = {a['joint']: float(self.data.qvel[info['joints'][a['joint']]['dof']]) for a in info['actuators'].values() if a['mode'] == 'velocity' and a['joint'] in info['joints']}
-                    effect['commandedSpeedMps'] = motion['speedMps']
-                    # 仅报告实测，不把轮速响应认作导航或任务成功。
-                    self.apply_motion(motion, motion['_duration'])
-                elif motion['kind'] == 'gait':
-                    effect.update({'controller':'planar-diagonal-trot','baseHeightM':float(self.data.xpos[info['body'],2]),'stableWalkingNotGuaranteed':True})
-                    for name,target in gait.targets(info['gaitLegs'],0,0,0).items():self.set_joint(info,name,target,self.model.opt.timestep)
-                elif motion['kind'] == 'gripper':
-                    cfg = info['controller']['gripper']
-                    width = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in cfg['jointNames'])
-                    effect.update({'actualWidthM': width, 'targetWidthM': motion['widthM'], 'targetReached': abs(width - motion['widthM']) <= motion['_tolerance']})
-                elif motion['kind'] == 'tendon':
-                    # 回执必须区分三类值，不能把终点计划值冒充实际控制：
-                    #  - targetLengths   请求目标（命令坐标，未被施加或只走了一部分的都按请求如实保留）
-                    #  - ctrlApplied     本动作最后真实写入源 ctrl 的值；取消/停止时是插值中途的真实值，
-                    #                    从未开始过的动作没有任何写入，必须是 null（不能称目标曾施加）
-                    #  - holdReference   停止后的保持参考：neutralize 写回引擎的实际 ctrl 与换算坐标
-                    # 只报告真实写过的控制/实测肌腱坐标；闭合只按坐标容差判定，不代表抓取成功。
-                    started = active['startTime'] is not None
-                    applied_steps = max([c.get('appliedSteps', 0) for c in motion['_tendonControls']] + [0])
-                    last_ctrl = {c['name']: c['lastCtrl'] for c in motion['_tendonControls'] if 'lastCtrl' in c}
-                    last_lengths = {c['name']: c['lastCtrl'] / c['gear'] for c in motion['_tendonControls'] if 'lastCtrl' in c}
-                    measured = {c['name']: float(self.data.ten_length[c['tendonId']]) for c in motion['_tendonControls']}
-                    errors = {c['name']: measured[c['name']] - c['target'] for c in motion['_tendonControls']}
-                    hold = None
-                    if status != 'completed':
-                        # 先写中性参考，再从引擎 ctrl 读回：回执给的是真实存在的保持控制，不是计划值。
-                        self.neutralize(motion['entityId'])
-                        motion['_neutralized'] = True
-                        hold = {'ctrl': {}, 'lengths': {}}
-                        for c in motion['_tendonControls']:
-                            value = float(self.data.ctrl[c['actuatorId']])
-                            hold['ctrl'][c['name']] = value
-                            hold['lengths'][c['name']] = value / c['gear'] if c['gear'] else None
-                    effect.update({'tendonNames': [c['name'] for c in motion['_tendonControls']],
-                                   'targetLengths': {c['name']: c['target'] for c in motion['_tendonControls']},
-                                   'started': started, 'appliedSteps': applied_steps,
-                                   'ctrlApplied': last_ctrl or None, 'lastAppliedLengths': last_lengths or None,
-                                   'holdReference': hold,
-                                   'measuredLengths': measured, 'tendonErrors': errors,
-                                   # 未开始/从未写入的动作不能报 targetReached，即使当前坐标巧合落在容差内。
-                                   'targetReached': bool(started and applied_steps
-                                                         and max(map(abs, errors.values())) <= motion['_tolerance']),
-                                   'tolerance': motion['_tolerance'],
-                                   'gear': {c['name']: c['gear'] for c in motion['_tendonControls']}})
-                else:
-                    errors = [float(self.data.qpos[info['joints'][n]['qpos']]) - target for n, target in zip(motion['jointNames'], motion['_points'][-1]['positions'])]
-                    effect.update({'jointErrors': errors, 'targetReached': max(map(abs, errors)) <= motion['_tolerance'], 'tolerance': motion['_tolerance']})
-                effects.append(effect)
-                payload = self.motion_payload(motion)
-                if payload is not None:
-                    effect['payload'] = payload
-                    motion.pop('_payloadHistory', None)
-                if status != 'completed' and not motion.get('_neutralized'):
-                    self.neutralize(motion['entityId'])
+                effects.append(self._motion_effect(aid, active, motion, status))
+            # 被撤销成员用停止当时冻结的效果/finalState，不冒用其余成员完成时的状态。
+            for record in active.get('cancelled', []):
+                effects.append(record['effect'])
             receipt['finalState'] = self.observe({'entityIds': [m['entityId'] for m in active['motions']], 'contacts': True})
         # 完成回执必须覆盖本动作窗口内真实发生过的辅助：只按结束瞬间的 map 快照会把已解除的辅助从回执上抹掉。
         receipt['effect'] = {'motions': effects, 'childrenStartSteps': {m['entityId']: receipt.get('startStep') for m in active['motions']}, 'executionMode': 'assisted-teleport' if self.assisted or active.get('assistedTicks') else 'physical-contact'}
+        if active.get('cancelled'):
+            receipt['cancelledMembers'] = [{'entityId': r['entityId'], 'status': 'cancelled', 'reason': r['reason'], 'endStep': r['endStep']} for r in active['cancelled']]
         if status != 'completed':
             receipt['taskAchieved'] = False
         emit({'event': 'receipt', 'receipt': receipt})
-
     def stop(self, selection):
         if selection.get('expectedGeneration') is not None and selection['expectedGeneration'] != self.generation:
             raise SimError('STALE_GENERATION', '停止请求属于旧模型代次，不触碰新代次控制')
         action_id = selection.get('actionId')
         if action_id and action_id not in self.receipts:
             raise SimError('ACTION_NOT_FOUND', '停止请求的动作不存在')
-        selected = set(selection.get('entityIds', self.entities))
-        affected = {eid for eid in selected if not action_id or self.control_owners.get(eid) == action_id}
+        entity_filter = selection.get('entityIds')
+        selected = set(entity_filter) if entity_filter else set(self.entities)
+        affected = set()
         stopped = []
         for aid, active in list(self.active.items()):
-            if selection.get('actionId') and aid != selection['actionId']:
+            if action_id and aid != action_id:
                 continue
-            if selection.get('entityIds') and not any(m['entityId'] in selection['entityIds'] for m in active['motions']):
-                continue
-            affected.update(m['entityId'] for m in active['motions'])
-            self.finish(aid, 'cancelled', 'STOP_CONFIRMED')
-            stopped.append(copy.deepcopy(self.receipts[aid]))
+            motions = active['motions']
+            if entity_filter:
+                hits = [m for m in motions if m['entityId'] in selected]
+                if not hits:
+                    continue
+                affected.update(m['entityId'] for m in hits)
+                misses = [m for m in motions if not any(m is h for h in hits)]
+                if misses:
+                    # 部分停止：父 batch 留给未命中成员继续，命中成员的控制/效果在停止当时冻结。
+                    self._cancel_members(aid, active, hits)
+                    continue
+                self.finish(aid, 'cancelled', 'STOP_CONFIRMED')
+                stopped.append(copy.deepcopy(self.receipts[aid]))
+            else:
+                affected.update(m['entityId'] for m in motions)
+                self.finish(aid, 'cancelled', 'STOP_CONFIRMED')
+                stopped.append(copy.deepcopy(self.receipts[aid]))
         for eid in affected:
             self.neutralize(eid)
             self.control_owners.pop(eid, None)
         if self.status in ('ready', 'running'):
             self.status = 'running' if self.active else 'ready'
         return {'stopped': True, 'stepIndex': self.step_index, 'receipts': stopped, 'affectedEntityIds': sorted(affected)}
+
+    def _freeze_names(self, eid, info):
+        from robot_authoring import freeze_constraint_names
+        return freeze_constraint_names(info['prefix'], sorted(info['joints']))
+
+    def freeze(self, selection):
+        """原生保持：只停止目标实体的动作，按**当前 pose**启用编译期预分配 inactive 的根锚/关节锁。
+
+        根锚只在实体根确为自由根时启用；固定/挂接根不被锁到 world，父实体继续运动。保持位姿/范围写进回执，
+        不每 tick 覆盖 qpos、不关碰撞、不暂停整 world、不用 Scene checkpoint。
+        """
+        if selection.get('expectedGeneration') is not None and selection['expectedGeneration'] != self.generation:
+            raise SimError('STALE_GENERATION', 'Freeze 请求属于旧模型代次，不触碰新代次控制')
+        ids = selection.get('entityIds') or sorted(self.entities)
+        freeze_id = selection.get('freezeId') or ('freeze-' + uuid.uuid4().hex[:12])
+        from robot_authoring import body_pose
+        frozen, already, missing = [], [], []
+        root_held, joint_locks, hold_pose, scope = {}, {}, {}, []
+        for eid in ids:
+            info = self.entities.get(eid)
+            if not info:
+                missing.append(eid); continue
+            if eid in self.frozen:
+                already.append(eid); continue
+            # 只撤销目标实体的动作；同 batch 的无关成员继续运行。
+            self.stop({'entityIds': [eid], 'expectedGeneration': self.generation})
+            mj.mj_forward(self.model, self.data)
+            names = self._freeze_names(eid, info)
+            held_root = False
+            root_eq = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_EQUALITY, names['root'])
+            free_root = next((joint for joint in info['freeJoints'].values() if joint['body'] == info['body']), None)
+            # 已挂接到父实体的实体（baseBinding.target.entityId，含 fixed 刚性装配与 free weld）不能被锁到
+            # world：它的根要么不是自由根、要么由 base weld 跟着父 body。若这里再启用世界根锚，会把
+            # 无关父机器人一起锁死。只锁它自己拥有的 scalar 关节（若有），基座继续随父运动。
+            binding = ((info.get('entity') or {}).get('components') or {}).get('baseBinding') or {}
+            anchor = binding.get('target') or binding.get('initialWorldPose') or {}
+            bound_to_parent = bool(anchor.get('entityId'))
+            if root_eq >= 0 and free_root is not None and not bound_to_parent:
+                # 以当前 body 原点为锚：world 侧 anchor=当前 xpos，body 侧 anchor=0，相对四元数=当前 xquat 的逆；
+                # 不用远处 world 原点形成杠杆，也不改 body 的安装位姿。
+                position = self.data.xpos[info['body']].copy(); orientation = self.data.xquat[info['body']].copy()
+                inverse = orientation.copy(); inverse[1:] *= -1
+                self.model.eq_data[root_eq, 0:3] = position
+                self.model.eq_data[root_eq, 3:6] = 0
+                self.model.eq_data[root_eq, 6:10] = inverse
+                self.data.eq_active[root_eq] = 1
+                self.data.qvel[free_root['dof']:free_root['dof'] + 6] = 0
+                held_root = True
+            locks = []
+            for local in sorted(info['joints']):
+                eq = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_EQUALITY, names['joints'][local])
+                if eq < 0:
+                    continue
+                joint = info['joints'][local]
+                # scalar joint 锁参考考虑 qpos0：eq_data[0] = 当前 qpos − qpos0。
+                self.model.eq_data[eq, 0] = float(self.data.qpos[joint['qpos']] - self.model.qpos0[joint['qpos']])
+                self.data.eq_active[eq] = 1
+                self.data.qvel[joint['dof']] = 0
+                locks.append(local)
+            mj.mj_forward(self.model, self.data)
+            record = {'freezeId': freeze_id, 'rootHeld': held_root, 'jointLocks': locks,
+                      'scope': [eid], 'holdPose': body_pose(self, info['body'])}
+            self.frozen[eid] = record
+            frozen.append(eid); scope.append(eid)
+            root_held[eid] = held_root; joint_locks[eid] = locks; hold_pose[eid] = record['holdPose']
+        return {'worldId': self.id, 'generation': self.generation, 'freezeId': freeze_id,
+                'status': 'frozen' if frozen else ('already-frozen' if already else 'not-found'),
+                'entityIds': list(ids), 'frozenEntityIds': frozen, 'alreadyFrozenEntityIds': already,
+                'missingEntityIds': missing, 'scope': scope, 'rootHeld': root_held, 'jointLocks': joint_locks,
+                'holdPose': hold_pose, 'stillActiveActions': sorted(self.active.keys()),
+                'controlConfigPreserved': True}
+
+    def restore(self, selection):
+        """解除本次原生保持：只关掉对应 eq_active，不改 gains/limits、不自动恢复旧动作/旧速度。"""
+        if selection.get('expectedGeneration') is not None and selection['expectedGeneration'] != self.generation:
+            raise SimError('STALE_GENERATION', 'Restore 请求属于旧模型代次，不触碰新代次控制')
+        ids = selection.get('entityIds') or sorted(self.frozen)
+        freeze_id = selection.get('freezeId')
+        restored, not_frozen, mismatched = [], [], []
+        for eid in ids:
+            record = self.frozen.get(eid)
+            if not record:
+                not_frozen.append(eid); continue
+            if freeze_id and record.get('freezeId') != freeze_id:
+                mismatched.append(eid); continue
+            info = self.entities.get(eid)
+            if info is not None:
+                names = self._freeze_names(eid, info)
+                eq_names = [names['root']] + [names['joints'][local] for local in record.get('jointLocks', [])]
+                for eq_name in eq_names:
+                    eq = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_EQUALITY, eq_name)
+                    if eq >= 0:
+                        self.data.eq_active[eq] = 0
+            del self.frozen[eid]
+            restored.append(eid)
+        mj.mj_forward(self.model, self.data)
+        return {'worldId': self.id, 'generation': self.generation, 'freezeId': freeze_id,
+                'status': 'restored' if restored else ('not-frozen' if not_frozen else 'mismatched'),
+                'entityIds': list(ids), 'restoredEntityIds': restored, 'notFrozenEntityIds': not_frozen,
+                'freezeMismatchEntityIds': mismatched, 'stillActiveActions': sorted(self.active.keys()),
+                'controlConfigPreserved': True}
 
     def refresh_derived(self):
         """把引擎派生量（xpos/xquat、ten_length/ten_velocity、actuator_force、sensordata…）对齐到当前积分状态。
@@ -3909,6 +4101,180 @@ class World:
         self._remember_capture(capture_id, result, [{'cameraName': 'free', 'resolvedCameraName': 'free', 'override': False, 'width': width, 'height': height, 'rgb': result['rgb'], 'depth': result['depth'], 'depthRangeM': result['depthRangeM'], 'annotationIds': []}])
         return result
 
+    # --------------------------------------------------------- 模拟LiDAR（原生射线）
+    # 所有权：机位/安装仍归 Scene 相机或原生相机清单（本方法只借用它的实际 world pose，不新增传感器库）；
+    # 量测是引擎真实几何求交（mj_multiRay 打在编译模型的 geom 上），不是相机深度/点云投影改名。
+    def _lidar_pattern(self, options):
+        """校验并展开一次扫描的射线图案；单位与角度约定在这里唯一确定。
+        方位角 0 指向 -Z（相机光轴/前），绕 +Y 向 +X 增大；俯仰角水平为 0、向 +Y 为正。"""
+        def integer(key, default, low, high):
+            value = options.get(key, default)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise SimError('INVALID_ARGUMENT', key + ' 必须是 ' + str(low) + '..' + str(high) + ' 的整数')
+            return value
+        channels = integer('channels', 16, 1, 512)
+        samples = integer('horizontalSamples', 360, 1, 4096)
+        hfov = float(options.get('horizontalFovDeg', 360.0))
+        if not math.isfinite(hfov) or not 0.0 < hfov <= 360.0:
+            raise SimError('INVALID_ARGUMENT', 'horizontalFovDeg 必须在 (0, 360]')
+        vertical = options.get('verticalFovDeg', [-15.0, 15.0])
+        if (not isinstance(vertical, (list, tuple)) or len(vertical) != 2
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)) for v in vertical)):
+            raise SimError('INVALID_ARGUMENT', 'verticalFovDeg 必须是 [下界, 上界] 两个有限数')
+        lower, upper = float(vertical[0]), float(vertical[1])
+        if not lower < upper or abs(lower) > 90.0 or abs(upper) > 90.0:
+            raise SimError('INVALID_ARGUMENT', 'verticalFovDeg 须满足 -90 <= 下界 < 上界 <= 90')
+        range_m = float(options.get('rangeM', 100.0))
+        if not math.isfinite(range_m) or range_m <= 0.0:
+            raise SimError('INVALID_ARGUMENT', 'rangeM 必须是正有限米数')
+        if hfov >= 360.0:
+            azimuth = (-180.0 + (np.arange(samples) + 0.5) * (360.0 / samples)) if samples > 1 else np.array([0.0])
+        else:
+            azimuth = np.linspace(-hfov / 2.0, hfov / 2.0, samples)
+        elevation = np.array([(lower + upper) / 2.0]) if channels == 1 else np.linspace(lower, upper, channels)
+        return {'channels': channels, 'horizontalSamples': samples, 'horizontalFovDeg': hfov,
+                'verticalFovDeg': [lower, upper], 'rangeM': range_m, 'azimuthDeg': azimuth, 'elevationDeg': elevation}
+
+    def _write_lidar_preview(self, path, ranges, range_limit):
+        """按 metadata 里记录的固定规则，从真实 range 数组生成预览 PNG（可由 npy+规则复算）：
+        有效：t=clamp(range/rangeLimit,0,1) → R=round(255·t)、G=round(255·(1−t))、B=64；无返回：RGB(0,0,0)。"""
+        rows, cols = int(ranges.shape[0]), int(ranges.shape[1])
+        rgb = np.zeros((rows, cols, 3), dtype=np.uint8)
+        valid = np.isfinite(ranges) & (ranges >= 0.0)
+        t = np.zeros_like(ranges, dtype=float)
+        t[valid] = np.clip(ranges[valid] / range_limit, 0.0, 1.0)
+        rgb[..., 0] = np.round(255.0 * t).astype(np.uint8)
+        rgb[..., 1] = np.round(255.0 * (1.0 - t)).astype(np.uint8)
+        rgb[..., 2] = 64
+        rgb[~valid] = 0
+        self._write_rgb_png(path, rgb, cols, rows)
+
+    def scan_lidar(self, options):
+        """从一台已命名机位的实际 world pose 发射原生射线，返回原始 range/有效性/命中 geom 与几何来源。"""
+        self.require_ready()
+        expected = options.get('expectedGeneration')
+        if expected is not None:
+            if isinstance(expected, bool) or not isinstance(expected, int):
+                raise SimError('INVALID_ARGUMENT', 'expectedGeneration 必须是整数')
+            if expected != self.generation:
+                raise SimError('STALE_GENERATION', 'STALE_GENERATION: LiDAR 扫描代次已过期: 请求 ' + str(expected) + '，当前 ' + str(self.generation))
+        name = options.get('cameraName')
+        resolved_name = self.resolve_camera_name(name)
+        pattern = self._lidar_pattern(options)
+        groups = self.display_groups(options.get('geomGroups'))
+        root = Path(options['outputDir']).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        # 射线用当前 FK 的位姿：挂载相机因此随父 body 运动，与渲染/标定同一步。
+        self.refresh_derived()
+        camid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_CAMERA, resolved_name)
+        if camid < 0:
+            raise SimError('CAMERA_NOT_FOUND', '原生相机不存在: ' + resolved_name)
+        override = self.camera_overrides.get(resolved_name)
+        position, rotation = self._camera_world_pose(camid, override)
+        forward = rotation @ np.array([0.0, 0.0, -1.0])
+        right = rotation @ np.array([1.0, 0.0, 0.0])
+        up = rotation @ np.array([0.0, 1.0, 0.0])
+        az = np.radians(np.asarray(pattern['azimuthDeg'], dtype=float))
+        el = np.radians(np.asarray(pattern['elevationDeg'], dtype=float))
+        ca, sa, ce, se = np.cos(az), np.sin(az), np.cos(el), np.sin(el)
+        # 形状 (channels, samples, 3)：某一 (c,s) 的方向 = forward·ce·ca + right·ce·sa + up·se。
+        directions = (ce[:, None, None] * ca[None, :, None] * forward[None, None, :]
+                      + ce[:, None, None] * sa[None, :, None] * right[None, None, :]
+                      + se[:, None, None] * up[None, None, :])
+        flat = directions.reshape(-1, 3)
+        nray = int(flat.shape[0])
+        vec = np.ascontiguousarray(flat.reshape(-1), dtype=np.float64)
+        pnt = np.asarray(position, dtype=np.float64)
+        geomid = np.full(nray, -1, dtype=np.int32)
+        dist = np.full(nray, -1.0, dtype=np.float64)
+        geomgroup = None
+        if groups is not None:
+            geomgroup = np.zeros(6, dtype=np.uint8)
+            for index in groups:
+                geomgroup[index] = 1
+        # 只排除传感器所挂的那个 body 自身：worldbody(0) 上的静态几何不能排除，否则地面/墙会消失。
+        mounted_body = int(self.model.cam_bodyid[camid])
+        bodyexclude = mounted_body if mounted_body > 0 else -1
+        mj.mj_multiRay(self.model, self.data, pnt, vec, geomgroup, 1, bodyexclude, geomid, dist, None, nray, float(pattern['rangeM']))
+        # 量程由本层显式裁剪：不同引擎版本对 multiRay cutoff 的处理不同，不能依赖它把超量程当无返回。
+        hit = np.isfinite(dist) & (dist >= 0.0) & (dist <= float(pattern['rangeM']))
+        ranges = np.where(hit, dist, np.nan).reshape(pattern['channels'], pattern['horizontalSamples']).astype(np.float64)
+        hit_ids = geomid.reshape(pattern['channels'], pattern['horizontalSamples'])
+        valid = hit.reshape(pattern['channels'], pattern['horizontalSamples'])
+        valid_values = ranges[valid]
+        geom_names = {}
+        for gid in np.unique(hit_ids[hit_ids >= 0]):
+            geom = self.model.geom(int(gid))
+            geom_names[int(gid)] = geom.name or ('geom' + str(int(gid)))
+        stem = str(uuid.uuid4())
+        range_path, valid_path = root / (stem + '-range.npy'), root / (stem + '-valid.npy')
+        hit_path, preview_path = root / (stem + '-hitGeom.npy'), root / (stem + '-preview.png')
+        np.save(range_path, ranges)
+        np.save(valid_path, valid)
+        np.save(hit_path, hit_ids.astype(np.int32))
+        self._write_lidar_preview(preview_path, ranges, pattern['rangeM'])
+        capture_id = str(uuid.uuid4())
+        entry = {
+            **self._camera_frame_identity(),
+            'source': 'mujoco-mj_multiRay', 'captureId': capture_id, 'sensorId': 'lidar:' + resolved_name,
+            'sensorKind': 'simulated-lidar', 'sensorSource': 'native-physics-raycast',
+            'cameraName': name, 'resolvedCameraName': resolved_name,
+            'geometrySource': 'mujoco-compiled-geoms', 'selfExclusion': 'sensor-parent-body-only',
+            'parentBodyName': self._camera_parent_body_name(camid),
+            'worldGeneration': self.generation,
+            'parentEntityId': self._camera_mount_readback(camid, position, rotation).get('parentEntityId'),
+            'mount': self._camera_mount_readback(camid, position, rotation).get('mount'),
+            'worldFromSensor': {'positionM': [float(v) for v in position],
+                                'quaternionXyzw': self._quaternion_from_matrix(rotation),
+                                'rotationMatrix': [[float(v) for v in row] for row in rotation]},
+            'referenceFrame': override['referenceFrame'] if override else ('parent' if self._camera_parent_body_name(camid) != 'world' else 'world'),
+            'override': override is not None,
+            'rayPattern': {'channels': pattern['channels'], 'horizontalSamples': pattern['horizontalSamples'],
+                           'horizontalFovDeg': pattern['horizontalFovDeg'], 'verticalFovDeg': list(pattern['verticalFovDeg']),
+                           'rangeM': pattern['rangeM'], 'units': 'm',
+                           'azimuthConvention': '0=forward(-Z), positive toward +X, around +Y',
+                           'elevationConvention': '0=horizontal, positive toward +Y'},
+            'rangeSemantics': 'euclidean-range-meters-along-ray',
+            'cameraDepthComparison': 'camera depth is axial Z along the optical axis; lidar range is Euclidean along the ray; register only with the recorded sensor pose, never rename one as the other',
+            'range': {'uri': range_path.as_uri(), 'mimeType': 'application/x-npy', 'units': 'm',
+                      'shape': [pattern['channels'], pattern['horizontalSamples']], 'noReturnValue': 'nan'},
+            'valid': {'uri': valid_path.as_uri(), 'mimeType': 'application/x-npy', 'shape': [pattern['channels'], pattern['horizontalSamples']]},
+            'hitGeom': {'uri': hit_path.as_uri(), 'mimeType': 'application/x-npy', 'shape': [pattern['channels'], pattern['horizontalSamples']],
+                        'geomIds': geom_names, 'noReturnValue': -1},
+            'preview': {'uri': preview_path.as_uri(), 'mimeType': 'image/png',
+                        'colorRule': 'valid: t=clamp(range/rangeM,0,1), R=round(255*t), G=round(255*(1-t)), B=64; no-return: RGB(0,0,0)',
+                        'rowOrder': 'elevation ascending', 'columnOrder': 'azimuth sequence as returned in rayPattern'},
+            'rayCount': nray, 'validCount': int(valid_values.size), 'noReturnCount': int(nray - valid_values.size),
+            'rangeMinM': (float(np.min(valid_values)) if valid_values.size else None),
+            'rangeMaxM': (float(np.max(valid_values)) if valid_values.size else None),
+            'rangeMeanM': (float(np.mean(valid_values)) if valid_values.size else None),
+            'outputDir': str(root),
+        }
+        self.lidar_scans[capture_id] = entry
+        for stale in list(self.lidar_scans)[:-64]:
+            del self.lidar_scans[stale]
+        return entry
+
+    def publish_lidar(self, capture_id, from_dir, to_dir):
+        """宿主发布完成后，只更新 range/valid/hitGeom/preview 的文件位置，不重新量测。"""
+        if capture_id not in self.lidar_scans:
+            raise SimError('LIDAR_NOT_FOUND', 'LiDAR 登记不存在: ' + capture_id)
+        source = Path(from_dir).resolve()
+        target = Path(to_dir).resolve()
+        record = self.lidar_scans[capture_id]
+        updates = []
+        for key in ('range', 'valid', 'hitGeom', 'preview'):
+            metadata = record.get(key)
+            if not metadata:
+                continue
+            path = target / Path(path_from_uri(metadata['uri'])).relative_to(source)
+            if not path.is_file():
+                raise SimError('LIDAR_FILE_MISSING', '已发布的 LiDAR 文件不存在: ' + str(path))
+            updates.append((metadata, path.as_uri()))
+        for metadata, uri in updates:
+            metadata['uri'] = uri
+        return {'captureId': capture_id, 'files': len(updates)}
+
     def _render_depth_only(self, resolved_name, width, height, groups):
         """标注自校验用的真实深度渲染（不落盘、不推进物理钟）。"""
         scene_option = self._scene_option_for(groups)
@@ -4115,6 +4481,7 @@ class World:
         # 临时相机 override 只属于这个 world 的生命周期；关闭即清除，源 Scene/MJCF 从未被改。
         self.camera_overrides = {}
         self.captures = {}
+        self.lidar_scans = {}
 
 
 requests = queue.Queue()
@@ -4220,6 +4587,10 @@ def main():
                         result = world.capture(args['options'])
                     elif method == 'capture_multi':
                         result = world.capture_multi(args['options'])
+                    elif method == 'lidar_scan':
+                        result = world.scan_lidar(args['options'])
+                    elif method == 'lidar_publish':
+                        result = world.publish_lidar(args['captureId'], args['fromDir'], args['toDir'])
                     elif method == 'camera_list':
                         result = world.camera_list(args.get('options'))
                     elif method == 'camera_adjust':
@@ -4234,6 +4605,10 @@ def main():
                         result = world.receipts[args['actionId']]
                     elif method == 'stop':
                         result = world.stop(args.get('selection', {}))
+                    elif method == 'freeze':
+                        result = world.freeze(args.get('selection', {}))
+                    elif method == 'restore':
+                        result = world.restore(args.get('selection', {}))
                     elif method == 'handle':
                         result = world.handle()
                     elif method == 'close':

@@ -1,10 +1,12 @@
 /**
  * 右侧固定工具栏（PLAN §三.5）：工作台最右，宽屏 60px、窄屏 46px，三种模式都在。
  *
- * 上组是工具（场景/环境/机器人/物体/相机/素材，点击开合工作面上的工具面板列），下组是工作面入口
- * （文件＝中央视图切到文件工作面；终端/产物＝底部抽屉）。窄屏收成紧凑图标列：短标签隐藏，
- * 可访问名称（aria-label）与 tooltip（title）保留。
+ * 上组是内容/采集工具：Scene（场景与组成）、Objects（物件清单）、Environment（环境与光照）、
+ * Robots（机器人）、Camera（机器人机位）、Capture（自由视角）、Recording（记录作业）、Notes（批注）。
+ * 下组是运行与工作面：Physics（物理世界独立配置）、当前引擎（单击切换偏好）、Files、Terminal、Outputs。
+ * Physics 与其余工具一样开工作面上的面板；它放在下组是因为它描述**运行环境**而不是内容编辑。
  *
+ * 窄屏收成紧凑图标列：短标签隐藏，可访问名称（aria-label）与 tooltip（title）保留。
  * 标签规则：按钮里那行标签必须放得进按钮（中文用完整短词；英文用缩写），完整名称始终在
  * aria-label/title 里。标签只允许在按钮内省略，不允许横向溢出到按钮外。
  *
@@ -18,40 +20,48 @@ import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
  * 每个入口两个名字：`zh`/`en` 是完整名称（aria-label 与 tooltip），`zh`/`shortEn` 是
  * 按钮里那行可见标签。中文本来就短；英文在 60px 宽的按钮里换成公认缩写，
  * 完整词始终留在 tooltip/可访问名称里，任何宽度都不横向溢出。
+ *
+ * `group` 只决定视觉分组（上组内容/采集，下组运行/工作面）；`behavior` 才决定点击做什么——
+ * Physics 在下组但仍是**工具面板**，引擎是偏好切换，Files/Terminal/Outputs 是工作面/抽屉。
+ * 泛用 `Library`（旧 `asset`）不再是一级轨项（R-008）：GLB 归 Objects、XML 机器人归 Robots、
+ * 环境资源归 Environment，导入/复用从各域进入。
  */
-type RailEntry={id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work"}
+export type RailBehavior="tool"|"engine"|"surface"
+export interface RailEntry{id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work";behavior:RailBehavior}
 
-// 工具轨按存储分域列入口：场景（worlds/scenes）、物件（assets）、环境（worlds/environments）、
-// 机器人（robots）、素材（聚合库）。五个入口与磁盘上的域目录一一对应，避免“只有素材看得到”。
-// 批注不是存储域，而是**画布上的操作模式**（落点锚在实体上、文字是人的说明），入口紧跟相机之后。
-const ENTRIES:RailEntry[]=[
-  {id:"scene",zh:"场景",en:"Scene",shortEn:"Scene",group:"tool"},
-  {id:"object",zh:"物件",en:"Objects",shortEn:"Object",group:"tool"},
-  {id:"environment",zh:"环境",en:"Environment",shortEn:"Env",group:"tool"},
-  {id:"robot",zh:"机器人",en:"Robot",shortEn:"Robot",group:"tool"},
-  {id:"camera",zh:"相机",en:"Camera",shortEn:"Camera",group:"tool"},
-  {id:"annotation",zh:"批注",en:"Annotations",shortEn:"Note",group:"tool"},
-  {id:"asset",zh:"素材",en:"Assets",shortEn:"Library",group:"tool"},
-  // 引擎切换与"文件"并列（用户要求"在 IDE 旁边加一个一模一样的按钮"）：同一套渲染与可访问名，
-  // 不新造第二种按钮外观。它不是工具面板，而是**一个唯一的设置项**：写引擎偏好。
-  {id:"engine",zh:"引擎",en:"Engine",shortEn:"Engine",group:"work"},
-  {id:"file",zh:"文件",en:"Files",shortEn:"Files",group:"work"},
-  {id:"terminal",zh:"终端",en:"Terminal",shortEn:"Term",group:"work"},
-  {id:"deliverable",zh:"产物",en:"Outputs",shortEn:"Outputs",group:"work"},
+export const RAIL_ENTRIES:readonly RailEntry[]=[
+  {id:"scene",zh:"场景",en:"Scene",shortEn:"Scene",group:"tool",behavior:"tool"},
+  {id:"object",zh:"物件",en:"Objects",shortEn:"Objects",group:"tool",behavior:"tool"},
+  {id:"environment",zh:"环境",en:"Environment",shortEn:"Env",group:"tool",behavior:"tool"},
+  {id:"robot",zh:"机器人",en:"Robots",shortEn:"Robots",group:"tool",behavior:"tool"},
+  {id:"camera",zh:"相机",en:"Camera",shortEn:"Camera",group:"tool",behavior:"tool"},
+  {id:"capture",zh:"拍摄",en:"Capture",shortEn:"Capture",group:"tool",behavior:"tool"},
+  {id:"recording",zh:"录制",en:"Recording",shortEn:"Recording",group:"tool",behavior:"tool"},
+  {id:"annotation",zh:"批注",en:"Notes",shortEn:"Notes",group:"tool",behavior:"tool"},
+  // 运行环境与工作面（下组）：Physics 仍是工具面板，引擎是**唯一的偏好切换**（单击，不新造设置页）。
+  {id:"physics",zh:"物理",en:"Physics",shortEn:"Physics",group:"work",behavior:"tool"},
+  {id:"engine",zh:"引擎",en:"Engine",shortEn:"Engine",group:"work",behavior:"engine"},
+  {id:"file",zh:"文件",en:"Files",shortEn:"Files",group:"work",behavior:"surface"},
+  {id:"terminal",zh:"终端",en:"Terminal",shortEn:"Terminal",group:"work",behavior:"surface"},
+  {id:"deliverable",zh:"产物",en:"Outputs",shortEn:"Outputs",group:"work",behavior:"surface"},
 ]
 
 
-export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,engine,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;engine?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
+export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,engine,preference,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;engine?:string;preference?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
   const ui=useWorkbenchUI()
   const state=ui.getSnapshot()
   const render=(entry:RailEntry)=>{
-    // 引擎按钮的可见标签带当前引擎名（中文短、英文也是公认词），完整名称仍在 aria-label/title。
-    const currentEngine=engine==="isaac"?"Isaac":engine==="mujoco"?"MuJoCo":engine||"—"
-    // 可见标签：中文用完整短词、英文用缩写（文件头既定规则）；引擎按钮显示**当前引擎名**。
-    // 每个入口都渲染自己的标签——此前只有引擎按钮渲染，会让其余按钮看起来是空按钮。
-    const label=entry.id==="engine"?tr(`物理引擎：${currentEngine}（点击切换）`,`Physics engine: ${currentEngine} (click to switch)`):tr(entry.zh,entry.en)
-    const shortLabel=entry.id==="engine"?currentEngine:tr(entry.zh,entry.shortEn)
-    const active=(nativeSceneActive??(state.mode!=="chat"))&&(entry.group==="tool"?state.tool===entry.id
+    // 运行中的引擎只用于“当前状态”短说明；切换的**下一次动作**一律按最新保存偏好计算，
+    // 否则运行 MuJoCo 时两次点击都会请求 Isaac（旧缺陷 R-009）。
+    const runningEngine=engine==="isaac"?"Isaac":engine==="mujoco"?"MuJoCo":engine||"—"
+    const savedEngine=preference==="isaac"?"Isaac":preference==="mujoco"?"MuJoCo":undefined
+    const label=entry.id==="engine"
+      ?savedEngine?tr(`物理引擎：运行 ${runningEngine}，已保存偏好 ${savedEngine}（点击切换偏好）`,`Physics engine: running ${runningEngine}, saved preference ${savedEngine} (click to change preference)`)
+        :tr(`物理引擎：${runningEngine}（点击切换偏好）`,`Physics engine: ${runningEngine} (click to change preference)`)
+      :tr(entry.zh,entry.en)
+    const shortLabel=entry.id==="engine"?runningEngine:tr(entry.zh,entry.shortEn)
+    const active=(nativeSceneActive??(state.mode!=="chat"))&&(
+      entry.behavior==="tool"?state.tool===entry.id&&state.centre==="canvas"
       :entry.id==="file"?state.centre==="file"
       :entry.id==="engine"?false
       :state.drawer===entry.id)
@@ -63,12 +73,14 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
       aria-pressed={active}
       title={label}
       data-engine={entry.id==="engine"?engine:undefined}
+      data-engine-preference={entry.id==="engine"?preference:undefined}
+      data-rail-behavior={entry.behavior}
       onClick={()=>{
-        if(entry.id==="engine"){onSwitchEngine?.(engine==="isaac"?"mujoco":"isaac");return}
+        if(entry.behavior==="engine"){const base=preference==="isaac"||preference==="mujoco"?preference:engine;onSwitchEngine?.(base==="isaac"?"mujoco":"isaac");return}
         if(entry.id==="file"&&openFiles){openFiles();return}
         if(entry.id==="terminal"&&openTerminal){openTerminal();return}
         revealScene?.()
-        if(entry.group==="tool"){
+        if(entry.behavior==="tool"){
           if(nativeSceneActive===false)ui.openTool(entry.id as ToolId)
           else ui.toggleTool(entry.id as ToolId)
         }else if(entry.id==="file")ui.toggleCentre("file")
@@ -82,8 +94,10 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
   }
   // data-group-label 只把既有的两组分组写进 DOM 给 CSS 当分组小标题用（窄栏隐藏），
   // 分组本身与按钮顺序不变，aria-label/title/aria-pressed 仍由上面每个入口各自提供。
-  return <nav className="lya-rail" data-compact={compact||undefined} aria-label={tr("工作台工具","Workbench tools")}>
-    <div className="lya-rail-group" data-group-label={tr("工具","Tools")}>{ENTRIES.filter(item=>item.group==="tool").map(render)}</div>
-    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("工作面","Surfaces")}>{ENTRIES.filter(item=>item.group==="work").map(render)}</div>
+  // P17：工具轨一律图标化（宽屏也不在图标下铺文字）；data-compact 标记它当前是“图标/紧凑”态，
+  // 分组、按钮顺序与每个入口自己的 aria-label/title/aria-pressed 不变。
+  return <nav className="lya-rail" data-compact={compact?"compact":"icon"} aria-label={tr("工作台工具","Workbench tools")}>
+    <div className="lya-rail-group" data-group-label={tr("工具","Tools")}>{RAIL_ENTRIES.filter(item=>item.group==="tool").map(render)}</div>
+    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("运行与工作面","Runtime and surfaces")}>{RAIL_ENTRIES.filter(item=>item.group==="work").map(render)}</div>
   </nav>
 }

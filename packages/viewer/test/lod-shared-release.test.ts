@@ -97,6 +97,31 @@ function countDisposals(target: { dispose: () => void }): { count: number } {
 }
 
 describe("共享资源的释放归属（真 GLB + 真 setScene/release/dispose）", () => {
+  test("同场景同实体换模型保留选择；真实删除仍清选择", async () => {
+    const harness = new Harness(), events: Array<string | undefined> = []
+    harness.viewer.options.onSelection = (id: string | undefined) => events.push(id)
+    await harness.viewer.setScene(snapshot(1, instance("pot-a", 0), instance("pot-b", 2)))
+    harness.viewer.select("pot-a"); events.length = 0
+    const replacement = { ...instance("pot-a", 0), resources: [{ ...ref, version: 2 }] }
+    const oldGroup = harness.viewer.objects.get("pot-a").group
+    await harness.viewer.setScene(snapshot(2, replacement, instance("pot-b", 2)))
+    expect(harness.errors).toEqual([])
+    expect(harness.viewer.objects.get("pot-a").group).not.toBe(oldGroup)
+    expect(harness.viewer.selected).toBe("pot-a")
+    expect(events).not.toContain(undefined)
+    await harness.viewer.setScene(snapshot(3, instance("pot-b", 2)))
+    expect(harness.viewer.selected).toBeUndefined()
+    expect(events.at(-1)).toBeUndefined()
+    harness.viewer.dispose()
+  })
+  test("换场景时同名实体换模型不继承上一场景的选择", async () => {
+    const harness = new Harness()
+    await harness.viewer.setScene(snapshot(1, instance("pot-a", 0)))
+    harness.viewer.select("pot-a")
+    await harness.viewer.setScene({ ...snapshot(1, { ...instance("pot-a", 0), resources: [{ ...ref, version: 2 }] }), sceneId: "another-scene" })
+    expect(harness.viewer.selected).toBeUndefined()
+    harness.viewer.dispose()
+  })
   test("两个实例共用同一批 geometry/material；删掉一个不释放它们；销毁 Viewer 才释放一次", async () => {
     const harness = new Harness()
     await harness.viewer.setScene(snapshot(1, instance("pot-a", 0), instance("pot-b", 2)))

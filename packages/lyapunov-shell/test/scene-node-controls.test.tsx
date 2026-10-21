@@ -44,7 +44,7 @@ async function command<T>(agent:Agent,name:string,input:unknown):Promise<T>{
 }
 beforeEach(async()=>{
  root=await mkdtemp(join(tmpdir(),"scene-node-controls-"));ctx=new Context()
- await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Sessions);await ctx.plugin(Commands);await ctx.plugin(scenePlugin,{dataRoot:join(root,"data"),defaultStorage:"cas"})
+ await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Sessions);await ctx.plugin(Commands);await ctx.plugin(scenePlugin,{dataRoot:join(root,"data"),productRoot:join(root,"no-bundled-product"),defaultStorage:"cas"})
  const create=(id:string)=>{const session=ctx.sessions.create(SessionId(id),{meta:{cwd:root}});return {id:session.id,session} as Agent}
  a=create("scene-control-a");b=create("scene-control-b")
 })

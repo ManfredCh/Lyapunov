@@ -1043,8 +1043,9 @@ class SceneAdapter:
                     prim=stage.GetPrimAtPath(path);UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False);prim.RemoveAPI(UsdPhysics.CollisionAPI)
                 entry['metadata']['standardGroundReplaced']=True
                 if entry.get('collision'):entry['collision']={**entry['collision'],'source':'native-support-reused','colliderPaths':[]}
-        from robot_authoring import install_base_bindings
+        from robot_authoring import install_base_bindings, install_freeze_constraints
         install_base_bindings(stage,scene,result,SceneError)
+        install_freeze_constraints(stage,result,SceneError)
         scene_cameras(stage,scene,result,worldposes)
         return stage,result
     def primitive(self,stage,path,collision,rigid,matrix,binding=None):

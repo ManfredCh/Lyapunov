@@ -135,6 +135,9 @@ test('23/75统一下载型号独立于旧12DOF，不把登记来源当已下载'
  expect(old.downloadModelId).toBe('unitree_g1_12dof_motion');expect(current.downloadModelId).toBe('unitree_g1_23dof_75obs');expect(current.label).toContain('23DOF / 75');expect(current.identity.modelId).toBe('jloganolson/g1_23dof_locomotion_isaac')
  expect(current.fallback.urls[0]!.url).toBe(`https://media.githubusercontent.com/media/${current.identity.modelId}/${current.identity.revision}/deployment/policy.pt`)
 })
+test('R-010：已登记来源标签为英文协议，英文界面不再出现中文数据标签',()=>{
+ for(const row of registeredRobotDownloads())expect(row.label).not.toMatch(/[\u4e00-\u9fff]/)
+})
 test('下载ID不能借用旧12适配器，关节数与唯一关节声明必须相等',()=>{
  const{m}=make()
  expect(()=>robotDownloadManifest({...m,packId:'unitree_g1_23dof_75obs'})).toThrow('MODEL_MISMATCH')

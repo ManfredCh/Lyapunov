@@ -14,8 +14,8 @@ export async function stageDefaultT0Robots(root:string,stage:string,sourceRoot:s
   const current=JSON.parse(await readFile(join(root,'packs',entry.packId,'pack.json'),'utf8')),ref=current.pieces.asset.ref?.split('#'),sourcePack=join(sourceRoot,'packs',entry.packId),destination=join(stage,'packs',entry.packId)
   await mkdir(destination,{recursive:true});await cp(join(root,'packs',entry.packId,'pack.json'),join(destination,'pack.json'))
   for(const piece of ['context','policy','vla','tests'])try{await cp(join(sourcePack,piece),join(destination,piece),{recursive:true})}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
-  // 这些模型只作按需入口：当前没有对应基础运动，不伪装默认可控示例。
-  if(['unitree_a1','generic_quadrotor'].includes(entry.packId)){blocked.push({packId:entry.packId,code:'BASIC_CONTROL_NOT_ADAPTED'});continue}
+  // unitree_a1 / generic_quadrotor 现已随包本体（许可闭包已核）：可作场景对象/装配/录制开箱即用；
+  // 基础运动未适配仍由 pack 的 directControl/policyStatus 如实上报，不伪装可控。
   try{
    if(!ref||ref[1]!==entry.packId||!/^ASSET_STAGING_MANIFEST[^/]*\.json$/.test(ref[0]))throw Error('ASSET_SOURCE_MANIFEST_REQUIRED')
    let manifest=JSON.parse(await readFile(join(sourceRoot,'packs',ref[0]),'utf8'))[entry.packId]

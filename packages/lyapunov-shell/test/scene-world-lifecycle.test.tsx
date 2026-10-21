@@ -5,8 +5,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SceneOperations} from '../../scene-kit/src/operations.ts'
 import {solidGlb,box} from '../../scene-kit/test/glb-geometry-fixture.ts'
-import {SceneWorldLifecycle,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
-import {SceneWorldStatus} from '../src/scene-world-status.tsx'
+import {SceneWorldLifecycle,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,SCENE_WORLD_CLOSED_PUBLIC_MESSAGE,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
+import {SceneWorldStatus,sceneWorldStatusDetail} from '../src/scene-world-status.tsx'
 import {ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE} from '../../lyapunov-contracts/src/command-privacy.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
 const scene=(id='s'):SceneSnapshot=>({sceneId:id,revision:0,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'robot',name:'arm',resources:[],components:{mujoco:{sourcePath:'/fixture/robot.xml'}},transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]}}]})
@@ -188,8 +188,8 @@ test('A08 物理卡隐藏单worldselector并显示manual/paused及真实重力',
  const html=renderToStaticMarkup(<WorldPhysicsPanel {...props}/>)
  expect(html).toContain('手动时钟');expect(html).toContain('[0, 0, -3]');expect(html).toContain('部分实例还没有碰撞');expect(html).not.toContain('运行世界选择')
  expect(renderToStaticMarkup(<WorldPhysicsPanel {...props} worlds={[w,world('other')]}/>)).toContain('运行世界选择')
- expect(html.split('<details')[0]).toContain('来自物理帧 step 2 · rev 0 · g1')
- const stale=renderToStaticMarkup(<WorldPhysicsPanel {...props} world={{...w,status:'unavailable',worldPhysics:f.worldPhysics}} frame={{...f,generation:999}} state={{phase:'failed'}}/>).split('<details')[0]!
+ const readback=html.slice(html.indexOf('data-testid="world-readback-details"'));expect(readback).toContain('来自物理帧 step 2 · rev 0 · g1');expect(html.slice(0,html.indexOf('data-testid="world-readback-details"'))).not.toContain('来自物理帧 step 2 · rev 0 · g1')
+ const stale=renderToStaticMarkup(<WorldPhysicsPanel {...props} world={{...w,status:'unavailable',worldPhysics:f.worldPhysics}} frame={{...f,generation:999}} state={{phase:'failed'}}/>)
  expect(stale).toContain('上次世界重力读回（当前世界不可用）');expect(stale).toContain('来自世界句柄 rev 0 · g1');expect(stale).not.toContain('g999')
 })
 test('A08 compact阻断原因不需展开详情即可见，原始长详情仍独立保留',()=>{
@@ -310,10 +310,28 @@ test('纯视觉idle状态经原formatter按界面语言显示，中英文compact
  const state:SceneWorldState={phase:'idle',sceneId:'visual',sceneRevision:1,detail:'场景可显示和编辑；未请求创建物理世界。'},noop=()=>{}
  for(const compact of [false,true]){
   const zh=renderToStaticMarkup(<SceneWorldStatus compact={compact} state={state} tr={cn=>cn} retry={noop} cancel={noop}/>),en=renderToStaticMarkup(<SceneWorldStatus compact={compact} state={state} tr={(_cn,en)=>en} retry={noop} cancel={noop}/>)
-  expect(zh).toContain('场景可显示和编辑；未请求创建物理世界。');expect(zh).not.toContain('The scene can be viewed and edited')
-  expect(en).toContain('The scene can be viewed and edited; no physics world was requested.');expect(en).not.toContain('场景可显示和编辑')
+  if(compact){
+   expect(zh).not.toContain('场景可显示和编辑；未请求创建物理世界。');expect(zh).toContain('查看详情')
+   expect(en).not.toContain('The scene can be viewed and edited; no physics world was requested.');expect(en).toContain('View details')
+  }else{
+   expect(zh).toContain('场景可显示和编辑；未请求创建物理世界。');expect(zh).not.toContain('The scene can be viewed and edited')
+   expect(en).toContain('The scene can be viewed and edited; no physics world was requested.');expect(en).not.toContain('场景可显示和编辑')
+  }
+  expect(sceneWorldStatusDetail(state,cn=>cn)).toBe('场景可显示和编辑；未请求创建物理世界。')
+  expect(sceneWorldStatusDetail(state,(_cn,en)=>en)).toBe('The scene can be viewed and edited; no physics world was requested.')
   expect(en).toContain('Not initialized');expect(zh).toContain('尚未初始化')
+  if(compact){expect(en).not.toContain('data-testid="world-status-reason"');expect(zh).not.toContain('data-testid="world-status-reason"')}
  }
  const unknown=renderToStaticMarkup(<SceneWorldStatus state={{phase:'idle',detail:'ORIGINAL_UNMAPPED_DETAIL'}} tr={(_cn,en)=>en} retry={noop} cancel={noop}/>)
  expect(unknown).toContain('ORIGINAL_UNMAPPED_DETAIL')
+})
+
+test('D1 明确Close的内置状态句按界面语言投影，未登记诊断文本不被翻译',()=>{
+ const state:SceneWorldState={phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE},noop=()=>{}
+ const en=renderToStaticMarkup(<SceneWorldStatus state={state} tr={(_cn,en)=>en} retry={noop} cancel={noop}/>)
+ expect(en).toContain('Physics world closed; the scene is kept; restarting requires an explicit action.')
+ expect(en).not.toContain('物理世界已关闭')
+ const zh=renderToStaticMarkup(<SceneWorldStatus state={state} tr={cn=>cn} retry={noop} cancel={noop}/>)
+ expect(zh).toContain(SCENE_WORLD_CLOSED_PUBLIC_MESSAGE)
+ expect(sceneWorldStatusDetail({detail:'ORIGINAL_DIAGNOSTIC'},(_cn,en)=>en)).toBe('ORIGINAL_DIAGNOSTIC')
 })

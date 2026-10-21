@@ -17,9 +17,11 @@
  * 而那个索引由调用方按"该实体自己已登记的资源 + 该文档的依赖闭包"构造；真正的闸门仍在路由。
  *
  * 三条不许越界的判据（越界就是改语义，不是修 bug）：
- *  1. **只改能原样保住 Viewer 侧键的行**：`robot.ts` 的资产表键是 `name ?? 文件名的去扩展名段`
- *     （`viewer/src/robot.ts:143-146`）。引用换成标记之后"文件名"就没了，所以**没有 `name` 的行一律不动**
- *     ——改了会换掉 `geom → mesh` 的映射，网格会整批变成 `MESH_ASSET_MISSING`（实测：panda 67 条里有 56 条无 `name`）。
+ *  1. **换引用必须原样保住 Viewer 侧键**：`robot.ts` 的资产表键是 `name ?? 文件名的去扩展名段`
+ *     （`viewer/src/robot.ts:321`）。没有 `name` 的行**不是不动**：先把 MuJoCo/Viewer 本来就会推出的
+ *     隐式名（`file` 的去扩展名段）**显式写回 `name`**，键因此逐字不变，再把引用换成标记。若直接把
+ *     `file` 换成标记而不补 `name`，键会变成标记串、`geom → mesh` 整批变成 `MESH_ASSET_MISSING`
+ *     （实测：panda 67 条里有 56 条无 `name`，Allegro 11 + UR10e 20 条全部无 `name`）。
  *  2. **只改已经在候选集里的件**：`authorized` 里没有的行原样留着，由既有的缺件通道如实上报。
  *  3. **不新增定位符语法**：写进去的就是 `product-paths.ts` 的 `res:<指纹>`，
  *     与 `uri` 键被投影之后得到的形状**逐字同一套**；不引入"标记+相对路径"这类第二套语法。
@@ -88,6 +90,14 @@ const directoryOf = (compiler: Record<string, unknown>, group: "mesh" | "texture
 /** 已有 scheme 的引用（标记、`file:`、`package://`）一律不动：它本身就是绝对定位符。 */
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i
 const ABSOLUTE = /^([A-Za-z]:[\\/]|\/)/
+/**
+ * MuJoCo 对没有 `name` 的 `<mesh file=…>` 会给出隐式名 = 文件名的去扩展名段；Viewer 的资产表键
+ * 用**同一条规则**（`viewer/src/robot.ts:321` 的 `mesh.name ?? mesh.file.split("/").pop().replace(/\.[^.]+$/, "")`）。
+ * 投影没有 `name` 的行时把它显式写回，键才逐字不变。规则必须与 Viewer 逐字同一份，不能另立一套。
+ */
+function implicitAssetName(reference: string): string {
+  return reference.split("/").pop()?.replace(/\.[^.]+$/, "") ?? ""
+}
 
 /** 机器人文档所在目录（**不含** meshdir）：`baseUri` 是 `file:` 时以它为准（与 Viewer 同一把基址）。 */
 function documentDirectory(robot: Record<string, unknown>, entity: Record<string, unknown>): string | undefined {
@@ -114,7 +124,7 @@ export interface RobotAssetLocatorFacts {
   entities: number
   meshes: number
   textures: number
-  /** 看见了但没改写的引用条数：没有 `name`（改了会换掉 Viewer 侧键）、不在候选集里、或扩展名不在 mimeType 表里。 */
+  /** 看见了但没改写的引用条数：引用没有真名/已带 scheme、不在候选集里、或扩展名不在 mimeType 表里。 */
   skipped: number
 }
 
@@ -149,10 +159,9 @@ export function robotDocumentAssetLocators(entity: unknown, authorized: Authoriz
       let groupChanged = false
       const mapped = rows.map(row => {
         const reference = row.file
-        const name = row.name
         const skip = (): Record<string, unknown> => { facts.skipped++; return row }
-        // 判据 ①：Viewer 的键由 `name` 给；没有 `name` 的行改了引用就换了键，一律不动。
-        if (typeof reference !== "string" || !reference || SCHEME.test(reference) || typeof name !== "string" || !name) return skip()
+        // 引用没有真名（无 `file`/已带 scheme）才不动；`name` 缺失不是不动，见下面的隐式名写回。
+        if (typeof reference !== "string" || !reference || SCHEME.test(reference)) return skip()
         const mimeType = ROBOT_VISUAL_MIME_BY_EXTENSION[extname(reference).toLowerCase()]
         if (!mimeType) return skip()
         // MuJoCo 语义：绝对路径**不受 meshdir 影响**（`formats.ts:282` 的依赖闭包同一条规则）。
@@ -160,10 +169,12 @@ export function robotDocumentAssetLocators(entity: unknown, authorized: Authoriz
         // 判据 ②：只对已授权件发标记。真正的闸门仍是媒体路由的候选集，这里只是**提前**判据。
         const candidate = authorized.get(absolute)
         if (!candidate) return skip()
+        // 判据 ①：把 Viewer 本来就会推出的隐式名显式写回（已有 `name` 时逐字保留），键因此不变。
+        const name = typeof row.name === "string" && row.name ? row.name : implicitAssetName(reference)
         facts[group === "mesh" ? "meshes" : "textures"]++
         added.push({ uri: candidate, mimeType, role: "visual" })
         groupChanged = true
-        return { ...row, file: resourceToken(candidate) }
+        return { ...row, name, file: resourceToken(candidate) }
       })
       if (!groupChanged) continue
       changed = true

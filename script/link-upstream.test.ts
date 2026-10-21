@@ -143,6 +143,7 @@ test("真实Bun冷安装与frozen复装后使用正式link脚本闭合workspace�
   const { root, sdk, consumer } = await fixture()
   for (const args of [["install", "--ignore-scripts"], ["install", "--frozen-lockfile", "--ignore-scripts"]]) {
     const result = spawnSync(process.execPath, ["--no-env-file", ...args], { cwd: root, encoding: "utf8", timeout: 30_000 })
+    if (result.status !== 0) throw new Error(`bun ${args.join(" ")} 退出=${result.status} signal=${String(result.signal)}\nstdout:${result.stdout?.slice(-600) ?? ""}\nstderr:${result.stderr?.slice(-1500) ?? ""}`)
     expect(result.status).toBe(0)
     await linkUpstream(root, { replaceOwned: true })
     const observed = probe(root, consumer)

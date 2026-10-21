@@ -158,14 +158,37 @@ const newtonWorld={
 }
 
 describe("D3 · WorldHandle 自报读数：世界状态行补的几行",()=>{
- test("有告警 ⇒ 条数 + **首条原文**（code/entityId 一并给），其余条数如实说",()=>{
+ test("告警默认给短摘要，全部原文与标识保留在默认关闭的详情",()=>{
   const html=markup(<WorldFacts world={worldWithWarnings} tr={tr}/>)
-  expect(html).toContain('data-testid="lyapunov-world-facts"')
-  expect(html).toContain('data-world-line="warnings"')
-  expect(html).toContain("世界编译告警 2 条（另有 1 条未展开）")
-  expect(html).toContain("纯视觉实体没有碰撞体，物理装配跳过（该实体不参与接触）")
-  expect(html).toContain("（ENTITY_SKIPPED_NO_COLLISION · visual-only-1）")
+  const visible=html.split('<details')[0]!
+  expect(visible).toContain('data-world-line="warnings"')
+  expect(visible).toContain('世界编译告警 2 条')
+  expect(visible).toContain('纯视觉实体不参与碰撞。')
+  expect(visible).not.toContain('ENTITY_SKIPPED_NO_COLLISION')
+  expect(visible).not.toContain('visual-only-1')
+  expect(html).toContain('data-testid="world-warning-details"')
+  expect(html).not.toContain('<details open')
+  for(const warning of worldWithWarnings.warnings){expect(html).toContain(warning.message);expect(html).toContain(warning.code)}
+  expect(html).toContain('visual-only-1')
   expect(html).toContain('class="lya-help lya-warning"')
+ })
+
+ test("英文首屏不泄漏中文原话、长JSON或ID；未知告警仍默认警示且原文不丢",()=>{
+  const raw='原生编译失败 '+JSON.stringify({worldId:'internal-world-identifier',reasons:Array(40).fill('diagnostic')})
+  const world={...newtonWorld,deviceNote:raw,warnings:[{code:'UNRECOGNIZED_NATIVE_WARNING',entityId:'internal-entity-identifier',message:raw}]}
+  const html=markup(<WorldFacts world={world} tr={(_zh,en)=>en}/>)
+  const visible=html.split('<details')[0]!
+  expect(visible).toContain('1 world compile warning(s)')
+  expect(visible).toContain('World compilation reported a warning. Review details.')
+  expect(visible).toContain('Device degraded. Review details.')
+  expect(visible).not.toMatch(/[\u3400-\u9fff]/)
+  expect(visible).not.toContain('internal-')
+  expect(visible).not.toContain('UNRECOGNIZED_NATIVE_WARNING')
+  expect(visible).not.toContain('diagnostic')
+  expect(html).toContain('原生编译失败')
+  expect(html).toContain('internal-world-identifier')
+  expect(html).toContain('internal-entity-identifier')
+  expect(html).toContain('UNRECOGNIZED_NATIVE_WARNING')
  })
 
  test("设备降级 ⇒ 追加 `deviceNote` 原话；设备/求解器/Warp 版本同处一行",()=>{
@@ -188,7 +211,9 @@ describe("D3 · WorldHandle 自报读数：世界状态行补的几行",()=>{
    const w={...newtonWorld,warnings:worldWithWarnings.warnings,status:phase==='blocked'?'unavailable' as const:phase}
    const html=markup(<WorldPhysicsPanel world={w} state={{phase,code:phase==='blocked'?'SOURCE_NOT_READY':undefined,detail:phase==='blocked'?'当前来源尚未确认':undefined}} worlds={[w]} disabled={false} tr={tr} start={noop} sync={noop} pause={noop} stop={noop} close={noop} prepare={noop} saveGravity={noop} selectWorld={noop} cancel={noop} diagnostics={<WorldFacts world={w} tr={tr}/>}/>)
    const visible=html.split('<details')[0]!
-   expect(visible).toContain('data-world-line="warnings"');expect(visible).toContain('ENTITY_SKIPPED_NO_COLLISION');expect(visible).toContain('data-world-line="device-degraded"');expect(visible).toContain(newtonWorld.deviceNote!)
+   expect(visible).toContain('data-world-line="warnings"');expect(visible).toContain('纯视觉实体不参与碰撞。');expect(visible).toContain('data-world-line="device-degraded"');expect(visible).toContain('设备已降级，请查看详情。')
+   expect(visible).not.toContain('ENTITY_SKIPPED_NO_COLLISION');expect(visible).not.toContain(newtonWorld.deviceNote!)
+   expect(html).toContain('ENTITY_SKIPPED_NO_COLLISION');expect(html).toContain(newtonWorld.deviceNote!)
    if(phase==='blocked')expect(visible).toContain('当前来源尚未确认')
   }
   const unknown=markup(<WorldPhysicsPanel state={{phase:'idle'}} worlds={[]} disabled={false} tr={tr} start={noop} sync={noop} pause={noop} stop={noop} close={noop} prepare={noop} saveGravity={noop} selectWorld={noop} cancel={noop} diagnostics={<WorldFacts world={undefined} tr={tr}/>}/>).split('<details')[0]!
@@ -240,6 +265,10 @@ describe("原生材料产品入口与真实读回的边界",()=>{
   expect(html).toContain("当前后端声明的入口：nativeUsd")
   expect(html).toContain("实际运行结果以当前世界回执为准")
   expect(html).toContain("deformable: requires CUDA")
+  expect(html).toContain('data-testid="world-backend-details"')
+  expect(html.split('<details')[0]).not.toContain('native-supported')
+  expect(html.split('<details')[0]).not.toContain('native-unsupported')
+  expect(html).not.toContain('<details open')
   expect(html).not.toContain("入口：nativeUsd、deformable")
   expect(workbenchSource).toContain("<NativePhysicsPanel")
  })

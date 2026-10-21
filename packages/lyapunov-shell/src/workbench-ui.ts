@@ -18,8 +18,14 @@ export {surfaceDisposition} from './ui-action-scope.ts'
 
 /** 三种展示模式：对话专注 / 协作 / 场景专注。 */
 export type LayoutMode="chat"|"collab"|"scene"
-/** 工具面板条目：一次只开一个，位于工作面右侧。 */
-export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"asset"|"annotation"
+/**
+ * 工具面板条目：一次只开一个，位于工作面右侧。
+ *
+ * RC 内容/采集/运行分组（R-001/R-009）：Scene 内容组织、Objects 物件清单、Environment 环境与光照、
+ * Robots 机器人、Camera 机器人机位、Capture 自由视角、Recording 记录作业、Annotate/Notes 画布批注；
+ * Physics 是运行环境，独立成面板。旧 `asset`（泛用素材库）退出一级入口，见下方 `LEGACY_TOOL_MIGRATIONS` 迁移。
+ */
+export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"
 /** 中央视图：场景画布（固定入口）⟷ 文件工作面。 */
 export type CentreId="canvas"|"file"
 /** 底部抽屉：终端 / 运行产物，一次一个。 */
@@ -41,8 +47,38 @@ const DEFAULT_STATE:WorkbenchUIState={mode:"collab",tool:null,centre:"canvas",dr
 /** 抽屉高度夹取：太矮放不下提示，太高会把画布挤没。 */
 export const DRAWER_MIN_HEIGHT=140
 export const DRAWER_MAX_HEIGHT=520
-/** 工具面板列宽（PLAN §三.6：288–320）。 */
-export const TOOL_PANEL_WIDTH=300
+/** 工具面板列宽（PLAN §三.6：288–320；P17 视觉减法后取紧凑下沿，把空间让回画布）。 */
+export const TOOL_PANEL_WIDTH=264
+/**
+ * P21 画布钳制下限：Native 下给 Inspector 让列时至少要留出这么宽的真实画布。
+ * 小于它时不再占列（让面板像 SDK 响应布局那样覆盖），从而不产生横向滚动、确认/取消仍可达。
+ */
+export const MIN_VIEWER_WIDTH=200
+/**
+ * 画布浮条工具（不占右列）：语义与 `work-surface.tsx` 的 `CANVAS_TOOLS` 相同（Notes）。
+ * 放在这里让 workbench 的预留判据与面板渲染共用同一份“哪些工具占列”。
+ */
+export const CANVAS_TOOL_IDS:ReadonlySet<ToolId>=new Set<ToolId>(["annotation"])
+/**
+ * Native 且当前有**真实 Inspector** 时，Viewer 容器要按同一 `TOOL_PANEL_WIDTH`/真实 portal 宽度让出的列宽。
+ *
+ * 返回 0（不占列，保持 SDK 原响应布局/覆盖）：
+ *  · 非 Native、工作面不 active（文件/终端标签或全局面板）、临时模式 `panelSuppressed`；
+ *  · 当前工具是 Notes 画布浮条或没有工具（无 Inspector）；
+ *  · 工作台宽度还没量到，或窄到“portal 宽 + MIN_VIEWER_WIDTH”放不下。
+ * 这就是 workbench.tsx 给 `.lya-wb-canvas` 设 padding-right 的唯一判据：不是伪造 canvas rect，
+ * 而是真实把 Viewer 容器缩到 portal 左缘（坐标/拾取/resize 仍读实际 canvas 尺寸）。
+ */
+export function viewerReservedWidth(input:{native:boolean;active:boolean;tool:string|null;panelSuppressed:boolean;fullWidth:number;panelWidth?:number}):number{
+ const panelWidth=input.panelWidth??TOOL_PANEL_WIDTH
+ if(!input.native||!input.active||input.panelSuppressed)return 0
+ const tool=input.tool
+ if(!tool||CANVAS_TOOL_IDS.has(tool as ToolId))return 0
+ const fullWidth=Math.max(0,Math.floor(input.fullWidth))
+ if(fullWidth<=0)return 0
+ if(fullWidth-panelWidth<MIN_VIEWER_WIDTH)return 0
+ return Math.min(panelWidth,fullWidth)
+}
 /**
  * 协作模式对话列宽（PLAN §三.6：360–420，画布优先）。
  * 默认取区间中点偏小的一侧，拖拽也只在这个区间里走：对话够读，画布拿到其余全部宽度。
@@ -67,19 +103,32 @@ const clampConversationWidth=(value:number)=>Math.min(CONVERSATION_MAX_WIDTH,Mat
  */
 
 const MODES:LayoutMode[]=["chat","collab","scene"]
-const TOOLS:ToolId[]=["scene","environment","robot","object","camera","asset","annotation"]
+const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics"]
+/**
+ * 旧存储/旧调用里的 `asset` 是泛用素材库（R-008 已把它并回业务类别）。存量 localStorage 没有
+ * 上下文，最接近的语义是 Objects 的导入/复用；`asset` 的旧 `ui_action` 也会走这条迁移，
+ * 不再新建一个孤立的 Library 面板。资源本身仍在既有 ResourceLibrary，不因入口调整丢失。
+ */
+export const LEGACY_TOOL_MIGRATIONS:Readonly<Record<string,ToolId>>={asset:"object"}
+export function migrateToolId(value:unknown):ToolId|null{
+  // 必须查**自有**属性：`in` 会把 `__proto__`/`constructor`/`toString` 等原型成员当命中，
+  // 让它们返回 Object.prototype/函数，违反 ToolId|null 白名单合同。未知值一律回 null。
+  if(typeof value==="string"&&Object.hasOwn(LEGACY_TOOL_MIGRATIONS,value))return LEGACY_TOOL_MIGRATIONS[value]!
+  return oneOfOrNull<ToolId>(TOOLS,value)
+}
 const CENTRES:CentreId[]=["canvas","file"]
 const DRAWERS:DrawerId[]=["terminal","deliverable"]
 const oneOf=<T extends string>(list:readonly T[],value:unknown,fallback:T):T=>list.includes(value as T)?value as T:fallback
 /** 可空字段：显式 null 保持 null（合法值），其余只接受白名单成员。 */
 const oneOfOrNull=<T extends string>(list:readonly T[],value:unknown):T|null=>value===null?null:list.includes(value as T)?value as T:null
 
-function sanitize(value:Partial<WorkbenchUIState>|undefined):WorkbenchUIState{
+/** 白名单与旧值迁移的纯函数出口：测试直接驱动它，不必依赖模块级 store 的加载顺序。 */
+export function sanitizeWorkbenchUIState(value:Partial<WorkbenchUIState>|undefined):WorkbenchUIState{
   if(!value||typeof value!=="object")return DEFAULT_STATE
   const height=Number(value.drawerHeight),width=Number(value.conversationWidth)
   return {
     mode:oneOf(MODES,value.mode,DEFAULT_STATE.mode),
-    tool:oneOfOrNull<ToolId>(TOOLS,value.tool),
+    tool:migrateToolId(value.tool),
     centre:oneOf(CENTRES,value.centre,DEFAULT_STATE.centre),
     drawer:oneOfOrNull<DrawerId>(DRAWERS,value.drawer),
     drawerHeight:Number.isFinite(height)?Math.min(DRAWER_MAX_HEIGHT,Math.max(DRAWER_MIN_HEIGHT,Math.round(height))):DEFAULT_STATE.drawerHeight,
@@ -87,7 +136,7 @@ function sanitize(value:Partial<WorkbenchUIState>|undefined):WorkbenchUIState{
   }
 }
 function readStored():WorkbenchUIState{
-  try{return sanitize(JSON.parse(localStorage.getItem(STORAGE_KEY)??"null") as Partial<WorkbenchUIState>)}catch{return DEFAULT_STATE}
+  try{return sanitizeWorkbenchUIState(JSON.parse(localStorage.getItem(STORAGE_KEY)??"null") as Partial<WorkbenchUIState>)}catch{return DEFAULT_STATE}
 }
 
 /** 唯一实例：一台界面一份展示状态，随页面存在，不随会话累积。 */

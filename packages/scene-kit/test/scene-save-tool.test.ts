@@ -36,7 +36,7 @@ beforeEach(async () => {
   await ctx.plugin(Tools)
   await ctx.plugin(Sessions)
   await ctx.plugin(Commands)
-  await ctx.plugin(scenePlugin, { dataRoot: join(base, "catalog") })
+  await ctx.plugin(scenePlugin, { dataRoot: join(base, "catalog"), productRoot: join(base, "no-bundled-product") })
   // agent 带上自己的原生会话：场景工具按会话说事（`agent.session.header.id` 就是归属键），
   // 只给一个 id 的替身没有可核实的会话，工具会按 SESSION_SCOPE_UNAVAILABLE 明确失败。
   const session = ctx.sessions.create(SessionId("scene-save-tool"))
@@ -123,7 +123,7 @@ describe("scene_save(portable) 的 Tool 接线（真实 ToolRegistry，未改 pl
     await fresh.plugin(Tools)
     await fresh.plugin(Sessions)
     await fresh.plugin(Commands)
-    await fresh.plugin(scenePlugin, { dataRoot: join(base, "另一台机器", "catalog") })
+    await fresh.plugin(scenePlugin, { dataRoot: join(base, "另一台机器", "catalog"), productRoot: join(base, "no-bundled-product") })
     const reopened: SceneSnapshot = valueOf(await fresh.tools.execute({ callId: ToolCallId("open-moved"), name: "scene_open", arguments: { input: { path: join(moved, "scene.json") } }, signal, agent }))
     expect(reopened.sceneId).toBe(sceneId)
     expect(reopened.entities.map(entity => entity.entityId)).toEqual(before.entities.map(entity => entity.entityId))

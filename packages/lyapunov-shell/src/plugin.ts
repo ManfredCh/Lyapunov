@@ -68,6 +68,7 @@ import { assertPublicHttpsURL, defaultHostResolver, fetchPublicHttpsBytes } from
 import { createHash } from "node:crypto"
 import { readRecording, readRecordingResource, listRecordings, recordingSummary } from "../../robot-workflows/src/recording-files.ts"
 import { previewScaleOf, previewPixelMappingText, localCorrectionRecordOf, type CaptureRecord, type LocalCorrectionRecord } from "./workbench-api.ts"
+import { captureVideoRecordOf, videoFileExtension, videoCodecFace, type CaptureVideoRecord, type CaptureVideoSample, type CaptureVideoSource, type VideoCaptureResult } from "./capture-video.ts"
 import { captureFeedbackContent, capturePins, requireCaptureFeedbackOwner, type FeedbackCapture } from "./capture-content.ts"
 import { currentDshHome, discoverSessions, precheckSession, restoreSession } from "./session-history.ts"
 import { OrientationChecks, importedVisualTarget, orientationPrompt, type OrientationTarget, type OrientationObservation } from "./orientation-check.ts"
@@ -79,6 +80,9 @@ import { environmentFaceFrom, environmentFaceNote } from "./environment-capture.
 // 所以两种事实在措辞里分开写（见 lod-capture.ts），数据集则两者都要知道。
 // `lodFaceIssue` 管的是另一件事：载荷带了这一面但读不出来时必须说清原因，不能装成"没有 LOD 读数"。
 import { lodFaceFrom, lodFaceIssue, lodFaceIssueNote, lodFaceNote } from "./lod-capture.ts"
+// 展示层窄面（R-011 Exploded view）：与 `environment`/`lod` 同一条纪律，唯一 owner 是 Viewer 的
+// `presentationStatus()`；本模块只整形 + 说清"这只是查看，不是真实拆卸"。
+import { presentationFaceFrom, presentationFaceNote } from "./presentation-capture.ts"
 // 相机数学**只有一份**：纯函数在 `packages/viewer/src/camera-view.ts`（无 three 依赖，前端/宿主/测试共用）。
 // 宿主用它做"排队前预检"与"落盘前的内参↔投影矩阵比对"，不自己再写一套投影数学。
 import { assertRenderSize, normalizeCameraRequest, normalizeIntrinsics, projectionMatrixFromIntrinsics, scaleIntrinsics, type ViewerCameraIntrinsics, type ViewerCameraRequest } from "../../viewer/src/camera-view.ts"
@@ -925,16 +929,17 @@ export async function apply(ctx:Context,config:Config={}){
    const attachment=image?await ctx.attachments.saveImage({data:image,mediaType:"image/png",name:"场景批注.png"}).catch(()=>undefined):undefined
    // 说明是给模型看的正本（含每条 xy/归一化/实体/局部坐标 + 相机位姿）：有它就原样回传，
    // 没有（旧采集）就由锚点现拼一份，模型不必自己从像素里猜。
+   const pose=derivedPose(latest)
    const prompt=typeof (latest as {prompt?:unknown}).prompt==="string"&&(latest as {prompt:string}).prompt.trim()
      ? (latest as {prompt:string}).prompt
      : ["【3D 视口批注】", ...(latest.annotations??[]).map(row=>`第 ${String(row.index)} 条：${row.text.trim()||"（未填写说明）"}；位置=${row.entity??row.entityId}（entityId ${row.entityId}）；实体局部坐标=(${row.anchor.local.map(value=>value.toFixed(3)).join(", ")}) m`)].join("\n")
-   return {found:true,sceneId,sceneRevision:latest.sceneRevision,captureId:latest.captureId,capturedAt:latest.capturedAt,prompt,imagePath:latest.imagePath,pose:derivedPose(latest),...originalFrameNote(latest),...latest.worldId?{worldId:latest.worldId,generation:latest.generation,frameId:latest.frameId,stepIndex:latest.stepIndex}:{},image:{attached:Boolean(attachment),...(attachment?captureImageFace(attachment,latest):{path:latest.imagePath,reason:"The image is unavailable; annotation coordinates and notes are still returned."})},annotations:latest.annotations!.map(row=>({index:row.index,annotationId:row.annotationId,entity:row.entity??row.entityId,entityId:row.entityId,text:row.text,anchorLocalM:row.anchor.local,anchorWorldM:row.anchor.world,normalWorld:row.anchor.normal,sceneId:row.anchor.sceneId,sceneRevision:row.anchor.sceneRevision,body:row.anchor.body})),note:"Numbers match the image marks. body.localM and body.normalLocal are fixed in the identified native body; a missing body anchor requires a new same-frame surface annotation or explicit body-local position.",...attachment?{__annotationImage:attachment}:{}} as any
+   return {found:true,sceneId,sceneRevision:latest.sceneRevision,captureId:latest.captureId,capturedAt:latest.capturedAt,prompt,imagePath:latest.imagePath,...(pose?{pose}:{}),...originalFrameNote(latest),...latest.worldId?{worldId:latest.worldId}:{},...latest.generation!==undefined?{generation:latest.generation}:{},...latest.frameId?{frameId:latest.frameId}:{},...latest.stepIndex!==undefined?{stepIndex:latest.stepIndex}:{},image:{attached:Boolean(attachment),...(attachment?captureImageFace(attachment,latest):{path:latest.imagePath,reason:"The image is unavailable; annotation coordinates and notes are still returned."})},annotations:latest.annotations!.map(row=>({index:row.index,annotationId:row.annotationId,entity:row.entity??row.entityId,entityId:row.entityId,text:row.text,anchorLocalM:row.anchor.local,anchorWorldM:row.anchor.world,...row.anchor.normal?{normalWorld:row.anchor.normal}:{},...row.anchor.sceneId?{sceneId:row.anchor.sceneId}:{},...row.anchor.sceneRevision!==undefined?{sceneRevision:row.anchor.sceneRevision}:{},...row.anchor.body?{body:row.anchor.body}:{}})),note:"Numbers match the image marks. body.localM and body.normalLocal are fixed in the identified native body; a missing body anchor requires a new same-frame surface annotation or explicit body-local position.",...attachment?{__annotationImage:attachment}:{}} as any
   },
  }))
 ctx.tools.register(defineTool({
   name:"ui_action",
   description:"Control the Lyapunov workbench interface. openTool opens a panel; openFiles/openTerminal/showCanvas switch the working surface. openResource takes path and target=preview|source and returns after a window in the current session actually displays that file. selectEntity selects an object. focus frames it from outside; enterSceneCenter moves the camera to a robust center of the subject. Neither moves the model or requires traversing the raw 3DGS bbox. selectScene switches to an existing scene. aimCameraView enters the actual cameraId (or Scene camera entityId) at its locked installation origin for orientation/FOV editing while retaining body FK. exitCameraView discards a pending installation draft and restores the main view. locateTcp/locateBase open the robot panel and show current native markers; if readback is missing, provide the real configuration entry. Change model position with the complete transform in scene_edit. Except for openResource, acknowledgement only establishes that an action was queued; verify the displayed result with viewer_observe.",
-  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","object","camera","asset","annotation"],description:"Target panel for openTool."},cameraId:{type:"string",description:"Exact current camera_list cameraName or Scene rig key for aimCameraView; never infer a camera name."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase/aimCameraView. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
+  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","object","camera","capture","recording","annotation","physics","asset"],description:"Target panel for openTool. Legacy 'asset' (generic library) is migrated to Objects; use the business panels instead."},cameraId:{type:"string",description:"Exact current camera_list cameraName or Scene rig key for aimCameraView; never infer a camera name."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase/aimCameraView. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
   output:{schema:{type:"json"},render:(_args,value)=>[{type:"text",text:uiActionModelText(value)}]},
   execute:async(args,exec)=>{
    const input=(args.input??args) as {action?:string;tool?:string;entityId?:string;sceneId?:string;clientId?:string;path?:string;target?:string;cameraId?:string}
@@ -1041,8 +1046,12 @@ ctx.tools.register(defineTool({
    const lodNote=lodFaceNote(lod)
    const environment=capture.environment
    const environmentNote=environmentFaceNote(environment)
+   // 这一帧的**展示层事实**（R-011）：这张图是不是 Exploded view、展开多少、选中哪个真实部件。它同样随
+   // 采集载荷一路带来（viewer_capture 已整形），回执必须带出，读图的模型才不会把显示偏移当物理拆卸。
+   const presentation=presentationFaceFrom(capture.presentation)
+   const presentationNote=presentationFaceNote(presentation)
    const baseNote="这张图来自目标窗口的原生 Viewer（Three/Spark 画布），不是 Blender 或其它渲染；sceneRevision 就是采集时该窗口加载的文档版本。"
-   return {source:captureSourceOf(capture as CaptureRecord&CaptureCameraExtras),sceneId:capture.sceneId,sceneRevision:capture.sceneRevision,expectedRevision,clientId,captureId:capture.captureId,capturedAt:capture.capturedAt,imagePath:capture.imagePath,image:captureImageFace(image,capture),...originalFrameNote(capture),...camera?{camera}:{},...appliedCamera?{appliedCamera}:{},...appliedCamera?{cameraNote:"这次观察在拍之前先把请求的相机摆到了这个窗口上；拍到的仍是**当前画布**（source=native-viewer，不是按相机渲染出的图），appliedCamera 是应用后当场量到的读数。"}:{},...(capture.worldId?{worldId:capture.worldId,generation:capture.generation,worldSceneRevision:capture.worldSceneRevision,frameSceneRevision:capture.frameSceneRevision,frameId:capture.frameId,stepIndex:capture.stepIndex,simTime:capture.simTime}:{}),...(environment?{environment}:{}),...(lod?{lod}:{}),...visualWarnings.length?{partial:true,visualWarnings,note:`${baseNote}注意：画面**可用但不完整**——有 ${String(visualWarnings.length)} 处部件没加载出来（见 visualWarnings，涉及实体 ${[...new Set(visualWarnings.map(row=>row.entityId))].join("、")}），这些部件不在画面里；这不是加载失败，剩下的场景是真实渲染出来的，但别把这张图当成完整场景。${environmentNote??""}${lodNote??""}`}:{note:`${baseNote}${environmentNote??""}${lodNote??""}`},__observeImage:image} as any
+   return {source:captureSourceOf(capture as CaptureRecord&CaptureCameraExtras),sceneId:capture.sceneId,sceneRevision:capture.sceneRevision,expectedRevision,clientId,captureId:capture.captureId,capturedAt:capture.capturedAt,imagePath:capture.imagePath,image:captureImageFace(image,capture),...originalFrameNote(capture),...camera?{camera}:{},...appliedCamera?{appliedCamera}:{},...appliedCamera?{cameraNote:"这次观察在拍之前先把请求的相机摆到了这个窗口上；拍到的仍是**当前画布**（source=native-viewer，不是按相机渲染出的图），appliedCamera 是应用后当场量到的读数。"}:{},...(capture.worldId?{worldId:capture.worldId,generation:capture.generation,worldSceneRevision:capture.worldSceneRevision,frameSceneRevision:capture.frameSceneRevision,frameId:capture.frameId,stepIndex:capture.stepIndex,simTime:capture.simTime}:{}),...(environment?{environment}:{}),...(lod?{lod}:{}),...(presentation?{presentation}:{}),...visualWarnings.length?{partial:true,visualWarnings,note:`${baseNote}注意：画面**可用但不完整**——有 ${String(visualWarnings.length)} 处部件没加载出来（见 visualWarnings，涉及实体 ${[...new Set(visualWarnings.map(row=>row.entityId))].join("、")}），这些部件不在画面里；这不是加载失败，剩下的场景是真实渲染出来的，但别把这张图当成完整场景。${environmentNote??""}${lodNote??""}${presentationNote??""}`}:{note:`${baseNote}${environmentNote??""}${lodNote??""}${presentationNote??""}`},__observeImage:image} as any
   },
  }))
  /** 拖拽等无模型回合的入口：只提交本会话已挂载的视觉实体身份，真正截图和下一轮图像消息由上方共用入口完成。 */
@@ -1289,14 +1298,18 @@ ctx.tools.register(defineTool({
    // 按相机出的图同样要如实报 LOD（与 `viewer_observe` 那句同一份 owner/措辞）：换的是相机，不是几何。
    const lod=extras.lod
    const lodNote=lodFaceNote(lod)??lodFaceIssueNote(extras.lodIssue)
+   // 按相机出的图同样要如实报展示层（与 `viewer_observe` 同一份 owner/措辞）：换的是相机，不是显示状态。
+   const presentation=presentationFaceFrom(extras.presentation)
+   const presentationNote=presentationFaceNote(presentation)
    return {source:"native-viewer-camera",sceneId:capture.sceneId,sceneRevision:capture.sceneRevision,expectedRevision:prepared.expectedRevision,clientId:prepared.clientId,captureId:capture.captureId,capturedAt:capture.capturedAt,
     imagePath:capture.imagePath,image:captureImageFace(image,capture),
     ...originalFrameNote(capture),
     camera:capture.camera,...extras.cameraImage?{cameraImage:extras.cameraImage}:{},...extras.cameraApply?{appliedCamera:extras.cameraApply}:{},
     ...extras.environment?{environment:extras.environment}:{},
     ...lod?{lod}:{},
+    ...presentation?{presentation}:{},
     ...capture.worldId?{worldId:capture.worldId,generation:capture.generation,worldSceneRevision:capture.worldSceneRevision,frameSceneRevision:capture.frameSceneRevision,frameId:capture.frameId,stepIndex:capture.stepIndex,simTime:capture.simTime}:{},
-    note:`这张图是**用指定相机在同一个原生 Viewer scene 上渲染**出来的（不是当前屏幕截图）：source=native-viewer-camera。camera 是这张图自己的相机读数；cameraImage 里的内参/像素尺寸/投影矩阵与附件像素尺寸在落盘前逐项核对过。与照片做同机位比对时用它，别拿 viewer_observe 的当前画布截图当参考图。${environmentNote??""}${lodNote??""}`,
+    note:`这张图是**用指定相机在同一个原生 Viewer scene 上渲染**出来的（不是当前屏幕截图）：source=native-viewer-camera。camera 是这张图自己的相机读数；cameraImage 里的内参/像素尺寸/投影矩阵与附件像素尺寸在落盘前逐项核对过。与照片做同机位比对时用它，别拿 viewer_observe 的当前画布截图当参考图。${environmentNote??""}${lodNote??""}${presentationNote??""}`,
     ...outcome.attachment?{__cameraImage:image}:{}} as any
   },
  }))
@@ -1394,6 +1407,22 @@ ctx.tools.register(defineTool({
   for(const file of files.filter(file=>file.endsWith(".json")&&!file.endsWith(".camera.json"))){const capture=JSON.parse(await readFile(join(directory,file),"utf8")) as CaptureRecord;if(sceneId===undefined||capture.sceneId===sceneId)rows.push(capture)}
   return rows.sort((a,b)=>b.capturedAt.localeCompare(a.capturedAt))
  }
+ /**
+  * 连续视频记录：与 PNG 采集**分开目录、分开类型**（`captures/videos/`）。旧 PNG `CaptureRecord`、
+ * `viewer_observe`、批注附件与原生附件语义都不变；视频不会作为图像附件交给模型，也不会被当成 PNG 读。
+  */
+ const videoDirectory=(sessionKey:string)=>{if(!sessionKey)throw new Error(`${SESSION_SCOPE_UNAVAILABLE}: 视频目录必须按会话取（拒绝落到全局共享目录）`);return join(captureDirectory(sessionKey),"videos")}
+ const videoRecordPath=(sessionKey:string,id:string)=>{if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new Error("INVALID_VIDEO_ID");return join(videoDirectory(sessionKey),id+".json")}
+ const listVideoCaptures=async(sessionKey:string|undefined,sceneId?:string):Promise<CaptureVideoRecord[]>=>{
+  if(!root||!sessionKey)return []
+  const directory=videoDirectory(sessionKey)
+  let files:string[];try{files=await readdir(directory)}catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return [];throw error}
+  const rows:CaptureVideoRecord[]=[]
+  for(const file of files.filter(file=>file.endsWith(".json"))){try{const record=JSON.parse(await readFile(join(directory,file),"utf8")) as CaptureVideoRecord;if(record?.kind==="continuous-video"&&(sceneId===undefined||record.sceneId===sceneId))rows.push(record)}catch{/* 单条坏记录不拖垮列表 */}}
+  return rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
+ }
+ /** 交给前端的视频记录**不含**服务端绝对路径：取回走 `capture-video-media?videoId=`。 */
+ const videoFace=(record:CaptureVideoRecord)=>{const {mediaPath: _mediaPath,...rest}=record;return rest}
  /** 产品安装根：界面要拿它解析解释器/安装脚本路径（发行布局=解包根，开发检出=仓库根）。 */
 /**
  * 批注读取端的"这张图什么视角"：**由记录里已有的 `camera` + `attachment` 尺寸派生**。
@@ -1477,7 +1506,7 @@ function derivedPose(record:{camera?:unknown;attachment?:{width?:number;height?:
  const width=record.originalImage?.width??record.attachment?.width,height=record.originalImage?.height??record.attachment?.height
  return {...(camera as Record<string,unknown>),
   ...(typeof fov==="number"?{fovDeg:fov}:{}),
-  ...(typeof width==="number"&&typeof height==="number"?{imageWidth:width,imageHeight:height,aspect:height?width/height:undefined}:{})}
+  ...(typeof width==="number"&&typeof height==="number"?{imageWidth:width,imageHeight:height,...height?{aspect:width/height}:{}}:{})}
 }
 const PRODUCT_ROOT_FOR_ENGINE=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:Request)=>Promise<Response>)=>ctx.effect(()=>ctx.connection.fetch.register({
@@ -1970,7 +1999,10 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   // 带了这一面但读不出来：把**原因**记进记录。`undefined` = 载荷里根本没有这一面（旧前端），两件事不能混。
   const lodIssue=lodFaceIssue(input.lod)
   const environment=environmentFaceFrom(input.environment)
-  const capture:FeedbackCapture&CaptureCameraExtras={captureId:randomUUID(),sessionKey,...feedbackClientId?{clientId:feedbackClientId}:{},sceneId:input.sceneId,sceneRevision:input.sceneRevision,capturedAt:input.capturedAt??new Date().toISOString(),attachment,imagePath,...originalImage?{originalImage}:{},camera:input.camera,source:captureSource,...verifiedCameraImage?{cameraImage:verifiedCameraImage}:{},...cameraApply?{cameraApply}:{},...(annotationRows.length?{annotations:annotationRows}:{}),...(promptRow?{prompt:promptRow}:{}),...(visualWarnings.length?{visualWarnings}:{}),...(environment?{environment}:{}),...(lod?{lod}:{}),...(lodIssue?{lodIssue}:{}),...input.worldId?{worldId:input.worldId,generation:input.generation,frameId:input.frameId,stepIndex:input.stepIndex,simTime:input.simTime}:{}}
+  // 展示层窄面（R-011）：这张图是不是 Exploded view、展开多少、选中哪个真实部件。与上面两面同一条纪律——
+  // 只认白名单字段、`displayOnly` 必须为 true，缺字段就不写空壳（前端没标这一面 ≠ 画面没炸开）。
+  const presentation=presentationFaceFrom(input.presentation)
+  const capture:FeedbackCapture&CaptureCameraExtras={captureId:randomUUID(),sessionKey,...feedbackClientId?{clientId:feedbackClientId}:{},sceneId:input.sceneId,sceneRevision:input.sceneRevision,capturedAt:input.capturedAt??new Date().toISOString(),attachment,imagePath,...originalImage?{originalImage}:{},camera:input.camera,source:captureSource,...verifiedCameraImage?{cameraImage:verifiedCameraImage}:{},...cameraApply?{cameraApply}:{},...(annotationRows.length?{annotations:annotationRows}:{}),...(promptRow?{prompt:promptRow}:{}),...(visualWarnings.length?{visualWarnings}:{}),...(environment?{environment}:{}),...(lod?{lod}:{}),...(lodIssue?{lodIssue}:{}),...(presentation?{presentation}:{}),...input.worldId?{worldId:input.worldId,generation:input.generation,frameId:input.frameId,stepIndex:input.stepIndex,simTime:input.simTime}:{}}
   capture.pins=capturePins(input.pins,capture)
   if(input.worldId){
    // Validation above may fill the world revision from the live world when an
@@ -2047,6 +2079,8 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
  // 再转发给同一个 Sim Provider。真实渲染、标定、override 与标注点全部由 Provider 产生，
  // Viewer/Shell 不缓存任何相机物理状态，也不写源 MJCF/Scene 文档。
  const cameraDirectory=(sessionKey:string,id:string)=>{if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new Error("INVALID_CAPTURE_ID");return join(captureDirectory(sessionKey),"camera",id)}
+ // 模拟LiDAR产物目录：与相机采集同用 captureRoot 的会话命名空间，但独立子目录/独立登记文件。
+ const lidarDirectory=(sessionKey:string,id:string)=>{if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new Error("INVALID_CAPTURE_ID");return join(captureDirectory(sessionKey),"lidar",id)}
  const liveCameraWorld=async(sessionKey:string,worldId:string,sceneId:string,expectedGeneration?:number)=>{
   const sim=existingSimFor(sessionKey)
   if(!sim)throw new Error("PROVIDER_UNAVAILABLE")
@@ -2136,7 +2170,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const saved=await sceneFor(sessionKey).scene.commit(cameraInstallationCommit(snapshot,draft,bodies,entityId,source,sourceCameraName))
   return {status:'SAVED',snapshot:saved,entityId,source,worldNeedsSync:Boolean(draft.parentEntityId||existingSimFor(sessionKey)),...(sampled?{sample:{sceneId:sampled.sceneId!,sceneRevision:sampled.sceneRevision!,...sampled.worldId!==undefined?{worldId:sampled.worldId}:{},...sampled.generation!==undefined?{generation:sampled.generation}:{},...sampled.frameId!==undefined?{frameId:sampled.frameId}:{},...sampled.stepIndex!==undefined?{stepIndex:sampled.stepIndex}:{}}}:installationSample?{sample:installationSample}:{}),note:'Installation saved in Scene. The existing World owner handles synchronization and native frame readback. Saving does not enter camera view.'}
  }
- ctx.tools.register(defineTool({name:'camera_scene_save',description:"Persist a camera using the sidebar's Scene CAS. Omitting entityId creates a new camera; to update an existing camera, read and reuse its entityId and current expectedRevision. If the save result has worldNeedsSync=true, call sim_sync for the existing World before camera_list or physical capture, using the saved Scene revision. install accepts typed installation: positionM in explicit referenceFrame=world|parent (parent is the selected real body origin, meters), normal as the viewing direction (-Z optical axis), optional up to define roll, or quaternionXyzw; fovYDeg is vertical degrees. Direction without up preserves the prior roll by shortest rotation. Use annotationId/captureId from viewer_annotation_read with the exact bodyName and optional body-local offsetM to install at its surface point/normal. A mount requires worldId/expectedGeneration and same-frame camera_list FK. Read real bodies or robot_presets; never guess a link/TCP/center from robot names. If a requested center is undefined, ask for a declared frame/offset or surface annotation. current-view samples complete K/resolution/clipping/pose from the specified window. draft uses the full human form. native-preset loads actual registered/native calibration; URDF has no implicit cameras, use declared sensor calibration. restore retains the original installation baseline. Editing never moves the robot. A temporary camera_adjust is not a persistent save.",parameters:{input:{type:'object',required:true,additionalProperties:false,properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},mode:{type:'string',enum:['current-view','draft','install','native-preset','restore'],required:true},entityId:{type:'string'},name:{type:'string'},clientId:{type:'string'},worldId:{type:'string'},expectedGeneration:{type:'integer'},presetId:{type:'string'},mount:{type:'object',additionalProperties:false,properties:{entityId:{type:'string',required:true},bodyName:{type:'string',required:true}}},installation:{type:'object',additionalProperties:false,properties:{referenceFrame:{type:'string',enum:['world','parent']},positionM:{type:'array',items:{type:'number'},description:'Exactly three finite components [x,y,z] in meters; invalid lengths are rejected before saving.'},annotationId:{type:'string'},captureId:{type:'string'},offsetM:{type:'array',items:{type:'number'},description:'Exactly three finite body-local offset components in meters; requires a real annotation.'},normal:{type:'array',items:{type:'number'},description:'Exactly three finite viewing-normal components; zero vectors are rejected.'},up:{type:'array',items:{type:'number'},description:'Exactly three finite up-vector components; zero or collinear vectors are rejected.'},quaternionXyzw:{type:'array',items:{type:'number'},description:'Exactly four finite quaternion components [x,y,z,w]; zero quaternions are rejected.'},fovYDeg:{type:'number'},width:{type:'integer'},height:{type:'integer'},near:{type:'number'},far:{type:'number'},intrinsics:{type:'object',additionalProperties:false,properties:{fx:{type:'number',required:true},fy:{type:'number',required:true},cx:{type:'number',required:true},cy:{type:'number',required:true},width:{type:'integer',required:true},height:{type:'integer',required:true}}}}},draft:{type:'object',additionalProperties:true,description:"Human installation form: name/position/quaternion/fovYDeg/width/height/near/far/parentEntityId/bodyName are strings; intrinsics contains fx/fy/cx/cy/width/height."}}}},output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>await saveSceneCamera((exec as {agent?:unknown}).agent,(args.input??args) as unknown as CameraSceneSaveInput,exec.signal) as any}))
+ ctx.tools.register(defineTool({name:'camera_scene_save',description:"Persist a camera using the sidebar's Scene CAS. Omitting entityId creates a new camera; to update an existing camera, read and reuse its entityId and current expectedRevision. If the save result has worldNeedsSync=true, call sim_sync for the existing World before camera_list or physical capture, using the saved Scene revision. install accepts typed installation: positionM in explicit referenceFrame=world|parent (parent is the selected real body origin, meters), normal as the viewing direction (-Z optical axis), optional up to define roll, or quaternionXyzw; fovYDeg is vertical degrees. Direction without up preserves the prior roll by shortest rotation. Use annotationId/captureId from viewer_annotation_read with the exact bodyName and optional body-local offsetM to install at its surface point/normal. A mount requires worldId/expectedGeneration and same-frame camera_list FK. Read real bodies or robot_presets; never guess a link/TCP/center from robot names. If a requested center is undefined, ask for a declared frame/offset or surface annotation. current-view samples pose, FOV and clip planes from the specified window; resolution stays the Scene default 640x480 unless the sampled camera declares its own K (never the window's viewport pixels). draft uses the full human form. native-preset loads actual registered/native calibration; URDF has no implicit cameras, use declared sensor calibration. restore retains the original installation baseline. Editing never moves the robot. A temporary camera_adjust is not a persistent save.",parameters:{input:{type:'object',required:true,additionalProperties:false,properties:{sceneId:{type:'string',required:true},expectedRevision:{type:'integer',required:true},mode:{type:'string',enum:['current-view','draft','install','native-preset','restore'],required:true},entityId:{type:'string'},name:{type:'string'},clientId:{type:'string'},worldId:{type:'string'},expectedGeneration:{type:'integer'},presetId:{type:'string'},mount:{type:'object',additionalProperties:false,properties:{entityId:{type:'string',required:true},bodyName:{type:'string',required:true}}},installation:{type:'object',additionalProperties:false,properties:{referenceFrame:{type:'string',enum:['world','parent']},positionM:{type:'array',items:{type:'number'},description:'Exactly three finite components [x,y,z] in meters; invalid lengths are rejected before saving.'},annotationId:{type:'string'},captureId:{type:'string'},offsetM:{type:'array',items:{type:'number'},description:'Exactly three finite body-local offset components in meters; requires a real annotation.'},normal:{type:'array',items:{type:'number'},description:'Exactly three finite viewing-normal components; zero vectors are rejected.'},up:{type:'array',items:{type:'number'},description:'Exactly three finite up-vector components; zero or collinear vectors are rejected.'},quaternionXyzw:{type:'array',items:{type:'number'},description:'Exactly four finite quaternion components [x,y,z,w]; zero quaternions are rejected.'},fovYDeg:{type:'number'},width:{type:'integer'},height:{type:'integer'},near:{type:'number'},far:{type:'number'},intrinsics:{type:'object',additionalProperties:false,properties:{fx:{type:'number',required:true},fy:{type:'number',required:true},cx:{type:'number',required:true},cy:{type:'number',required:true},width:{type:'integer',required:true},height:{type:'integer',required:true}}}}},draft:{type:'object',additionalProperties:true,description:"Human installation form: name/position/quaternion/fovYDeg/width/height/near/far/parentEntityId/bodyName are strings; intrinsics contains fx/fy/cx/cy/width/height."}}}},output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>await saveSceneCamera((exec as {agent?:unknown}).agent,(args.input??args) as unknown as CameraSceneSaveInput,exec.signal) as any}))
  ctx.commands.register({name:'camera_scene_save',description:"Use the same persistent Scene camera save/install/mount/preset/restore operation as the natural-language Tool.",input:{hint:'{sceneId,expectedRevision,mode,entityId?,name?,clientId?,worldId?,expectedGeneration?,mount?,installation?,draft?,presetId?}'},recordInput:false,handler:async invocation=>({kind:'success',text:JSON.stringify(await saveSceneCamera(invocation.agent,JSON.parse(invocation.rawInput||'{}'),invocation.signal??new AbortController().signal))})})
  ctx.effect(()=>()=>cameraListCache.dispose(),"lyapunov-shell: UI camera query cache")
  // 自动轮询只读 UI 路由，不激活 Agent、不写 commandResult/Session 消息。
@@ -2185,6 +2219,36 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const input=JSON.parse(invocation.rawInput||"{}") as Parameters<typeof captureCameraViews>[1]
   return {kind:"success",text:JSON.stringify(await captureCameraViews(sessionKeyOf(invocation.agent),input,invocation.signal))}
  }})
+  // 模拟LiDAR量测入口：只把输出目录收敛到本会话 captureRoot 并核对 world/Scene/代次归属，
+  // 真实射线、距离、有效性与几何来源全部由 Provider 产生；不新增全局传感器库，机位仍来自命名相机。
+  const captureLidar=async(sessionKey:string,input:{sceneId?:string;sceneRevision?:number;worldId?:string;expectedGeneration?:number;cameraName?:string;channels?:number;horizontalSamples?:number;horizontalFovDeg?:number;verticalFovDeg?:number[];rangeM?:number;geomGroups?:number[]},signal:AbortSignal)=>{
+   if(typeof input.cameraName!=="string"||!input.cameraName.trim())throw new Error("CAMERA_NAME_REQUIRED")
+   const {sim,world,snapshot}=await liveCameraWorld(sessionKey,input.worldId!,input.sceneId!,input.expectedGeneration)
+   if(input.sceneRevision!==undefined&&input.sceneRevision!==snapshot.revision)throw new Error("CAMERA_SCENE_REVISION_MISMATCH")
+   signal.throwIfAborted()
+   if(!sim.scanLidar)throw new Error("SENSOR_UNAVAILABLE: 当前Provider未提供模拟LiDAR量测接口")
+   const captureId=randomUUID(),directory=lidarDirectory(sessionKey,captureId)
+   await mkdir(directory,{recursive:true,mode:0o700})
+   const result=await sim.scanLidar(world.worldId,{outputDir:directory,cameraName:input.cameraName.trim(),...input.channels===undefined?{}:{channels:input.channels},...input.horizontalSamples===undefined?{}:{horizontalSamples:input.horizontalSamples},...input.horizontalFovDeg===undefined?{}:{horizontalFovDeg:input.horizontalFovDeg},...input.verticalFovDeg===undefined?{}:{verticalFovDeg:input.verticalFovDeg as [number,number]},...input.rangeM===undefined?{}:{rangeM:input.rangeM},...input.geomGroups===undefined?{}:{geomGroups:input.geomGroups}})
+   const receipt={sceneId:input.sceneId,sceneRevision:snapshot.revision,worldId:world.worldId,worldGeneration:world.worldGeneration,outputDir:directory,...result,providerCaptureId:result.captureId,captureId}
+   if(result.worldId!==world.worldId||result.generation!==world.worldGeneration||result.sceneRevision!==snapshot.revision)throw new Error("CAMERA_LIDAR_SOURCE_MISMATCH")
+   await writeFile(join(directory,"lidar.json"),JSON.stringify(receipt,null,2),{mode:0o600})
+   signal.throwIfAborted()
+   return receipt
+  }
+  ctx.commands.register({name:"camera_lidar_scan_ui",description:"Measure a simulated LiDAR scan from an existing named camera's real world pose with the engine's native ray geometry, writing real range/validity/hit-geom artifacts under the configured captureRoot.",input:{hint:'{sceneId, worldId, expectedGeneration, cameraName, channels, horizontalSamples, horizontalFovDeg, verticalFovDeg, rangeM, geomGroups}'},recordInput:false,handler:async invocation=>{
+   const input=JSON.parse(invocation.rawInput||"{}") as Parameters<typeof captureLidar>[1]
+   return {kind:"success",text:JSON.stringify(await captureLidar(sessionKeyOf(invocation.agent),input,invocation.signal))}
+  }})
+  register("camera-lidar",["POST"],async request=>{
+   const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"LiDAR扫描"),input=await request.json() as Parameters<typeof captureLidar>[1]
+   if(!Number.isInteger(input.expectedGeneration)||!Number.isInteger(input.sceneRevision))throw new Error("CAMERA_QUERY_IDENTITY_REQUIRED")
+   const value=await captureLidar(sessionKey,input,request.signal)
+   const current=await liveCameraWorld(sessionKey,input.worldId!,input.sceneId!,input.expectedGeneration)
+   if(current.snapshot.revision!==input.sceneRevision)throw new Error("CAMERA_SCENE_REVISION_MISMATCH")
+   request.signal.throwIfAborted()
+   return Response.json(uiCommandFields("camera_lidar_scan_ui",value,productPathRoots,privacyMode==="developer"),{headers:{"cache-control":"private, no-store"}})
+  })
  // 周期预览与工具采集使用同一 native operation；预览只回 UI，不注入 Session/AgentLoop。
  register("camera-preview",["POST"],async request=>{
   const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"相机预览"),input=await request.json() as Parameters<typeof captureCameraViews>[1]
@@ -2535,7 +2599,9 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
    const face=capture.annotations?.length?{...capture,annotations:undefined,annotationCount:capture.annotations.length,annotationDigest:capture.annotations.map(row=>({index:row.index,entity:row.entity??row.entityId,text:row.text}))}:capture
    return uiCommandFields("viewer_capture",face,productPathRoots)??face
   }))
-  return Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,recentActions,...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
+  // 连续视频与图像采集**同一份 state 轮询**、不同数组：前端既能发现视频，也不会把视频塞进图像列表。
+  const videos=(await listVideoCaptures(sessionKey,sceneId)).map(videoFace)
+  return Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,videos,recentActions,...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
  })
  // 场景清单归 scene-kit 所有：布局改造后场景文档在 <worlds>/scenes，shell 不再自己猜目录
  // （旧实现读 config.dataRoot/单根，迁移后恒返回空列表，3D 视口因此永远停在空态）。
@@ -2633,6 +2699,84 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   }
   const capture=await readCapture(sessionKey,id),image=await ctx.attachments.readImage(capture.attachment as any)
   return new Response(image.data,{headers:{"content-type":capture.attachment.mediaType,"cache-control":"private, no-cache"}})
+ })
+ // 连续视频：收**前端真实 MediaRecorder** 产出的字节与它自报的容器/编码；服务端不转码、不补帧、不改名。
+ // 载荷：4 字节大端 meta 长度 + UTF-8 meta JSON + 原始视频字节（避免把 MB 级字节塞进 JSON/请求头）。
+ register("capture-video",["POST"],async request=>{
+  const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"连续视频上传")
+  const body=Buffer.from(await request.arrayBuffer())
+  if(body.length<4)throw new Error("CAPTURE_VIDEO_FRAME_INVALID: 载荷缺 meta 长度")
+  const metaLength=body.readUInt32BE(0)
+  if(metaLength<=0||metaLength>2_000_000||4+metaLength>body.length)throw new Error("CAPTURE_VIDEO_FRAME_INVALID: meta 长度越界")
+  let meta:Record<string,unknown>
+  try{const parsed=JSON.parse(body.subarray(4,4+metaLength).toString("utf8"));if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("not object");meta=parsed as Record<string,unknown>}catch{throw new Error("CAPTURE_VIDEO_META_INVALID: meta 不是 JSON 对象")}
+  const bytes=body.subarray(4+metaLength)
+  if(!bytes.length)throw new Error("CAPTURE_VIDEO_BYTES_EMPTY: 空视频不落盘（不把空文件标成成功）")
+  const text=(value:unknown,label:string,max=2000)=>{if(typeof value!=="string"||!value||value.length>max)throw new Error(`CAPTURE_VIDEO_META_INVALID: ${label}`);return value}
+  const number=(value:unknown,label:string,max:number)=>{if(typeof value!=="number"||!Number.isFinite(value)||value<0||value>max)throw new Error(`CAPTURE_VIDEO_META_INVALID: ${label}`);return value}
+  const sceneId=text(meta.sceneId,"sceneId",200)
+  const revisionValue=meta.sceneRevision
+  if(typeof revisionValue!=="number"||!Number.isInteger(revisionValue)||revisionValue<0)throw new Error("CAPTURE_VIDEO_META_INVALID: sceneRevision")
+  const snapshot=await sceneSnapshot(sessionKey,sceneId)
+  if(revisionValue>snapshot.revision)throw new Error("CAPTURE_VIDEO_SCENE_REVISION_INVALID: 视频所属场景版本晚于当前快照")
+  // 容器/编码由**实际 mediaType** 复算，不信前端另报的 container 字段。
+  const derived=videoCodecFace(text(meta.mediaType,"mediaType",120))
+  const mediaType=derived.mimeType||"application/octet-stream"
+  const source:CaptureVideoSource=meta.source==="route"?"route":"free-view"
+  const width=Math.round(number(meta.width,"width",16384)),height=Math.round(number(meta.height,"height",16384))
+  if(width<=0||height<=0)throw new Error("CAPTURE_VIDEO_META_INVALID: 尺寸必须为正")
+  const startedAt=text(meta.startedAt,"startedAt",80),stoppedAt=text(meta.stoppedAt,"stoppedAt",80)
+  const durationMs=number(meta.durationMs,"durationMs",6*60*60*1000),stopReason=text(meta.stopReason,"stopReason",200),frameRate=Math.round(number(meta.frameRate,"frameRate",240))
+  const worldId=typeof meta.worldId==="string"&&meta.worldId?meta.worldId:undefined
+  const worldGeneration=typeof meta.worldGeneration==="number"&&Number.isInteger(meta.worldGeneration)&&meta.worldGeneration>=0?meta.worldGeneration:undefined
+  if(worldId){const sim=existingSimFor(sessionKey);const found=sim?(await sim.listWorlds()).find(item=>item.worldId===worldId):undefined;if(!found||found.sceneId!==sceneId)throw new Error("CAPTURE_VIDEO_WORLD_MISMATCH: 视频标注的 world 不属于该场景")}
+  let cameraSamples:CaptureVideoSample[]|undefined
+  if(Array.isArray(meta.cameraSamples)&&meta.cameraSamples.length){
+   if(meta.cameraSamples.length>4096)throw new Error("CAPTURE_VIDEO_META_INVALID: cameraSamples 过多")
+   cameraSamples=meta.cameraSamples.map((row:any,index:number)=>{
+    const tMs=typeof row?.tMs==="number"&&Number.isFinite(row.tMs)&&row.tMs>=0?row.tMs:undefined
+    const position=Array.isArray(row?.position)&&row.position.length===3&&row.position.every((v:unknown)=>typeof v==="number"&&Number.isFinite(v))?row.position as [number,number,number]:undefined
+    const quaternion=Array.isArray(row?.quaternion)&&row.quaternion.length===4&&row.quaternion.every((v:unknown)=>typeof v==="number"&&Number.isFinite(v))?row.quaternion as [number,number,number,number]:undefined
+    if(tMs===undefined||!position||!quaternion)throw new Error(`CAPTURE_VIDEO_META_INVALID: cameraSamples[${index}]`)
+    const fovDeg=typeof row?.fovDeg==="number"&&Number.isFinite(row.fovDeg)?row.fovDeg:undefined
+    return {tMs,position,quaternion,...fovDeg===undefined?{}:{fovDeg}}
+   })
+  }
+  const videoId=randomUUID(),directory=videoDirectory(sessionKey),fileName=videoId+"."+videoFileExtension(derived.container),mediaPath=join(directory,fileName)
+  const result:VideoCaptureResult={blob:new Blob([bytes],{type:mediaType}),bytes:bytes.length,mimeType:mediaType,container:derived.container,codec:derived.codec,width,height,startedAt,stoppedAt,durationMs,stopReason,...typeof meta.error==="string"&&meta.error?{error:meta.error.slice(0,500)}:{}}
+  const record=captureVideoRecordOf(videoId,mediaPath,result,{sceneId,sceneRevision:revisionValue,...worldId?{worldId}:{},...worldGeneration!==undefined?{worldGeneration}:{},source,frameRate,...cameraSamples?{cameraSamples}:{},...meta.route!==undefined?{route:meta.route}:{}},new Date().toISOString())
+  await mkdir(directory,{recursive:true,mode:0o700})
+  await writeFile(mediaPath,bytes,{mode:0o600})
+  await writeFile(videoRecordPath(sessionKey,videoId),JSON.stringify(record,null,2),{mode:0o600})
+  return Response.json(videoFace(record))
+ })
+ // 视频媒体：按会话与 videoId 读，只允许读该会话 `videos/` 目录内的文件；支持 Range（`<video>` 拖动播放）。
+ register("capture-video-media",["GET"],async request=>{
+  const id=new URL(request.url).searchParams.get("videoId")??""
+  const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"连续视频媒体")
+  const directory=videoDirectory(sessionKey)
+  const record=JSON.parse(await readFile(videoRecordPath(sessionKey,id),"utf8")) as CaptureVideoRecord
+  if(record.videoId!==id||record.kind!=="continuous-video")throw new Error("CAPTURE_VIDEO_ID_MISMATCH")
+  const path=resolve(record.mediaPath)
+  if(dirname(path)!==directory)throw new Error("CAPTURE_VIDEO_OUTSIDE_DIRECTORY")
+  const data=await readFile(path),mediaType=typeof record.mediaType==="string"&&record.mediaType?record.mediaType:"application/octet-stream",total=data.length
+  const rangeHeader=request.headers.get("range")
+  if(rangeHeader){const match=/bytes=(\d*)-(\d*)/.exec(rangeHeader);if(match){const start=match[1]?Number(match[1]):0;const end=match[2]?Math.min(Number(match[2]),total-1):total-1;if(Number.isFinite(start)&&Number.isFinite(end)&&start<=end&&start<total)return new Response(data.subarray(start,end+1),{status:206,headers:{"content-type":mediaType,"content-range":`bytes ${start}-${end}/${total}`,"accept-ranges":"bytes","content-length":String(end-start+1),"cache-control":"private, no-cache"}})}}
+  return new Response(data,{headers:{"content-type":mediaType,"accept-ranges":"bytes","content-length":String(total),"cache-control":"private, no-cache"}})
+ })
+ // LiDAR媒体：按会话命名空间读逐通道产物，只允许读该次扫描目录内的文件；range/valid/hitGeom 是 npy、preview 是 PNG。
+ register("lidar-media",["GET"],async request=>{
+  const query=new URL(request.url).searchParams,id=query.get("captureId")??"",channel=query.get("channel")??"preview"
+  const sessionKey=await bindSessionId(ctx,query.get("sessionId"),"LiDAR媒体")
+  if(!["range","valid","hitGeom","preview"].includes(channel))throw new Error("INVALID_LIDAR_MEDIA")
+  const directory=lidarDirectory(sessionKey,id),receipt=JSON.parse(await readFile(join(directory,"lidar.json"),"utf8")) as {captureId?:string;[key:string]:any}
+  if(receipt.captureId!==id)throw new Error("LIDAR_CAPTURE_ID_MISMATCH")
+  const metadata=receipt[channel]
+  if(!metadata||typeof metadata.uri!=="string")throw new Error("LIDAR_CHANNEL_MISSING")
+  const path=resolve(localPath(metadata.uri))
+  if(dirname(path)!==directory)throw new Error("LIDAR_MEDIA_OUTSIDE_CAPTURE")
+  const preview=channel==="preview"
+  return new Response(await readFile(path),{headers:{"content-type":preview?"image/png":"application/x-npy","cache-control":"private, no-cache",...preview?{}:{"content-disposition":`attachment; filename="${id}-${channel}.npy"`}}})
  })
  // 媒体寻址用资源标记（`res:<指纹>`）：浏览器不持有绝对路径，标记只在**已授权候选集**里等值匹配。
  // 候选集本身就是授权判据（分割产物准入清单 / 场景资源表），所以解析只认集合内成员，越界即失败。
@@ -2746,5 +2890,51 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   }
   const bytes=await sceneFor(sessionKey).resources.readVerifiedResource(scene,uri)
   return new Response(bytes as BodyInit,{headers:{"content-type":rep?.mimeType??"application/octet-stream","cache-control":"private, no-cache"}})
+ })
+ /**
+  * V10-08 放置预览媒体：**只**按当前会话已登记的 resourceId/version 取 record，再用该版本自己的
+  * 原件/表示/依赖闭包做等值授权。不接受任意 path，不扩大既有 `resource` 路由的白名单，也不把
+  * 临时预览 Scene 插入 SceneStore。跨会话、错误版本、越界 uri 一律失败。
+  */
+ register("asset-preview-resource",["GET"],async request=>{
+  const query=new URL(request.url).searchParams
+  const sessionKey=await bindSessionId(ctx,query.get("sessionId"),"资产放置预览")
+  const resourceId=query.get("resourceId")??"",version=Number(query.get("version"))
+  if(!resourceId||!Number.isSafeInteger(version)||version<0)throw new Error("ASSET_PREVIEW_RESOURCE_VERSION_REQUIRED")
+  const operations=sceneFor(sessionKey)
+  const record=await operations.resources.get(resourceId,version)
+  if(record.ref.resourceId!==resourceId||record.ref.version!==version)throw new Error("ASSET_PREVIEW_RESOURCE_VERSION_MISMATCH")
+  if(record.deletedAt)throw new Error("RESOURCE_IN_TRASH")
+  const verification=await operations.resources.verify(resourceId,version)
+  if(!verification.valid)throw new Error(`RESOURCE_UNAVAILABLE: ${JSON.stringify(verification)}`)
+  const representations=[record.ref.original,...record.ref.representations]
+  const candidates:string[]=representations.map(representation=>representation.uri)
+  for(const dependency of record.parsed.dependencies)candidates.push(dependency.path,pathToFileURL(dependency.path).href)
+  const requested=query.get("uri")??""
+  let uri:string|undefined
+  if(requested.startsWith(RESOURCE_TOKEN_PREFIX))uri=matchResourceToken(requested,candidates)
+  else if(candidates.includes(requested))uri=requested
+  else if(requested){
+   let absolute:string|undefined
+   try{absolute=localPath(requested)}catch{absolute=undefined}
+   if(!absolute&&!/^[a-z][a-z\d+.-]*:/i.test(requested))try{absolute=resolve(dirname(localPath(record.ref.original.uri)),requested)}catch{absolute=undefined}
+   if(absolute){
+    if(candidates.includes(absolute))uri=absolute
+    else{
+     const fileUri=pathToFileURL(absolute).href
+     if(candidates.includes(fileUri))uri=fileUri
+    }
+   }
+  }
+  if(!uri)throw new Error("ASSET_PREVIEW_RESOURCE_NOT_AUTHORIZED")
+  const representation=representations.find(row=>row.uri===uri)
+  // 校验用同一份 `readVerifiedResource`：把这条已登记资源版本作为唯一引用交给它，不伪造 SceneStore 记录。
+  const verificationScene={entities:[{resources:[record.ref]}]} as unknown as SceneSnapshot
+  if((await stat(localPath(uri))).size>64*1024*1024){
+   const stream=await operations.resources.streamVerifiedResource(verificationScene,uri,request.signal)
+   return new Response(stream.body,{headers:{"content-type":representation?.mimeType??"application/octet-stream","content-length":String(stream.size),"cache-control":"private, no-cache"}})
+  }
+  const bytes=await operations.resources.readVerifiedResource(verificationScene,uri)
+  return new Response(bytes as BodyInit,{headers:{"content-type":representation?.mimeType??"application/octet-stream","cache-control":"private, no-cache"}})
  })
 }
