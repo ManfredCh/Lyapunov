@@ -1,6 +1,7 @@
 /**
  * envgate：R-013 内部子树的**真实原生拆分**（已安装 MuJoCo 3.13 MjSpec，经 python/mjcf_subtree.py）。
- * 设置 LYAPUNOV_MUJOCO_PYTHON；缺环境显式跳过，不把跳过计为原生通过。
+ * 设置 LYAPUNOV_MUJOCO_PYTHON；缺环境显式跳过，不把跳过计为原生通过。pack 资产件不随
+ * 源仓分发（packs/<id>/asset 是本地供给链接），缺件同样显式跳过。
  *
  * 夹具：真实 Panda（packs/franka_panda/asset/franka_emika_panda/panda.xml）内手 + 任务私有闭合小样。
  * 不下载厂商资源；原件与全部旧依赖 SHA 必须逐字不变。本用例只证明源格式/资源/CAS/独立重载这一层；
@@ -23,15 +24,18 @@ const run = promisify(execFile)
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '../../..')
 const python = process.env.LYAPUNOV_MUJOCO_PYTHON ?? resolve(repoRoot, '.runtime/sim-python/bin/python')
+const panda = resolve(repoRoot, 'packs/franka_panda/asset/franka_emika_panda/panda.xml')
 const available = existsSync(python)
-const options = { skip: available ? false : `原生 MuJoCo 解释器不存在：${python}` }
+const skipReason = !available ? `原生 MuJoCo 解释器不存在：${python}` : !existsSync(panda) ? `pack 资产件不随源仓分发：${panda}` : false
+// Bun 的 node:test 兼容层忽略 describe/test 选项参数里的 skip（同 timeout 一样要显式 API），
+// 缺前置条件时必须走 describe.skip，否则会用例真跑然后 ENOENT。
+const describeNative = skipReason === false ? describe : describe.skip
 /**
  * Panda 内手与 part 落位两条用例都要走真实资源打包 + 原生重载/编译，实际耗时超过 Bun 默认的 5000ms
  * **单例**上限（`describe` 上的 timeout 被 Bun 忽略，必须在每条 `test` 上声明）。这里只提高等待上限，
  * 数值容差与功能断言保持原样；缺解释器仍整组 skip。
  */
 const NATIVE_CASE_TIMEOUT_MS = 120_000
-const panda = resolve(repoRoot, 'packs/franka_panda/asset/franka_emika_panda/panda.xml')
 const fixture = (name: string) => resolve(here, 'fixtures/p9-subtree', name)
 const sha = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex')
 const load = async (modelPath: string) => {
@@ -40,7 +44,7 @@ const load = async (modelPath: string) => {
 }
 const localOf = (uri: string) => uri.startsWith('file:') ? fileURLToPath(uri) : uri
 
-describe('R-013 真实 MJCF/URDF 内部子树拆分', options, () => {
+describeNative('R-013 真实 MJCF/URDF 内部子树拆分', () => {
   test('Panda 内手：两份新资源独立重载、DOF/驱动精确、原件与旧依赖 SHA 不变', { timeout: NATIVE_CASE_TIMEOUT_MS }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'rc-subtree-native-'))
     try {

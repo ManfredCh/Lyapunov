@@ -563,12 +563,13 @@ describe("⑧ 无 `name` 的 MJCF mesh：补隐式名保住 Viewer 键，再投�
     expect(reading.loadFailures).toEqual([])
   })
 
-  test("真实 packs 原件：Allegro 11 + UR10e 20 条无 name 网格全部在依赖闭包里并被投影", async () => {
-    const cases = [
-      { label: "allegro_hand", source: join(import.meta.dir, "..", "..", "..", "packs", "allegro_hand", "asset", "left_hand.xml"), meshes: 11 },
-      { label: "ur10e", source: join(import.meta.dir, "..", "..", "..", "packs", "ur10e", "asset", "universal_robots_ur10e", "ur10e.xml"), meshes: 20 },
-    ]
-    for (const { label, source, meshes } of cases) {
+  // pack 资产件不随源仓分发（`packs/*/asset` 是本地供给链接）：缺件显式跳过，不计为通过。
+  const packCases = [
+    { label: "allegro_hand", source: join(import.meta.dir, "..", "..", "..", "packs", "allegro_hand", "asset", "left_hand.xml"), meshes: 11 },
+    { label: "ur10e", source: join(import.meta.dir, "..", "..", "..", "packs", "ur10e", "asset", "universal_robots_ur10e", "ur10e.xml"), meshes: 20 },
+  ]
+  test.skipIf(!packCases.every(item => existsSync(item.source)))("真实 packs 原件：Allegro 11 + UR10e 20 条无 name 网格全部在依赖闭包里并被投影", async () => {
+    for (const { label, source, meshes } of packCases) {
       const robot = await robotVisual(source)
       const parsed = await parseAsset(source)
       const uri = pathToFileURL(source).href

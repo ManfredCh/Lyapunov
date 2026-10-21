@@ -17,7 +17,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as THREE from "three"
@@ -478,7 +478,8 @@ const expectPandaPose = (visual: RobotVisual, pose: PandaPose, label: string): v
   }
 }
 
-describe("真实 Panda：body 世界位姿投影不得重复应用本 body 关节（肘/腕断口）", () => {
+// pack 资产件不随源仓分发（`packs/*/asset` 是本地供给链接）：缺件显式跳过，不计为原生通过。
+describe.skipIf(!existsSync(pandaSource))("真实 Panda：body 世界位姿投影不得重复应用本 body 关节（肘/腕断口）", () => {
   test("原生参照夹具与当前 panda.xml 是同一份原件，不是过期快照", () => {
     expect(pandaReference.source).toBe("packs/franka_panda/asset/franka_emika_panda/panda.xml")
     expect(pandaReference.mujocoVersion).toMatch(/^3\./)
