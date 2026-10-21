@@ -16,9 +16,9 @@
 | 机械臂 | trossen_wx250s | T1（DROID） | menagerie `trossen_wx250s` | **π0.5-DROID** + `droid` norm_stats（DROID 原生本体是 Franka Panda 7DoF；Wx250s 需 7↔8 维映射） | DROID 生态一种 embodiment | 待建包 |
 | 机械臂 | trossen_wxai | T1+ | menagerie `trossen_wxai` | 同上族 | ALOHA 族新臂 | 待建包 |
 | 机械臂 | aloha（双臂场景） | T1+ | menagerie `aloha` | π0.5-ALOHA 系 | 双臂组合场景包 | 待建包 |
-| 机器狗 | unitree_a1 | T0（前代） | menagerie `unitree_a1` | WTW（walk-these-ways 支持 a1 族） | 与 Go1 同适配链 | 待建包 |
+| 机器狗 | unitree_a1 | T0（前代） | menagerie `unitree_a1` | WTW（walk-these-ways 支持 a1 族） | 与 Go1 同适配链 | **已随包入库**（2026-10-21：含 a1.png 预览；基础运动仍需适配器） |
 | 机器狗 | （Mini Cheetah） | T1 | **无公开 MJCF 主流仓**（MIT Cheetah-Software 代码为主） | 无公开部署级 policy | 如实标 UNVERIFIED，接口复刻位 | 不建假包 |
-| 无人机 | generic_quadrotor（PX4） | T0 | **已定源**：gym-pybullet-drones `cf2x.urdf`（GitHub utiasDSL 原仓 / HF `bensprenger/gym_pybullet_drones` 镜像，2026-09-23 实查；MuJoCo 可直接载 URDF） | PX4/ArduPilot SITL 外接 | thrust 通道 + 外部飞控 | 待建包（第二批） |
+| 无人机 | generic_quadrotor（PX4） | T0 | **已定源**：gym-pybullet-drones `cf2x.urdf`（GitHub utiasDSL 原仓 / HF `bensprenger/gym_pybullet_drones` 镜像，2026-09-23 实查；MuJoCo 可直接载 URDF） | PX4/ArduPilot SITL 外接 | thrust 通道 + 外部飞控 | **已随包入库**（2026-10-21：`cf2.dae` 违网格契约，转 `cf2.obj` 后入包；飞行仍需外部飞控） |
 | 无人机 | （DJI Tello） | T1 | **无官方 sim 模型** | 无 | 仅接口复刻位 | 不建假包 |
 | 灵巧手 | shadow_dexee | T1+ | menagerie `shadow_dexee` | 直控（tendon 族） | Shadow 族第四包 | 待建包 |
 | 灵巧手 | xhand_right | T1 | **已定源**：HF `RoboVerseOrg/roboverse_data` → `robots/xhand_right/urdf/xhand_right.urdf`（2026-09-23 实查） | HF 社区微调痕迹（GSHand xarm7_xhand、pi05-xhand）+ 直控 | XHand 族右手 | 待建包（第二批） |

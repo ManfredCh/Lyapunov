@@ -2,9 +2,9 @@
 
 | 出版信息 | 标记 |
 | --- | --- |
-| 应用发布名称 | 0.1.0α · Linux x64 |
-| 技术版本 / releaseId | `0.1.0-alpha.7` |
-| 文档日期 | 2026-10-09 |
+| 应用发布名称 | 0.1.0RC · Linux x64 |
+| 技术版本 / releaseId | `0.1.0-rc` |
+| 文档日期 | 2026-10-21 |
 | 作者团队 | Vorynel Co., Ltd. |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | 版权 | © 2026 Vorynel Co., Ltd. |
@@ -12,7 +12,7 @@
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
 
-本文对应 Lyapunov 0.1.0α（技术版本及 releaseId 为 `0.1.0-alpha.7`）的 Linux x64 安装合同。当前发布说明见[0.1.0α](releases/0.1.0-alpha.7.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.1.0RC（技术版本及 releaseId 为 `0.1.0-rc`）的 Linux x64 安装合同。当前发布说明见[0.1.0-rc](releases/0.1.0-rc.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
 
 ## 默认安装
 
@@ -36,9 +36,9 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-Alpha7 默认桌面自动化供给使用固定官方稳定版 `0.7.13`；本地修补版 `0.7.13+local.atsbus.1` 仅通过 `LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local` 显式选择，不自动切换。本版支持 Ubuntu 24.04 或更新版本；两份供给与 indicator 要求 glibc 2.39 或更新版本，安装器按发行清单提前检查。
+桌面自动化供给使用固定官方稳定版 `0.7.13`；本地修补版 `0.7.13+local.atsbus.1` 仅通过 `LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local` 显式选择，不自动切换。本版支持 Ubuntu 24.04 或更新版本；两份供给与 indicator 要求 glibc 2.39 或更新版本，安装器按发行清单提前检查。
 
-Alpha7 supports Ubuntu 24.04 or newer with glibc 2.39 or newer. Desktop automation defaults to pinned official version `0.7.13`. Select the optional `0.7.13+local.atsbus.1` variant explicitly with `LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local`; there is no automatic switch. The installer checks the release manifest before activation and preserves the previous installation when the host is incompatible. Both variants have the same minimum glibc requirement.
+Lyapunov supports Ubuntu 24.04 or newer with glibc 2.39 or newer. Desktop automation defaults to pinned official version `0.7.13`. Select the optional `0.7.13+local.atsbus.1` variant explicitly with `LYAPUNOV_COMPUTER_USE_LINUX_VARIANT=local`; there is no automatic switch. The installer checks the release manifest before activation and preserves the previous installation when the host is incompatible. Both variants have the same minimum glibc requirement.
 
 需要 Linux `x86_64`、glibc、图形会话、Electron 所需共享库和可用的渲染后端。安装脚本使用系统的 `curl`、`sha256sum`、`tar`、`mktemp`、`getconf` 及常规 shell 工具；应用自带 Node.js 和 Electron，默认 MuJoCo 伴随包自带 Python。无需预先安装系统 Conda、Python、Bun 或配置模型 Key。版本目录使用随包 Node、固定 DSH 及其依赖，MuJoCo 只使用该版本的独立 `.runtime/sim-python`；默认安装不改系统 Python、不依赖 PATH 中的 dsh／python，也不复用宿主开发 venv。用户会话、凭据和数据继续使用产品的稳定数据根。运行时目录与依赖的私有归属、Host 的权限与 bwrap、Chromium 的桌面沙盒各有自己的检查，目录隔离本身不代替内核沙盒验证。
 
@@ -57,7 +57,7 @@ macOS 版本将尽快提供；Windows 用户建议通过 WSL2 + WSLg 安装和�
 | 默认 MuJoCo SDK | `<版本目录>/.runtime/sim-python/` |
 | 该版本安装回执 | `<版本目录>/.install/` |
 
-安装器下载版本清单，校验归档字节数与 SHA-256，并核对包内 `RELEASE.json` 的版本、平台和源码提交。默认 MuJoCo 以 `conda-pack` 伴随包在最终版本路径解包并运行 relocation；随后执行托管 SDK 的 `doctor` 与原生 `physics-check`。这些检查通过后，安装器才原子切换 `current` 并创建用户命令与桌面入口。
+安装器下载版本清单，校验归档字节数与 SHA-256，并核对包内 `RELEASE.json` 的版本、平台和源码提交。本版默认 MuJoCo 为 `install-provider`：版本激活后由包内 provider 联网准备独立 SDK（历史 `conda-pack` 批次在最终版本路径解包伴随包并运行 relocation）；随后执行托管 SDK 的 `doctor` 与原生 `physics-check`。这些检查通过后，安装器才原子切换 `current` 并创建用户命令与桌面入口。
 
 正常系统沙箱授权会按上面的同一安装流程自动完成；其他桌面共享库或受限沙箱条件阻断时，已校验的版本目录与 SDK 会保留，原 `current` 保持不变。按短状态与日志说明处理后重跑原安装命令，已下载的正确归档可复用，中断下载保留为 `.partial`。
 
@@ -114,7 +114,7 @@ Guest 使用独立本地工程与会话，不连接产品账户或计费后端�
 - 最新：`https://vorynel.com/lyapunov/releases/latest/linux-x64.json`，同目录 `.tsv`。
 - 固定版本：`https://vorynel.com/lyapunov/releases/<releaseId>/linux-x64.json`，同目录 `.tsv`。
 - 主包：`https://vorynel.com/lyapunov/releases/<releaseId>/<archive.path>`。
-- MuJoCo 伴随包：同一版本目录中的 `<mujoco.runtime.archive.path>`；默认运行时格式为 `conda-pack`。
+- MuJoCo 伴随包：仅 `conda-pack` 批次在同一版本目录中提供 `<mujoco.runtime.archive.path>`；`0.1.0-rc` 为 `install-provider` 批次，清单不含伴随包字段，SDK 由包内 provider 联网准备。
 
 JSON 中两项 `archive.path` 均为文件名；TSV 的 `archive_path` 与 `mujoco_path` 是从 `/lyapunov/` 起算的相对发布路径。使用清单内的真实文件名、字节数和 SHA-256；应用版本号与发布批次 releaseId 分开登记。
 
@@ -122,7 +122,7 @@ JSON 中两项 `archive.path` 均为文件名；TSV 的 `archive_path` 与 `mujo
 
 1. 从官网选择一个固定 releaseId，保存其清单与两个归档。先将下载文件的字节数和 `sha256sum` 输出与清单比较。
 2. 将主包完整解到一个新的版本目录，保留清单规定的顶层 `archiveRoot`。该目录以 `./lyapunov` 为产品入口。
-3. 在主包根创建 `.runtime/sim-python`，将 MuJoCo 伴随包解到这里。用该环境的 `bin/python bin/conda-unpack` 在最终路径运行 relocation；此后保留该路径。
+3. `conda-pack` 批次：在主包根创建 `.runtime/sim-python`，将 MuJoCo 伴随包解到这里，用该环境的 `bin/python bin/conda-unpack` 在最终路径运行 relocation。`install-provider` 批次（含 `0.1.0-rc`）：改为在包根运行 `./lyapunov install-provider mujoco` 联网准备 SDK；此后保留该路径。
 4. 运行 `./lyapunov doctor mujoco --managed-sdk` 与 `./lyapunov physics-check --managed-sdk`，按真实输出补齐当前桌面的共享库或沙盒要求。检查通过后运行 `./lyapunov`。
 5. 手工解包不会生成默认安装器的 `current`／`previous`／用户启动器。希望使用这些入口时，运行官方脚本安装同一 releaseId。
 

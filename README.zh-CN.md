@@ -30,15 +30,14 @@
 
 感谢 [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) 的支持，使 Lyapunov 的开发得以实现。
 
-## Alpha8 本次更新 · 0.1.0-alpha.8
+## 0.1.0 RC 本次更新 · 0.1.0-rc
 
-- 世界关闭暂时失败后可重试，修复 [Issue #1](https://github.com/ManfredCh/Lyapunov/issues/1) 描述的问题。
-- 接通原生物理材料与状态：MuJoCo flex 与实体缆线；Newton 受限源位置控制、静态容器 water MPM 与原生 RGB-D 相机；已有 Isaac USD 可变形体与 PBD 粒子的参数及节点／粒子读回。可用范围遵循各引擎支持的能力与本机运行环境要求。
-- 修改原生参数后同步并读回实际值，再保存与重开便携工程，保留原生文档和资源。
-- 同名工程可用**打开副本 / Open copy**创建新场景，保留原场景及其资源。
-- 自动检查点限定所选工程目录，准备过程支持取消。
+- V11 工作台候选版：工程重开带显式**打开副本 / Open copy**入口，原生材料与引擎状态工具、原生 RGB-D 相机、策略驱动的机器人执行与实时录制。
+- Robot Library 现已**随包内置全部 11 个 T0 条目、开箱即用**——allegro_hand、crazyflie_2、franka_panda、generic_quadrotor、leap_hand、shadow_hand、unitree_a1、unitree_g1、unitree_go1、unitree_go2、ur10e——资产经许可与逐件 SHA-256 台账校验，无需另行下载即可放入场景；unitree_a1 与 generic_quadrotor 如实标注需外部控制器或适配器后才可运动。
+- 修复：合并的生成授权现在正确响应各等待方的取消。
+- 修复：引擎"下次启动"偏好浮卡不再被轨容器裁剪，正常可见。
 
-查看[完整 Alpha8 发布说明](docs/releases/alpha8.md)与[Alpha8 发布及下载](https://github.com/ManfredCh/Lyapunov/releases/tag/v0.1.0-alpha.8)。
+查看[完整 RC 发布说明](docs/releases/0.1.0-rc.md)。归档与校验值按发布批次发布；[官网安装页](https://vorynel.com/lyapunov/)的版本清单为下载权威。
 
 **杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
 
