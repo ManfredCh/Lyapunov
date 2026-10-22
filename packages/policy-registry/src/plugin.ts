@@ -29,6 +29,7 @@ import {G1_23_75_ID} from './g1-23-75.ts'
 import {adoptLocalG1Policy} from './g1-local-policy.ts'
 import {installRobotDownload,robotDownloadManifest,registeredRobotDownloads,RobotDownloadFailure,type RobotDownloadFetcher} from './robot-download.ts'
 import { executePolicy } from './execution.ts'
+import { applySkillTools } from './skill-tools.ts'
 export { matchPolicy } from './match.ts'
 export type { PolicyMatchInput, PolicyMatchDifference, PolicyMatchResult } from './match.ts'
 export const name='lyapunov-policy-registry'
@@ -425,6 +426,8 @@ export function apply(ctx:Context,config:Config={}){
    return {kind:'success',text:JSON.stringify(value)}
   }catch(error){return {kind:'error',text:String(error)}}}})
  }
+ // packs 技能库（AGENT_GRAPH_CONTRACT §4）：五个冻结名工具 + 同名 commands，packsRoot 取安装根 packs/。
+ applySkillTools(ctx)
  // 模型路由条目服务（模型面 + 本机缓存事实）：持有端点配置与 dataDirectory 的一方出这一份只读事实，
  // 包面板与取件命令共读——消费方（shell）的运行根不含权重缓存目录，自己拼不出这条路。
  ctx.reflect.provide('policyModels',config.guest?{invalidate(){},async list(){return {status:'UNREACHABLE' as const,code:'GUEST_PRODUCT_SERVICE_FORBIDDEN',checkedAt:new Date().toISOString(),routes:[]}}}:createModelRoutes({dataDirectory:directory,packEndpoint:config.packEndpoint,fetcher:config.packFetcher}))

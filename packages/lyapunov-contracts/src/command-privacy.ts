@@ -627,7 +627,7 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
         "rootHeld", "jointLocks", "holdPose", "stillActiveActions", "controlConfigPreserved", "reason")
       return out
     case "sim_execute_batch": case "robot_move": case "joint_move": case "vehicle_drive": case "robot_gripper":
-      pick("actionId", "status", "startStep", "endStep", "effect", "taskAchieved", "reason")
+      pick("actionId", "status", "startStep", "endStep", "effect", "taskAchieved", "reason", "taskCheck")
       return out
     case "robot_move_tcp":
       pick("status", "taskAchieved", "reason", "executionMode", "site", "bodyName", "requestedDeltaM", "measuredDeltaM", "targetErrorM", "beforeTcp", "afterTcp", "action", "beforeStep", "afterStep", "jointNames", "beforePositions", "afterPositions", "contacts", "collisionChecked", "tracking")
@@ -701,6 +701,15 @@ export function uiCommandFields(name: string, value: unknown, roots?: ProductPat
     case "ui_photo_viewpoint_coverage": case "viewer_annotation_send_ui":
       pick("acked", "saved", "observe", "localCorrections", "localCorrectionsCount", "cameras",
         "override", "annotationId", "captureId", "injectedMessageId", "injectedSession", "outputDir", "engine", "preference", "restart", "tables", "missing")
+      return out
+    case "sim_task_check":
+      pick("taskAchieved", "evaluated", "failed", "rejectedBy", "frameId", "stepIndex", "matchedSkills")
+      return out
+    case "campaign_init": case "campaign_status": case "campaign_transition": case "campaign_record_run":
+      pick("campaignId", "campaign", "openRunIds", "recommendedNextTaskId", "taskId", "from", "to", "runId", "summary")
+      return out
+    case "pack_skill_list": case "pack_skill_get": case "skill_propose": case "skill_verify_record": case "skill_promote":
+      pick("status", "admitted", "packs", "total", "skill", "promotion", "record")
       return out
     default:
       return null
@@ -779,6 +788,8 @@ export function publicCommandFace(name: string, value: unknown, english = false)
   if (typeof source.frameCount === "number") rows.push(tr(`${source.frameCount} 帧`, `${source.frameCount} frames`))
   if (typeof source.jobId === "string") rows.push(tr("任务已启动", "Job started"))
   if (typeof source.valid === "boolean") rows.push(source.valid ? tr("检查通过", "Check passed") : tr("检查未通过", "Check failed"))
+  if (typeof source.taskAchieved === "boolean") rows.push(source.taskAchieved ? tr("任务达成", "Task achieved") : tr("任务未达成", "Task not achieved"))
+  if (count("failed") > 0) rows.push(tr(`${count("failed")} 项谓词未满足`, `${count("failed")} predicates unmet`))
   if (typeof source.modelEntry === "string") rows.push(tr(`模型入口 ${displayPath(source.modelEntry)}`, `Model entry ${displayPath(source.modelEntry)}`))
   if (typeof source.reason === "string") rows.push(stripInternal(source.reason).slice(0, 160))
   if (!rows.length) rows.push(tr("操作完成", "Completed"))
@@ -833,7 +844,8 @@ export function publicCommandShape(name: string, value: unknown, roots?: Product
     "recordingId", "frameCount", "jobId", "emptyResult", "modelEntry", "entityId", "name", "captureName", "total",
     "query", "files", "bytes", "updatedAt", "error", "resolvedRevision", "missing", "changed", "folder", "origin",
     "sizeBytes", "storage", "storedEntryPath", "deletedAt", "worldSceneRevision", "frameSceneRevision", "capturedAt",
-    "annotationCount", "injectionError", "lodIssue", "outputDir", "calibration", "camera", "simEngine", "engineId"]) scalar(key)
+    "annotationCount", "injectionError", "lodIssue", "outputDir", "calibration", "camera", "simEngine", "engineId",
+    "evaluated", "campaignId", "taskId", "from", "to", "runId", "admitted"]) scalar(key)
   if (isPlainObject(value.snapshot)) {
     const snapshot = value.snapshot as Record<string, unknown>
     out.snapshot = {
@@ -865,7 +877,7 @@ export function publicCommandShape(name: string, value: unknown, roots?: Product
   if (isPlainObject(value.output) && Array.isArray((value.output as Record<string, unknown>).artifacts)) {
     out.output = { artifacts: ((value.output as Record<string, unknown>).artifacts as unknown[]).length }
   }
-  for (const key of ["masks", "items", "assets", "entities", "joints", "annotations", "cameras", "visualWarnings", "warnings", "history", "assignments", "actions", "files", "missing", "changed"]) count(key)
+  for (const key of ["masks", "items", "assets", "entities", "joints", "annotations", "cameras", "visualWarnings", "warnings", "history", "assignments", "actions", "files", "missing", "changed", "failed", "packs", "openRunIds"]) count(key)
   if (isPlainObject(value.lastFrame)) {
     const last = value.lastFrame as Record<string, unknown>
     out.lastFrame = { ...typeof last.generation === "number" ? { generation: last.generation } : {}, ...typeof last.stepIndex === "number" ? { stepIndex: last.stepIndex } : {} }

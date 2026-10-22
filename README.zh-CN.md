@@ -30,15 +30,6 @@
 
 感谢 [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) 的支持，使 Lyapunov 的开发得以实现。
 
-## 0.1.0 RC 本次更新 · 0.1.0-rc
-
-- V11 工作台候选版：工程重开带显式**打开副本 / Open copy**入口，原生材料与引擎状态工具、原生 RGB-D 相机、策略驱动的机器人执行与实时录制。
-- Robot Library 现已**随包内置全部 11 个 T0 条目、开箱即用**——allegro_hand、crazyflie_2、franka_panda、generic_quadrotor、leap_hand、shadow_hand、unitree_a1、unitree_g1、unitree_go1、unitree_go2、ur10e——资产经许可与逐件 SHA-256 台账校验，无需另行下载即可放入场景；unitree_a1 与 generic_quadrotor 如实标注需外部控制器或适配器后才可运动。
-- 修复：合并的生成授权现在正确响应各等待方的取消。
-- 修复：引擎"下次启动"偏好浮卡不再被轨容器裁剪，正常可见。
-
-查看[完整 RC 发布说明](docs/releases/0.1.0-rc.md)。归档与校验值按发布批次发布；[官网安装页](https://vorynel.com/lyapunov/)的版本清单为下载权威。
-
 **杭州奇异宇宙人工智能有限公司出品。** Lyapunov 是 **LLM优先、3D原生的机器人与Agent桌面框架**，面向机器人开发者、仿真/研究团队与三维创作者，在同一工作台对话、建场景、准备机器人、执行受控仿真并采集相机数据。
 
 Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万物皆插件”架构，采用 Cordis 的组合机制整合工具与能力。感谢 DSH 与 Cordis 的作者和贡献者；Cordis 的设计见论文 [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512)。

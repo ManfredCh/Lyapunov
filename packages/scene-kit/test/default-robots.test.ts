@@ -117,6 +117,9 @@ test('缺件/路径不合法/inventory SHA 不符：如实 MODEL_NOT_BUNDLED，�
  }finally{await rm(escape.root,{recursive:true,force:true})}
 })
 
+// P15 单例预算：与下一条同因——真实 ResourceLibrary import + adapter 身份/SHA 复算，
+// 全 CI 沙箱实测已触 5000.99ms 默认预算截断（同文件既有 20_000ms 先例的同类用例）。
+// 仅为这条原生集成用例显式声明 20_000ms；模型沿用/SHA/资源选取/幂等判据全部保留。
 test('已准备 policy：本体沿用 adapter 模型与 SHA，资源按 adapter 身份选取',async()=>{
  const fx=await fixture()
  try{
@@ -135,7 +138,7 @@ test('已准备 policy：本体沿用 adapter 模型与 SHA，资源按 adapter 
   expect((await ensureDefaultRobotLibrary(fx.product,scene,policies)).registered).toEqual([])
   expect(await scene.resources.list()).toHaveLength(1)
  }finally{await rm(fx.root,{recursive:true,force:true})}
-})
+},20000)
 
 // P16 单例预算：与上一条同因——真实原生 ResourceLibrary 连续多次 import + adapter 身份/SHA 复算，
 // 真实物理 Python 环境下实测已到 5.0s（主控精确环境复现 5001.03ms、全CI 3855.02ms），默认 5000ms

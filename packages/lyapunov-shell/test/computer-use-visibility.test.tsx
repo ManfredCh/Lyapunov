@@ -133,7 +133,7 @@ describe("D1 · computer-use 事实：用户看到的原话",()=>{
  test("挂载层：合同类型先有键、宿主投影接进 state、两个挂载点都在页面上",()=>{
   // ① 客户端合同（`workbench-api.ts`）：先有类型再谈渲染——没有它渲染点连键都看不见
   expect(apiSource).toContain("export interface ComputerUseFacts {")
-  expect(apiSource).toContain("computerUse?:ComputerUseFacts }")
+  expect(apiSource).toContain("computerUse?:ComputerUseFacts;")
   // ② 宿主状态投影 → 本窗口 state（轮询落地那一句）
   expect(workbenchSource).toContain("setComputerUse(value.computerUse)")
   expect(workbenchSource).toContain('const [computerUse,setComputerUse]=useState<WorkbenchState["computerUse"]>()')

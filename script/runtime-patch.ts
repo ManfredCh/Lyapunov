@@ -200,6 +200,11 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     add("robot-tools")
   }
   add("robot-workflows",{recordingRoot})
+  // agent-graph 编排面（docs/AGENT_GRAPH_CONTRACT.md §6）：campaign_* 工具 + run 证据收集器 +
+  // 确定性谓词判定 sim_task_check。都无装配期配置——campaign 归属取调用方会话工作目录，
+  // sim_task_check 在调用时按执行会话取 sim 世界（无引擎时装配不失败，调用时如实报缺）。
+  add("agent-graph")
+  add("sim-task-check")
   // 分享预览是可再生的中间产物，归 cache。
   if(input.mode!=="guest")add("lyapunov-share",{mode:input.mode,privateRoot:join(d?.cacheRoot??input.sceneRoot,"share-previews"),accountId:input.accountId,accountApiUrl:input.accountApiUrl,serviceUrl:process.env.LYAPUNOV_SHARE_SERVICE_URL,previewOrigin:process.env.LYAPUNOV_SHARE_PREVIEW_ORIGIN})
   if(input.grasp&&input.grasp!=="none")add("grasp-"+input.grasp,{python:input.grasp==="anygrasp"?join(PRODUCT_ROOT,".runtime/conda/envs/anygrasp/bin/python"):mujocoPython})
@@ -257,6 +262,10 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   if(input.surface==="web")plugins.push(
     {id:"lyapunov-desktop-lifecycle",name:join(PRODUCT_ROOT,"packages/desktop/dist/plugin.js")},
     {id:"lyapunov-shell",name:"@lyapunov/shell",config:{recordingRoot,captureRoot,knownMcpDefaults:installedKnownMcpDefaults(input.sdkEnvironment??process.env),...(d?{catalogRoot:d.catalogRoot}:{}),...input.administrator?{administrator:input.administrator,modelBilling:input.modelBilling}:{}}},
+    // campaign 状态会话投影（docs/AGENT_GRAPH_CONTRACT.md §6）：tools/result 观察 campaign_* 回执
+    // → `lyapunov/campaign-state` 事件 → sessionProjection 'campaigns'（task 矩阵 + 预算用量）。
+    // 独立插件入口是因为 §6 把 shell 源码限定在 campaign-* 前缀文件里，主 plugin.ts 不新增 import。
+    {id:"lyapunov-shell-campaigns",name:join(PRODUCT_ROOT,"packages/lyapunov-shell/dist/campaign-projection.js")},
     {id:"lyapunov-workspace",name:"@lyapunov/workspace",config:{dataDirectory:outsideRoot("review-comments")}},
     {id:"lyapunov-pty",name:"@deepseek-ai/dsh-terminal"},
     {id:"lyapunov-terminal",name:"@deepseek-ai/dsh-terminal-bash",config:{shellDialect:process.platform==="win32"?"pwsh":"bash"}},

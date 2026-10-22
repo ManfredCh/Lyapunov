@@ -45,6 +45,27 @@
       "reason": "发行沙箱检查：普通用户与上下文限制、root4755及nosuid事实；不执行sudo或修改系统策略。"
     },
     {
+      "path": "packages/agent-graph/test/campaign-e2e.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "AGENT-GRAPH 跨包 E2E（契约 §7）：真实 Cordis 装配——原生 Tools/Commands/Session/AgentLoop 测试件 + 真 Agent（session.header.cwd=tmpdir）走 ctx.tools.execute 完整管线。全链：campaign_init→transition(exploring→debugging 复用 worker run)→e2e_probe 调用经 tools/execute waterfall 落 calls.jsonl（sha256 argsDigest+回执字段转录、预算计数）→campaign_record_run 写自含 run.json→tmpdir packsRoot 上 skill_propose/verify_record/promote 走通（晋升记录回指真实 heldout 复核 runId）→verifying→heldout-eval→done 收拢 campaign.status=completed。反例：heldout 任务两处 worker 越权具名拒绝（CAMPAIGN_ILLEGAL_TRANSITION/CAMPAIGN_PARTITION_VIOLATION）、未验证与未通过提案 promote 均 SKILL_NOT_VERIFIED 且不产生 skills/ 文件。tmpdir 夹具、离线、无引擎无网络。"
+    },
+    {
+      "path": "packages/agent-graph/test/campaign.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "AGENT-GRAPH 单元面（tmpdir 夹具 ctx 捕获 waterfall/注册表）：campaign_init/status 持久化往返与具名校验拒绝（空 tasks/非法 partition/非正预算/未知 campaignId）；transition 状态机与 run 生命周期（活动状态开 run、同任务同角色复用、heldout+worker CAMPAIGN_PARTITION_VIOLATION、heldout record_run 落 heldoutResult）；tools/execute waterfall 证据轨迹（seq/callId/sha256 argsDigest/回执转录/失败留证/campaign_* 豁免）与三维预算闸（超限当次放行、后续 CAMPAIGN_BUDGET_EXCEEDED）；record_run 自含 run.json+summary 计数。断言真实落盘文件。"
+    },
+    {
+      "path": "packages/agent-graph/test/state-machine.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "AGENT-GRAPH 状态机纯函数面：dev 与 heldout 两分区合法迁移表逐边核对（含 verifying→debugging 打回、活动态→blocked、终局无出边）、非法迁移具名 CAMPAIGN_ILLEGAL_TRANSITION、heldout+worker CAMPAIGN_PARTITION_VIOLATION、defaultRoleFor 角色推断（verifying/heldout-eval→verifier，余→worker）。离线纯逻辑。"
+    },
+    {
       "path": "packages/asset-bake/test/bake-route.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -771,6 +792,13 @@
       "markers": [],
       "decision": "include",
       "reason": "P19 R-005：真实相机安装 mount 穿过机器 UI 出站投影的回归。真实 camera_scene_save 回执字段先过 commandRouteResponse/uiCommandFields，再喂给 cameraDraftOfScene/sceneCameraDraftOf/restoredCameraDraft，断言 camera.mount 与 installation.baseline.mount 保留、其它返回 Scene snapshot 的命令一致、同版本重复投影不丢；负例钉住计费/取件 mount、用户自定组件、假相机（无 fovYDeg）、token 与机器路径仍不可见，且 mount 仍在全局内部字段表中。离线纯逻辑，不触网不启引擎。实测 8 pass / 0 fail。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/campaign-projection.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "LYAPUNOV-SHELL campaign 投影+面板（契约 §6）：真实 Cordis 装配（mountAgentLoopTestDependencies + 真 Agent/Session header.cwd=tmpdir）走 ctx.tools.execute——init/status 回执直接落卡、transition 增量回执经投影补发的 campaign_status 落整卡（openRunIds）、具名拒绝写 lastError 且下一次成功读数清除；会话间投影隔离；fold/init/cardOf 纯函数（整卡替换、goal 不进卡）；面板 SSR 断言任务状态矩阵+used/max 预算条+heldout 徽标+越界 --lya-bad，颜色全走 --lya-* token 无硬编码色值。tmpdir、离线。"
     },
     {
       "path": "packages/lyapunov-shell/test/capability-facts.test.ts",
@@ -1777,6 +1805,20 @@
       "markers": [],
       "decision": "include",
       "reason": "A08有限managed/显式策略解释器与Sourcekind依赖选择负例；临时探针报文替身，不下载/真实SDK/推理/GPU或动作，真实Host/native另验。"
+    },
+    {
+      "path": "packages/policy-registry/test/skill-library.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "POLICY-REGISTRY 技能库落盘面（tmpdir packsRoot）：proposals/ 与 skills/ 目录纪律（提案绝不直进 skills/）、PackSkill 形状校验（schema lyapunov-pack-skill/1）、verify 覆盖写与 passed=true 唯一解锁、promote 原子写+promotions.jsonl 追加+提案清理；具名错误 SKILL_*（PACK_NOT_FOUND/PROPOSAL_EXISTS/ALREADY_PROMOTED/NOT_VERIFIED/AMBIGUOUS/ID_INVALID）。原子写（临时文件+rename）与 JSON 可重建。"
+    },
+    {
+      "path": "packages/policy-registry/test/skill-tools.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "POLICY-REGISTRY 技能工具面（§4 冻结名）：pack_skill_list/pack_skill_get/skill_propose/skill_verify_record/skill_promote 五工具+同名命令经假 ctx 注册表驱动；{input} 与 JSON 字符串入参同语义归一化；提案-验证-晋升全链与未验证拒绝、packId 消歧与 SKILL_PACK_MISMATCH；SKILL_* 错误码原样上抛不吞不译。tmpdir packsRoot、离线。"
     },
     {
       "path": "packages/policy-registry/test/tier-roster.test.ts",
@@ -2843,6 +2885,27 @@
       "markers": [],
       "decision": "include",
       "reason": "无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/sim-task-check/test/plugin.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "SIM-TASK-CHECK 插件面：sim_task_check 工具+命令注册与冻结签名（{worldId,expectedGeneration,predicates,checkSpec?}）；typed schema 与谓词形状校验具名拒绝（TASK_CHECK_PREDICATE_INVALID）；会话世界解析缺口如实报 TASK_CHECK_WORLD_REQUIRED/TASK_CHECK_STALE_GENERATION；TaskCheckResult 形状（taskAchieved/failed[]/rejectedBy/frameId/stepIndex）。夹具世界、离线。"
+    },
+    {
+      "path": "packages/sim-task-check/test/predicates.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "SIM-TASK-CHECK 谓词求值纯函数面：八种原子（entity-in-box/distance-below|above/contact-exists/joint-in-range/settled/reachable/no-penetration）与 and/or/not 组合树的判定；缺实体 ENTITY_MISSING、缺观测 OBSERVATION_UNAVAILABLE 如实上报不猜；失败回执携带具名 reasonCode+expected/measured。离线纯逻辑。"
+    },
+    {
+      "path": "packages/sim-task-check/test/spec-gate.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "SIM-TASK-CHECK spec 级门（不推进物理的最便宜先行拦截）：SPEC_ENTITY_MISSING（谓词引用实体不在场景声明）、SPEC_UNREACHABLE（正值 reachable 目标超出声明可达半径）、SPEC_ALREADY_SATISFIED（stepIndex=0 已满足仍如实报 taskAchieved）；场景服务不可用时降级为仅帧级门、checkSpec===false 显式关闭。夹具帧+声明、离线。"
     },
     {
       "path": "packages/viewer/test/animation-reference.test.ts",

@@ -19,9 +19,9 @@ const upper = RAIL_ENTRIES.filter(entry => entry.group === "tool").map(entry => 
 const lower = RAIL_ENTRIES.filter(entry => entry.group === "work").map(entry => entry.id)
 
 describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
-  test("上组依次 Scene/Objects/Env/Robots/Camera/Capture/Recording/Notes；下组 Physics/引擎/Files/Terminal/Outputs", () => {
+  test("上组依次 Scene/Objects/Env/Robots/Camera/Capture/Recording/Notes；下组 Physics/Campaigns/引擎/Files/Terminal/Outputs", () => {
     expect(upper).toEqual(["scene", "object", "environment", "robot", "camera", "capture", "recording", "annotation"])
-    expect(lower).toEqual(["physics", "engine", "file", "terminal", "deliverable"])
+    expect(lower).toEqual(["physics", "campaign", "engine", "file", "terminal", "deliverable"])
     // 泛用 Library 退出一级轨（R-008）；Physics 在下组但行为是工具面板，不是抽屉/偏好。
     expect(RAIL_ENTRIES.some(entry => (entry.id as string) === "asset")).toBe(false)
     expect(RAIL_ENTRIES.find(entry => entry.id === "physics")!.behavior).toBe("tool")
@@ -33,12 +33,12 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
     }
   })
 
-  test("P17 视觉减法：工具轨 13 入口原顺序不变，宽屏也图标化，名称全部走 aria-label/title", () => {
-    // 13 项入口是产品契约，不减项、不换序；可见文字不再常驻（CSS 由 .lya-rail-item .lya-rail-label 隐藏）。
-    expect(RAIL_ENTRIES.length).toBe(13)
+  test("P17 视觉减法：工具轨 14 入口原顺序不变，宽屏也图标化，名称全部走 aria-label/title", () => {
+    // 14 项入口是产品契约，不减项、不换序；可见文字不再常驻（CSS 由 .lya-rail-item .lya-rail-label 隐藏）。
+    expect(RAIL_ENTRIES.length).toBe(14)
     expect(RAIL_ENTRIES.map(entry => entry.id)).toEqual([
       "scene", "object", "environment", "robot", "camera", "capture", "recording", "annotation",
-      "physics", "engine", "file", "terminal", "deliverable",
+      "physics", "campaign", "engine", "file", "terminal", "deliverable",
     ])
     for (const entry of RAIL_ENTRIES) expect(entry.en.trim().length).toBeGreaterThan(0)
   })
@@ -92,11 +92,11 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
       expect(labels).toContain("Objects")
       expect(labels).toContain("Physics")
       expect(labels).toContain("Environment")
-      // P17：图标化后仍是 13 个完整入口，名称全部走 aria-label/title（不靠图标下常驻文字）。
+      // P17：图标化后仍是 14 个完整入口，名称全部走 aria-label/title（不靠图标下常驻文字）。
       const nav = document.querySelector<HTMLElement>(".lya-rail")!
       expect(nav.getAttribute("data-compact")).toBe("icon")
       const items = [...document.querySelectorAll<HTMLButtonElement>(".lya-rail-item")]
-      expect(items.length).toBe(13)
+      expect(items.length).toBe(14)
       for (const item of items) {
         expect((item.getAttribute("aria-label") ?? "").trim().length).toBeGreaterThan(0)
         expect((item.getAttribute("title") ?? "").trim().length).toBeGreaterThan(0)

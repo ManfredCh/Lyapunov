@@ -41,6 +41,12 @@ for(const name of packages){
     const preferences = await Bun.build({entrypoints:[join(dir,'src/preferences-host.ts')],outdir:join(dir,'dist'),naming:'[name].js',target:'node',format:'esm',external:['@deepseek-ai/*'],minify:false})
     if (!preferences.success) throw new AggregateError(preferences.logs, '原生偏好 Config 入口构建失败：' + name)
   }
+  if (name === 'lyapunov-shell') {
+    // campaign 会话投影是独立 cordis 插件入口（lyapunov-shell-campaigns，runtime-patch 按 dist 路径挂载），
+    // 与 preferences-host 同一"随包额外出具名 dist 产物"的惯例。
+    const campaigns = await Bun.build({entrypoints:[join(dir,'src/campaign-projection.ts')],outdir:join(dir,'dist'),naming:'[name].js',target:'node',format:'esm',external:['@deepseek-ai/*'],minify:false})
+    if (!campaigns.success) throw new AggregateError(campaigns.logs, 'campaign 投影插件入口构建失败：' + name)
+  }
   if(name==="desktop"){
     const credentials=await Bun.build({entrypoints:[join(dir,"src/guest-credentials.ts")],outdir:join(dir,"dist"),target:"node",format:"esm",external:["@deepseek-ai/*"]})
     if(!credentials.success)throw new AggregateError(credentials.logs,"游客传输凭据provider构建失败")

@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-sim-task-check
+      name: '@lyapunov/sim-task-check/plugin'

@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-agent-graph
+      name: '@lyapunov/agent-graph/plugin'

@@ -51,6 +51,11 @@ const names:Record<string,[string,string]>={
  camera_list_ui:["读取命名相机","List named cameras"],camera_adjust_ui:["调整相机位姿 / 视场","Adjust camera pose / FOV"],
  camera_capture_multi_ui:["同帧多视角采集","Multi-view capture"],camera_annotation_ui:["像素标注","Annotate pixel"],
  camera_dataset_export_ui:["导出多视角数据集","Export multi-view dataset"],camera_lidar_scan_ui:["LiDAR 扫描","LiDAR scan"],
+ sim_task_check:["检查任务谓词","Check task predicates"],
+ campaign_init:["初始化 Campaign","Initialize campaign"],campaign_status:["读取 Campaign 状态","Read campaign status"],
+ campaign_transition:["推进 Campaign 状态","Transition campaign task"],campaign_record_run:["记录 Campaign 运行","Record campaign run"],
+ pack_skill_list:["列出能力包技能","List pack skills"],pack_skill_get:["读取能力包技能","Read pack skill"],
+ skill_propose:["提交技能提案","Propose skill"],skill_verify_record:["记录技能验证","Record skill verification"],skill_promote:["准入晋升技能","Promote skill"],
 }
 const shortened=(value:unknown,max=50)=>String(value??"").length>max?String(value).slice(0,max-1)+"…":String(value??"")
 /** 失败摘要只留服务端给的公开码 + 人话（`P402: …`），内部码/栈/路径已在出站投影点去掉。 */
@@ -212,7 +217,7 @@ function domainCommandSummaryRaw(name:string,text:string|undefined,kind:"success
  if(snapshot)return {summary:`${value.name?shortened(value.name,28)+" · ":""}rev ${snapshot.revision} · ${entities(snapshot.entities??snapshot.entityCount)} ${tr("个实体","entities")}${entities(value.missing)?tr(` · ${entities(value.missing)} 项引用缺失`,` · ${entities(value.missing)} missing references`):""}`,tone:entities(value.missing)?"warning":"ok"}
  if(value?.worldId&&value.engineId)return {summary:`${value.engineId} · generation ${value.worldGeneration} · rev ${value.appliedSceneRevision} · ${value.status}`,tone:["unsynced","unavailable"].includes(value.status)?"warning":"ok"}
  if(value?.joints!==undefined&&value.entityId)return {summary:`${shortened(value.entityId,24)} · ${entities(value.joints)} ${tr("个关节","joints")}${value.controlledJointNames?` · ${entities(value.controlledJointNames)} ${tr("可控","controlled")}`:""}`,tone:"ok"}
- if(value?.frameId)return {summary:`step ${value.stepIndex} · ${Number(value.simTime).toFixed(3)} s · ${entities(value.entities)} ${tr("个实体","entities")}`,tone:"ok"}
+ if(value?.frameId&&typeof value?.taskAchieved!=="boolean")return {summary:`step ${value.stepIndex} · ${Number(value.simTime).toFixed(3)} s · ${entities(value.entities)} ${tr("个实体","entities")}`,tone:"ok"}
  if(typeof value?.valid==="boolean")return {summary:value.valid?tr("校验通过","Verification passed"):tr(`缺失 ${entities(value.missing)} 项 · 变化 ${entities(value.changed)} 项`,`${entities(value.missing)} missing · ${entities(value.changed)} changed`),tone:value.valid?"ok":"warning"}
  if(value?.name!==undefined)return {summary:`${shortened(value.name,40)}${value.ref?.version===undefined?"":` · v${value.ref.version}`}${value.deletedAt?tr(" · 回收站"," · In trash"):""}`,tone:"ok"}
  if(value?.masks!==undefined)return {summary:value.emptyResult?tr("未找到匹配对象","No matching objects"):`${value.provider??""} · ${entities(value.masks)} masks`,tone:"ok"}

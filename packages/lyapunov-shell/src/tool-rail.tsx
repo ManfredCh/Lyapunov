@@ -12,7 +12,7 @@
  *
  * 这里只发展示状态命令；面板内容由 work-surface 负责，场景/world 数据仍属于既有 host 所有者。
  */
-import {WorkbenchIcon} from "./vendor/tabler/icons.tsx"
+import {WorkbenchIcon,type WorkbenchIconId} from "./vendor/tabler/icons.tsx"
 import type {Translate} from "./entity-editor.tsx"
 import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
 
@@ -27,7 +27,7 @@ import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
  * 环境资源归 Environment，导入/复用从各域进入。
  */
 export type RailBehavior="tool"|"engine"|"surface"
-export interface RailEntry{id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work";behavior:RailBehavior}
+export interface RailEntry{id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work";behavior:RailBehavior;/** id 不在 WorkbenchIconId 白名单内时才给：图标沿用既有 id 而不是为单个入口扩图标库。 */ icon?:WorkbenchIconId}
 
 export const RAIL_ENTRIES:readonly RailEntry[]=[
   {id:"scene",zh:"场景",en:"Scene",shortEn:"Scene",group:"tool",behavior:"tool"},
@@ -40,6 +40,8 @@ export const RAIL_ENTRIES:readonly RailEntry[]=[
   {id:"annotation",zh:"批注",en:"Notes",shortEn:"Notes",group:"tool",behavior:"tool"},
   // 运行环境与工作面（下组）：Physics 仍是工具面板，引擎是**唯一的偏好切换**（单击，不新造设置页）。
   {id:"physics",zh:"物理",en:"Physics",shortEn:"Physics",group:"work",behavior:"tool"},
+  // Campaign 描述 agent 运行（worker/verifier 循环），归运行组；无同名图标，沿用 terminal 读作“代理执行”。
+  {id:"campaign",zh:"巡检",en:"Campaigns",shortEn:"Camp",group:"work",behavior:"tool",icon:"terminal"},
   {id:"engine",zh:"引擎",en:"Engine",shortEn:"Engine",group:"work",behavior:"engine"},
   {id:"file",zh:"文件",en:"Files",shortEn:"Files",group:"work",behavior:"surface"},
   {id:"terminal",zh:"终端",en:"Terminal",shortEn:"Terminal",group:"work",behavior:"surface"},
@@ -88,7 +90,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         else ui.toggleDrawer(entry.id==="terminal"?"terminal":"deliverable")
       }}
     >
-      <WorkbenchIcon id={entry.id} size={16}/>
+      <WorkbenchIcon id={entry.icon??(entry.id as WorkbenchIconId)} size={16}/>
       <span className="lya-rail-label">{shortLabel}</span>
     </button>
   }

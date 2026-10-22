@@ -47,6 +47,7 @@ import type {RobotAssemblyChange,RobotAssemblyCheckResult,RobotAssemblyHistoryRe
 import {validRobotPose} from "../../lyapunov-contracts/src/robot-authoring.ts"
 import {FlightControlPanel} from "./flight-control-panel.tsx"
 import {RecordingPanel,recordingPanelSeatKey} from "./recording-panel.tsx"
+import {CampaignsPanel} from "./campaign-panel.tsx"
 import {CapturePanel,cameraRigSpecs} from "./capture-panel.tsx"
 import {CameraAimControl,CameraReturnControl,SceneCameraPanel,useNativeCameraList} from "./scene-camera-panel.tsx"
 import {CaptureSessionBar,ContinuousCapturePanel} from "./capture-video-panel.tsx"
@@ -678,6 +679,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // D1（`bugfixHistory/VISIBILITY-HOLES-20260926.md`）：computer-use 会话事实（宿主 `computerUseFacts()` 的状态投影）。
  // 此前这个键在客户端**零读取**——"本会话正在控制输入"、"会话结束恢复失败了哪几项"、"哪些输入被拒了"用户全看不到。
  const [computerUse,setComputerUse]=useState<WorkbenchState["computerUse"]>()
+ const [campaigns,setCampaigns]=useState<WorkbenchState["campaigns"]>()
  // DEV-039：3D 渲染不可用（WebGL 上下文创建失败）时的**显式**呈现状态。
  // 与 `error` 分开：`error` 是"这一轮操作失败了"，这里是"这台机器上 3D 画不出来"——
  // 前者会随下次操作清掉，后者在环境修好前一直成立，且必须顶掉画布位置而不是留空座位。
@@ -1066,7 +1068,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(!currentAPI())return value
   const previous=hostId.current??readCache(cacheKey).hostInstanceId,changed=Boolean(previous&&previous!==value.hostInstanceId)
   setAdministrator(value.modelBilling==="own-key"?value.administrator:undefined)
-  hostId.current=value.hostInstanceId;setWorldHostEpoch(value.hostInstanceId);setProviderAvailable(value.providerAvailable);setWorlds(value.worlds);setCaptures(value.captures??[]);setVideos(value.videos??[]);setComputerUse(value.computerUse)
+  hostId.current=value.hostInstanceId;setWorldHostEpoch(value.hostInstanceId);setProviderAvailable(value.providerAvailable);setWorlds(value.worlds);setCaptures(value.captures??[]);setVideos(value.videos??[]);setComputerUse(value.computerUse);setCampaigns(value.campaigns)
   if(value.recentActions)setActions(value.recentActions)
   if(value.scene){if(selectedRef.current&&!value.scene.entities.some(e=>e.entityId===selectedRef.current)){selectedRef.current=undefined;setSelected(undefined)}setScene(old=>old?.sceneId===value.scene!.sceneId&&old.revision===value.scene!.revision?old:value.scene);sceneRef.current=value.scene}
   if(changed){setWorld(undefined);worldRef.current=undefined;setFrame(undefined);setDescriptions({});setTargets({});projectedScene.current=undefined;viewer.current?.setWorld(undefined);setNotice(tr("Host 已重启，旧世界句柄已清除；正在按当前场景恢复物理世界。","Host restarted; old world handles were cleared. Restoring physics for the current scene."));persist(value.scene,undefined)}
@@ -2984,7 +2986,8 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    {videos.length>0&&<><div className="lya-row"><strong>{tr("连续视频","Continuous videos")} {videos.length}</strong></div><div>{videos.slice(0,6).map(record=><div key={record.videoId}><video controls preload="metadata" style={{width:"100%",height:"auto"}} src={api.videoURL(record.videoId)} aria-label={tr("连续视频回放","Continuous video playback")}/><p className="lya-help">{record.source==="route"?tr("路线","Route"):tr("自由视角","Free view")} · {record.container}/{record.codec} · {(record.durationMs/1000).toFixed(2)} s · {record.bytes} B</p><a href={api.videoURL(record.videoId)} download={`${record.videoId}.${record.container==="unknown"?"bin":record.container}`}>{tr("下载视频","Download video")}</a></div>)}</div></>}
   </>
  const annotationBar=<AnnotationPanel annotations={annotations} activeId={activeAnnotation} annotating={annotating} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} sceneReady={Boolean(scene)} hasEntities={Boolean(scene?.entities.length)} entityName={entityId=>scene?.entities.find(item=>item.entityId===entityId)?.name} sceneId={annotationSceneId} focusRequest={annotationFocusRequest} onToggleMode={annotationActions.toggleMode} onSelect={annotationActions.select} onText={annotationActions.text} onRemove={annotationActions.remove} onCapture={captureAnnotations} inject={injectAnnotations} onInject={setInjectAnnotations} prompt={annotationPrompt} captures={annotationCaptures} tr={tr}/>
- const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,object:objectPanel,camera:cameraPanel,capture:capturePanel,recording:recordingPanel,annotation:null,physics:physicsPanel}
+ const campaignPanel=<CampaignsPanel campaigns={campaigns??[]} tr={tr}/>
+ const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,object:objectPanel,camera:cameraPanel,capture:capturePanel,recording:recordingPanel,annotation:null,physics:physicsPanel,campaign:campaignPanel}
  const addViewerToChat=async()=>{
   const menu=viewerMenu,snapshot=sceneRef.current,currentSession=sessionId,requestAPI=apiRef.current
   if(!menu||!snapshot||!currentSession||!insertViewerReference)throw Error('VIEWER_REFERENCE_NATIVE_INPUT_UNAVAILABLE')

@@ -25,7 +25,7 @@ export type LayoutMode="chat"|"collab"|"scene"
  * Robots 机器人、Camera 机器人机位、Capture 自由视角、Recording 记录作业、Annotate/Notes 画布批注；
  * Physics 是运行环境，独立成面板。旧 `asset`（泛用素材库）退出一级入口，见下方 `LEGACY_TOOL_MIGRATIONS` 迁移。
  */
-export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"
+export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"|"campaign"
 /** 中央视图：场景画布（固定入口）⟷ 文件工作面。 */
 export type CentreId="canvas"|"file"
 /** 底部抽屉：终端 / 运行产物，一次一个。 */
@@ -103,7 +103,7 @@ const clampConversationWidth=(value:number)=>Math.min(CONVERSATION_MAX_WIDTH,Mat
  */
 
 const MODES:LayoutMode[]=["chat","collab","scene"]
-const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics"]
+const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics","campaign"]
 /**
  * 旧存储/旧调用里的 `asset` 是泛用素材库（R-008 已把它并回业务类别）。存量 localStorage 没有
  * 上下文，最接近的语义是 Objects 的导入/复用；`asset` 的旧 `ui_action` 也会走这条迁移，

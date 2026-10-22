@@ -91,6 +91,7 @@ import {applyPreferencesHost} from './preferences-host.ts'
 import {applyExternalToolsHost} from './external-tools-host.ts'
 import {applyProductFontsHost} from './product-fonts.ts'
 import {applyExecutionGraph,type GraphConfig} from './execution-graph-host.ts'
+import {campaignsOf} from './campaign-projection.ts'
 // DEV-PRIV-01 发行隐私数据边界：产品侧唯一判据（纯函数）。三个消费者各留各的字段，
 // **没有 `{public,result}` 兜底**——出站面从这里裁，浏览器载荷里根本没有内部原文。
 import {commandRouteResponse,diagnosticsPayload,displayPath,publicCommandError,redactSecretsText,scrubAbsolutePaths,stripStack,uiCommandFields} from "../../lyapunov-contracts/src/command-privacy.ts"
@@ -2443,7 +2444,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const input=resolveProductPaths(body.input,productPathRoots)
   const resolved=await ctx.sessionController.resolveAgent(SessionId(sessionId));if('error' in resolved)throw resolved.error
   const agent=resolved.agent
-  if(!/^(scene_|asset_|policy_|sim_|robot_|joint_|vehicle_|viewer_|sensor_|camera_|segment_|recording_|fastgs_|ui_)/.test(name))throw new Error("UNKNOWN_DOMAIN_COMMAND")
+  if(!/^(scene_|asset_|policy_|sim_|robot_|joint_|vehicle_|viewer_|sensor_|camera_|segment_|recording_|fastgs_|ui_|campaign_|skill_|pack_skill_)/.test(name))throw new Error("UNKNOWN_DOMAIN_COMMAND")
   // 归属核对基准 = 命令发出时（客户端内部请求携带）的选择身份；只有拿不到元数据的旧/非 UI 调用
   // 才退回服务端此刻的记录。不能用请求到达后才采到的新选择去解释一条更早发出的命令。
   const atStart=dispatchedIdentity(selection)??selectionIdentity(agent)
@@ -2601,7 +2602,10 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   }))
   // 连续视频与图像采集**同一份 state 轮询**、不同数组：前端既能发现视频，也不会把视频塞进图像列表。
   const videos=(await listVideoCaptures(sessionKey,sceneId)).map(videoFace)
-  return Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,videos,recentActions,...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
+  // campaign 投影按会话取：agent-graph 的 campaign_* 调用落 `lyapunov/campaign-state` 卡；
+  // 投影未注册（agent-graph 未装配）或本会话无 campaign 时就是空表，不另造第二份状态。
+  const campaignCards=agent?campaignsOf(ctx,agent.session)?.campaigns:undefined
+  return Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,videos,recentActions,...campaignCards?{campaigns:campaignCards}:{},...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
  })
  // 场景清单归 scene-kit 所有：布局改造后场景文档在 <worlds>/scenes，shell 不再自己猜目录
  // （旧实现读 config.dataRoot/单根，迁移后恒返回空列表，3D 视口因此永远停在空态）。

@@ -21,6 +21,20 @@
         "typescript": "5.8.2",
       },
     },
+    "packages/agent-graph": {
+      "name": "@lyapunov/agent-graph",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.4",
+        "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+        "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+      },
+      "optionalPeers": [
+        "@deepseek-ai/cordis",
+        "@deepseek-ai/dsh-commands",
+        "@deepseek-ai/dsh-tools",
+      ],
+    },
     "packages/asset-bake": {
       "name": "@lyapunov/asset-bake",
       "version": "0.1.0",
@@ -125,7 +139,7 @@
     },
     "packages/desktop": {
       "name": "@lyapunov/desktop",
-      "version": "0.1.0-alpha.4",
+      "version": "0.1.0-rc",
       "dependencies": {
         "electron-store": "10.1.0",
         "electron-updater": "6.8.3",
@@ -546,6 +560,20 @@
         "@deepseek-ai/cordis",
       ],
     },
+    "packages/sim-task-check": {
+      "name": "@lyapunov/sim-task-check",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.4",
+        "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+        "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+      },
+      "optionalPeers": [
+        "@deepseek-ai/cordis",
+        "@deepseek-ai/dsh-commands",
+        "@deepseek-ai/dsh-tools",
+      ],
+    },
     "packages/viewer": {
       "name": "@lyapunov/viewer",
       "version": "0.1.0",
@@ -571,6 +599,8 @@
     "@electron-internal/extract-zip": ["@electron-internal/extract-zip@1.0.5", "https://registry.npmmirror.com/@electron-internal/extract-zip/-/extract-zip-1.0.5.tgz", {}, "sha512-+bqFCP98pLI0Tt0XQo1TmlXtwjWchISndDOxCkEcIuUgXWpBnLyRI+2DU+mesvnMMX6L1XDqYNA0lXNDHd/yiA=="],
 
     "@electron/get": ["@electron/get@5.1.0", "https://registry.npmmirror.com/@electron/get/-/get-5.1.0.tgz", { "dependencies": { "debug": "^4.1.1", "env-paths": "^3.0.0", "graceful-fs": "^4.2.11", "progress": "^2.0.3", "semver": "^7.6.3", "sumchecker": "^3.0.1" }, "optionalDependencies": { "undici": "^7.24.4" } }, "sha512-3kSBtG8ObcTVfXanm5vVJ6UnBLEVmVsRk1M+vGqCuMBV+XLCbJYuWQful+yIy0GQDsSlK0kHEriEHn7SPk4EnA=="],
+
+    "@lyapunov/agent-graph": ["@lyapunov/agent-graph@workspace:packages/agent-graph"],
 
     "@lyapunov/api-client": ["@lyapunov/api-client@workspace:packages/lyapunov-api-client"],
 
@@ -637,6 +667,8 @@
     "@lyapunov/sim-mujoco": ["@lyapunov/sim-mujoco@workspace:packages/sim-mujoco"],
 
     "@lyapunov/sim-newton": ["@lyapunov/sim-newton@workspace:packages/sim-newton"],
+
+    "@lyapunov/sim-task-check": ["@lyapunov/sim-task-check@workspace:packages/sim-task-check"],
 
     "@lyapunov/terminal": ["@lyapunov/terminal@workspace:packages/lyapunov-terminal"],
 

@@ -1,0 +1,65 @@
+{
+  "schema": "lyapunov-pack-skill/1",
+  "proposal": {
+    "skillId": "panda-grasp-retry-after-slip",
+    "packId": "franka_panda",
+    "failureSignature": {
+      "reasonCodes": ["CONTACT_MISSING", "POSE_OUTSIDE_BOX"],
+      "description": "夹爪闭合后 contact-exists 谓词不成立，目标块仍停留在放置区外——典型抓取滑脱/未夹住。"
+    },
+    "applicableWhen": {
+      "robotKinds": ["arm"],
+      "taskShape": "pick-and-place",
+      "description": "Franka Emika Panda 7 自由度臂 + 平行夹爪；拾放类任务中首次抓取未形成稳定接触。"
+    },
+    "fixStrategy": "抬回预抓位上方，降低接近速度沿 -Z 二次下压约 1cm 后重新闭合夹爪，抬升后用 contact-exists 复测接触是否形成。",
+    "program": [
+      {
+        "tool": "sim_control",
+        "input": {
+          "kind": "control",
+          "entityId": "panda",
+          "jointNames": ["panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4", "panda_joint5", "panda_joint6", "panda_joint7"],
+          "positions": [0.0, -0.4, 0.0, -2.2, 0.0, 2.0, 0.785],
+          "stepCount": 50
+        }
+      },
+      {
+        "tool": "sim_control",
+        "input": {
+          "kind": "control",
+          "entityId": "panda",
+          "jointNames": ["panda_finger_joint1", "panda_finger_joint2"],
+          "positions": [0.0, 0.0],
+          "stepCount": 30
+        }
+      },
+      {
+        "tool": "sim_task_check",
+        "input": {
+          "worldId": "<worldId>",
+          "expectedGeneration": 0,
+          "predicates": {
+            "and": [
+              { "kind": "contact-exists", "entityA": "panda/panda_leftfinger", "entityB": "block" },
+              { "kind": "contact-exists", "entityA": "panda/panda_rightfinger", "entityB": "block" }
+            ]
+          }
+        }
+      }
+    ],
+    "devEvidence": {
+      "runIds": ["fixture-dev-run-0001"],
+      "checkedAt": "2026-10-22T00:00:00.000Z"
+    },
+    "author": "fixture:agent-c-skeleton（示例条目，非真实 worker 产出）"
+  },
+  "promotion": {
+    "skillId": "panda-grasp-retry-after-slip",
+    "packId": "franka_panda",
+    "verifierRunId": "fixture-verifier-run-0001",
+    "reproducedTaskIds": ["fixture-task-pick-place-01"],
+    "attempts": 1,
+    "promotedAt": "2026-10-22T00:00:00.000Z"
+  }
+}

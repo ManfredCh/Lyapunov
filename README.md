@@ -30,15 +30,6 @@
 
 We thank [UAD — The Architectural Design & Research Institute of Zhejiang University Co., Ltd. (浙江大学建筑设计研究院有限公司)](https://www.uad.com.cn/) for the support that made the development of Lyapunov possible.
 
-## 0.1.0 RC update · 0.1.0-rc
-
-- The V11 workbench candidate: project reopen with an explicit **Open copy** path, native materials and engine-state tools, native RGB-D cameras, and policy-driven robot execution with live recording.
-- The Robot Library now ships all **11 bundled T0 entries out of the box** — allegro_hand, crazyflie_2, franka_panda, generic_quadrotor, leap_hand, shadow_hand, unitree_a1, unitree_g1, unitree_go1, unitree_go2 and ur10e — license- and SHA-256-ledgered, ready to place without extra downloads; unitree_a1 and generic_quadrotor are honestly labeled as needing an external controller or adapter.
-- Fix: coalesced generation approvals now honor per-waiter cancellation.
-- Fix: the engine "next start" preference card now renders visibly instead of being clipped inside the rail.
-
-See the [full RC release notes](docs/releases/0.1.0-rc.md). Archives and checksums are published per release batch; the [installation page](https://vorynel.com/lyapunov/) manifest is the download authority.
-
 Lyapunov is an **LLM-first, 3D-native robotics and agent desktop framework**, produced by **Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)**. For robotics developers, simulation/research teams and 3D creators, it brings scene construction, robot preparation, controlled simulation and camera data into one workspace. Chat, code, files, the 3D viewer, and physics share one desktop workspace.
 
 Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “everything-is-a-plugin” architecture and uses Cordis's composition mechanism to integrate tools and capabilities. We thank the authors and contributors of DSH and Cordis; the Cordis design is described in [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512).
@@ -50,6 +41,11 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 <!-- Workbench screenshot placeholder: add the correct image here when available. -->
 
 **Recommended workflow:** ask the agent to use native product tools, or use workbench controls for scene, robot and simulation operations.
+
+## Release channels
+
+- **Default installation — [0.1.0 RC](docs/releases/0.1.0-rc.md):** the existing installation contract and default download remain available.
+- **Opt-in preview — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** adds agent-graph campaigns, task predicates on action receipts, automatic recall of verified skills, worker/heldout and verifier isolation, and the Campaigns workbench panel. Select the alpha explicitly; it does not replace the RC download.
 
 ## Install on Linux
 

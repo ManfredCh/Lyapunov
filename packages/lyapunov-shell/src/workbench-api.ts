@@ -5,6 +5,7 @@ import type {EnvironmentCaptureFace} from './environment-capture.ts'
 import type {LodCaptureFace} from './lod-capture.ts'
 import type {PresentationCaptureFace} from './presentation-capture.ts'
 import type {VerifiedAdministrator} from '../../lyapunov-product-bundle/src/account/administrator.ts'
+import type {CampaignCard} from './campaign-projection.ts'
 /**
  * D1（`bugfixHistory/VISIBILITY-HOLES-20260926.md`）：computer-use 会话的**自报事实**——宿主 `plugin.ts` 的
  * `computerUseFacts()` 逐字投影（`active`/`since`/`consent`/`consentReason`/`indicator`/`snapshot`/`lastReport`/`refusals`）。
@@ -31,7 +32,7 @@ export interface ComputerUseFacts {
   /** 被拒的输入（宿主保留最近 5 条）：`code`/`rule` 是拒它的判据，`combos` 是命中的组合键。 */
   refusals:Array<{at:string;tool:string;code:string;rule:string;combos:readonly string[]}>
 }
-export interface WorkbenchState { hostInstanceId:string; lastSceneId?:string; administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key';scene?:SceneSnapshot; worlds:WorldHandle[]; providerAvailable:boolean; captures?:CaptureRecord[]; /** 连续视频记录（R-005）：与 `captures` 图像列表**分开**的具名数组，不能混用。 */ videos?:CaptureVideoRecord[]; recentActions?:Array<{id:string;label:string;waiting:boolean;receipt?:any;error?:string}>; uiActions?:Array<{id:string;action:string;args:Record<string,unknown>;enqueuedAt:string}>; /** 本窗口（clientId）自己的选择事实：多窗口同会话时，另一个窗口的选择不会覆盖它。 */ selection?:{clientId:string;facts:Record<string,unknown>}; /** D1：computer-use 会话事实（宿主 `computerUseFacts()`）；缺省＝宿主没给这一面。**渲染点**见 `workbench.tsx` 的 `ComputerUseFacts` 组件。 */ computerUse?:ComputerUseFacts }
+export interface WorkbenchState { hostInstanceId:string; lastSceneId?:string; administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key';scene?:SceneSnapshot; worlds:WorldHandle[]; providerAvailable:boolean; captures?:CaptureRecord[]; /** 连续视频记录（R-005）：与 `captures` 图像列表**分开**的具名数组，不能混用。 */ videos?:CaptureVideoRecord[]; recentActions?:Array<{id:string;label:string;waiting:boolean;receipt?:any;error?:string}>; uiActions?:Array<{id:string;action:string;args:Record<string,unknown>;enqueuedAt:string}>; /** 本窗口（clientId）自己的选择事实：多窗口同会话时，另一个窗口的选择不会覆盖它。 */ selection?:{clientId:string;facts:Record<string,unknown>}; /** D1：computer-use 会话事实（宿主 `computerUseFacts()`）；缺省＝宿主没给这一面。**渲染点**见 `workbench.tsx` 的 `ComputerUseFacts` 组件。 */ computerUse?:ComputerUseFacts; /** agent-graph 会话的 campaign 卡片表（`sessionProjection 'campaigns'` 折叠态的 campaigns 字段）；缺省＝宿主未装配 agent-graph 或本会话还没有 campaign。 */ campaigns?:CampaignCard[] }
 /** 一条批注的落盘行：编号、文字、锚点（实体局部坐标 + 下单时世界坐标）。编号与标记、截图圈点同源。 */
 export interface CaptureAnnotationRecord { index:number; annotationId:string; sceneId?:string; entityId:string; entity?:string; text:string; anchor:import('../../viewer/src/annotations.ts').ViewerAnnotationAnchor }
 /** 带批注采集在 state 投影里只给计数与摘要：界面列表用不到整套锚点，250ms 轮询不该背几百条坐标。 */
