@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "87793ac4436b1f66cbf5656547e0dfb7c3a142ec246d19be96d14ba09bcaf894": {
+    "a934cdd39ad328f1bbb3fc48a8ca2bc84a8ed2bda63ef5aa58d9b6af68df18e2": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -45,6 +45,10 @@
         "packages/client/ui-model-selection/src/client/service.ts",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts",
         "packages/client/ui-model-selection/tests/model-select.client.spec.tsx",
+        "packages/client/ui-settings-general/src/client/SettingsRoot.tsx",
+        "packages/client/ui-settings-general/src/client/index.ts",
+        "packages/client/ui-settings-general/src/client/shell-contract.ts",
+        "packages/client/ui-settings/src/client/contract/slots.ts",
         "packages/client/ui-trajectory/README.md",
         "packages/client/ui-trajectory/README.zh.md",
         "packages/client/ui-trajectory/package.json",
@@ -76,10 +80,10 @@
         "pnpm-lock.yaml"
       ],
       "stageHashes": [
-        "b6c4ee191233570b2f8cc6b11b415a134469aaa3eeea414f7d5d377d0029b743",
-        "be7b1723be53fd218dbb79204f747565c18ab0e62a8d9682ba355979e784fa08"
+        "b7ebc0f4cf1a6ff8f280a176212e83c5934be02012b4b51a5cadf59a377d03bb",
+        "192d77216f5b44649c9f2fe25d7ebec602e4b65ac49a985f1f8301c7dad9c5e5"
       ],
-      "finalHash": "be7b1723be53fd218dbb79204f747565c18ab0e62a8d9682ba355979e784fa08",
+      "finalHash": "192d77216f5b44649c9f2fe25d7ebec602e4b65ac49a985f1f8301c7dad9c5e5",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -122,6 +126,10 @@
         "packages/client/ui-model-selection/src/client/service.ts": "055c152fc1b48916800f09db470f16cd3100187abe4140d747d0dd7aead958e5",
         "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts": "ac8c238e860d06ed048060a5abcb7fff7fb33c3466029761d9ce57398f9643c6",
         "packages/client/ui-model-selection/tests/model-select.client.spec.tsx": "6b9f72d0b71d78fd7238d3db810703caf50632c51356e1361e5d00491804c79d",
+        "packages/client/ui-settings-general/src/client/SettingsRoot.tsx": "581cf9406e0fe86a64ffbc46697b4ba0c88dbc2291b595072dd475557cd17df6",
+        "packages/client/ui-settings-general/src/client/index.ts": "3abe0d3ff2adb94f5d27c39eca2b45f04d9d57de2ef534ccc2ecb8b4181afa3c",
+        "packages/client/ui-settings-general/src/client/shell-contract.ts": "7d0713dd327874b85df19e5e3b4a9a1817726b7f5fe34f97e25b5641c67f5783",
+        "packages/client/ui-settings/src/client/contract/slots.ts": "dfccced4b217c3a9c5519bbd1d4dcab3b4fc4e9194a720283a5ee50b6f1cb0f3",
         "packages/client/ui-trajectory/README.md": "f2b8110dfffd189f9de2c6089577e34f890020dfd45207a49619a6eef0e483a6",
         "packages/client/ui-trajectory/README.zh.md": "4eea03f5aead0e3711e5e5c78a37bb03f59359017253607045a4c41560524626",
         "packages/client/ui-trajectory/package.json": "6a7bb4fa1038ed98d108bba8a0095790ca1eb9052d07c891a440eb1c6cb54c41",

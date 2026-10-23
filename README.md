@@ -44,14 +44,15 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Current default — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** the website `latest` manifest and the installer now select this Linux x64 prerelease. It adds agent-graph campaigns, task predicates on action receipts, automatic recall of verified skills, worker/heldout and verifier isolation, and the Campaigns workbench panel.
-- **Previous release — [0.1.0 RC](docs/releases/0.1.0-rc.md):** its versioned directory, tag, installation contract and release notes remain available. Use `--version RELEASE_ID` to install it explicitly; it is no longer the default download.
+- **Current default — [0.2.1](docs/releases/0.2.1.md):** full Linux x64 distribution, with native settings refinement and the complete Agent Graph product.
+- **Previous preview — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** retained with its version directory, tag, release notes and assets.
+- **Previous RC — [0.1.0 RC](docs/releases/0.1.0-rc.md):** retained with its version directory, tag, release notes and assets.
 
-GitHub release metadata does not allow a prerelease to be marked as the platform “latest”. The GitHub release for 0.2.0 Alpha 1 stays a prerelease, and every download entry we control points to the versioned Alpha 1 archive or to the `latest` manifest prepared for this switch. We do not relabel the Alpha as stable or move the RC tag.
+Use the versioned release identifier with `--version` to install a previous release explicitly.
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session. The default command below installs **0.2.0-alpha.1** after the `latest` switch:
+From a regular terminal in your graphical desktop session. The default command below installs **0.2.1**:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh

@@ -44,14 +44,15 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前默认 — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md)：**官网 `latest` 清单与安装器默认选择本版 Linux x64 预发布。新增 Agent Graph 任务判定、失败技能召回、独立复验、开发/留出隔离和 Campaigns 面板。
-- **上一个版本 — [0.1.0 RC](docs/releases/0.1.0-rc.md)：**固定版本目录、标签、安装合同与历史说明继续保留；需要旧版时用 `--version RELEASE_ID` 明确安装，它不再是默认下载。
+- **当前默认 — [0.2.1](docs/releases/0.2.1.md)：**完整 Linux x64 发行版，包含原生设置整理与完整 Agent Graph 产品能力。
+- **历史预览版 — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md)：**保留固定版本目录、标签、说明及下载资产。
+- **历史候选版 — [0.1.0 RC](docs/releases/0.1.0-rc.md)：**保留固定版本目录、标签、说明及下载资产。
 
-GitHub Release 的 “latest” 平台字段不能把 prerelease 标成 latest。0.2.0 Alpha 1 的 GitHub Release 保持 prerelease；我们可控的下载入口直指固定版本归档，或指向本次准备切换的 `latest` 清单。不把 Alpha 改名成 stable，也不移动 0.1.0RC 标签。
+需要旧版时，通过安装器的 `--version RELEASE_ID` 明确选择。
 
 ## 在 Linux 上安装
 
-在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.0-alpha.1**：
+在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.1**：
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh

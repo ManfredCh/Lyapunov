@@ -15,6 +15,8 @@
  * 兜底：每行都给出对应的命令行，供无界面/远程场景直接复制。
  */
 import {useCallback,useEffect,useState} from "react"
+import {Button,Input,Checkbox,SegmentedControl,IconRefreshOutlineRegular} from "@deepseek-ai/dsh-client-ui-primitives"
+import {SettingsPage,SettingsHeading,SettingsListRow,SettingsField,SettingsDetails,SettingsStatus} from "./settings-ui.tsx"
 import type {Context} from "@deepseek-ai/cordis"
 import type {EngineInstallState,EngineLicenseAcceptance,EngineProvidersPayload,EngineProviderStatus,IsaacLocalCandidate,IsaacLocalDiscovery,IsaacLocalSelection} from "./engine-provider-contract.ts"
 
@@ -40,9 +42,9 @@ async function localSdkRequest<T>(action:string,body?:Record<string,unknown>):Pr
  * 三档必须一眼分清：显式 ENV 覆盖 > 已保存外置/旧版本 > 本版本产品托管。
  */
 function isaacSourceLabel(tr:Translate,source:IsaacLocalSelection["nextSource"]):string{
- return source==="env-override"?tr("显式环境变量覆盖","explicit environment override")
-  :source==="saved-preference"?tr("已保存的本地/旧版本 SDK","saved local/legacy SDK")
-  :tr("本版本产品托管默认","this version's product-managed default")
+ return source==="env-override"?tr("环境变量覆盖","Environment override")
+  :source==="saved-preference"?tr("已保存的本地 SDK","Saved local SDK")
+  :tr("产品默认","Product default")
 }
 
 /** 当前选择说明：本地化文案由结构化字段（`nextSource`）推出，宿主返回的固定中文 detail 不直接上屏。 */
@@ -87,30 +89,19 @@ function IsaacLocalPicker({tr,disabled,installing,onChanged}:{tr:Translate;disab
   catch(reason){setError(String(reason instanceof Error?reason.message:reason))}finally{setBusy(false)}
  }
  const blocked=disabled||busy
- return <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:8,padding:10,border:"1px solid var(--dsw-alias-border-l1)",borderRadius:6}} aria-label={tr("本地 Isaac Sim 安装","Local Isaac Sim installation")}>
-  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-   <strong style={{fontSize:13}}>{tr("已有 Isaac Sim？直接使用本地安装","Already have Isaac Sim? Use a local installation")}</strong>
-   <button type="button" disabled={blocked} onClick={()=>void discover(false)}>{busy?tr("检查中…","Checking…"):tr("发现本地安装","Find local installation")}</button>
-  </div>
-  <p style={{margin:0,fontSize:12,opacity:.75}}>{tr("Isaac 路径按固定优先级解析：① 显式环境变量 LYAPUNOV_ISAAC_PYTHON；② 已保存的本地/旧版本 SDK；③ 本版本产品托管安装。下面保存只写选择，当前会话与运行中的世界不变，下次启动才使用新路径。安装目录、python.sh 或 Conda/venv 的 bin/python 都可以先检查再登记。","Isaac paths resolve in a fixed order: (1) the explicit LYAPUNOV_ISAAC_PYTHON environment override; (2) a saved local/legacy SDK; (3) this version's product-managed install. Saving below only records the choice: the current session and the running world are unchanged, and the new path is used on the next startup. A directory, python.sh or a Conda/venv bin/python can all be checked and then registered.")}</p>
-  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-   <input aria-label={tr("Isaac Sim 安装目录或 Python 路径","Isaac Sim directory or Python path")} value={path} onChange={event=>setPath(event.target.value)} placeholder={tr("安装目录、python.sh 或 bin/python 的绝对路径","Absolute path to installation directory, python.sh or bin/python")} style={{flex:1,minWidth:180}}/>
-   <button type="button" disabled={blocked||!path.trim()} onClick={()=>void discover(true)}>{tr("检查此路径","Check this path")}</button>
-  </div>
-  {selection&&<div style={{fontSize:12,opacity:.75,wordBreak:"break-all"}}>
-   {tr("下次启动 SDK：","SDK for next startup: ")}{selection.nextPython}
-   {"（"}{isaacSourceLabel(tr,selection.nextSource)}{"）"}
-   <div>{isaacSelectionDetail(tr,selection)}</div>
-   {selection.savedPython&&<button type="button" disabled={blocked||installing} onClick={()=>void select(null)}>{tr("恢复产品默认路径","Restore product default path")}</button>}
-  </div>}
-  {candidates.map(candidate=><div key={candidate.python} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:4,padding:8,background:"var(--dsw-alias-bg-l1,#0001)",borderRadius:6}}>
-   <code style={{wordBreak:"break-all"}}>{candidate.python}</code>
-   <span style={{fontSize:12}}>{isaacCandidateDetail(tr,candidate)}</span>
-   <button type="button" disabled={blocked||installing||!candidate.compatible||selection?.savedPython===candidate.python} onClick={()=>void select(candidate.python)}>{selection?.savedPython===candidate.python?tr("已保存此安装","Installation saved"):tr("使用此安装（下次启动）","Use this installation (next startup)")}</button>
-  </div>)}
-  {message&&<p role="status" style={{margin:0,fontSize:12}}>{message}</p>}
-  {installing&&<p style={{margin:0,fontSize:12}}>{tr("安装任务正在运行。可以检查已有安装，任务结束后再保存 SDK 选择。","Installation is running. You can check existing installations and save the SDK choice after the task ends.")}</p>}
-  {error&&<p role="alert" style={{margin:0,fontSize:12}}>{error}</p>}
+ const [candidatePython,setCandidatePython]=useState<string>()
+ const chosen=candidatePython??selection?.savedPython
+ const candidate=candidates.find(row=>row.python===chosen)
+ return <div className='lya-settings' aria-label={tr('本地 Isaac Sim 安装','Local Isaac Sim installation')}>
+  <label className='lya-settings-search-label'><span>{tr('安装目录或 Python 路径','Installation directory or Python')}</span><Input value={path} onChange={event=>setPath(event.target.value)} placeholder='/absolute/path/to/python.sh'/></label>
+  <div className='lya-settings-actions'><Button size='sm' disabled={blocked||!path.trim()} onClick={()=>void discover(true)}>{tr('检查路径','Check path')}</Button><Button size='sm' disabled={blocked} onClick={()=>void discover(false)}>{busy?tr('检查中…','Checking…'):tr('发现本地安装','Find installations')}</Button></div>
+  <div className='lya-settings-list'>{candidates.map(row=><Button key={row.python} variant='ghost' className='lya-settings-list-row' aria-pressed={chosen===row.python} disabled={blocked||!row.compatible} title={isaacCandidateDetail(tr,row)} onClick={()=>setCandidatePython(row.python)}><span className='lya-settings-row-name'><code>{row.python}</code></span><span className='lya-settings-row-state'>{row.compatible?tr('兼容','Compatible'):tr('不兼容／不可用','Not compatible / unavailable')}</span></Button>)}</div>
+  {candidate&&<Button size='sm' variant='primary' disabled={blocked||installing||!candidate.compatible||selection?.savedPython===candidate.python} onClick={()=>void select(candidate.python)}>{selection?.savedPython===candidate.python?tr('已保存此安装','Installation saved'):tr('使用此安装','Use selected installation')}</Button>}
+  {selection&&<dl className='lya-settings-fields'><SettingsField label={tr('下次启动 SDK','SDK for next start')}><code>{selection.nextPython}</code></SettingsField><SettingsField label={tr('来源','Source')}>{isaacSourceLabel(tr,selection.nextSource)}</SettingsField></dl>}
+  {selection?.savedPython&&<Button size='sm' disabled={blocked||installing} onClick={()=>void select(null)}>{tr('恢复产品默认路径','Restore product default')}</Button>}
+  {message&&<p className='lya-settings-message' role='status'>{message}</p>}{error&&<p className='lya-settings-message' role='alert'>{error}</p>}
+  {installing&&<p className='lya-settings-caption'>{tr('安装任务运行中，结束后可保存 SDK 选择。','Installation is running. Save the SDK choice after it ends.')}</p>}
+  <SettingsDetails title={tr('路径优先级与兼容性','Resolution order & compatibility')}><p className='lya-settings-caption'>{selection?isaacSelectionDetail(tr,selection):tr('显式环境变量优先，其次是保存选择，最后是产品默认。','Environment override, then saved choice, then product default.')}</p>{candidates.map(row=><div key={row.python}><code>{row.python}</code><p className='lya-settings-caption'>{isaacCandidateDetail(tr,row)}</p></div>)}</SettingsDetails>
  </div>
 }
 
@@ -124,42 +115,34 @@ function ProviderRowView({row,install,preference,busy,license,tr,onAcceptLicense
  const blocked=isIsaac&&!license
  const localSelected=isIsaac&&row.runtimeSource==="saved-preference"
  const result=install?.result??undefined
- return <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,overflowWrap:"anywhere",gap:6,padding:"10px 12px",border:"1px solid var(--dsw-alias-border-l1)",borderRadius:8}}>
-  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-   <strong>{row.label}</strong>
-   <span style={{opacity:.85}}>{row.installed?`${isPolicyRuntime?tr("独立 CPU 模块/版本已核","Independent CPU modules/versions verified"):tr("当前解释器可发现 SDK","SDK found in selected interpreter")}${row.version?` · ${row.version}`:""}`:isPolicyRuntime?tr("独立 CPU 环境待准备","Independent CPU environment needs preparation"):tr("当前解释器未发现 SDK","SDK not found in selected interpreter")}</span>
-   <span style={{minWidth:0,overflowWrap:"anywhere",opacity:.6,fontSize:12}}>{row.detail}</span>
-   <span style={{flex:1}}/>
-   {row.engineChoice
-    ? <button type="button" disabled={busy!==undefined||install?.running||preference===row.engineChoice} onClick={()=>onChoose(row.engineChoice!)}>
-       {preference===row.engineChoice?tr("已是偏好","Preferred"):tr("切换到此引擎","Use this engine")}
-      </button>
-    : <span style={{opacity:.6,fontSize:12}}>{isPolicyRuntime?tr("CPU 策略推理","CPU policy inference"):tr("运行环境","Runtime")}</span>}
-   {row.installable&&<button type="button" disabled={busy!==undefined||install?.running||blocked||localSelected} onClick={()=>onInstall(row.id)}>
-    {install?.running?tr("安装中…","Installing…"):localSelected?tr("已选择本地安装","Local installation selected"):row.managedStatus==="missing"?tr("安装到产品目录","Install to product directory"):tr("修复产品托管安装","Repair managed install")}
-   </button>}
-  </div>
-  <div style={{opacity:.65,fontSize:12,wordBreak:"break-all"}}>{tr("下次启动 SDK 路径：","SDK path for next startup: ")}{row.runtimePython}（{row.runtimeSource==="env-override"?tr("外置覆盖","external override"):row.runtimeSource==="saved-preference"?tr("已保存的本地安装","saved local installation"):tr("产品默认","product default")}；{tr("本页检查 SDK 可发现性","this page checks SDK discovery")}）</div>
-  <div style={{opacity:.6,fontSize:12,wordBreak:"break-all"}}>{tr("产品托管安装：","Product managed install: ")}{row.managedStatus==="ready"?tr("SDK 可发现","SDK found"):row.managedStatus==="missing"?tr("前缀不存在","prefix missing"):tr("前缀存在但 SDK 未就绪","prefix present; SDK incomplete")} · {row.prefix}</div>
-  {isIsaac&&<IsaacLocalPicker tr={tr} disabled={busy!==undefined} installing={Boolean(install?.running)} onChanged={onSdkChanged}/>}
-  {isIsaac&&<div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:4}}>
-   <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13}}>
-    <input type="checkbox" checked={Boolean(license)} onChange={event=>onAcceptLicense(event.target.checked)}/>
-    <span>{tr("我已阅读并同意 NVIDIA Omniverse 许可协议","I have read and accept the NVIDIA Omniverse License Agreement")}（
-     <a href={EULA_URL} target="_blank" rel="noreferrer">EULA</a>）</span>
-   </label>
-   {license
-    ? <p style={{margin:0,opacity:.7,fontSize:12}}>{tr("已接受：","Accepted:")}{new Date(license.acceptedAt).toLocaleString()} · <a href={license.eulaUrl} target="_blank" rel="noreferrer">{license.eulaUrl}</a></p>
-    : <p style={{margin:0,opacity:.75,fontSize:13}}>{tr("接受许可是「用户动作」（会记录接受时间）：先勾选上面这项，安装按钮才会可用——许可由使用者自己接受，我们不代签。","Accepting the license is an explicit user action (recorded with a timestamp): tick the box above to enable installation. The license is accepted by the end user, never on their behalf.")}</p>}
-  </div>}
-  <div style={{fontSize:12,opacity:.6}}>
-   <>{tr("命令行等价入口：","CLI equivalent:")} <code>{install?.cli??`./lyapunov install-provider ${row.id}`}</code></>
-  </div>
-  {install?.running&&<pre style={{margin:0,maxHeight:140,overflow:"auto",fontSize:12,background:"var(--dsw-alias-bg-l1,#0001)",padding:8,borderRadius:6}}>{install.tail.slice(-1500)||tr("（安装刚开始，暂无输出）","(starting; no output yet)")}</pre>}
-  {!install?.running&&result&&<p role="status" style={{margin:0,fontSize:13}}>
-   {String(result.status??"")}{result.code?` · ${result.code}`:""}{result.message?`：${result.message}`:""}
-  </p>}
- </div>
+ const installButton=row.installable&&<Button size='sm' variant='primary' disabled={busy!==undefined||install?.running||blocked||localSelected} onClick={()=>onInstall(row.id)}>{install?.running?tr('安装中…','Installing…'):localSelected?tr('已选择本地安装','Local installation selected'):row.managedStatus==='missing'?tr('安装到产品目录','Install to product directory'):tr('修复托管安装','Repair managed install')}</Button>
+ return <>
+  <dl className='lya-settings-fields'>
+   <SettingsField label={tr('SDK','SDK')}>{row.installed?tr('已发现','Found'):tr('未发现','Not found')}{row.version?' · '+row.version:''}</SettingsField>
+   <SettingsField label={tr('来源','Source')}>{isaacSourceLabel(tr,row.runtimeSource)}</SettingsField>
+   <SettingsField label={tr('托管安装','Managed install')}>{row.managedStatus==='ready'?tr('SDK 已发现','SDK found'):row.managedStatus==='missing'?tr('未安装','Not installed'):tr('安装未完整','Incomplete')}</SettingsField>
+  </dl>
+  {row.engineChoice&&preference!==row.engineChoice&&<div className='lya-settings-actions'><Button size='sm' disabled={busy!==undefined||install?.running||preference===row.engineChoice} onClick={()=>onChoose(row.engineChoice!)}>{preference===row.engineChoice?tr('已是偏好','Preferred'):tr('设为下次启动引擎','Use for next start')}</Button></div>}
+  {isIsaac?<>
+   <SettingsDetails title={tr('使用本地 SDK','Use a local SDK')}><IsaacLocalPicker tr={tr} disabled={busy!==undefined} installing={Boolean(install?.running)} onChanged={onSdkChanged}/></SettingsDetails>
+   <SettingsDetails title={tr('产品托管安装','Product-managed installation')}>
+    <Checkbox checked={Boolean(license)} onChange={onAcceptLicense} label={tr('我已阅读并接受 NVIDIA Omniverse 许可协议','I accept the NVIDIA Omniverse License Agreement')}/>
+    <a href={EULA_URL} target='_blank' rel='noreferrer'>{tr('查看许可协议','Read license agreement')} ↗</a>
+    {!license&&<p className='lya-settings-caption'>{tr('接受许可后才能安装。','Accept the license to enable installation.')}</p>}
+    {license&&<p className='lya-settings-caption'>{tr('已接受：','Accepted: ')}{new Date(license.acceptedAt).toLocaleString()}</p>}
+    {installButton}
+    <SettingsDetails title={tr('组件与存储','Components & storage')}><p className='lya-settings-caption'>{tr('固定的 Kit/App、核心、机器人导入与测试组件，以及 SDK/physics/Kit 扩展缓存。通用 Kit 缓存 6.0.1.0 约 5.88 GB，支持分段续传并校验总长度与 SHA-256。','Pinned Kit/App, core, robot import/tests and SDK/physics/Kit extension caches. The generic Kit cache 6.0.1.0 is about 5.88 GB; segmented downloads check total length and SHA-256.')}</p></SettingsDetails>
+   </SettingsDetails>
+  </>:<div className='lya-settings-actions'>{installButton}</div>}
+  <SettingsDetails title={tr('安装输出','Installation output')} open={Boolean(install?.running)}>
+   {install?.running&&<SettingsStatus state='ongoing'>{tr('安装中','Installing')}</SettingsStatus>}
+   <pre>{install?.tail||tr('暂无安装输出。','No installation output yet.')}</pre>
+   {result&&<p className='lya-settings-message' role='status'>{[result.status,result.code,result.message].filter(Boolean).join(' · ')}</p>}
+   {install?.logPath&&<code>{install.logPath}</code>}
+  </SettingsDetails>
+  <SettingsDetails title={tr('SDK 路径与诊断','SDK paths & diagnostics')}><dl className='lya-settings-fields'><SettingsField label={tr('下次启动 SDK','SDK for next start')}><code>{row.runtimePython}</code></SettingsField><SettingsField label={tr('托管安装目录','Managed directory')}><code>{row.prefix}</code></SettingsField></dl><p className='lya-settings-message'>{row.detail}</p><p className='lya-settings-caption'>{tr('这里检查 SDK 发现状态；实际物理世界与渲染按运行结果显示。','This checks SDK discovery; physical-world and rendering results are shown at run time.')}</p>{isPolicyRuntime&&<p className='lya-settings-caption'>{tr('独立 CPU 策略推理环境。','Independent CPU policy inference environment.')}</p>}</SettingsDetails>
+  <SettingsDetails title={tr('命令行等价入口','CLI equivalent')}><code>{install?.cli??`./lyapunov install-provider ${row.id}`}</code></SettingsDetails>
+ </>
 }
 
 /**
@@ -170,6 +153,7 @@ function ProviderRowView({row,install,preference,busy,license,tr,onAcceptLicense
  */
 export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Translate;kinds:readonly ProviderRow["kind"][];title:string;blurb:string;showSwitch:boolean}){
  const [snapshot,setSnapshot]=useState<Snapshot>()
+ const [selectedId,setSelectedId]=useState<string>()
  const [error,setError]=useState("")
  const [busy,setBusy]=useState<string|undefined>(undefined)
  const refresh=useCallback(async()=>{
@@ -203,56 +187,36 @@ export function EngineSettingsSection({tr,kinds,title,blurb,showSwitch}:{tr:Tran
  const rows=snapshot?.providers.filter(row=>kinds.includes(row.kind))??[]
  // "自动" = 偏好层没有显式引擎（`null`）。宿主写 `"auto"` 时会**清除** `engine` 键，所以读回也是 null。
  const isAuto=preference===null
- return <section style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,overflowWrap:"anywhere",gap:14,padding:20}} aria-label={title}>
-  <h2 style={{margin:0}}>{title}</h2>
-  <p style={{margin:0,opacity:.75}}>{blurb}</p>
-  {showSwitch&&<p style={{margin:0}}>
-   {tr("当前运行：","Running:")} <strong>{running??tr("未知","unknown")}</strong>
-   {" · "}{tr("偏好：","Preference:")} <strong>{preference??tr("自动（Isaac GPU 优先）","automatic (prefer Isaac GPU)")}</strong>
-  </p>}
-  {/* 复核点 3：从"已有手动偏好"回到自动的**显式入口**——复用同一偏好文件/endpoint（写 `auto` 即清除
-      显式偏好），不另造配置 owner；CLI/env 的显式 engine 仍优先。运行中的世界不变，重启后生效。 */}
-  {showSwitch&&<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-   <button type="button" disabled={busy!==undefined||isAuto} onClick={()=>void choose("auto")}>
-    {isAuto?tr("已是自动","Automatic"):tr("自动（Isaac GPU 优先）","Automatic (prefer Isaac GPU)")}
-   </button>
-   <span style={{opacity:.6,fontSize:12}}>{tr("清除显式偏好：Isaac 的 SDK/许可/GPU 条件具备且仍为自动时，下次启动优先 Isaac；已设置的手动偏好不会被自动逻辑改动。","Clears the explicit preference: when Isaac's SDK/license/GPU conditions hold and you stay automatic, the next start prefers Isaac; a manual preference is never changed automatically.")}</span>
-  </div>}
-  {/* 自动候选与回退理由：判据全部来自宿主上游 `resolveEngine()` 原话，界面不复述、不另编"默认"。 */}
-  {showSwitch&&decision?.gpu&&<p style={{margin:0,opacity:.75}}>{tr("GPU：","GPU: ")}{decision.gpu.headline}</p>}
-  {showSwitch&&decision?.next&&<p style={{margin:0}}>
-   {decision.next.source==="default"?tr("缺省/自动会选：","Default/auto picks: "):tr("下次启动：","Next start: ")}
-   <strong>{decision.next.engine}</strong>{"（"}{decision.next.reason}{"）"}
-   {decision.restartRequired?tr("；偏好已保存，重启后生效。","; preference saved, effective after restart."):""}
-  </p>}
-  {showSwitch&&decision?.next?.candidates?.length?<ul style={{margin:0,paddingInlineStart:18,opacity:.7,fontSize:12}}>
-   {decision.next.candidates.map(candidate=><li key={candidate.engine}>{candidate.engine}{candidate.ready?tr("：候选条件满足"," : candidate conditions met"):`：${candidate.blockers.join(tr("；","; "))}`}{candidate.scope?`（${candidate.scope}）`:""}</li>)}
-  </ul>:null}
-  {showSwitch&&decision?.error?<p role="alert" style={{margin:0}}>{tr("引擎判定不可用：","Engine decision unavailable: ")}{decision.error}</p>:null}
-  {error&&<p role="alert" style={{margin:0}}>{error}</p>}
-  {!snapshot&&!error&&<p role="status">{tr("正在读取状态…","Reading status…")}</p>}
-  {snapshot&&<div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",minWidth:0,gap:10}}>
-   {rows.map(row=><ProviderRowView key={row.id} row={row} install={snapshot.installs.find(item=>item.provider===row.id)} preference={preference} busy={busy} license={snapshot.licenses?.isaac} tr={tr} onAcceptLicense={accepted=>void acceptLicense(accepted)} onInstall={provider=>void install(provider)} onChoose={provider=>void choose(provider)} onSdkChanged={refresh}/>)}
-  </div>}
-  {snapshot&&<p style={{margin:0,opacity:.6,fontSize:12}}>
-   {showSwitch
-    ? tr("已有兼容的 Isaac Sim 可直接选择本地安装；产品安装选择当前物理运行所需的固定官方组件（Kit/App、核心、机器人导入与测试及扩展缓存），并准备当前固定 SDK 的离线扩展闭包：除两个明确缓存 isaacsim-extscache-kit-sdk、isaacsim-extscache-physics 外，还包含通用 Kit 扩展缓存 isaacsim-extscache-kit 6.0.1.0（约 5.88GB）。该大 wheel 由固定官方索引的 pin 分段断点续传，逐段核对 206/Content-Range，并只在总长度与 SHA256 完全匹配后原子落盘并交给正常 pip；下载或校验失败会阻断安装，不报成功。机器人和环境素材按任务准备。Isaac 需用户接受 NVIDIA Omniverse 许可；安装成功不代表 Kit、PhysX 或 RTX 已实际运行。一般场景与碰撞可在本页显式选择 MuJoCo，重启后生效。",
-        "Reuse a compatible local Isaac Sim installation when available. The installer selects the pinned official components the current physics runtime needs (Kit/App, core, robot import and tests, plus extension caches) and prepares the offline extension closure for the pinned SDK: besides the two explicit caches isaacsim-extscache-kit-sdk and isaacsim-extscache-physics, it includes the generic Kit extension cache isaacsim-extscache-kit 6.0.1.0 (about 5.88GB). That large wheel is resumed in segments from the pinned official index, each 206/Content-Range is checked, and only an exact total length and SHA256 match is atomically published and handed to normal pip; a download or verification failure blocks the install instead of reporting success. Robot and environment assets are prepared per task. Isaac requires the user's NVIDIA Omniverse license acceptance; a successful install does not mean Kit, PhysX or RTX has actually run. For general scenes and collision, explicitly select MuJoCo here; it takes effect after restart.")
-    : tr("基准测试（LIBERO / Gymnasium）是「评测负载」，不在这个清单里：它们不是 provider，仍用 `./lyapunov install-provider benchmark-*` 安装、`./lyapunov benchmark --provider …` 运行。",
-        "These are evaluation workloads with their own Python environments, not physics engines: the engine computes the world, the benchmark decides which tasks to grade it on.")}
-  </p>}
- </section>
+ const selected=rows.find(row=>row.id===selectedId)
+ const displayName=(name:string)=>name.replaceAll('（',' (').replaceAll('）',')')
+ const engineName=(engine:string|null)=>displayName(rows.find(row=>row.engineChoice===engine)?.label??engine??tr('未知','Unknown'))
+ return <SettingsPage label={title}>
+  <SettingsHeading title={selected?displayName(selected.label):title} back={selected?()=>setSelectedId(undefined):undefined} backLabel={title} actions={<Button size='sm' title={tr('刷新','Refresh')} aria-label={tr('刷新','Refresh')} icon={<IconRefreshOutlineRegular size={16}/>} disabled={busy!==undefined} onClick={()=>void refresh()}/>}/>
+  {error&&<p className='lya-settings-message' role='alert'>{error}</p>}
+  {!snapshot&&!error&&<p className='lya-settings-message' role='status'>{tr('正在读取状态…','Reading status…')}</p>}
+  {!selected&&<>
+   {showSwitch&&<>
+    <dl className='lya-settings-fields'><SettingsField label={tr('当前运行','Running')}>{engineName(running)}</SettingsField><SettingsField label={tr('下次启动','Next start')}>{decision?.next?.engine||preference?engineName(decision?.next?.engine??preference):tr('自动','Automatic')}{decision?.restartRequired&&<p className='lya-settings-caption'>{tr('已保存，重启后生效。','Saved; restart required.')}</p>}</SettingsField></dl>
+    <label className='lya-settings-caption'>{tr('引擎偏好','Engine preference')}</label>
+    <SegmentedControl id='lya-engine-preference' label={tr('引擎偏好','Engine preference')} value={isAuto?'auto':preference!} onChange={value=>void choose(value)} disabled={busy!==undefined||installing} options={[{value:'auto',label:tr('自动','Automatic')},...rows.filter(row=>row.engineChoice).map(row=>({value:row.engineChoice!,label:displayName(row.label)}))]}/>
+    <div id={'lya-engine-preference-'+(isAuto?'auto':preference)+'-panel'} role='tabpanel' aria-labelledby={'lya-engine-preference-'+(isAuto?'auto':preference)}><p className='lya-settings-caption'>{tr('偏好在下次启动生效，当前会话继续运行。','Changes apply at the next start; the current session continues.')}</p></div>
+   </>}
+   <div className='lya-settings-list' aria-label={tr('可用引擎','Engine providers')}>{rows.map(row=><SettingsListRow key={row.id} name={displayName(row.label)} status={row.installed?[tr('SDK 已发现','SDK found'),row.version].filter(Boolean).join(' · '):tr('待安装／检查','Install / inspect')} onClick={()=>setSelectedId(row.id)}/>)}</div>
+   {showSwitch&&<SettingsDetails title={tr('引擎选择与 GPU','Engine decision & GPU')}><p className='lya-settings-message'>{blurb}</p>{decision?.gpu&&<p className='lya-settings-message'>{decision.gpu.headline}</p>}{decision?.next&&<p className='lya-settings-message'>{decision.next.engine} · {decision.next.reason}</p>}{decision?.next?.candidates?.map(candidate=><p key={candidate.engine} className='lya-settings-message'>{candidate.engine} · {candidate.ready?tr('候选条件满足','Candidate conditions met'):candidate.blockers.join('; ')}{candidate.scope?' · '+candidate.scope:''}</p>)}{decision?.error&&<p className='lya-settings-message' role='alert'>{decision.error}</p>}</SettingsDetails>}
+  </>}
+  {selected&&<ProviderRowView row={selected} install={snapshot?.installs.find(item=>item.provider===selected.id)} preference={preference} busy={busy} license={snapshot?.licenses?.isaac} tr={tr} onAcceptLicense={accepted=>void acceptLicense(accepted)} onInstall={provider=>void install(provider)} onChoose={provider=>void choose(provider)} onSdkChanged={refresh}/>}
+ </SettingsPage>
 }
 
 /** 注册到设置面板（与"通知与快捷键"同一种 slot，不新建设置框架）。 */
 export function applyEngineSettings(ctx:Context):void{
  const t=ctx.locale.bind("lyapunov")
  const tr:Translate=(zh,en)=>t("open")==="Scene workbench"?en:zh
- const inject=(kinds:readonly ProviderRow["kind"][],title:string,blurb:string,showSwitch:boolean)=>()=>({tr,kinds,title,blurb,showSwitch})
+ const inject=(kinds:readonly ProviderRow["kind"][],title:()=>string,blurb:()=>string,showSwitch:boolean)=>()=>({tr,kinds,title:title(),blurb:blurb(),showSwitch})
  ctx.slots.inject("settings.section",()=>ctx.slots.register({
   name:"settings.section",id:"lyapunov-engine",order:30,label:()=>tr("物理引擎","Physics engine"),
-  inject:inject(["engine"],tr("物理引擎","Physics engine"),
-   tr("引擎在启动时装配（一个世界只能有一个 Provider），所以切换后需重启工作台生效，运行中的会话与动作不会被打断。",
+  inject:inject(["engine"],()=>tr("物理引擎","Physics engine"),
+   ()=>tr("引擎在启动时装配（一个世界只能有一个 Provider），所以切换后需重启工作台生效，运行中的会话与动作不会被打断。",
       "The engine is composed at startup (one provider per world), so a switch takes effect after the workbench restarts; running sessions and actions are unaffected."),true),
  },EngineSettingsSection))
 }

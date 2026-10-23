@@ -10,6 +10,7 @@ import {applyPreferencesClient} from "./preferences-client.tsx"
 import {registerNativeWorkspace} from "./native-workspace.tsx"
 import {applyBalanceSection} from "./balance-section.tsx"
 import {applyEngineSettings} from "./engine-settings.tsx"
+import {applySettingsIcons} from "./settings-icons.tsx"
 import {applyExternalToolsSettings} from "./external-tools-settings.tsx"
 import {applyExecutionGraphClient} from "./execution-graph-client.tsx"
 import {applyRobotLibrarySettings} from "./robot-library-settings.tsx"
@@ -30,6 +31,7 @@ export function apply(ctx:Context){
  registerNativeWorkspace(ctx)
  applyBalanceSection(ctx)
  applyEngineSettings(ctx)
+ applySettingsIcons(ctx)
  applyExternalToolsSettings(ctx)
  applyExecutionGraphClient(ctx)
  applyFilesNavigationClient(ctx)

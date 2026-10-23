@@ -1,6 +1,6 @@
 # Lyapunov for Linux
 
-This directory defines the Linux x64 Alpha package. The current default is **0.2.0-alpha.1**; 0.1.0RC remains available by versioned install. For the per-user installation with the default MuJoCo runtime, use the [website installer](https://vorynel.com/lyapunov/):
+This directory defines the Linux x64 package. The current default is **0.2.1**; 0.2.0-alpha.1 and 0.1.0RC remains available by versioned install. For the per-user installation with the default MuJoCo runtime, use the [website installer](https://vorynel.com/lyapunov/):
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh

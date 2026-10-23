@@ -1449,6 +1449,56 @@ index 470c852ec8d0e85e731ba7b05ff2e67a1897eb07..6089a93fe371463ffe7a9c547f9bb2f2
 +  expect(view.getByRole('button').textContent).toBe('Model')
 +  expect(first.getSnapshot().current).toEqual({ provider: 'lyapunov-plans', model: 'peiri' })
 +})
+diff --git a/packages/client/ui-settings-general/src/client/SettingsRoot.tsx b/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
+index 761ae2dc0f19318cb9e7856501639d49598a5832..cc1d58e5b7a5cf509c3544a79e595a9e0e3d9fa4 100644
+--- a/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
++++ b/packages/client/ui-settings-general/src/client/SettingsRoot.tsx
+@@ -81,7 +81,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
+                 data-modal-autofocus={row.id === active ? '' : undefined}
+                 onClick={() => { onSelect(row.id) }}
+               >
+-                {navIcon(row.id)}
++                <span className={css.navIcon} aria-hidden="true">{renderSlot('settings.section.icon', {}, { only: row.id, fallback: navIcon(row.id) })}</span>
+                 <span className={css.navLabel}>{row.label}</span>
+               </button>
+             ))}
+diff --git a/packages/client/ui-settings-general/src/client/index.ts b/packages/client/ui-settings-general/src/client/index.ts
+index a17ea2c51981b5bdd5e5f40f4382b508b79005fc..977814d401e3c6a62ed75cb405c0ea6c917dbad6 100644
+--- a/packages/client/ui-settings-general/src/client/index.ts
++++ b/packages/client/ui-settings-general/src/client/index.ts
+@@ -206,6 +206,7 @@ export function apply(ctx: ClientContext): void {
+         'settings.action': { kind: 'list', scope: 'root' },
+         'settings.close': { kind: 'single', scope: 'root' },
+         'settings.section': { kind: 'list', scope: 'root' },
++        'settings.section.icon': { kind: 'list', scope: 'root' },
+         'settings.onboarding': { kind: 'list', scope: 'root' },
+       },
+       inject: shellInjected,
+diff --git a/packages/client/ui-settings-general/src/client/shell-contract.ts b/packages/client/ui-settings-general/src/client/shell-contract.ts
+index 8589dfe28a10d9c22661622a34af44781d0b248f..a44e6a1e7017ca662145df836585c143fc970ae4 100644
+--- a/packages/client/ui-settings-general/src/client/shell-contract.ts
++++ b/packages/client/ui-settings-general/src/client/shell-contract.ts
+@@ -72,6 +72,7 @@ export type SettingsRootComponentProps =
+     | 'settings.action'
+     | 'settings.close'
+     | 'settings.section'
++    | 'settings.section.icon'
+     | 'settings.onboarding'
+   >
+   & InjectFace<SettingsRootInjected>
+diff --git a/packages/client/ui-settings/src/client/contract/slots.ts b/packages/client/ui-settings/src/client/contract/slots.ts
+index d04ac21fa606fe4dc0af75dee0bae4b60fb299a7..2a7bdac5b2fd36ada34050ee9bbe9968d489d68a 100644
+--- a/packages/client/ui-settings/src/client/contract/slots.ts
++++ b/packages/client/ui-settings/src/client/contract/slots.ts
+@@ -55,6 +55,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+      * item registrant; the shell neither declares nor renders it.)
+      */
+     'settings.section': { kind: 'list'; scope: 'root'; owner: SettingsSectionOwnerProps }
++    /** 自定义设置项可贡献导航图标；未贡献时沿用原生图标。 */
++    'settings.section.icon': { kind: 'list'; scope: 'root'; owner: { children?: never } }
+     /**
+      * One page inside the Plugins settings section. The section owner renders
+      * localized entry labels as tabs and mounts each contribution inside its
 diff --git a/packages/client/ui-trajectory/README.md b/packages/client/ui-trajectory/README.md
 index ca4a84a44fd7fc42f6c7ea2ff95fa533731fde0f..c68a3a3ed603dd2ef06de0c505c22d269ad667a3 100644
 --- a/packages/client/ui-trajectory/README.md
