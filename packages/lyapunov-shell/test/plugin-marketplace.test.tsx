@@ -1,4 +1,4 @@
-import {describe,expect,test} from 'bun:test'
+import {afterAll,describe,expect,test} from 'bun:test'
 import React from 'react'
 import {createRequire} from 'node:module'
 import {spawnSync,spawn} from 'node:child_process'
@@ -8,7 +8,21 @@ import {tmpdir} from 'node:os'
 import {join,dirname} from 'node:path'
 import {integrationAssociations,classifyMcpIntegration,marketplaceEntries,filterMarketplace} from '../src/plugin-marketplace.ts'
 import {validExistingExecutable} from '../src/integration-discovery.ts'
-import {ExternalToolsSettings,applyExternalToolsSettings} from '../src/external-tools-settings.tsx'
+// 产品与固定SDK各有自己的依赖树；测试按客户端的单React合同编译真实组件。
+const settingsUiDir=await mkdtemp(join(tmpdir(),'product-native-settings-ui-'))
+const productRootForUi=fileURLToPath(new URL('../../../',import.meta.url))
+await symlink(join(productRootForUi,'node_modules'),join(settingsUiDir,'node_modules'),'dir')
+const settingsUiBuild=await Bun.build({entrypoints:[join(productRootForUi,'packages/lyapunov-shell/src/external-tools-settings.tsx')],target:'bun',format:'esm',plugins:[{name:'test-single-react',setup(builder){builder.onResolve({filter:/^react(?:-dom)?(?:\/.*)?$/},args=>({path:Bun.resolveSync(args.path,productRootForUi),external:true}))}}]})
+if(!settingsUiBuild.success)throw new AggregateError(settingsUiBuild.logs,'设置组件测试编译失败')
+await writeFile(join(settingsUiDir,'settings-ui.mjs'),await settingsUiBuild.outputs.find(row=>row.path.endsWith('.js'))!.text())
+// react-dom 在首次加载时探测 DOM；先建立独立探测文档，再由每条测试建立自身文档。
+const {JSDOM:InitialDom}=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))('jsdom')
+const initialDom=new InitialDom('<!doctype html><html><body></body></html>'),initialGlobals=new Map<string,PropertyDescriptor|undefined>()
+for(const key of ['window','document','navigator']){initialGlobals.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:initialDom.window[key],configurable:true,writable:true})}
+const {ExternalToolsSettings,applyExternalToolsSettings}=await import(join(settingsUiDir,'settings-ui.mjs')) as typeof import('../src/external-tools-settings.tsx')
+for(const [key,descriptor]of initialGlobals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}
+initialDom.window.close()
+afterAll(()=>rm(settingsUiDir,{recursive:true,force:true}))
 import type {ExternalToolsState,ExternalMcpRow} from '../src/external-tools-state.ts'
 import {Context} from '@deepseek-ai/cordis'
 
@@ -117,39 +131,36 @@ describe('插件市场原生读数的薄投影',()=>{
 
 test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；不显示secret值、不调用模型',async()=>{
  const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
- const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'}),saved=new Map<string,PropertyDescriptor|undefined>()
+ const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  const names=['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']
  for(const name of names){saved.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{value:name==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[name],configurable:true,writable:true})}
  let current=state();const calls:any[]=[];let nativeDocumentCalls=0
  globalThis.fetch=(async(input:any,init?:RequestInit)=>{calls.push({path:String(input),method:init?.method??'GET',body:init?.body});return Response.json(String(input).includes('/mcp')?{saved:true}:current)}) as typeof fetch
  const {createRoot}=await import('react-dom/client'),root=createRoot(document.getElementById('root')!),{act}=React
- const render=async()=>{await act(async()=>{root.render(<ExternalToolsSettings tr={(_zh,en)=>en} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{nativeDocumentCalls++}}/>);await new Promise(r=>setTimeout(r,0))})}
- const change=async(input:HTMLInputElement|HTMLSelectElement,value:string)=>{await act(async()=>{const setter=Object.getOwnPropertyDescriptor(input.tagName==='SELECT'?dom.window.HTMLSelectElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!;setter.call(input,value);input.dispatchEvent(new dom.window.Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})}
- const button=(text:string)=>[...document.querySelectorAll('button')].find(v=>v.textContent===text)!
+ const click=async(node:HTMLElement)=>{if(!node)throw Error('UI target missing; buttons='+[...document.querySelectorAll('button')].map(x=>x.textContent).join('|'));await act(async()=>{node.click();await new Promise(r=>setTimeout(r,0))})}
+ const button=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(v=>v.textContent===text)!
+ const refresh=()=>click(document.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]')!)
+ const tab=(text:string)=>[...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(v=>v.textContent===text)!
+ const back=()=>click(button('Integrations'))
+ const openRow=(text:string)=>click([...document.querySelectorAll<HTMLButtonElement>('.lya-settings-list-row')].find(v=>v.querySelector('.lya-settings-row-name')?.textContent===text)!)
+ const change=async(value:string)=>{const input=document.querySelector<HTMLInputElement>('input[type="search"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})}
  try{
-  await render();const associationPanel=[...document.querySelectorAll('fieldset')].find(row=>row.querySelector('legend')?.textContent==='Existing installations and native server association')!;expect([...associationPanel.querySelectorAll('strong')].map(row=>row.textContent)).toEqual(['Blender','Unity','Computer Use for Linux']);expect(document.body.textContent).toContain('customBlender');expect(document.body.textContent).toContain('robot-provisioning');expect(document.body.textContent).not.toContain('PRIVATE_TOKEN=')
-  const search=document.querySelector<HTMLInputElement>('input[type="search"]')!
-  await change(search,'robot');expect(document.body.textContent).toContain('robot-provisioning')
-  await change(search,'');const selects=document.querySelectorAll('select');await change(selects[0]!,'skill')
-  const inventory=document.querySelector('[aria-label="Discovered plugins and skills"]')!;expect(inventory.textContent).toContain('robot-provisioning');expect(inventory.textContent).not.toContain('customBlender')
-  await act(async()=>button('Details and source').click());expect(inventory.textContent).toContain('/product/skills/robot-provisioning/SKILL.md');expect(inventory.textContent).toContain('/robot-provisioning')
-  await act(async()=>button('Open associated server configuration').click());expect(nativeDocumentCalls).toBe(1)
-  expect(document.body.textContent).not.toContain('Save and connect');expect(document.querySelector('input[value="customBlender"]')).toBeNull();expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
-  current={...current,mcp:[mcp('first'),mcp('second')],associations:integrationAssociations([mcp('first'),mcp('second')])}
-  await act(async()=>button('Inspect existing / refresh').click());expect(document.body.textContent).toContain('Multiple native servers match')
-  const choice=[...document.querySelectorAll('select')].find(v=>v.textContent?.includes('Choose; no automatic replacement'))!
-  await change(choice,'second');expect(nativeDocumentCalls).toBe(2);expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
-  current={...current,mcp:[],associations:integrationAssociations([]),blenderSupply:{...current.blenderSupply,ready:true}}
-  await act(async()=>button('Inspect existing / refresh').click());await act(async()=>button('Associate in native document').click())
-  expect(nativeDocumentCalls).toBe(3);expect(document.body.textContent).not.toContain('Choose a verified source');expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
-  current={...current,mcp:[mcp('unity',{integration:'unity',command:'mcp-for-unity',unityStatusDirectory:'/public/unity-registry',unityDisableUpdateCheck:true})],associations:integrationAssociations([mcp('unity',{integration:'unity'})])}
-  await act(async()=>button('Inspect existing / refresh').click());await act(async()=>button('Open associated server configuration').click());expect(nativeDocumentCalls).toBe(4)
-  expect(document.body.textContent).not.toContain('Unity addon registry directory (absolute path)');expect(document.querySelector('select[value="stdio"]')).toBeNull();expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
+  await act(async()=>{root.render(<ExternalToolsSettings tr={(_zh,en)=>en} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{nativeDocumentCalls++}}/>);await new Promise(r=>setTimeout(r,0))})
+  expect(document.querySelector('h2')?.textContent).toBe('Integrations');expect(document.querySelector('[aria-label="Integration list"]')?.textContent).toContain('customBlender');expect(document.body.textContent).toContain('robot-provisioning');expect(document.body.textContent).not.toContain('PRIVATE_TOKEN=')
+  await change('robot');expect(document.querySelectorAll('.lya-settings-list-row')).toHaveLength(1);expect(document.body.textContent).toContain('robot-provisioning')
+  await change('');await click(tab('Skills'));expect(document.querySelector('[aria-label="Integration list"]')?.textContent).not.toContain('customBlender')
+  await openRow('robot-provisioning');expect(document.body.textContent).toContain('/robot-provisioning');expect(document.body.textContent).toContain('/product/skills/robot-provisioning/SKILL.md');expect(document.body.textContent).toContain('Model loading')
+  await back();await click(tab('MCP'));await openRow('customBlender');expect(document.querySelector('input[value="customBlender"]')).toBeNull();expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
+  await click(button('Open native configuration'));expect(nativeDocumentCalls).toBe(1);expect(document.body.textContent).toContain('Current tools');expect(document.body.textContent).toContain('mcp__customBlender__get_scene_info')
+  await back();current.mcp=[mcp('first'),mcp('second')];current.associations=integrationAssociations(current.mcp);await refresh();expect(document.body.textContent).toContain('Multiple native servers match')
+  const chooser=[...document.querySelectorAll<HTMLButtonElement>('button')].find(v=>v.textContent?.startsWith('Choose a server'))!;await click(chooser)
+  const choose=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(v=>v.textContent?.includes(text))!
+  await click(choose('first'));expect(nativeDocumentCalls).toBe(2);await click(chooser);await click(choose('second'));expect(nativeDocumentCalls).toBe(3);expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
+  current.writable=false;await refresh();expect(document.querySelector('input[value="customBlender"]')).toBeNull();expect(document.body.textContent).not.toContain('Save and connect');expect(document.body.textContent).not.toContain('Unity addon registry directory (absolute path)')
   await act(async()=>{root.render(<ExternalToolsSettings tr={zh=>zh} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{nativeDocumentCalls++}}/>);await new Promise(r=>setTimeout(r,0))})
-  expect(document.body.textContent).toContain('软件与集成');expect(document.body.textContent).toContain('打开原生 MCP 配置文档');expect(document.body.textContent).not.toContain('Unity addon 登记目录（绝对路径）');expect(document.body.textContent).not.toContain('保存并连接')
+  expect(document.body.textContent).toContain('集成');expect(document.body.textContent).toContain('原生 MCP 配置');expect(document.body.textContent).not.toContain('保存并连接');expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name)}}
 })
-
 
 // 原SDK外壳和原inventory组件参加交互，不由产品重写官方列表。
 test('原插件列表仍默认且可打开集成；软件下载不藏details，正常按钮提交原acquire而非模型会话',async()=>{
@@ -187,11 +198,11 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
  try{
   function NativeSettingsHarness(){
    const [activeId,setActiveId]=React.useState('plugins')
-   return React.createElement(SettingsRoot,{wide:true,t:(key:string)=>key,useStore:(select:any)=>select({open:true,activeId}),actions:{open:()=>{},close:()=>{},select:setActiveId,openSection:setActiveId},useSections:(select:any)=>select(rows),useShortcuts:(select:any)=>select([]),useDesktopUpdate:(select:any)=>select({}),useConnectionState:(select:any)=>select('connected'),useOnboardingSteps:(select:any)=>select([]),useSessions:(select:any)=>select({phase:'ready',byId:{fixture:{retainedBy:{mainView:1},blank:false}}}),openDesktopUpdate:()=>{},reconnect:()=>{},renderSlot:(name:string,_owner:unknown,options?:{only:string;fallback?:unknown})=>{if(name==='settings.section'){if(options?.only==='plugins')return native();if(options?.only==='agent-presets')return React.createElement(AgentPresetSection,{t:(key:string)=>presetEn[key as keyof typeof presetEn]??key,useAgentPresetSection:(select:any)=>select({status:'ready',error:null,saving:false,rows:[{id:'standard',isDefault:true},{id:'ptc'},{id:'minimal'},{id:'cordis'},{id:'existing-custom',name:'Existing custom mod',description:'Preserved declaration'}],view:null}),load:async()=>{presetLoads++},view:async()=>{},closeView:()=>{},makeDefault:async()=>{},startCreatorDraft:()=>{creatorRequests++},close:()=>{}} as any);const entry=entries.find(row=>row.id===options?.only);return entry?React.createElement(entry.component,entry.inject()):null}if(name==='settings.header')return 'Settings';if(name==='settings.close')return 'Close';return options?.fallback??null}} as any)
+   return React.createElement(SettingsRoot,{wide:true,t:(key:string)=>key,useStore:(select:any)=>select({open:true,activeId}),actions:{open:()=>{},close:()=>{},select:setActiveId,openSection:setActiveId},useSections:(select:any)=>select(rows),useShortcuts:(select:any)=>select([]),useDesktopUpdate:(select:any)=>select({}),useConnectionState:(select:any)=>select('connected'),useOnboardingSteps:(select:any)=>select([]),useSessions:(select:any)=>select({phase:'ready',byId:{fixture:{retainedBy:{mainView:1},blank:false}}}),openDesktopUpdate:()=>{},reconnect:()=>{},renderSlot:(name:string,_owner:unknown,options?:{only:string;fallback?:unknown})=>{if(name==='settings.section'){if(options?.only==='plugins')return native();if(options?.only==='agent-presets')return React.createElement(AgentPresetSection,{t:(key:string)=>presetEn[key as keyof typeof presetEn]??key,useAgentPresetSection:(select:any)=>select({status:'ready',error:null,saving:false,rows:[{id:'standard',isDefault:true},{id:'ptc'},{id:'minimal'},{id:'cordis'},{id:'existing-custom',name:'Existing custom mod',description:'Preserved declaration'}],view:null}),load:async()=>{presetLoads++},view:async()=>{},closeView:()=>{},makeDefault:async()=>{},startCreatorDraft:()=>{creatorRequests++},close:()=>{}} as any);const entry=entries.find(row=>row.id===options?.only);return entry?React.createElement(entry.component,{...entry.inject(),key:entry.id}):null}if(name==='settings.header')return 'Settings';if(name==='settings.close')return 'Close';return options?.fallback??null}} as any)
   }
   await act(async()=>{root.render(React.createElement(NativeSettingsHarness));await new Promise(r=>setTimeout(r,0))})
   const nav=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('nav button')].find(row=>row.textContent===text)!
-  expect([...document.querySelectorAll('nav button')].map(row=>row.textContent)).toEqual(['General','Models','Plugin list','Software and integrations','Agent presets','Physics engine','Robot library','Optional software downloads'])
+  expect([...document.querySelectorAll('nav button')].map(row=>row.textContent)).toEqual(['General','Models','Plugin list','Integrations','Agent presets','Physics engine','Robot library','Downloads'])
   await act(async()=>{nav('Agent presets').click();await new Promise(r=>setTimeout(r,0))})
   for(const text of ['Standard mode','PTC mode','Minimal mode','Creator mode','Existing custom mod'])expect(document.body.textContent).toContain(text)
   expect(presetLoads).toBe(1);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.includes('Let the agent help me create a preset'))!.click()});expect(creatorRequests).toBe(1)
@@ -199,27 +210,38 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
   expect(nav('Plugin list').getAttribute('aria-current')).toBe('true')
   await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click()})
   expect(document.body.textContent).toContain('Native existing plugin')
-  await act(async()=>{nav('Software and integrations').click();await new Promise(r=>setTimeout(r,0))})
-  expect(document.querySelector('[aria-label="Software downloads and installation"]')).toBeNull()
-  const openDocumentButton=[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Open native MCP configuration')!
-  await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(1);expect(document.body.textContent).not.toContain('without inject')
-  documentFailure=true;await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(2);expect(document.body.textContent).toContain('Native configuration document open failed');documentFailure=false
+  await act(async()=>{nav('Integrations').click();await new Promise(r=>setTimeout(r,0))})
+  expect(document.querySelector('[aria-label="Optional packages"]')).toBeNull()
+  const findButton=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('.lya-settings button')].find(row=>row.textContent===text)!
+  const tick=async()=>{await new Promise(r=>setTimeout(r,0))}
+  const click=async(node:HTMLElement)=>{if(!node)throw Error('UI target missing; buttons='+[...document.querySelectorAll('button')].map(x=>x.textContent).join('|'));await act(async()=>{node.click();await tick()})}
+  const refresh=()=>click(document.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]')!)
+  const openDocumentButton=findButton('Native MCP configuration')
+  await click(openDocumentButton);expect(documentCalls).toBe(1);expect(document.body.textContent).not.toContain('without inject')
+  documentFailure=true;await click(openDocumentButton);expect(documentCalls).toBe(2);expect(document.body.textContent).toContain('Native configuration document open failed');documentFailure=false
   documentGate=new Promise<void>((_resolve,reject)=>{rejectDocument=reject})
-  await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(3);expect(openDocumentButton.disabled).toBe(true)
-  await act(async()=>{openDocumentButton.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(3)
-  const inspectWhileDocumentPending=[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!;expect(inspectWhileDocumentPending.disabled).toBe(false)
-  const pendingStateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{inspectWhileDocumentPending.click();await new Promise(r=>setTimeout(r,0))});expect(calls.filter(row=>row.path.includes('/state')).length).toBeGreaterThan(pendingStateReads)
-  await act(async()=>{nav('Optional software downloads').click();await new Promise(r=>setTimeout(r,0))})
-  const software=document.querySelector<HTMLElement>('[aria-label="Software downloads and installation"]');expect(software).not.toBeNull();expect(software!.closest('details:not([open])')).toBeNull();expect(software!.textContent).toContain('Blender');expect(software!.textContent).toContain('Unity');expect(software!.textContent).toContain('SAM 3D Objects');expect(software!.textContent).toContain('FastGS')
-  const blender=software!.querySelector<HTMLElement>('[data-tool-id="blender"]')!;expect(blender).not.toBeNull()
-  expect([...blender.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.disabled).toBe(false)
-  await act(async()=>{[...blender.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(1)})
-  expect(calls.find(row=>row.path.endsWith('/acquire'))?.body).toMatchObject({id:'blender'});expect(modelCalls).toBe(0);const job=hostCtx.jobs.list()[0]!,stateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{await hostCtx.jobs.wait(job.id,3000)});expect(calls.some(row=>row.path.includes('/job?'))).toBe(true);expect(calls.filter(row=>row.path.includes('/state'))).toHaveLength(stateReads);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain(String(job.id));expect(document.body.textContent).toContain('not installed automatically')
-  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Read actual output')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Fixture official page request accepted')
-  openerExit=17;const unity=software!.querySelector<HTMLElement>('[data-tool-id="unity"]')!;await act(async()=>{[...unity.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Download / install from official source')!.click();await waitForJob(2)});const failed=hostCtx.jobs.list().find(row=>row.id!==job.id)!;await hostCtx.jobs.wait(failed.id,3000);await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Inspect existing / refresh')!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Official download page could not be opened (exit 17)');expect(document.body.textContent).not.toContain('官方下载页面未能打开');expect(modelCalls).toBe(0)
-  expect(documentCalls).toBe(3);await act(async()=>{rejectDocument(new Error('Late native document opener failure'));await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Late native document opener failure')
-  const reopenDocument=[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='Open native MCP configuration')!;expect(reopenDocument.disabled).toBe(false);documentGate=undefined
-  await act(async()=>{reopenDocument.click();await new Promise(r=>setTimeout(r,0))});expect(documentCalls).toBe(4);expect(document.body.textContent).not.toContain('Late native document opener failure')
+  await click(openDocumentButton);expect(documentCalls).toBe(3);expect(openDocumentButton.disabled).toBe(true)
+  await click(openDocumentButton);expect(documentCalls).toBe(3)
+  const inspectWhileDocumentPending=document.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]')!;expect(inspectWhileDocumentPending.disabled).toBe(false)
+  const pendingStateReads=calls.filter(row=>row.path.includes('/state')).length;await refresh();expect(calls.filter(row=>row.path.includes('/state')).length).toBeGreaterThan(pendingStateReads)
+  // 页面切换使用原slot键，待完成原生文档请求不会被软件下载锁阻断。
+  await act(async()=>{rejectDocument(new Error('Late native document opener failure'));await tick()});expect(document.body.textContent).toContain('Late native document opener failure');expect(openDocumentButton.disabled).toBe(false);documentGate=undefined
+  await click(openDocumentButton);expect(documentCalls).toBe(4);expect(document.body.textContent).not.toContain('Late native document opener failure')
+  await click(nav('Downloads'))
+  const software=document.querySelector<HTMLElement>('[aria-label="Optional packages"]');expect(software).not.toBeNull();expect(software!.closest('details:not([open])')).toBeNull()
+  for(const name of ['Blender','Unity','SAM 3D Objects','FastGS'])expect(software!.textContent).toContain(name)
+  const openPackage=(text:string)=>click([...document.querySelectorAll<HTMLButtonElement>('.lya-settings-list-row')].find(row=>row.querySelector('.lya-settings-row-name')?.textContent===text)!)
+  await openPackage('Blender');expect(document.querySelector('h2')?.textContent).toBe('Blender');expect(findButton('Open official installer').disabled).toBe(false)
+  await act(async()=>{findButton('Open official installer').click();await waitForJob(1)})
+  expect(calls.find(row=>row.path.endsWith('/acquire'))?.body).toMatchObject({id:'blender'});expect(modelCalls).toBe(0)
+  const job=hostCtx.jobs.list()[0]!,stateReads=calls.filter(row=>row.path.includes('/state')).length;await act(async()=>{await hostCtx.jobs.wait(job.id,3000)})
+  expect(calls.some(row=>row.path.includes('/job?'))).toBe(true);expect(calls.filter(row=>row.path.includes('/state'))).toHaveLength(stateReads)
+  await refresh();expect(document.body.textContent).toContain(String(job.id));expect(document.body.textContent).toContain('not installed automatically')
+  await click(findButton('View output'));expect(document.body.textContent).toContain('Fixture official page request accepted')
+  await click(findButton('Downloads'));await openPackage('Unity');openerExit=17
+  await act(async()=>{findButton('Open official installer').click();await waitForJob(2)})
+  const failed=hostCtx.jobs.list().find(row=>row.id!==job.id)!;await hostCtx.jobs.wait(failed.id,3000);await refresh()
+  expect(document.body.textContent).toContain('Official download page could not be opened (exit 17)');expect(document.body.textContent).not.toContain('官方下载页面未能打开');expect(modelCalls).toBe(0);expect(documentCalls).toBe(4)
   await act(async()=>{nav('Plugin list').click();await new Promise(r=>setTimeout(r,0))});expect(nav('Plugin list').getAttribute('aria-current')).toBe('true');await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.startsWith('Global plugins'))!.click();await new Promise(r=>setTimeout(r,0))});expect(document.body.textContent).toContain('Native existing plugin')
  }finally{await act(async()=>root.unmount());removeController();await hostCtx.fiber.dispose();await clientCtx.fiber.dispose();dom.window.close();await rm(nativeDir,{recursive:true,force:true});for(const[key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
 })
