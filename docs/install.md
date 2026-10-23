@@ -2,9 +2,9 @@
 
 | 出版信息 | 标记 |
 | --- | --- |
-| 应用发布名称 | 0.1.0RC · Linux x64 |
-| 技术版本 / releaseId | `0.1.0-rc` |
-| 文档日期 | 2026-10-21 |
+| 应用发布名称 | 0.2.0 Alpha 1 · Linux x64（预发布） |
+| 技术版本 / releaseId | `0.2.0-alpha.1` / `rcui-v11-20261022T151637Z-agraph5` |
+| 文档日期 | 2026-10-23 |
 | 作者团队 | Vorynel Co., Ltd. |
 | 赞助方 | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | 版权 | © 2026 Vorynel Co., Ltd. |
@@ -12,7 +12,7 @@
 | 公共源码 | [ManfredCh/Lyapunov](https://github.com/ManfredCh/Lyapunov) |
 | 图片与概念来源 | 项目贡献者撰写的说明与版本标记；本手册为文字和命令说明，无概念图素材。 |
 
-本文对应 Lyapunov 0.1.0RC（技术版本及 releaseId 为 `0.1.0-rc`）的 Linux x64 安装合同。当前发布说明见[0.1.0-rc](releases/0.1.0-rc.md)。releaseId、最低 glibc、主包和 MuJoCo 伴随包的文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及该批次版本清单为准。主包与默认 MuJoCo 使用同一个 releaseId，按清单选择对应归档。
+本文对应 Lyapunov 0.2.0 Alpha 1（技术版本 `0.2.0-alpha.1`，发布批次 `rcui-v11-20261022T151637Z-agraph5`）的 Linux x64 安装合同；它是预发布版，不是 stable。当前发布说明见[0.2.0-alpha.1](releases/0.2.0-alpha.1.md)，完整操作步骤见[中文完整操作手册](https://vorynel.com/lyapunov/manual.html)。releaseId、最低 glibc、主包文件名、大小与校验值，以[官网安装页](https://vorynel.com/lyapunov/)及本批次版本清单为准。0.1.0RC 的固定版本目录、标签和[历史发布说明](releases/0.1.0-rc.md)继续保留。
 
 ## 默认安装
 
@@ -55,9 +55,11 @@ macOS 版本将尽快提供；Windows 用户建议通过 WSL2 + WSLg 安装和�
 | 命令入口 | `~/.local/bin/lyapunov` |
 | 桌面入口 | `${XDG_DATA_HOME:-$HOME/.local/share}/applications/lyapunov-desktop.desktop` |
 | 默认 MuJoCo SDK | `<版本目录>/.runtime/sim-python/` |
+| 默认策略 CPU 运行时 | `<版本目录>/.runtime/policy-python/`（本批次含默认策略供给时） |
+| 策略运行时日志 | `<版本目录>/.install/policy-cpu.log`、`.install/policy-cpu.exit` |
 | 该版本安装回执 | `<版本目录>/.install/` |
 
-安装器下载版本清单，校验归档字节数与 SHA-256，并核对包内 `RELEASE.json` 的版本、平台和源码提交。本版默认 MuJoCo 为 `install-provider`：版本激活后由包内 provider 联网准备独立 SDK（历史 `conda-pack` 批次在最终版本路径解包伴随包并运行 relocation）；随后执行托管 SDK 的 `doctor` 与原生 `physics-check`。这些检查通过后，安装器才原子切换 `current` 并创建用户命令与桌面入口。
+安装器下载版本清单，校验归档字节数与 SHA-256，并核对包内 `RELEASE.json` 的版本、平台和源码提交。本版默认 MuJoCo 为 `install-provider`：版本激活后由包内 provider 联网准备独立 SDK（历史 `conda-pack` 批次在最终版本路径解包伴随包并运行 relocation）；本批次含默认策略供给时，还会用 `install-provider policy-cpu` 准备独立的策略运行时。随后执行托管 SDK 的 `doctor` 与原生 `physics-check`。这些检查通过后，安装器才原子切换 `current` 并创建用户命令与桌面入口；策略运行时失败会报 `DEFAULT_POLICY_RUNTIME_FAILED`，保留旧 `current` 与用户数据。
 
 正常系统沙箱授权会按上面的同一安装流程自动完成；其他桌面共享库或受限沙箱条件阻断时，已校验的版本目录与 SDK 会保留，原 `current` 保持不变。按短状态与日志说明处理后重跑原安装命令，已下载的正确归档可复用，中断下载保留为 `.partial`。
 
@@ -114,7 +116,7 @@ Guest 使用独立本地工程与会话，不连接产品账户或计费后端�
 - 最新：`https://vorynel.com/lyapunov/releases/latest/linux-x64.json`，同目录 `.tsv`。
 - 固定版本：`https://vorynel.com/lyapunov/releases/<releaseId>/linux-x64.json`，同目录 `.tsv`。
 - 主包：`https://vorynel.com/lyapunov/releases/<releaseId>/<archive.path>`。
-- MuJoCo 伴随包：仅 `conda-pack` 批次在同一版本目录中提供 `<mujoco.runtime.archive.path>`；`0.1.0-rc` 为 `install-provider` 批次，清单不含伴随包字段，SDK 由包内 provider 联网准备。
+- MuJoCo 伴随包：仅 `conda-pack` 批次在同一版本目录中提供 `<mujoco.runtime.archive.path>`；`0.2.0-alpha.1` 为 `install-provider` 批次，清单不含伴随包字段，SDK 由包内 provider 联网准备。
 
 JSON 中两项 `archive.path` 均为文件名；TSV 的 `archive_path` 与 `mujoco_path` 是从 `/lyapunov/` 起算的相对发布路径。使用清单内的真实文件名、字节数和 SHA-256；应用版本号与发布批次 releaseId 分开登记。
 
@@ -122,8 +124,8 @@ JSON 中两项 `archive.path` 均为文件名；TSV 的 `archive_path` 与 `mujo
 
 1. 从官网选择一个固定 releaseId，保存其清单与两个归档。先将下载文件的字节数和 `sha256sum` 输出与清单比较。
 2. 将主包完整解到一个新的版本目录，保留清单规定的顶层 `archiveRoot`。该目录以 `./lyapunov` 为产品入口。
-3. `conda-pack` 批次：在主包根创建 `.runtime/sim-python`，将 MuJoCo 伴随包解到这里，用该环境的 `bin/python bin/conda-unpack` 在最终路径运行 relocation。`install-provider` 批次（含 `0.1.0-rc`）：改为在包根运行 `./lyapunov install-provider mujoco` 联网准备 SDK；此后保留该路径。
-4. 运行 `./lyapunov doctor mujoco --managed-sdk` 与 `./lyapunov physics-check --managed-sdk`，按真实输出补齐当前桌面的共享库或沙盒要求。检查通过后运行 `./lyapunov`。
+3. `conda-pack` 批次：在主包根创建 `.runtime/sim-python`，将 MuJoCo 伴随包解到这里，用该环境的 `bin/python bin/conda-unpack` 在最终路径运行 relocation。`install-provider` 批次（含 `0.2.0-alpha.1`）：改为在包根运行 `./lyapunov install-provider mujoco` 联网准备 SDK；本批次含默认策略供给，还要运行 `./lyapunov install-provider policy-cpu` 准备独立策略运行时；此后保留这两个路径。
+4. 运行 `./lyapunov doctor mujoco --managed-sdk` 与 `./lyapunov physics-check --managed-sdk`，按真实输出补齐当前桌面的共享库或沙盒要求。检查通过后运行 `./lyapunov`。`install-provider` 自己会运行对应 provider 的 doctor，不需要再给 `install-provider` 传 doctor 参数；日志在 `.install/provider.log`、`.install/policy-cpu.log` 与 `.install/policy-cpu.exit`。
 5. 手工解包不会生成默认安装器的 `current`／`previous`／用户启动器。希望使用这些入口时，运行官方脚本安装同一 releaseId。
 
 以下是单个归档的校验示例；文件名与摘要必须从该固定版本清单复制：
@@ -148,7 +150,7 @@ tar --no-same-owner --no-same-permissions   -xzf /absolute/path/to/mujoco-compan
 
 ## 可选引擎与大型运行时
 
-默认安装准备 MuJoCo 及规划、几何和传输依赖；Isaac、Newton、policy 运行时和 benchmark 套件按需选择：
+默认安装准备 MuJoCo 及规划、几何和传输依赖；本批次含默认策略供给时还会准备 `policy-cpu`。Isaac、Newton 和 benchmark 套件按需选择；`policy-cpu` 可在修复时重跑：
 
 ```sh
 "$HOME/.local/bin/lyapunov" install-provider newton

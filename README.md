@@ -36,7 +36,7 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 **Linux installation:** The [installation page](https://vorynel.com/lyapunov/) and its release manifest are the authority for release identifiers, downloads, and system requirements. This repository contains the product source; the [release notes](docs/releases) describe product changes and their verified scope.
 
-[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Installation guide / 安装手册](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases)
+[Install](#install-on-linux) · [First run](#first-run) · [Robots and cameras](#robots-and-cameras) · [Full manual / 完整操作手册](https://vorynel.com/lyapunov/manual.html) · [Installation guide / 历史安装指南](https://vorynel.com/lyapunov/guide.html) · [Release notes / 发布说明](docs/releases)
 
 <!-- Workbench screenshot placeholder: add the correct image here when available. -->
 
@@ -44,12 +44,14 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Default installation — [0.1.0 RC](docs/releases/0.1.0-rc.md):** the existing installation contract and default download remain available.
-- **Opt-in preview — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** adds agent-graph campaigns, task predicates on action receipts, automatic recall of verified skills, worker/heldout and verifier isolation, and the Campaigns workbench panel. Select the alpha explicitly; it does not replace the RC download.
+- **Current default — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** the website `latest` manifest and the installer now select this Linux x64 prerelease. It adds agent-graph campaigns, task predicates on action receipts, automatic recall of verified skills, worker/heldout and verifier isolation, and the Campaigns workbench panel.
+- **Previous release — [0.1.0 RC](docs/releases/0.1.0-rc.md):** its versioned directory, tag, installation contract and release notes remain available. Use `--version RELEASE_ID` to install it explicitly; it is no longer the default download.
+
+GitHub release metadata does not allow a prerelease to be marked as the platform “latest”. The GitHub release for 0.2.0 Alpha 1 stays a prerelease, and every download entry we control points to the versioned Alpha 1 archive or to the `latest` manifest prepared for this switch. We do not relabel the Alpha as stable or move the RC tag.
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session:
+From a regular terminal in your graphical desktop session. The default command below installs **0.2.0-alpha.1** after the `latest` switch:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -88,6 +90,8 @@ Peiri is the language model name used for conversation and tool orchestration. P
 2. Choose **Sign in**, complete website authorization in your browser, and return to the same application window. The workspace opens after the account is verified. To use the website's model service, first register an account and top up Credits. Signed-in model calls use **Peiri** and the account's central Credits.
 3. To work locally, choose **Try as guest**. Guest opens an independent local workspace without connecting to product servers, including the product account or billing backend. Files, scene editing, the viewer, and locally installed tools remain available. Guest starts with **no default model**; configure your own provider explicitly in model settings to use an agent. Guest does not use Peiri, product billing, or central Credits.
 4. Create or open a project, then add assets from your files or the local resource library. Guest projects remain separate from signed-in projects; export a guest project and explicitly import it after sign-in when you want to move it.
+
+For the complete install → guest/sign-in → scene → robot → camera → RGB-D → recording → export → result-check workflow, with the actual Camera/Capture/Recording labels, defaults, frames and failure handling, read the [Chinese full manual](https://vorynel.com/lyapunov/manual.html).
 
 The account page and settings expose the actual connection, model, and engine state. Provider credentials belong to the provider you configure; the application does not supply credentials for external services, which retain their own usage and billing terms.
 

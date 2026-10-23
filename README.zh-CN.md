@@ -36,15 +36,22 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 **Linux 安装：**版本标识、下载内容和系统要求以[官网安装页](https://vorynel.com/lyapunov/)及其版本清单为准。本仓库包含产品源码；[发布说明](docs/releases)记录产品变化与核验范围。
 
-[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整安装手册](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases)
+[安装](#在-linux-上安装) · [首次运行](#首次运行) · [机器人与相机](#机器人与相机) · [完整操作手册](https://vorynel.com/lyapunov/manual.html) · [历史安装指南](https://vorynel.com/lyapunov/guide.html) · [发布说明](docs/releases)
 
 <!-- 工作台截图待替换：获得正确图片后在此位置补入。 -->
 
 **推荐工作流：** 让Agent使用原生产品工具，或使用工作台控件完成场景、机器人与仿真操作。
 
+## 版本通道
+
+- **当前默认 — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md)：**官网 `latest` 清单与安装器默认选择本版 Linux x64 预发布。新增 Agent Graph 任务判定、失败技能召回、独立复验、开发/留出隔离和 Campaigns 面板。
+- **上一个版本 — [0.1.0 RC](docs/releases/0.1.0-rc.md)：**固定版本目录、标签、安装合同与历史说明继续保留；需要旧版时用 `--version RELEASE_ID` 明确安装，它不再是默认下载。
+
+GitHub Release 的 “latest” 平台字段不能把 prerelease 标成 latest。0.2.0 Alpha 1 的 GitHub Release 保持 prerelease；我们可控的下载入口直指固定版本归档，或指向本次准备切换的 `latest` 清单。不把 Alpha 改名成 stable，也不移动 0.1.0RC 标签。
+
 ## 在 Linux 上安装
 
-在图形桌面会话的普通终端中运行：
+在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.0-alpha.1**：
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -83,6 +90,8 @@ Peiri 是对话与工具编排使用的语言模型代称；Pontryagin 是后台
 2. 点击 **Sign in／登录**，在浏览器完成官网授权后返回同一个应用窗口；账号验证成功后进入工作台。使用官网模型服务需先注册账号并充值 Credits；登录用户的模型调用使用 **Peiri** 和该账号的中央 Credits。
 3. 希望在本地使用时，点击 **Try as guest／游客体验**。Guest 打开独立本地工作台，不连接产品服务器，包括产品账号和计费后端。文件、场景编辑、视口及已安装本地工具可用。游客初始**没有默认模型**；需要 Agent 时在模型设置显式配置自己的 provider。游客不使用 Peiri、产品计费或中央 Credits。
 4. 创建或打开工程，从自己的文件或本地资源库添加资产。游客工程与登录工程分开保存；需要迁移时，先导出游客工程，再登录并显式导入。
+
+从安装、游客/登录、新项目、导入/选机器人、设机位、预览/RGB-D、录制/导出到结果核验的完整步骤，见[中文完整操作手册](https://vorynel.com/lyapunov/manual.html)。
 
 账号页与设置显示实际连接、模型和引擎状态。Provider 凭据由使用者自行配置；应用不提供外部服务的凭据，外部服务保留自己的使用与计费条件。
 
