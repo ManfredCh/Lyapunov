@@ -4,6 +4,7 @@ import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import {requireWritableScene} from '../../scene-kit/src/plugin.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { JobId } from '@deepseek-ai/dsh-jobs'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-commands'
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
@@ -226,7 +227,27 @@ export function apply(ctx:Context,config:Config={}){
  }}
  ctx.reflect.provide('policyDefaults',defaultPolicies)
  ctx.effect(()=>{void defaultPolicies.prepare().catch(error=>ctx.logger.warn(String(error)));return()=>{}})
- const running=new Map<string,{runId:string;jobId:string;controller:AbortController}>()
+ // owner key 由原生会话 + world/entity 的 JSON tuple 组成：同名世界/实体在两个会话里各自成立，
+ // 且 id 自身含分隔符时也不会相撞。starting 在 matchPolicy 之前占位，防止两个并发调用在匹配的
+ // await 间隙都通过 running 检查。
+ const running=new Map<string,{runId:string;jobId:string;controller:AbortController;done:Promise<unknown>}>()
+ const starting=new Set<string>()
+ // 只追踪**本插件创建**的后台执行/下载：原始 Promise + 自己的 controller + 原生 Job 引用。
+ // 释放时按这些引用请求取消并等待真正的执行/清理完成，不遍历无关 Jobs；失败不被 JobOutcome 吞掉。
+ type TrackedJob={controller:AbortController;raw?:Promise<unknown>;jobId?:JobId;owner?:SessionId;watched?:boolean}
+ const trackedJobs=new Set<TrackedJob>()
+ // 原生 Jobs.start 会在准入后同步调用 run，但测试替身/未来实现可能延后调用；raw 不能在 start
+ // 返回时就假定已赋值。先登记 entry，run 真正起跑后再挂完成清理，避免准入通过但尚未 run 时崩。
+ const trackJob=(entry:TrackedJob)=>{
+  trackedJobs.add(entry)
+  if(entry.raw&&!entry.watched){entry.watched=true;void entry.raw.finally(()=>trackedJobs.delete(entry)).catch(()=>{})}
+  return entry
+ }
+ const ownerKey=(owner:string,worldId:unknown,entityId:unknown)=>JSON.stringify([owner,worldId,entityId])
+ const isAbortError=(error:unknown)=>error instanceof Error&&(error.name==='AbortError'||(error as {code?:unknown}).code==='ABORT_ERR')
+ const jobFailure=(controller:AbortController,error:unknown)=>({status:controller.signal.aborted&&isAbortError(error)?'killed' as const:'failed' as const,result:String(error)})
+ let disposed=false
+ const assertAttached=()=>{if(disposed)throw new Error('POLICY_PLUGIN_DISPOSED')}
  const localPath=(value:unknown,exec:any)=>{if(typeof value!=="string"||!value.trim())throw new Error("POLICY_LOCAL_PATH_REQUIRED");if(value.startsWith("file:"))return fileURLToPath(value);if(isAbsolute(value))return value;const cwd=exec?.agent?.session?.header?.cwd??exec?.agent?.session?.header?.meta?.cwd;if(typeof cwd!=="string")throw new Error("POLICY_WORKSPACE_REQUIRED: 相对路径需要当前会话工作区");return resolve(cwd,value)}
  const blocked=(error:unknown)=>{if(error instanceof RobotDownloadFailure)return {status:"BLOCKED",ready:false,...error.toJSON()};const message=error instanceof Error?error.message:String(error),code=message.match(/^(POLICY_[A-Z0-9_]+|ROBOT_[A-Z0-9_]+|GUEST_PRODUCT_SERVICE_FORBIDDEN)(?=:)/)?.[1]??'POLICY_LOCAL_LOAD_FAILED';return {status:"BLOCKED",ready:false,code,message,retryable:false}}
  const registeredInput=async(input:any,preparation=false)=>{
@@ -391,25 +412,56 @@ export function apply(ctx:Context,config:Config={}){
     }
    }
    if(!input.background)return run(exec.signal)
-   const controller=new AbortController()
-   const jobId=ctx.jobs.start({kind:'policy_download',label:'Policy 下载 '+id.modelId,owner:exec.agent?.id,run:()=>({cancel:()=>controller.abort(),done:run(controller.signal).then(result=>({status:'completed' as const,result:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)}))})})
+   assertAttached()
+   const controller=new AbortController(),owner=typeof exec.agent?.id==='string'?exec.agent.id as SessionId:undefined
+   // 原生 Jobs.start 先做 owner/配额/controller 准入，再调用 run；真正的下载必须从 run 内起跑。
+   // 准入拒绝时 start 直接抛出，不得先产生下载副作用或残留 running 记录。
+   let task!:Promise<{status:'completed'|'failed'|'killed';result:string}>
+   const entry:TrackedJob={controller,owner}
+   const jobId=ctx.jobs.start({kind:'policy_download',label:'Policy 下载 '+id.modelId,owner:exec.agent?.id,run:()=>{
+    const started=run(controller.signal)
+    entry.raw=started
+    trackJob(entry)
+    task=started.then(result=>({status:'completed' as const,result:JSON.stringify(result)}),error=>jobFailure(controller,error))
+    return {cancel:()=>controller.abort(),done:task}
+   }})
+   entry.jobId=jobId
+   trackJob(entry)
    return {status:'RUNNING',jobId}
   }},
   policy_execute:{description:"Execute an adapted policy through existing ctx.sim in a matching world/entity/generation. Synchronize CPU inference with physics steps. Long-running tasks use native Jobs and support policy_stop or job_kill.",execute:async(input,exec)=>{
    requireWritableScene(ctx,exec.agent,'本地策略执行 policy_execute')
    const id=identity(input),sim=policySim(ctx,exec),scene=policyScene(ctx,exec) as any
    if(!Number.isInteger(input.expectedGeneration))throw new Error('POLICY_EXPECTED_GENERATION_REQUIRED')
-   const matched=await matchPolicy({dataDirectory:root()},{...input,...id},scene,sim)
-   if(matched.status!=='MATCHED')return matched
-   const key=input.worldId+'/'+input.entityId
-   if(running.has(key))throw new Error('POLICY_ENTITY_ALREADY_RUNNING')
-   const runId='policy-'+randomUUID(),controller=new AbortController()
-   const jobId=ctx.jobs.start({kind:'policy_execution',label:'Policy 执行 '+id.modelId,owner:exec.agent?.id,outputLimitBytes:8000,run:()=>({cancel:()=>controller.abort(),done:executePolicy({dataDirectory:root(),pythonPath:config.pythonPath,pythonRuntimes:config.pythonRuntimes},{...input,...id,runId},scene,sim,controller.signal).then(result=>({status:result.status==='COMPLETED'?'completed' as const:result.status==='CANCELLED'?'killed' as const:'failed' as const,result:JSON.stringify(result)}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)})).finally(()=>running.delete(key))})})
-   running.set(key,{runId,jobId,controller})
-   return {status:'RUNNING',runId,jobId,worldId:input.worldId,entityId:input.entityId,expectedGeneration:input.expectedGeneration,resultPath:join(root(),'policy-runs',runId,'result.json')}
+   assertAttached()
+   const owner=requireSessionId(exec.agent,'策略执行'),key=ownerKey(owner,input.worldId,input.entityId)
+   if(running.has(key)||starting.has(key))throw new Error('POLICY_ENTITY_ALREADY_RUNNING')
+   starting.add(key)
+   try{
+    const matched=await matchPolicy({dataDirectory:root()},{...input,...id},scene,sim)
+    // 匹配期间插件可能已释放：此时不得再凭这次迟到结果新建 Job。
+    assertAttached()
+    if(matched.status!=='MATCHED')return matched
+    const runId='policy-'+randomUUID(),controller=new AbortController()
+    // 与下载相同：匹配通过后先让原生 Jobs.start 完成准入，run 内才启动真正的策略执行。
+    // 准入拒绝不得先跑起来再让 Promise 留在后台。raw/controller/JobId 仍在 start 返回后统一持有。
+    let task!:Promise<{status:'completed'|'failed'|'killed';result:string}>
+    const entry:TrackedJob={controller,owner:owner as SessionId}
+    const jobId=ctx.jobs.start({kind:'policy_execution',label:'Policy 执行 '+id.modelId,owner:exec.agent?.id,outputLimitBytes:8000,run:()=>{
+     const started=executePolicy({dataDirectory:root(),pythonPath:config.pythonPath,pythonRuntimes:config.pythonRuntimes},{...input,...id,runId},scene,sim,controller.signal)
+     entry.raw=started
+     trackJob(entry)
+     task=started.then(result=>({status:result.status==='COMPLETED'?'completed' as const:result.status==='CANCELLED'?'killed' as const:'failed' as const,result:JSON.stringify(result)}),error=>jobFailure(controller,error)).finally(()=>{if(running.get(key)?.runId===runId)running.delete(key)})
+     return {cancel:()=>controller.abort(),done:task}
+    }})
+    entry.jobId=jobId
+    trackJob(entry)
+    running.set(key,{runId,jobId,controller,done:task})
+    return {status:'RUNNING',runId,jobId,worldId:input.worldId,entityId:input.entityId,expectedGeneration:input.expectedGeneration,resultPath:join(root(),'policy-runs',runId,'result.json')}
+   }finally{starting.delete(key)}
   }},
   policy_stop:{description:"Stop policy Jobs for the specified world/entity and wait for physical stop confirmation and execution receipts.",execute:async(input,exec)=>{
-   const key=input.worldId+'/'+input.entityId,run=running.get(key)
+   const owner=requireSessionId(exec.agent,'策略停止'),key=ownerKey(owner,input.worldId,input.entityId),run=running.get(key)
    if(!run)return {status:'NOT_RUNNING',worldId:input.worldId,entityId:input.entityId}
    ctx.jobs.kill(JobId(run.jobId),exec.agent?.id,'policy-stop');await ctx.jobs.wait(JobId(run.jobId),10000,exec.agent?.id)
    try{return JSON.parse(await readFile(join(root(),'policy-runs',run.runId,'result.json'),'utf8'))}catch{return {status:'STOPPING',runId:run.runId,jobId:run.jobId}}
@@ -431,5 +483,25 @@ export function apply(ctx:Context,config:Config={}){
  // 模型路由条目服务（模型面 + 本机缓存事实）：持有端点配置与 dataDirectory 的一方出这一份只读事实，
  // 包面板与取件命令共读——消费方（shell）的运行根不含权重缓存目录，自己拼不出这条路。
  ctx.reflect.provide('policyModels',config.guest?{invalidate(){},async list(){return {status:'UNREACHABLE' as const,code:'GUEST_PRODUCT_SERVICE_FORBIDDEN',checkedAt:new Date().toISOString(),routes:[]}}}:createModelRoutes({dataDirectory:directory,packEndpoint:config.packEndpoint,fetcher:config.packFetcher}))
- ctx.effect(()=>()=>{for(const run of running.values())run.controller.abort()})
+ // 插件释放：先阻止迟到的匹配/后台下载再建 Job，再按本插件持有的原生 Job 引用请求取消，
+ // 等到**原始执行/清理 Promise**真正结束。正常取消（AbortError）不算清理失败；真实清理错误
+ // 聚合成 POLICY_PLUGIN_CLEANUP_FAILED 向上传播，不吞成成功，也不等待无关 Jobs。
+ ctx.effect(()=>()=>{
+  disposed=true
+  const pending=[...trackedJobs],requestErrors:unknown[]=[]
+  for(const entry of pending){
+   try{if(entry.jobId!==undefined)ctx.jobs.kill(entry.jobId,entry.owner,'policy-plugin-dispose',true)}
+   catch(error){requestErrors.push(error)}
+   try{entry.controller.abort()}catch(error){requestErrors.push(error)}
+  }
+  return (async()=>{
+   const results=await Promise.allSettled(pending.map(entry=>entry.raw))
+   const errors=[...requestErrors]
+   for(let index=0;index<results.length;index++){
+    const result=results[index]!,entry=pending[index]!
+    if(result.status==='rejected'&&!(entry.controller.signal.aborted&&isAbortError(result.reason)))errors.push(result.reason)
+   }
+   if(errors.length)throw new AggregateError(errors,'POLICY_PLUGIN_CLEANUP_FAILED')
+  })()
+ })
 }

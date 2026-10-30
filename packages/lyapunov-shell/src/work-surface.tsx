@@ -1,5 +1,5 @@
 /**
- * 工作面布局（PLAN §三.6）：中央视图 + 工具面板列 + 底部抽屉 + 最右工具栏。
+ * 工作面布局（PLAN §三.6）：中央视图 + 工具面板列 + 产物抽屉 + 最右工具栏。
  *
  * 结构固定，切换模式/工具只改 CSS 与抽屉高度，**不卸载**任何一块：
  * - 中央视图：场景画布（工作台自有固定入口）与文件工作面（`lyapunov.workbench.centre` key `file`）
@@ -7,10 +7,10 @@
  *   是同一个 Viewer 实例（同相机、同选中、同 world），文件草稿也不因切换而重建；
  * - 工具面板：Claude 式 side page——不占布局轨道，覆盖在中央右侧（absolute + 阴影 + 滑入动画），
  *   一次一个，内容由 lyapunov-shell 的场景状态提供，标题栏同 rail 图标并可关闭；
- * - 底部抽屉：终端（`lyapunov.workbench.drawer` key `terminal`，真实 PTY 会话）与运行产物
- *   同样是常驻 layer，关闭抽屉只隐藏不卸载；占用者通过 owner 参数 `visible` 决定是否轮询；
+ * - 底部抽屉：只保留运行产物；终端入口统一打开 DSH 原生侧栏终端标签（`openTerminal`），
+ *   不再在抽屉里维护第二套 PTY/渲染宿主；
  * - 会话级 Provider 座位（`lyapunov.workbench.session`）：lyapunov-workspace 把它的**同一份**
- *   客户端状态（草稿/保存/冲突/终端选择）注入一次，包住中央视图与抽屉，两块共享同一个实例，
+ *   客户端状态（草稿/保存/冲突）注入一次，包住中央视图与抽屉，两块共享同一个实例，
  *   不存在"渲染两处＝两个 owner"。未注册时原样透传（fallback 就是 children 本身）。
  *
  * 槽位由注册方声明，这里的 renderSlot 是注册方传下来的授权函数（与原生 AppFrame 把 renderSlot
@@ -25,8 +25,8 @@ import {WorkbenchIcon,type WorkbenchIconId} from "./vendor/tabler/icons.tsx"
 import {useWorkbenchUI,DRAWER_MIN_HEIGHT,DRAWER_MAX_HEIGHT,TOOL_PANEL_WIDTH} from "./workbench-ui.ts"
 import {appSidePanelHost} from "./app-side.ts"
 
-/** 工作台自己声明的三个子槽位（注册项在 client.tsx 里声明同一份）。 */
-export type WorkbenchSlotKeys="lyapunov.workbench.session"|"lyapunov.workbench.centre"|"lyapunov.workbench.drawer"
+/** 工作台自己声明的两个子槽位（注册项在 client.tsx 里声明同一份）。 */
+export type WorkbenchSlotKeys="lyapunov.workbench.session"|"lyapunov.workbench.centre"
 export type WorkbenchRenderSlot=PropsRenderSlots<WorkbenchSlotKeys>["renderSlot"]
 
 function MissingSurface({tr,what}:{tr:Translate;what:string}){
@@ -53,10 +53,12 @@ export function PanelColumn({tr,title,tool,children,onClose,hidden=false}:{tr:Tr
 /**
  * 工具面板 / 抽屉的标题映射在 workbench.tsx（它握着场景状态）；这里只负责座位与几何。
  */
-export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,deliverables,active=true,nativeTab=false,revealScene,panelSuppressed=false}:{
+export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,deliverables,active=true,nativeTab=false,revealScene,openTerminal,panelSuppressed=false}:{
   active?:boolean
   nativeTab?:boolean
   revealScene?:()=>void
+  /** 打开原生侧栏终端标签；终端生命周期完全由 DSH 原生 owner 持有。 */
+  openTerminal?:()=>void
   sessionId?:string
   tr:Translate
   renderSlot:WorkbenchRenderSlot
@@ -87,10 +89,10 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,
   // retained 编辑器可见时，同工具的 active 面板只是空壳（object inspector 的占位）⇒ 不挂载、不占 flex/gap。
   const activeVisible=panelRendered&&!retainedVisible
   // 交给占用者的开合请求（同进程函数，不是端点、不是新状态）；identity 稳定，避免占用者反复登记。
-  const reveal=useMemo(()=>({canvas:()=>{revealScene?.();ui.showCentre("canvas")},file:()=>ui.showCentre("file"),terminal:()=>{revealScene?.();ui.showDrawer("terminal")},toggleTerminal:()=>{revealScene?.();if(nativeTab&&!active)ui.showDrawer("terminal");else ui.toggleDrawer("terminal")}}),[ui,revealScene,nativeTab,active])
+  const reveal=useMemo(()=>({canvas:()=>{revealScene?.();ui.showCentre("canvas")},file:()=>ui.showCentre("file"),terminal:()=>openTerminal?.(),toggleTerminal:()=>openTerminal?.()}),[ui,revealScene,openTerminal])
   const exposed=active&&state.centre==="file"
-  // 中央与抽屉的宿主**常驻挂载**：画布/文件状态/录制/终端宿主换的只是可见性（hidden + CSS），
-  // 不是 React 位置。切走再切回不重建 Viewer、不丢未保存草稿、不新建 PTY。
+  // 中央与产物抽屉的宿主**常驻挂载**：画布/文件状态/录制换的只是可见性（hidden + CSS），
+  // 不是 React 位置。切走再切回不重建 Viewer、不丢未保存草稿；终端由原生侧栏持有。
   const fileVisible=!nativeTab&&active&&state.centre==="file",deliverableVisible=active&&state.drawer==="deliverable"
   const fileSurface=nativeTab?null:renderSlot("lyapunov.workbench.centre",{sessionId,visible:fileVisible},{entryKey:"file",fallback:<MissingSurface tr={tr} what={tr("文件工作面","File work surface")}/>})
   const body=<>
@@ -110,7 +112,7 @@ export function WorkSurface({sessionId,tr,renderSlot,centre,panel,retainedPanel,
         return host?.isConnected&&typeof host.appendChild==="function"?createPortal(node,host):node
       })():null}
     </div>
-    <section className="lya-wb-drawer" hidden={state.drawer!=="deliverable"&&state.drawer!=="terminal"} style={{height:state.drawerHeight,"--lya-drawer-height":`${state.drawerHeight}px`} as CSSProperties} aria-label={tr("底部抽屉","Bottom drawer")}>
+    <section className="lya-wb-drawer" hidden={state.drawer!=="deliverable"} style={{height:state.drawerHeight,"--lya-drawer-height":`${state.drawerHeight}px`} as CSSProperties} aria-label={tr("底部抽屉","Bottom drawer")}>
       <div className="lya-wb-drawer-handle" role="separator" aria-orientation="horizontal" aria-label={tr("调整抽屉高度","Resize drawer")}
         onPointerDown={event=>{
           const startY=event.clientY,startHeight=state.drawerHeight

@@ -1,5 +1,6 @@
 import {stageDefaultRobotPolicies} from "./default-robot-policies.ts"
 import {stageDefaultT0Robots} from "./default-t0-robots.ts"
+import {stageHumanAvatarResources} from "./human-avatar-resources.ts"
 import {cp,mkdir,readdir,readFile,writeFile,realpath,readlink,symlink,chmod,rm,stat,rename} from 'node:fs/promises'
 import {existsSync,writeSync,createReadStream} from 'node:fs'
 import {dirname,join,relative,resolve,isAbsolute,basename} from 'node:path'
@@ -275,6 +276,8 @@ stampDesktopAppVersion(stage,product.version)
 await writeFile(join(stage,'package.json'),JSON.stringify({name:'lyapunov-dsh',version:product.version,license:product.license,private:true,type:'module'},null,2)+'\n')
 const robotSupply=await stageDefaultT0Robots(root,stage,process.env.LYAPUNOV_ROBOT_STAGING_ROOT??root)
 if(robotSupply.models.length!==11)throw Error('DEFAULT_T0_SUPPLY_INCOMPLETE: '+JSON.stringify(robotSupply.blocked)+'；请提供许可与哈希闭包齐全的 LYAPUNOV_ROBOT_STAGING_ROOT')
+const humanAvatarSupply=await stageHumanAvatarResources(root,stage,process.env.LYAPUNOV_HUMAN_AVATAR_STAGING_ROOT??join(root,'.runtime/human-avatar-sources'))
+console.log(JSON.stringify({phase:'human-avatars',entries:humanAvatarSupply.entries,catalogSha256:humanAvatarSupply.catalogSha256,bytes:humanAvatarSupply.bytes}))
 const policySupply=await stageDefaultRobotPolicies(root,stage,process.env.LYAPUNOV_ROBOT_POLICY_STAGING_ROOT??join(root,'.runtime/default-policy-sources'))
 const defaultPolicyFiles=new Set(policySupply.allowedFiles)
 console.log(JSON.stringify({phase:'default-robot-policies',entries:policySupply.entries.map(row=>({packId:row.packId,bytes:row.bytes})),blocked:policySupply.blocked}))
@@ -348,7 +351,7 @@ await writeFile(join(stage,'runtime/micromamba/LICENSE'),mambaLicense.text)
 const mambaLicenseRecord={version:mambaLicense.version,spdx:mambaLicense.spdx,url:mambaLicense.url,source:mambaLicense.source,location:mambaLicense.source==='network'?mambaLicense.location:relative(root,mambaLicense.location),payloadLocation:'runtime/micromamba/LICENSE',sha256:mambaLicense.sha256,bytes:mambaLicense.bytes,pinnedSha256:mambaLicense.pinnedSha256,hashMatchesPin:mambaLicense.hashMatchesPin,cached:mambaLicense.cached,...(mambaLicense.pinProblem?{pinProblem:mambaLicense.pinProblem}:{})}
 
 await mkdir(join(stage,'distribution/linux'),{recursive:true})
-for(const file of ['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
+for(const file of ['README.md','doctor.mjs','sandbox.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
 // 随包分发的可选 Provider 定义：`distribution/providers/graspgenx/` 是**产品的可选 Provider 定义**
 // （用户据此自建 worker，`packages/grasp-graspgenx/README.md` 与 `distribution/linux/README.md` 都指向它），
 // 不是服务端内容，必须随产品分发。缺失即 fail-closed 停止打包，拷入后在 RELEASE.json 如实登记。
@@ -363,7 +366,7 @@ for(const provider of bundledProviders){
 const providerProblems=bundledProviderViolations({required:bundledProviders.map(provider=>provider.name),present:bundledProviderFiles})
 if(providerProblems.length)throw new Error('发行载荷 Provider 定义契约不成立：'+providerProblems.join('；'))
 await cp(join(root,'distribution/linux/lyapunov'),join(stage,'lyapunov'))
-for(const path of ['lyapunov','distribution/linux/install-provider','runtime/node/bin/node','runtime/micromamba/micromamba'])await chmod(join(stage,path),0o755)
+for(const path of ['lyapunov','distribution/linux/install-provider','distribution/linux/install-usd-parser','runtime/node/bin/node','runtime/micromamba/micromamba'])await chmod(join(stage,path),0o755)
 const buildEntries=[
   {entry:'packages/desktop/src/main.ts',output:'packages/desktop/dist/main.js',target:'node',format:'esm',external:['electron','electron-store','electron-window-state','electron-updater','@deepseek-ai/*']},
   {entry:'packages/desktop/src/preload.ts',output:'packages/desktop/dist/preload.cjs',target:'node',format:'cjs',external:['electron']},
@@ -418,7 +421,7 @@ sourceCommitMatchesPayload:provenanceAtStart.verdict==='CLEAN'&&!provenanceMoved
 worktreeProvenance:{scope:[...PAYLOAD_SCOPE],changed:provenanceAtWrite.changed?.length??null,payloadScoped:provenanceAtWrite.payloadRaw?.length??null,payloadChanged:provenanceAtWrite.payloadChanged?.length??null,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,startWorktree:provenanceAtStart.worktree,movedDuringPackaging:provenanceMoved,sample:(provenanceAtStart.payloadChanged??[]).slice(0,10),dirtyOverride:allowDirty?ALLOW_DIRTY_ENV:null},
 // 随包法律产物的来源与身份：从入库件、缓存、环境变量覆盖还是网络取到，sha256 一并入册，
 // 让"这份许可证是谁、从哪来"在产物里可查，而不是只有一句"包里有 LICENSE"。
-micromambaLicense:mambaLicenseRecord,unityMcp:{...unityMcpSupply,runtimePrepared:'on-target',wheel:relative(stage,unityMcpSupplyPaths(stage).wheel),licensePath:relative(stage,unityMcpSupplyPaths(stage).license),provenancePath:relative(stage,unityMcpSupplyPaths(stage).provenance)},computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage,computerUseLinuxSupply.activeDefault).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
+humanAvatars:humanAvatarSupply,humanCuda:{mode:'optional-install-provider',install:'./lyapunov install-provider mujoco --human-cuda',requirements:'packages/sim-mujoco/requirements-human-cuda.txt',source:'packages/sim-mujoco/warp-source.json',check:'packages/sim-mujoco/python/check_human_cuda.py',runtimeBundled:false},micromambaLicense:mambaLicenseRecord,unityMcp:{...unityMcpSupply,runtimePrepared:'on-target',wheel:relative(stage,unityMcpSupplyPaths(stage).wheel),licensePath:relative(stage,unityMcpSupplyPaths(stage).license),provenancePath:relative(stage,unityMcpSupplyPaths(stage).provenance)},computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage,computerUseLinuxSupply.activeDefault).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
 await writeFile(join(stage,'RELEASE.json'),JSON.stringify(release,null,2)+'\n')
 const symlinks:Array<{path:string;target:string}>=[]
 // 发行包只携带代码和许可证；用户凭据、运行时状态和模型权重必须在包外。

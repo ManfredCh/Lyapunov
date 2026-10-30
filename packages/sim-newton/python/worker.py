@@ -454,6 +454,8 @@ def native_source(entity):
     与 sim-mujoco 相同口径：先看 components.mujoco.sourcePath/xml，
     再从 resources 里找 mjcf/urdf 的表示。Newton 只做导入与仿真，不做资产转换。
     """
+    if any(r.get('original',{}).get('mimeType')=='model/vnd.usd' for r in entity.get('resources',[])):
+        raise SimError('UNSUPPORTED_CAPABILITY','原生USD物理尚未接入此Provider；请显式选Isaac，或使用单独登记且已验证的MJCF/URDF资产，不能将USD静默降为视觉: '+str(entity.get('entityId')))
     cfg = entity.get('components', {}).get('mujoco', {})
     if cfg.get('sourcePath') or cfg.get('xml'):
         return cfg

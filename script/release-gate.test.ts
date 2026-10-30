@@ -524,17 +524,36 @@ describe('caseExec · 真实 CLI 解析口径（G7-NORMAL-GATE-TSCONFIG）', () 
     const dir = mkdtempSync(join(tmpdir(), 'gate-caseexec-green-'))
     const f = join(dir, 'green.test.ts')
     writeFileSync(f, "import { expect, test } from 'bun:test'\ntest('绿', () => { expect(1).toBe(1) })\n")
+    // 同名嵌套负对照：旧实现把相对路径原样交给 bun test，Bun 会把它当过滤串并扫到 nested/green.test.ts。
+    // 该文件里的用例必须失败；只有"确切文件"口径才会留下 1 pass / 0 fail。
+    mkdirSync(join(dir, 'nested'))
+    writeFileSync(join(dir, 'nested', 'green.test.ts'), "import { expect, test } from 'bun:test'\ntest('嵌套同名文件不得被执行', () => { expect(1).toBe(2) })\n")
     try {
-      const { cmd, args } = caseExec(spec({ id: 'green-fixture', path: f }), dir)
+      const { cmd, args } = caseExec(spec({ id: 'green-fixture', path: 'green.test.ts' }), dir)
       // 不注入 override：root 没有 tsconfig，就不指向一个不存在的文件、也不越过 root 去读别的项目配置。
       expect(args.some((a) => a.startsWith('--tsconfig-override='))).toBe(false)
+      // 路径已解析成确切文件（而不是留给 Bun 解释的相对过滤串）。
+      expect(args.at(-1)).toBe(f)
       const r = run(cmd, args, dir, 120_000)
       expect(r.code).toBe(0)
-      expect(parseCaseOutput(r.out).pass).toBe(1)
+      const c = parseCaseOutput(r.out)
+      expect(c.pass).toBe(1)
+      expect(c.fail).toBe(0)
+      expect(r.out).not.toContain('嵌套同名文件不得被执行')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 120_000)
+
+  test('plain 与 python 同样解析成确切文件，不把相对路径留给执行器解释', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gate-caseexec-paths-'))
+    try {
+      expect(caseExec(spec({ id: 'plain', path: 'plain.ts', runner: 'plain' }), dir).args.at(-1)).toBe(join(dir, 'plain.ts'))
+      expect(caseExec(spec({ id: 'python', path: 'case.py', runner: 'python' }), dir).args).toEqual([join(dir, 'case.py')])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 // ── 2. 判定：每条非绿都要说清是哪一条、差多少 ────────────────────────────────
@@ -1424,8 +1443,38 @@ describe('端到端负对照（真 gate 进程 + 真夹具用例）', () => {
 // ── 4. 门自身的静态不变式（防止用例表被悄悄改坏） ────────────────────────────
 
 describe('CASES 表的不变式', () => {
-  test('clean release snapshots derive tracked tests without private history', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lyapunov-release-tests-'))
+  test('干净发布检出在没有本轮回执时从 tracked tests 派生（目录不存在/空/无关历史）', () => {
+    for (const state of ['absent', 'empty', 'unrelated'] as const) {
+      const dir = mkdtempSync(join(tmpdir(), `lyapunov-release-${state}-`))
+      try {
+        const git = (...args: string[]) => {
+          const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8', timeout: 5000 })
+          expect(result.status).toBe(0)
+          return result.stdout.trim()
+        }
+        git('init', '-q')
+        git('config', 'user.name', 'Test Fixture')
+        git('config', 'user.email', 'fixture@example.invalid')
+        writeFileSync(join(dir, 'smoke.test.ts'), 'test("smoke", () => {})\n')
+        if (state !== 'absent') mkdirSync(join(dir, 'bugfixHistory'), { recursive: true })
+        if (state === 'unrelated') writeFileSync(join(dir, 'bugfixHistory', 'OLD-NOTES-20250101.md'), '# 与本轮无关的历史文档\n引用 `packages/demo/test/legacy.test.ts`（不是本轮回执）。\n')
+        git('add', '.')
+        git('commit', '-qm', 'Initial release snapshot')
+        const before = git('rev-parse', 'HEAD')
+        expect(existsSync(join(dir, 'bugfixHistory'))).toBe(state !== 'absent')
+        expect(git('status', '--porcelain')).toBe('')
+        expect(deriveRoundCandidates(dir)).toEqual({ derived: ['smoke.test.ts'], stale: [], fromStatus: 0, fromReceipts: 0, fromTracked: 1 })
+        expect(git('rev-parse', 'HEAD')).toBe(before)
+        expect(git('status', '--porcelain')).toBe('')
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    }
+  }, 20000)
+
+  test('本轮回执关闭 tracked 兜底；stale 引用单列，脏工作树仍从 status 派生', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lyapunov-release-receipt-'))
+    const cited = 'packages/demo/test/cited.test.ts'
+    const uncited = 'packages/demo/test/uncited.test.ts'
+    const stale = 'packages/demo/test/stale.test.ts'
     try {
       const git = (...args: string[]) => {
         const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8', timeout: 5000 })
@@ -1435,17 +1484,63 @@ describe('CASES 表的不变式', () => {
       git('init', '-q')
       git('config', 'user.name', 'Test Fixture')
       git('config', 'user.email', 'fixture@example.invalid')
-      writeFileSync(join(dir, 'smoke.test.ts'), 'test("smoke", () => {})\n')
+      mkdirSync(join(dir, 'packages/demo/test'), { recursive: true })
+      writeFileSync(join(dir, cited), 'test("cited", () => {})\n')
+      writeFileSync(join(dir, uncited), 'test("uncited", () => {})\n')
+      mkdirSync(join(dir, 'bugfixHistory'), { recursive: true })
+      writeFileSync(join(dir, 'bugfixHistory', 'FIX-ROUND-20260926.md'), `# 本轮回执\n引用 \`${cited}\`。\n`)
       git('add', '.')
-      git('commit', '-qm', 'Initial release snapshot')
+      git('commit', '-qm', 'Round receipt')
+
       const before = git('rev-parse', 'HEAD')
-      expect(existsSync(join(dir, 'bugfixHistory'))).toBe(false)
       expect(git('status', '--porcelain')).toBe('')
-      expect(deriveRoundCandidates(dir)).toEqual({ derived: ['smoke.test.ts'], stale: [], fromStatus: 0, fromReceipts: 0, fromTracked: 1 })
+      const receiptOnly = deriveRoundCandidates(dir)
+      expect(receiptOnly).not.toBeNull()
+      expect(receiptOnly!.derived).toEqual([cited])
+      expect(receiptOnly!.stale).toEqual([])
+      expect(receiptOnly!.fromStatus).toBe(0)
+      expect(receiptOnly!.fromReceipts).toBe(1)
+      expect(receiptOnly!.fromTracked).toBeUndefined()
+      // 有本轮回执时不许把 tracked tests 全量并进来：未引用的用例必须仍然缺席。
+      expect(receiptOnly!.derived).not.toContain(uncited)
       expect(git('rev-parse', 'HEAD')).toBe(before)
       expect(git('status', '--porcelain')).toBe('')
+
+      writeFileSync(join(dir, 'bugfixHistory', 'FIX-ROUND-20260926.md'), `# 本轮回执\n引用 \`${cited}\` 与已删除的 \`${stale}\`。\n`)
+      git('add', '.')
+      git('commit', '-qm', 'Add stale citation')
+      const staleHead = git('rev-parse', 'HEAD')
+      const staleRead = deriveRoundCandidates(dir)
+      expect(staleRead!.derived).toEqual([cited])
+      expect(staleRead!.stale).toEqual([stale])
+      expect(staleRead!.fromStatus).toBe(0)
+      expect(staleRead!.fromReceipts).toBe(2)
+      expect(staleRead!.fromTracked).toBeUndefined()
+      expect(staleRead!.derived).not.toContain(uncited)
+      expect(git('rev-parse', 'HEAD')).toBe(staleHead)
+      expect(git('status', '--porcelain')).toBe('')
+
+      // 脏工作树：即使本轮回执关闭了 tracked 兜底，status 仍是独立来源。
+      writeFileSync(join(dir, uncited), 'test("uncited", () => {})\n// dirty\n')
+      expect(git('status', '--porcelain')).toBe(`M ${uncited}`)
+      const dirtyRead = deriveRoundCandidates(dir)
+      expect(dirtyRead!.derived).toEqual([cited, uncited])
+      expect(dirtyRead!.stale).toEqual([stale])
+      expect(dirtyRead!.fromStatus).toBe(1)
+      expect(dirtyRead!.fromReceipts).toBe(2)
+      expect(dirtyRead!.fromTracked).toBeUndefined()
+      expect(git('rev-parse', 'HEAD')).toBe(staleHead)
+      expect(git('status', '--porcelain')).toBe(`M ${uncited}`)
     } finally { rmSync(dir, { recursive: true, force: true }) }
-  }, 15000)
+  }, 20000)
+
+  test('git 不可用 ⇒ 派生返回 null（不拿空集合冒充"没 drift"）', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'lyapunov-git-failure-'))
+    const absent = join(parent, 'missing-root')
+    rmSync(parent, { recursive: true, force: true })
+    expect(existsSync(absent)).toBe(false)
+    expect(deriveRoundCandidates(absent)).toBeNull()
+  })
 
   test('每条都有量什么（purpose）/ 非零下限 / 来源计数，且路径唯一', () => {
     expect(CASES.length).toBeGreaterThan(50)

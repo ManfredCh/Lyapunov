@@ -1,3 +1,6 @@
+import { applyHumanPose } from './human-pose.ts'
+import { loadUsdVisual, applyUsdBodyWorldPoses } from "./usd-visual.ts"
+import type { UsdPreview } from "../../lyapunov-contracts/src/usd.ts"
 import * as THREE from "three"
 import { buildSceneLight, orientAreaLight, type SceneLight } from "./scene-light.ts"
 import { EntityMaterialOverride, composeMaterialOverride, parseMaterialOverride, MATERIAL_OVERRIDE_KEY, type MaterialOverridePatch, type MaterialStatus } from "./material-override.ts"
@@ -1288,6 +1291,18 @@ export class SceneViewer {
     const ref = primaryResource(entity)
     if (!ref) return
     loaded.baseRef = { resourceId: ref.resourceId, version: ref.version }
+    if (visual.kind === "usd") {
+      if(visual.usdTransientPreview)return this.wrapSourceCoordinates(ref,visual,await loadUsdVisual(visual.usdTransientPreview as UsdPreview,texture=>{if(!texture.uri)throw Error('USD_TRANSIENT_TEXTURE_UNAVAILABLE');return Promise.resolve(resolveResource(texture.uri,ref))}))
+      const previewRef=entity.resources.find(row=>row.resourceId===visual.usdPreviewResourceId&&row.original.mimeType==='application/vnd.lyapunov.usd-preview+json')
+      if(!previewRef)throw Error('USD_PREVIEW_RESOURCE_MISSING')
+      const url=await resolveResource(previewRef.original.uri,previewRef)
+      const response=await fetch(url)
+      if(!response.ok)throw Error('USD_PREVIEW_FETCH_FAILED: '+response.status)
+      const payload=await response.json() as {sourceResourceId:string;sourceVersion:number;preview:UsdPreview}
+      if(payload.sourceResourceId!==ref.resourceId||payload.sourceVersion!==visual.usdPreviewSourceVersion)throw Error('USD_PREVIEW_SOURCE_MISMATCH')
+      loaded.lodWarnings.push(...payload.preview.losses)
+      return this.wrapSourceCoordinates(ref,visual,await loadUsdVisual(payload.preview,texture=>{const representation=previewRef.representations.find(row=>row.role==='usd-texture:'+texture.id);if(!representation)throw Error('USD_TEXTURE_REPRESENTATION_MISSING: '+texture.id);return Promise.resolve(resolveResource(representation.uri,previewRef))}))
+    }
     const rep = ref.representations.find(rep => rep.role === "visual") ?? ref.representations[0] ?? ref.original
     let result: THREE.Object3D
     if (visual.kind === "splat") {
@@ -2105,6 +2120,7 @@ export class SceneViewer {
 
   /** 把一个实体的烘焙动画登记进播放表。加载完成与场景重入都走这里——"登记"只有一个 owner。 */
   private trackAnimation(entityId: string, loaded: Loaded): void {
+    if(this.snapshot?.entities.find(e=>e.entityId===entityId)?.components.human){loaded.mixer?.stopAllAction();this.mixers.delete(entityId);return}
     if (!loaded.mixer || !loaded.clips) return
     if(this.animationSnapshot!==this.snapshot||!this.animationEntities){this.animationSnapshot=this.snapshot;this.animationEntities=new Map(this.snapshot?.entities.map(entity=>[entity.entityId,entity])??[])}
     const entity=this.animationEntities.get(entityId),reference=entity?staticAnimationReference(entity,this.animationEntities):undefined
@@ -2212,6 +2228,11 @@ export class SceneViewer {
     for (const entity of frame.entities) {
       const loaded = this.objects.get(entity.entityId)
       if (!loaded) continue
+      const human=this.snapshot?.entities.find(e=>e.entityId===entity.entityId)?.components.human
+      if(entity.humanPose&&human&&loaded.visual){
+        if(entity.humanPose.stepIndex===frame.stepIndex&&Math.abs(entity.humanPose.simTime-frame.simTime)<1e-9)applyHumanPose(loaded.visual,entity.humanPose,human)
+      }
+      applyUsdBodyWorldPoses(loaded.visual??loaded.baseVisual,entity.sensors?.usdBodyWorldPoses)
       if (!entity.dynamicGeometry?.length) { this.clearDynamicGeometry(loaded); continue }
       loaded.dynamicGeometry ??= new DynamicGeometryVisual(loaded.group, () => loaded.materialOverride?.reset())
       loaded.dynamicGeometry.update(entity.dynamicGeometry, loaded.visual, loaded.robot?.bodyNode)

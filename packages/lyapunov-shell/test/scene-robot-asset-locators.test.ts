@@ -134,7 +134,8 @@ describe("② 负对照：不走这一层 ⇒ 同一条引用在路由那里换�
 describe("③ 接线门：两条路由都必须走这一层（形状门，不是行为门）", () => {
   test("`state` 与 `scene` 的场景载荷都经 `projectSceneOutbound`，不再有 `projectPathsOnly(scene,…)` 直出", () => {
     // 与 `environment-routing.test.ts` 的 `runDomainPointerGate(PLUGIN_SOURCE)` 同一手法：对真实源码做形状门。
-    expect(PLUGIN_SOURCE.includes("scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{}")).toBe(true)
+    expect(PLUGIN_SOURCE.includes("outboundScene=scene?await projectSceneOutbound(scene,sessionKey):undefined")).toBe(true)
+    expect(PLUGIN_SOURCE.includes("outboundScene?{scene:outboundScene}:{}")).toBe(true)
     expect(PLUGIN_SOURCE.includes('await projectSceneOutbound(await sceneSnapshot(sessionKey,query.get("sceneId")??""),sessionKey)')).toBe(true)
     expect(PLUGIN_SOURCE.includes("projectPathsOnly(scene,productPathRoots)")).toBe(false)
     // 这一层自己也只有一份实现（导出给本文件用），作用域里的绑定只是把路径域与缓存接上。

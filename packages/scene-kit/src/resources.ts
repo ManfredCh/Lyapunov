@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { isDeepStrictEqual } from "node:util"
-import { copyFile, link, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { copyFile, link, mkdir, mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises"
 import { constants, createReadStream, createWriteStream } from "node:fs"
 import { Readable, Transform as StreamTransform } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -130,7 +130,7 @@ export interface ResourceVersionDerivationSubtreeExtract {
   at: string
 }
 /** 一个版本的来历（说明用；版本身份仍只看这一版自己的真实字节）。 */
-export type ResourceDerivation = ResourceVersionDerivation | ResourceVersionDerivationSubtreeExtract
+export type ResourceDerivation = ResourceVersionDerivation | ResourceVersionDerivationSubtreeExtract | {kind:'usd-preview';from:number;resourceId:string;version:number;overrides:import('../../lyapunov-contracts/src/usd.ts').UsdInstanceOverrides;at:string}
 interface ResourceLocation { ref: ResourceRef; parsed: ParsedAsset }
 export type ResourceStorageKind = "cas" | "reference" | "materialized"
 export type ResourceOrigin = "builtin" | "download" | "generated" | "import"
@@ -356,6 +356,7 @@ export interface ResourceAuthorityOptions {
    */
   casRoot?: string
 }
+interface AuthorityValueRef { schema: 1; path: string; sha256: string; bytes: number }
 interface AuthorityJournalEntry {
   operationID: string
   idempotencyKey: string
@@ -363,9 +364,13 @@ interface AuthorityJournalEntry {
   status: "prepared" | "applied"
   beforeRegistryRevision: string
   afterRegistryRevision?: string
-  beforeCatalog: Catalog
+  /** 旧inline仍可读；新写入的不可变值属于同一authority journal的存储，不进入另一份状态账本。 */
+  beforeCatalog?: Catalog
   afterCatalog?: Catalog
   result?: unknown
+  beforeCatalogRef?: AuthorityValueRef
+  afterCatalogRef?: AuthorityValueRef
+  resultRef?: AuthorityValueRef
   createdAt: string
   appliedAt?: string
   fileTransition?: ResourceFileTransition & { files?: ResourceFileTransition[]; phase: "planned" | "moved"; syncedDirectories?: string[] }
@@ -416,7 +421,7 @@ function entryDependency(parsed: ParsedAsset, path: string): FileStamp {
   const resolved = resolve(path)
   return parsed.dependencies.find(stamp => resolve(stamp.path) === resolved) ?? parsed.dependencies[0]!
 }
-const inferredRecordCategory = (kind: ParsedAsset["kind"]): ResourceAuthorityCategory => ({ splat: "background", source: "scene", robot: "robot", mesh: "object" } as const)[kind]
+const inferredRecordCategory = (kind: ParsedAsset["kind"]): ResourceAuthorityCategory => ({ splat: "background", source: "scene", robot: "robot", mesh: "object", usd:"object" } as const)[kind]
 function recordCategory(record: ResourceRecord): ResourceAuthorityCategory {
   return record.category ?? inferredRecordCategory(record.parsed.kind)
 }
@@ -501,11 +506,11 @@ function transitionFiles(transition: PlannedTransition): ResourceFileTransition[
 }
 
 const categoryKinds: Record<ResourceAuthorityCategory, ParsedAsset["kind"][]> = {
-  background: ["splat"], scene: ["source"], robot: ["robot"], object: ["mesh"],
+  background: ["splat"], scene: ["source","usd"], robot: ["robot","usd"], object: ["mesh","usd"],
 }
 function authorityCategory(category: unknown, kind: ParsedAsset["kind"]): ResourceAuthorityCategory {
   if (category !== undefined && (typeof category !== "string" || !Object.hasOwn(categoryKinds, category))) throw new Error(`RESOURCE_CATEGORY_INVALID: ${String(category)}`)
-  const inferred = category as ResourceAuthorityCategory | undefined ?? ({ splat: "background", source: "scene", robot: "robot", mesh: "object" } as const)[kind]
+  const inferred = category as ResourceAuthorityCategory | undefined ?? ({ splat: "background", source: "scene", robot: "robot", mesh: "object", usd:"object" } as const)[kind]
   if (!inferred || !categoryKinds[inferred].includes(kind)) throw new Error(`RESOURCE_CATEGORY_KIND_CONFLICT: ${String(inferred)}:${kind}`)
   return inferred
 }
@@ -657,8 +662,76 @@ export class ResourceLibrary {
     return { registryRevision: this.revision(index), records: structuredClone(index.records) }
   }
   private async journal(): Promise<AuthorityJournalEntry[]> {
-    try { return await readJSON<AuthorityJournalEntry[]>(this.journalPath) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error }
+    // 只读小条目，不把历史snapshot/result refs全部hydrate回内存。
+    try {
+      const entries = await readJSON<AuthorityJournalEntry[]>(this.journalPath)
+      if (!Array.isArray(entries) || entries.some(entry => !isRecord(entry) || typeof entry.operationID !== "string" || typeof entry.idempotencyKey !== "string" || typeof entry.beforeRegistryRevision !== "string" || !["prepared", "applied"].includes(entry.status))) throw new Error("RESOURCE_AUTHORITY_JOURNAL_INVALID")
+      return entries
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw new Error(`RESOURCE_AUTHORITY_JOURNAL_UNREADABLE: ${this.journalPath}: ${String(error)}`) }
+  }
+  private authorityValuePath(ref: AuthorityValueRef): string {
+    if (!ref || ref.schema !== 1 || !/^[a-f0-9]{64}$/.test(ref.sha256) || !Number.isSafeInteger(ref.bytes) || ref.bytes < 1 || ref.path !== `operations/objects/${ref.sha256}.json`) throw new Error("RESOURCE_AUTHORITY_VALUE_REF_INVALID")
+    return join(this.catalogRoot, ref.path)
+  }
+  private async verifiedAuthorityValuePath(ref: AuthorityValueRef): Promise<string> {
+    const path = this.authorityValuePath(ref)
+    let actual: string
+    try { actual = await realpath(path) } catch (error) { throw new Error(`RESOURCE_AUTHORITY_VALUE_MISSING: ${ref.path}: ${String(error)}`) }
+    if (!pathInside(await realpath(this.catalogRoot), actual)) throw new Error(`RESOURCE_AUTHORITY_VALUE_PATH_ESCAPE: ${ref.path}`)
+    const stamp = await fileStamp(actual, true)
+    if (stamp.size !== ref.bytes || stamp.sha256 !== ref.sha256) throw new Error(`RESOURCE_AUTHORITY_VALUE_HASH_MISMATCH: ${ref.path}`)
+    return actual
+  }
+  private async readAuthorityValue(ref: AuthorityValueRef): Promise<unknown> {
+    const path = await this.verifiedAuthorityValuePath(ref)
+    try { return await readJSON<unknown>(path) } catch (error) { throw new Error(`RESOURCE_AUTHORITY_VALUE_JSON_INVALID: ${ref.path}: ${String(error)}`) }
+  }
+  private async authorityObjectDirectory(): Promise<string> {
+    await mkdir(this.catalogRoot, { recursive: true })
+    const root = await realpath(this.catalogRoot)
+    let directory = this.catalogRoot
+    for (const segment of ["operations", "objects"]) {
+      directory = join(directory, segment)
+      try { await mkdir(directory) } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error }
+      if (!(await stat(directory)).isDirectory() || !pathInside(root, await realpath(directory))) throw new Error("RESOURCE_AUTHORITY_VALUE_PATH_ESCAPE")
+    }
+    return directory
+  }
+  private async syncAuthorityObjects(directory: string): Promise<void> {
+    for (const path of [directory, dirname(directory), this.catalogRoot]) {
+      const parent = await open(path, "r"); try { await parent.sync() } finally { await parent.close() }
+    }
+  }
+  private async storeAuthorityValue(value: unknown): Promise<AuthorityValueRef> {
+    const json = JSON.stringify(value)
+    if (json === undefined) throw new Error("RESOURCE_AUTHORITY_VALUE_NOT_JSON")
+    const bytes = Buffer.from(json + "\n"), sha256 = createHash("sha256").update(bytes).digest("hex")
+    const ref: AuthorityValueRef = { schema: 1, path: `operations/objects/${sha256}.json`, sha256, bytes: bytes.length }
+    const path = this.authorityValuePath(ref), directory = await this.authorityObjectDirectory()
+    try { await stat(path); await this.verifiedAuthorityValuePath(ref); await this.syncAuthorityObjects(directory); return ref }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
+    const temporary = `${path}.${randomUUID()}.tmp`, file = await open(temporary, "wx", 0o600)
+    try {
+      await file.writeFile(bytes); await file.sync(); await file.close()
+      try { await link(temporary, path) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; await this.verifiedAuthorityValuePath(ref) }
+      // Blob先持久，再允许operations.json发布指向它的prepared/applied状态。
+      await this.syncAuthorityObjects(directory)
+    } finally { await file.close().catch(() => {}); await rm(temporary, { force: true }) }
+    return ref
+  }
+  private async persistJournal(entries: AuthorityJournalEntry[]): Promise<void> {
+    // 旧inline逐项外置；新日志只写refs与事务元数据，不复制/序列化全部历史大定义。
+    for (const entry of entries) for (const [key, refKey] of [["beforeCatalog", "beforeCatalogRef"], ["afterCatalog", "afterCatalogRef"], ["result", "resultRef"]] as const) {
+      if (entry[key] !== undefined) { entry[refKey] = await this.storeAuthorityValue(entry[key]); delete entry[key] }
+    }
+    await atomicJSON(this.journalPath, entries)
+  }
+  private async journalCatalog(entry: AuthorityJournalEntry, key: "beforeCatalog" | "afterCatalog"): Promise<Catalog> {
+    const ref = key === "beforeCatalog" ? entry.beforeCatalogRef : entry.afterCatalogRef
+    const value = ref ? await this.readAuthorityValue(ref) : entry[key] === undefined ? undefined : structuredClone(entry[key])
+    if (!isRecord(value) || !Array.isArray(value.records)) throw new Error(`RESOURCE_AUTHORITY_CATALOG_MISSING: ${entry.operationID}:${key}`)
+    return value as unknown as Catalog
   }
   private fault(stage: ResourceAuthorityFaultStage): void { this.options.faultInjector?.(stage) }
   /**
@@ -671,7 +744,7 @@ export class ResourceLibrary {
     const persisted = currentJournal.find(entry => entry.operationID === operationID)
     if (!persisted) return
     persisted.fileTransition = transition
-    await atomicJSON(this.journalPath, currentJournal)
+    await this.persistJournal(currentJournal)
   }
   private async planMoveFiles(record: ResourceRecord, destination: string): Promise<ResourceFileTransition[]> {
     const source = localPath(record.ref.original.uri), sourceDirectory = dirname(source), targetDirectory = dirname(destination)
@@ -746,23 +819,25 @@ export class ResourceLibrary {
       const replay = entries.find(item => item.idempotencyKey === idempotencyKey)
       if (replay) {
         if (replay.inputHash !== inputHash || replay.operationID !== operationID) throw new Error(`RESOURCE_IDEMPOTENCY_CONFLICT: ${idempotencyKey}`)
-        if (replay.status !== "applied" || !replay.result || !replay.afterRegistryRevision) throw new Error(`RESOURCE_OPERATION_INCOMPLETE: ${operationID}`)
-        return { ...(replay.result as T), operationID, idempotencyKey, registryRevision: replay.afterRegistryRevision, beforeRegistryRevision: replay.beforeRegistryRevision, replayed: true }
+        if (replay.status !== "applied" || (!replay.resultRef && !replay.result) || !replay.afterRegistryRevision) throw new Error(`RESOURCE_OPERATION_INCOMPLETE: ${operationID}`)
+        const result = replay.resultRef ? await this.readAuthorityValue(replay.resultRef) : replay.result
+        if (!result) throw new Error(`RESOURCE_OPERATION_INCOMPLETE: ${operationID}`)
+        return { ...(result as T), operationID, idempotencyKey, registryRevision: replay.afterRegistryRevision, beforeRegistryRevision: replay.beforeRegistryRevision, replayed: true }
       }
       if (identity.expectedRegistryRevision && identity.expectedRegistryRevision !== beforeRegistryRevision) throw new Error(`RESOURCE_REGISTRY_CAS_MISMATCH: expected ${identity.expectedRegistryRevision}, actual ${beforeRegistryRevision}`)
-      const prepared: AuthorityJournalEntry = { operationID, idempotencyKey, inputHash, status: "prepared", beforeRegistryRevision, beforeCatalog: structuredClone(index), createdAt: new Date().toISOString() }
+      const prepared: AuthorityJournalEntry = { operationID, idempotencyKey, inputHash, status: "prepared", beforeRegistryRevision, beforeCatalogRef: await this.storeAuthorityValue(index), createdAt: new Date().toISOString() }
       // Move 先把可验证的文件 inventory 写进 prepared journal。即使进程死在文件搬迁与 index 发布之间，
       // recovery 也能判断应回滚，而不是留下半个 authority row。
       if (isRecord(command)) prepared.fileTransition = await this.planFileTransition(index, command)
-      entries.push(prepared); await atomicJSON(this.journalPath, entries)
+      entries.push(prepared); await this.persistJournal(entries)
       this.fault("prepared_journal")
       const changed = await mutate(index, prepared)
       this.fault("after_file_transition")
       const afterRegistryRevision = changed.changed === false ? beforeRegistryRevision : this.revision(index)
       if (changed.changed !== false) { index.registryRevision = afterRegistryRevision; await atomicJSON(this.indexPath, index) }
       this.fault("index_published")
-      prepared.status = "applied"; prepared.afterRegistryRevision = afterRegistryRevision; prepared.afterCatalog = structuredClone(index); prepared.result = changed.result; prepared.appliedAt = new Date().toISOString()
-      await atomicJSON(this.journalPath, entries)
+      prepared.status = "applied"; prepared.afterRegistryRevision = afterRegistryRevision; prepared.afterCatalogRef = await this.storeAuthorityValue(index); prepared.resultRef = await this.storeAuthorityValue(changed.result); prepared.appliedAt = new Date().toISOString()
+      await this.persistJournal(entries)
       this.fault("journal_applied")
       return { ...(changed.result as T), operationID, idempotencyKey, registryRevision: afterRegistryRevision, beforeRegistryRevision, replayed: false }
     })
@@ -778,10 +853,15 @@ export class ResourceLibrary {
     const entries = await this.journal(), recovered: string[] = []
     if (!entries.length) return recovered
     let index: Catalog | undefined
-    try { index = await this.index() } catch { index = undefined }
-    const applied = entries.filter(item => item.status === "applied" && item.afterCatalog).at(-1)
-    if (!index && applied?.afterCatalog) { index = applied.afterCatalog; await atomicJSON(this.indexPath, applied.afterCatalog); recovered.push(applied.operationID) }
-    else if (!index) throw new Error("RESOURCE_AUTHORITY_RECOVERY_UNAVAILABLE")
+    try { index = await readJSON<Catalog>(this.indexPath) } catch { index = undefined }
+    const applied = entries.filter(item => item.status === "applied" && (item.afterCatalogRef || item.afterCatalog)).at(-1)
+    if (!index && applied) { index = await this.journalCatalog(applied, "afterCatalog"); await atomicJSON(this.indexPath, index); recovered.push(applied.operationID) }
+    else if (!index) {
+      // 首次prepared就中断时还没有index/applied；它的before快照就是唯一已知基线。
+      const prepared = entries.find(entry => entry.status === "prepared")
+      if (!prepared) throw new Error("RESOURCE_AUTHORITY_RECOVERY_UNAVAILABLE")
+      index = await this.journalCatalog(prepared, "beforeCatalog")
+    }
     // A prepared move with source absent and target present is a file-only partial
     // transition. Restore the original path before dropping the intent. This is
     // deliberately best-effort and fail-closed when inventory does not match.
@@ -842,7 +922,7 @@ export class ResourceLibrary {
       const laterApplied = entries.slice(entryIndex + 1).some(item => item.status === "applied")
       if (laterApplied) continue
       if (rolledBack.has(entry.operationID) || this.revision(index!) !== entry.beforeRegistryRevision) {
-        index = structuredClone(entry.beforeCatalog)
+        index = await this.journalCatalog(entry, "beforeCatalog")
       }
       discardedPrepared.add(entry.operationID)
       // 被丢弃的 prepared 操作从未提交，索引已回到 beforeCatalog；它留下的
@@ -859,11 +939,12 @@ export class ResourceLibrary {
       return true
     })
     if (discardedPrepared.size) await atomicJSON(this.indexPath, index)
-    if (remaining.length !== entries.length) await atomicJSON(this.journalPath, remaining)
+    if (remaining.length !== entries.length) await this.persistJournal(remaining)
     return recovered
   }
   /** 外部原件连同依赖闭包复制进 <dataRoot>/assets/cas；任一文件失败时清理本次新建目标，不留半截。 */
   private async storeInCas(entryPath: string, parsed: ParsedAsset): Promise<{ entry: string; targets: Map<string, string> }> {
+    if(parsed.kind==="usd"&&Array.isArray(parsed.metadata.absoluteAssetPaths)&&parsed.metadata.absoluteAssetPaths.length)throw Error("USD_CAS_ABSOLUTE_DEPENDENCY: 请先以storage:reference登记，便携保存会仅改写副本的绝对引用")
     const closure = [...new Set(parsed.dependencies.map(stamp => resolve(stamp.path)))]
     const stamps = new Map(parsed.dependencies.map(stamp => [resolve(stamp.path), stamp]))
     for (const source of closure) {
@@ -1053,7 +1134,7 @@ export class ResourceLibrary {
       const textureSnapshot=(parsed.metadata.missingTextureSnapshot??[]) as Array<{kind?:string}>
       const textureTags=parsed.metadata.sourceTexturePolicy==='available'?['保留几何与现有材质',`缺失依赖 ${textureSnapshot.filter(loss=>loss.kind==='image'||loss.kind==='material-library').length}`,`空纹理声明 ${textureSnapshot.filter(loss=>loss.kind==='empty-texture-path').length}`]:[]
       const record: ResourceRecord = {
-        ref: { resourceId, version, original, representations: [{ ...original, role: parsed.kind === "robot" ? "simulation" : "visual" }], source: parsed.source },
+        ref: { resourceId, version, original, representations: [{ ...original, role: parsed.kind === "robot" || parsed.kind === "usd" ? "simulation" : "visual" }], source: parsed.source },
         category: resolvedCategory, name: metadata.name ?? basename(path, extname(path)), tags: [...new Set([...(metadata.tags??[]),...textureTags])], folder: metadata.folder ?? "", createdAt: new Date().toISOString(), parsed, storage, storedEntryPath: entryPath,
         // 只有 materialized 写 home；reference/cas 记录字节不变，既有索引与 registryRevision 不受影响。
         ...(home?{home}:{}),
@@ -1063,6 +1144,11 @@ export class ResourceLibrary {
         ...(metadata.mountTransform?{mountTransform:structuredClone(metadata.mountTransform)}:{}),...(metadata.visualSourceTransform?{visualSourceTransform:structuredClone(metadata.visualSourceTransform)}:{}),...(metadata.legacySource?{legacySource:structuredClone(metadata.legacySource)}:{}),...(metadata.networkProvenance?{networkProvenance:structuredClone(metadata.networkProvenance)}:{}),
         ...(derivedFrom?{derivedFrom:structuredClone(derivedFrom)}:{}),
         operationID: operationID ?? randomUUID(), idempotencyKey: idempotencyKey ?? operationID ?? randomUUID(),
+      }
+      if(parsed.metadata.format==='usd-preview')for(const texture of (parsed.metadata.usdPreviewTextures??[]) as Array<{id:string;file:string;mimeType:string}>){
+        const file=parsed.dependencies.find(row=>row.sha256===texture.id)
+        if(!file)throw Error('USD_PREVIEW_TEXTURE_DEPENDENCY_MISSING: '+texture.id)
+        record.ref.representations.push({uri:pathToFileURL(file.path).href,mimeType:texture.mimeType,role:'usd-texture:'+texture.id})
       }
       if (geometry) {
         record.sceneGeometryBinding = geometry.binding
@@ -1123,6 +1209,10 @@ export class ResourceLibrary {
         const { parsed } = inspected
         if (!parsed) continue
         const record: ResourceRecord = { ref: structuredClone(ref), name: name ?? basename(localPath(ref.original.uri), extname(localPath(ref.original.uri))), tags: [], folder: '', createdAt: new Date().toISOString(), parsed, ...(discovered ? { componentDefaults: structuredClone(discovered) } : {}) }
+        if(parsed.metadata.format==='usd-standard-library'){
+          const library=parsed.metadata.usdStandardLibrary as {license:{id:string;attribution:string}}
+          record.license={id:library.license.id,attribution:library.license.attribution,source:'file'}
+        }
         if (existing) {
           // 已登记位置的字节是版本身份的唯一依据；位置可变、字节不能变。同一版本的每一处位置都是按
           // 真实字节（sameVersionAtAnotherLocation）进来的，所以按"任一已登记位置"比对与只看主位置
@@ -1415,7 +1505,7 @@ export class ResourceLibrary {
     try { entryPath = record.storedEntryPath ?? localPath(record.ref.original.uri) } catch { entryPath = record.storedEntryPath }
     const origin: ResourceOrigin =
       entryPath && this.options.productRoot && pathInside(this.options.productRoot, entryPath) ? "builtin"
-      : record.networkProvenance?.sourceUrl ? "download"
+      : record.networkProvenance?.sourceUrl || record.parsed.metadata.simready ? "download"
       : entryPath && pathInside(this.providerJobsRoot, entryPath) ? "generated"
       : "import"
     // 许可如实透出：记录里没有许可事实时**显示 unknown**（不默认成任何具体许可）。

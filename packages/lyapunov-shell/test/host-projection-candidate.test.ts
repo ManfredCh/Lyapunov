@@ -18,7 +18,10 @@ import SessionQueryEngine from "@deepseek-ai/dsh-session-query"
 import { createSessionOutboundProjection, type SessionOutboundProjection } from "../../lyapunov-contracts/src/session-event-projection.ts"
 
 const root = resolve(import.meta.dirname, "../../..")
-const upstream = join(root, ".upstream/deepseek-harness-20260911-candidate")
+const lock = JSON.parse(readFileSync(join(root, "UPSTREAM_LOCK.json"), "utf8")) as { directory: string; commit: string }
+// 旧源码只从 Git 对象取（7c3 已从保留旧 SDK 纯本地 fetch 进这个独立对象库）；
+// 依赖、lib/types、Context/Session 运行时仍取 UPSTREAM_LOCK.directory 的现行固定 SDK。
+const upstream = join(root, lock.directory)
 const pinned = "7c3f05885033aa3aed74904d59a94692d12a47f7"
 const packagePath = "packages/api/session-controller"
 const patchPath = join(root, "packages/lyapunov-shell/patches/dsh-session-outbound-projection.patch")
@@ -96,7 +99,7 @@ beforeAll(async () => {
   const host = JSON.parse(readFileSync(join(scratch, packagePath, "tsconfig.host.json"), "utf8")) as { files: string[] }
   expect(host.files).toContain("src/outbound-projection.ts")
   const compileFiles = ["src/types.ts", "src/history.ts", "src/outbound-projection.ts", "src/assistant-stream.ts"]
-  const base = ts.parseConfigFileTextToJson("tsconfig.base.json", run("git", ["show", `${pinned}:tsconfig.base.json`], upstream))
+  const base = ts.parseConfigFileTextToJson("tsconfig.base.json", run("git", ["show", `${lock.commit}:tsconfig.base.json`], upstream))
   if (base.error) throw new Error(ts.flattenDiagnosticMessageText(base.error.messageText, "\n"))
   const paths = Object.fromEntries(Object.entries(base.config.compilerOptions.paths as Record<string, string[]>).map(([key, values]) => [
     key, values.map(value => resolve(upstream, value.replace(/\/src(?=\/|$)/, "/lib/types").replace(/\.ts$/, ".d.ts"))),

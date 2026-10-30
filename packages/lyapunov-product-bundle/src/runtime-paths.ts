@@ -13,6 +13,7 @@ export const RUNTIME_NAME = "lyapunov" as const
 export const LEGACY_RUNTIME_NAME = "lyaup" as const
 export const RUNTIME_ENV = {
   productRoot: "LYAPUNOV_PRODUCT_ROOT",
+  usdPython: "LYAPUNOV_USD_PYTHON",
   sceneRoot: "LYAPUNOV_SCENE_ROOT",
   pluginRoot: "LYAPUNOV_PLUGIN_ROOT",
   mode: "LYAPUNOV_MODE",
@@ -29,6 +30,8 @@ export const RUNTIME_ENV = {
   electronBinary: "LYAPUNOV_ELECTRON_BINARY",
   sam3Checkpoint: "LYAPUNOV_SAM3_CHECKPOINT",
   updateUrl: "LYAPUNOV_UPDATE_URL",
+  // 人体 CUDA 是用户显式开关：父环境只接受 cpu|cuda:0，由 backendEnvironment 校验后逐键转发。
+  humanComputeDevice: "LYAPUNOV_HUMAN_COMPUTE_DEVICE",
   // SDK 解释器覆盖键：唯一解析实现在 sdk-python.mjs，doctor 与 Host 装配/物理检查共用。
   policyPython: "LYAPUNOV_POLICY_PYTHON",
   mujocoPython: SDK_PYTHON_ENV.mujoco,

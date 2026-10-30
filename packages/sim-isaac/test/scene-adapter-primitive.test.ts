@@ -22,6 +22,55 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const SOURCE = process.env.LYAPUNOV_SCENE_ADAPTER ?? resolve(HERE, '..', 'python', 'scene_adapter.py')
 const REPO = resolve(HERE, '..', '..', '..')
 
+test('原生USD的SDF烘焙在CPU/none进入runtime stage前具名拒绝；实例变体和已禁用碰撞按实际组合筛选',()=>{
+  const probe=`
+import ast,json,sys
+from types import SimpleNamespace as NS
+tree=ast.parse(open(sys.argv[1],encoding='utf-8').read());wanted={'SceneError','require_native_usd_sdf_device'}
+nodes=[n for n in tree.body if isinstance(n,(ast.ClassDef,ast.FunctionDef))and n.name in wanted];assert len(nodes)==2
+class Path(str):
+ def MakeRelativePath(self,root):return Path(self[len(root)+1:]if self==root or self.startswith(root+'/')else'../outside')
+class Variant:
+ def GetVariantNames(self):return['sdf','convexHull']
+ def SetVariantSelection(self,value):state['approximation']=value
+class Prim:
+ def __init__(self,path):self.path=path
+ def GetPath(self):return Path(self.path)
+ def IsA(self,kind):return state['mesh']
+ def HasAPI(self,kind):return state['collision']
+ def GetVariantSet(self,name):return Variant()
+class Stage:
+ def GetSessionLayer(self):return'session'
+ def SetEditTarget(self,target):assert target=='session'
+ def GetDefaultPrim(self):return Prim('/Root')
+ def GetPrimAtPath(self,path):return Prim(str(path))
+def opened(*args,**kwargs):state['stageOpens']+=1;return Stage()
+def traversed(root,predicate):state['proxies']=predicate=='instance-proxies';return[Prim(root.path+'/Mesh')]
+def attr(key):return NS(Get=lambda:state[key])
+ns={'Sdf':NS(Path=Path,Layer=NS(FindOrOpen=lambda path:path,CreateAnonymous=lambda:'session')),'Usd':NS(Stage=NS(Open=opened,LoadAll='all'),PrimRange=traversed,TraverseInstanceProxies=lambda:'instance-proxies'),'UsdGeom':NS(Mesh='mesh'),'UsdPhysics':NS(CollisionAPI=lambda prim:NS(GetCollisionEnabledAttr=lambda:attr('enabled')),MeshCollisionAPI=lambda prim:NS(GetApproximationAttr=lambda:attr('approximation')))}
+exec(compile(ast.Module(body=nodes,type_ignores=[]),sys.argv[1],'exec'),ns)
+def run(device='cpu',rendering='none',overrides=None,**values):
+ global state
+ state={'approximation':'sdf','collision':True,'enabled':True,'mesh':True,'stageOpens':0,'proxies':False,**values}
+ try:ns['require_native_usd_sdf_device']('source.usda',overrides or{},device,rendering);error=None
+ except ns['SceneError']as e:error={'code':e.code,'message':str(e)}
+ return{'error':error,'state':state}
+report={'sdf':run(),'convex':run(approximation='convexHull'),'disabled':run(enabled=False),'visual':run(collision=False),'cube':run(mesh=False),'cuda':run('cuda:0'),'rtx':run(rendering='rtx'),'variant':run(overrides={'variants':{'/Root':{'shape':'convexHull'}}}),'invalidVariant':run(overrides={'variants':{'/Root':{'shape':'missing'}}})}
+populate=next(n for c in tree.body if isinstance(c,ast.ClassDef)and c.name=='SceneAdapter'for n in c.body if isinstance(n,ast.FunctionDef)and n.name=='populate')
+guard=[n.lineno for n in ast.walk(populate)if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='require_native_usd_sdf_device']
+runtime=[n.lineno for n in ast.walk(populate)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)and n.func.attr=='create_new_stage']
+assert guard and runtime and min(guard)<min(runtime)
+print(json.dumps(report))
+`
+  const run=spawnSync(process.env.TESTCI_PYTHON??process.env.LYAPUNOV_PYTHON??'/usr/bin/python3',['-c',probe,SOURCE],{encoding:'utf8'})
+  expect(run.status,run.stderr).toBe(0)
+  const report=JSON.parse(run.stdout)
+  expect(report.sdf.error.code).toBe('ISAAC_SDF_COOKING_REQUIRES_CUDA');expect(report.sdf.error.message).toContain('usd-sdf-preflight');expect(report.sdf.state.proxies).toBe(true)
+  for(const name of ['convex','disabled','visual','cube','cuda','rtx','variant'])expect(report[name].error,name).toBeNull()
+  expect(report.cuda.state.stageOpens).toBe(0);expect(report.rtx.state.stageOpens).toBe(0)
+  expect(report.invalidVariant.error.code).toBe('USD_VARIANT_INVALID')
+})
+
 const HARNESS = `
 """Offline stage probe for SceneAdapter.primitive (T2 ISAAC-07/10).
 

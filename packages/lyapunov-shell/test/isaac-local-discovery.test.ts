@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, test} from "bun:test"
 import {spawnSync} from "node:child_process"
-import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs"
+import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs"
 import {tmpdir} from "node:os"
 import {dirname, join, resolve} from "node:path"
 import {createIsaacLocalDiscovery, isaacCandidatePaths, registerIsaacLocalRoutes} from "../src/isaac-local-discovery.ts"
@@ -15,6 +15,8 @@ const PRODUCT_ROOT = resolve(import.meta.dirname, "../../..")
 const roots: string[] = []
 afterEach(() => {clearIsaacSdkProbeCache();for (const root of roots.splice(0)) rmSync(root, {recursive: true, force: true})})
 function scratch() {const root=mkdtempSync(join(tmpdir(),"lyapunov-isaac-local-"));roots.push(root);return root}
+/** 只把被测发现的“产品根”指到临时根；check.py 通过只读链接提供，托管 SDK 前缀仍是不存在的空形状。 */
+function isolatedProductRoot() {const root=scratch(),check=join(root,"packages/sim-isaac/python/check.py");mkdirSync(dirname(check),{recursive:true});symlinkSync(join(PRODUCT_ROOT,"packages/sim-isaac/python/check.py"),check);return root}
 const shQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 function executable(file: string, text: string) {mkdirSync(dirname(file), {recursive: true});writeFileSync(file, text);chmodSync(file, 0o755)}
 /** SDK fixture 的模块体主动抛错；若发现检查 import Isaac 而不是 find_spec，测试会失败。 */
@@ -42,9 +44,9 @@ const envFor = (root: string): NodeJS.ProcessEnv => ({LYAPUNOV_ENGINE_PREFERENCE
 
 describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   test("发现多个真实模块/元数据候选，只检查而不自动选择或接受许可",async()=>{
-    const root=scratch(), installations=join(root,"installations")
+    const root=scratch(), productRoot=isolatedProductRoot(), installations=join(root,"installations")
     const pip=pipSdk(join(installations,"pip")), standalone=standaloneSdk(join(installations,"standalone"))
-    const env=envFor(root),local=createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env,scanRoots:[installations]})
+    const env=envFor(root),local=createIsaacLocalDiscovery({productRoot,env,scanRoots:[installations]})
     expect(local.selection().savedPython).toBeNull()
     expect(existsSync(env.LYAPUNOV_ENGINE_PREFERENCE_FILE!)).toBe(false)
     const result=await local.discover()
@@ -62,7 +64,7 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     const home=scratch(),versions=join(home,".local/share/lyapunov/versions")
     const legacy=pipSdk(join(versions,"0.1.0-alpha.4-interactions.1/.runtime/conda/envs/isaac"))
     const oldPackageOnly=pipSdk(join(versions,"0.1.0-alpha.2")) // 只有旧包 bin/python，没有默认入口
-    const source=createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env,home})
+    const source=createIsaacLocalDiscovery({productRoot,env,home})
     const scanned=await source.discover()
     expect(scanned.candidates.map(row=>row.python)).toContain(legacy.python)
     expect(scanned.candidates.find(row=>row.python===legacy.python)?.compatible).toBe(true)
@@ -70,7 +72,7 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     expect(scanned.selection.savedPython).toBeNull()
     expect(existsSync(env.LYAPUNOV_ENGINE_PREFERENCE_FILE!)).toBe(false)
     // 重复入口（env 覆盖与 versions 扫描指向同一路径）只算一个候选，不重复也不伪造。
-    const dedup=isaacCandidatePaths({productRoot:PRODUCT_ROOT,home,env:{...env,LYAPUNOV_ISAAC_PYTHON:legacy.python}})
+    const dedup=isaacCandidatePaths({productRoot,home,env:{...env,LYAPUNOV_ISAAC_PYTHON:legacy.python}})
     expect(dedup.paths.filter(path=>path===legacy.python)).toHaveLength(1)
     // 打包布局：productRoot = <prefix>/versions/<release>，versions 根取它的父目录。
     const prefix=scratch(),packagedRoot=join(prefix,"versions/0.1.0-alpha.6.1")
@@ -82,13 +84,13 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   })
 
   test("保存选择保留引擎/许可，重新创建读取后 resolver、Host 装配和环境面板一致",async()=>{
-    const root=scratch(),{python}=pipSdk(join(root,"SDK with spaces")),env=envFor(root)
+    const root=scratch(),productRoot=isolatedProductRoot(),{python}=pipSdk(join(root,"SDK with spaces")),env=envFor(root)
     writeFileSync(env.LYAPUNOV_ENGINE_PREFERENCE_FILE!,JSON.stringify({engine:"mujoco",licenses:{isaac:{acceptedAt:"2026-09-30T01:00:00Z",eulaUrl:"https://example.invalid/test"}}}))
     let changes=0
-    const local=createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env,onChanged:()=>{changes++}})
+    const local=createIsaacLocalDiscovery({productRoot,env,onChanged:()=>{changes++}})
     const selected=await local.select(dirname(dirname(python)))
     expect(selected.savedPython).toBe(python);expect(selected.restartRequired).toBe(true);expect(changes).toBe(1)
-    expect(createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env}).selection()).toEqual(selected)
+    expect(createIsaacLocalDiscovery({productRoot,env}).selection()).toEqual(selected)
     const stored=JSON.parse(readFileSync(env.LYAPUNOV_ENGINE_PREFERENCE_FILE!,"utf8"))
     expect(stored.engine).toBe("mujoco");expect(stored.licenses.isaac.eulaUrl).toBe("https://example.invalid/test")
     expect(resolveSdkPython(PRODUCT_ROOT,"isaac",env)).toEqual({python,source:"saved-preference"})
@@ -106,8 +108,8 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   })
 
   test("环境变量显式覆盖优先，安装器 managed 解析不借环境或保存的外置 SDK",async()=>{
-    const root=scratch(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
-    await createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env}).select(python)
+    const root=scratch(),productRoot=isolatedProductRoot(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
+    await createIsaacLocalDiscovery({productRoot,env}).select(python)
     const override=join(root,"different/bin/python")
     expect(resolveSdkPython(root,"isaac",{...env,LYAPUNOV_ISAAC_PYTHON:override})).toEqual({python:override,source:"env-override"})
     expect(resolveSdkPython(root,"isaac",{...env,LYAPUNOV_ISAAC_PYTHON:override},{managed:true})).toEqual({python:join(root,".runtime/conda/envs/isaac/bin/python"),source:"package-default"})
@@ -115,25 +117,25 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   })
 
   test("standalone 需要同根模块、Kit/扩展、版本；裸 VERSION、旧版本、外来模块都拒绝",async()=>{
-    const root=scratch()
+    const root=scratch(),productRoot=isolatedProductRoot()
     for(const [name,options] of [["valid",{}],["no-module",{module:false}],["old-version",{version:"5.1.0"}],["foreign-module",{outside:join(root,"outside")}]] as const){
       const {python}=standaloneSdk(join(root,name),options)
       const candidate=await inspectIsaacPython(python,{productRoot:PRODUCT_ROOT,fresh:true})
       expect(candidate.compatible).toBe(name==="valid")
-      if(name!=="valid")await expect(createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env:envFor(root)}).select(python)).rejects.toThrow("ISAAC_LOCAL_SDK_INVALID")
+      if(name!=="valid")await expect(createIsaacLocalDiscovery({productRoot,env:envFor(root)}).select(python)).rejects.toThrow("ISAAC_LOCAL_SDK_INVALID")
     }
     const {python}=standaloneSdk(join(root,"no-kit"));rmSync(join(root,"no-kit/kit"),{recursive:true})
     expect((await inspectIsaacPython(python,{productRoot:PRODUCT_ROOT,fresh:true})).compatible).toBe(false)
     expect(existsSync(envFor(root).LYAPUNOV_ENGINE_PREFERENCE_FILE!)).toBe(false)
     // 失败能继续重选：无效选择被拒且不写文件；随后选一个兼容的 standalone 仍能登记成功。
     const recovered=standaloneSdk(join(root,"valid"))
-    const saved=await createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env:envFor(root)}).select(recovered.python)
+    const saved=await createIsaacLocalDiscovery({productRoot,env:envFor(root)}).select(recovered.python)
     expect(saved.savedPython).toBe(recovered.python)
     expect(readSdkPythonPreference("isaac",envFor(root))).toBe(recovered.python)
   })
 
   test("错误路径、空扫描、Python 版本不匹配与超时有明确结果，不执行命令文本",async()=>{
-    const root=scratch(),env=envFor(root),local=createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env,scanRoots:[root]})
+    const root=scratch(),productRoot=isolatedProductRoot(),env=envFor(root),local=createIsaacLocalDiscovery({productRoot,env,scanRoots:[root]})
     expect((await local.discover()).candidates).toEqual([])
     const marker=join(root,"should-not-exist")
     expect((await local.discover(`/bin/sh -c touch ${marker}`)).candidates[0].compatible).toBe(false)
@@ -148,17 +150,17 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   })
 
   test("有限目录扫描不会递归孙目录，超过候选上限会提示手动路径",()=>{
-    const root=scratch(),base=join(root,"installations")
+    const root=scratch(),productRoot=isolatedProductRoot(),base=join(root,"installations")
     for(let n=0;n<5;n++)pipSdk(join(base,`env-${n}`))
     const nested=pipSdk(join(base,"hidden/deeper"))
-    const result=isaacCandidatePaths({productRoot:PRODUCT_ROOT,env:envFor(root),scanRoots:[base],maxCandidates:2})
+    const result=isaacCandidatePaths({productRoot,env:envFor(root),scanRoots:[base],maxCandidates:2})
     expect(result.paths.length).toBe(2);expect(result.limited).toBe(true);expect(result.paths).not.toContain(nested.python)
   })
 
   test("注册真实发现/选择路由，选择写同一文件且返回下次启动状态",async()=>{
-    const root=scratch(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
+    const root=scratch(),productRoot=isolatedProductRoot(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
     const routes=new Map<string,(request:Request)=>Promise<Response>>()
-    registerIsaacLocalRoutes((path,_methods,handler)=>{routes.set(path,handler)},{productRoot:PRODUCT_ROOT,env,scanRoots:[join(root,"pip")]})
+    registerIsaacLocalRoutes((path,_methods,handler)=>{routes.set(path,handler)},{productRoot,env,scanRoots:[join(root,"pip")]})
     const response=await routes.get("isaac-local/select")!(new Request("http://fixture",{method:"POST",body:JSON.stringify({python})}))
     expect((await response.json() as {savedPython:string}).savedPython).toBe(python)
     expect(response.headers.get("cache-control")).toBe("private, no-store")
@@ -168,8 +170,8 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
   })
 
   test("已选兼容本地 SDK 的安装请求不会起任务或更改外置环境",async()=>{
-    const root=scratch(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
-    await createIsaacLocalDiscovery({productRoot:PRODUCT_ROOT,env}).select(python)
+    const root=scratch(),productRoot=isolatedProductRoot(),{python}=pipSdk(join(root,"pip")),env=envFor(root)
+    await createIsaacLocalDiscovery({productRoot,env}).select(python)
     let jobs=0,spawns=0
     const installer=createProviderInstaller({root:join(root,"attempts"),cwd:PRODUCT_ROOT,scriptPath:join(root,"missing-installer"),env,
       jobs:{start:()=>{jobs++;throw new Error("must not start")},kill:()=>{throw new Error("must not kill")}},

@@ -78,3 +78,17 @@ packs/*/asset/**
 /bugfixHistory/refactor-execution/*
 !/bugfixHistory/refactor-execution/*.md
 /bugfixHistory/negative-controls/
+
+# E/ 是候选、审计、历史工作树与私有材料的本地容器，不是 Dev 产品源码。
+# 保留其字节和现有 Git 根；只阻止整棵 E/ 被误加入本仓库。
+/E/
+
+# 本地 QA 与构建中间产物；发布产物仍按 distribution/ 的既有规则处理。
+/QA/
+/qa/
+/.qa/
+*.tsbuildinfo
+
+# packs 本地 staging 清单：generic_quadrotor/pack.json 仍引用它，资产许可尚未逐项复核。
+# 保留用户修改后的 cf2 OBJ 清单和实际字节在本机，但不随源码提交或发布。
+/packs/ASSET_STAGING_MANIFEST_EXTRA.json

@@ -18,7 +18,7 @@ import {assetSceneInstances,entityEffectivelyVisible,removeSceneNodeCommit,visib
 const noop=()=>{}
 
 test('Objects 选择页搜索名称、标签、格式与内置项；过滤保留真实选择且不提前放置',async()=>{
- const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+ const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'})
  const previous=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){

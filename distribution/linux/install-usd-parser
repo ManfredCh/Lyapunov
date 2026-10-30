@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+prefix="$root/.runtime/usd-python"
+if [ "${1:-}" = --check ]; then
+  [ "$#" -eq 1 ] || exit 2
+  [ -x "$prefix/bin/python" ] || { printf '%s\n' "USD_RUNTIME_UNAVAILABLE: $prefix；运行 ./distribution/linux/install-usd-parser" >&2; exit 2; }
+  "$prefix/bin/python" -c 'from pxr import Usd; print("USD_RUNTIME_READY", Usd.GetVersion())'
+  exit 0
+fi
+[ "$#" -eq 0 ] || { printf '%s\n' '用法：./distribution/linux/install-usd-parser [--check]' >&2; exit 2; }
+python_bin=${LYAPUNOV_USD_SETUP_PYTHON:-}
+if [ -z "$python_bin" ] && [ -x "$root/.runtime/sim-python/bin/python" ]; then python_bin="$root/.runtime/sim-python/bin/python"; fi
+if [ -z "$python_bin" ]; then python_bin=python3; fi
+if [ -d "$prefix" ] && [ -n "$(ls -A "$prefix")" ] && [ ! -f "$prefix/pyvenv.cfg" ]; then
+  printf '%s\n' "USD_RUNTIME_PREFIX_CONFLICT: $prefix 非空且不是本安装器的venv；目录已保留。" >&2; exit 2
+fi
+export PYTHONNOUSERSITE=1 HF_ENDPOINT=https://hf-mirror.com
+unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+"$python_bin" -m venv "$prefix"
+"$prefix/bin/python" -m pip install 'usd-core==26.5'
+"$prefix/bin/python" -c 'from pxr import Usd; assert Usd.GetVersion()==(0,26,5); print("USD_RUNTIME_READY", Usd.GetVersion())'

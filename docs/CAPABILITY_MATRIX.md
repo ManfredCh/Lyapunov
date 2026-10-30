@@ -92,3 +92,25 @@ Demo 可用已实现工具、确定机位和限定任务绕开非必要接入问
 原版LyapunovDev已收敛为单一“倒水工作”会话，显示G1套房与两个普通HTML标签；携带版为另存的产品介绍／天安门图集单文件。多会话归属已有修复，并有四会话＋Host 重启读数（DEV003-198 回执）；该回执**当时**登记了四项局限（B=LIBERO 真世界需另起 benchmark Host、C 天安门画面缺 DRACOLoader、切换非侧栏点行、C 迟到回执打错 sceneId）。其中 C 的 DRACO 故障属于**当时**的 Viewer 缺解码器，此后已补 `draco-decoder.ts`／`gltf-draco-decoder.ts` 源码与 `gltf-draco-decoder.test.ts`／`robot-glb-ktx2-texture.test.ts`（主控新跑 13 pass）；单 Host 只装配一个 Provider（B 需另起 benchmark Host）是**现有约束**。包含该修复的**完整四会话在最新包上的图形复验仍待**——不能把“仍缺复验”写成“仍无修复”，也不能标为已支持任意并行 session。
 
 09-19 LIBERO 官方单任务的 123 步成功仍有效（历史读数，保留原数字），但不证明松手放稳或取回；显式续接与纹理读取只有候选实现／夹具验证。历史记录已定位并保全112份关键日志，尚未全部重导入UI。见[本轮卡点与处理](DEMO_BLOCKERS_AND_HISTORY_20260920.md)、[历史核查](HISTORY_RECOVERY_20260920.md)。
+
+## 人体创建与运动（2026-10-28开发切片）
+
+| 能力 | MuJoCo | Isaac | 说明 |
+| --- | --- | --- | --- |
+| 原创蒙皮人偶、合法rigged GLB/原地旋转动作导入 | 已接线 | 未实现 | 许可与骨映射必填，资源库登记；不宣称逼真外观 |
+| 物理tick骨架/运动学分段接触/原生姿态Frame | 原生已运行 | CPU/none原生已运行 | 同世界原生USD资产+人体；Viewer只消费物理姿态 |
+| 停障、闭合路径、群组seed/相位 | 原生已运行 | 未实现 | 未启用navigation时保守停止 |
+| 固定Z平面自动绕障与拥堵解除 | 原生已运行 | 未实现 | 显式边界、4096节点上限；AABB保守网格，不支持跨楼层 |
+| 自由动力学ragdoll受力/跌倒 | 已实现待原生验收 | 未实现 | 无平衡行走/恢复控制器，不冒充运动学驱动 |
+
+入口、限制和复跑脚本见 [人体创建与运动](HUMAN_CROWD.md)。
+
+MuJoCo 人体动作可显式 `humanComputeDevice=cuda:0`（Warp 1.13 fp64，全体 clip 行人单 graph），可选安装 `install-provider mujoco --human-cuda`。2026-10-30 实测 20 人+Panda realtime RTF 约 0.32–0.37、工作台 12–16fps，**未达实时**；见 [RTX人体动作计算与渲染](HUMAN_GPU.md)。
+
+## 2026-10-28 源码增补：SimReady 与 USD
+
+USD主资产登记、OpenUSD依赖闭包、实例变体/变换、便携保存重开与派生几何预览已接入；Isaac原生刚体矩阵通过现有Frame传入Viewer并驱动源body绑定子几何；SimReady Central固定版本/BOM与旧Warehouse CSV的独立源身份/逐layer闭包接入同一资源库，均严格镜像；CSV目录发现已接入，真实小包获取仍按外部取证结果报告。Viewer支持基础UsdPreviewSurface与st纹理；MDL/任意网络、细分、蒙皮/动画仍未渲染；原生物理按Isaac具体实测回执记录，MuJoCo/Newton原生USD明确不可用。自动化几何/文档检查不代替界面或物理验收，详见 [使用与边界](SIMREADY_USD.md)。
+
+Isaac人体当前支持CPU/rendering:none基础路径、PhysX原生停障与选择性停止；高级ragdoll和平面A*具名拒绝，RTX/CUDA人体未适配。验收脚本见 [人体创建与运动](HUMAN_CROWD.md)。
+
+外部人体兼容已用Khronos CesiumMan固定GLB实测：矩阵祖先、57通道、髋部起伏/净根漂移分离、前向校准、便携重开及MuJoCo/Isaac动作、共享Viewer纹理/skin。范围见 [外部角色样例](HUMAN_EXTERNAL_CHARACTER.md)；不推导任意骨架、真实伸缩或动力学控制已支持。

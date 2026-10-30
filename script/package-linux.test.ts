@@ -94,10 +94,10 @@ describe('发行根清单名与产品链接归属判定同一身份', () => {
 
 describe('发行安装器的几何依赖与包内前缀复用', () => {
   const quote = (value:string) => "'"+value.replaceAll("'", "'\\''")+"'"
-  const fixture = (provider:'mujoco'|'isaac',geometryFails=false,pipFails=false) => {
+  const fixture = (provider:'mujoco'|'isaac',geometryFails=false,pipFails=false,gpuBaseFails=false,gpuCheckFails=false) => {
     const directory=mkdtempSync(join(tmpdir(),'lyapunov-geometry-install-')),product=join(directory,'product')
     const put=(file:string,text:string,executable=false)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,text);if(executable)chmodSync(file,0o755)}
-    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt']){
+    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt','packages/sim-mujoco/python/human_gpu.py','packages/sim-mujoco/python/check_human_cuda.py','packages/sim-mujoco/requirements-human-cuda.txt','packages/sim-mujoco/warp-source.json','packages/sim-mujoco/WARP-LICENSE.md']){
       mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(root,file),join(product,file))
     }
     // 通用 Kit 大 wheel 的固定 pin 在测试里替换为本地夹具：预置一个长度/SHA 已匹配的 wheel，
@@ -119,12 +119,12 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
     if(nodeProbe.status!==0)throw new Error('离线安装路由夹具需要现有 Node')
     const node=nodeProbe.stdout.trim()
     // 此 Python、pip、micromamba 与 doctor 均为明确的离线替身，不下载、不执行 Isaac、不接受真实许可。
-    put(join(prefix,'bin/python'),`#!/bin/sh\nif [ "$1" = -c ];then\ncase "$2" in\n*sys.prefix*) printf '%s\\n' ${quote(prefix)};;\n*coacd*) printf '%s\\n' "$2" >> ${quote(imports)};${geometryFails?"printf '%s\\n' 'ModuleNotFoundError: coacd' >&2;exit 17":"exit 0"};;\nesac\nexit 0\nfi\nif [ "$1" = -m ] && [ "$2" = pip ] && [ "$3" = --version ];then printf '%s\\n' 'offline pip';exit 0;fi\nexec ${quote(node)} ${quote(logger)} "$@"\n`,true)
+    put(join(prefix,'bin/python'),`#!/bin/sh\nif [ "$1" = -c ];then\ncase "$2" in\n*sys.prefix*) printf '%s\\n' ${quote(prefix)};;\n*HUMAN_GPU_IDENTITY_PROBE*) printf '%s\\n' 'HUMAN_GPU_IDENTITY_PROBE' >> ${quote(imports)};${gpuBaseFails?"printf '%s\\n' 'HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED' >&2;exit 21":"printf '%s\\n' 'offline-mu313-numpy-stable-identity'"};;\n*coacd*) printf '%s\\n' "$2" >> ${quote(imports)};${geometryFails?"printf '%s\\n' 'ModuleNotFoundError: coacd' >&2;exit 17":"exit 0"};;\n*warp*) printf '%s\\n' "$2" >> ${quote(imports)};;\nesac\nexit 0\nfi\ncase "$1" in\n*/check_human_cuda.py) printf '%s\\n' 'human-cuda-required-kernel-check' >> ${quote(imports)};${gpuCheckFails?"printf '%s\\n' 'HUMAN_CUDA_UNAVAILABLE' >&2;exit 23":"exit 0"};;\nesac\nif [ "$1" = -m ] && [ "$2" = pip ] && [ "$3" = --version ];then printf '%s\\n' 'offline pip';exit 0;fi\nexec ${quote(node)} ${quote(logger)} "$@"\n`,true)
     const micromamba=join(directory,'micromamba');put(micromamba,'#!/bin/sh\nexit 91\n',true)
     // 安装收尾会读/写 engine.json：这里钉到临时文件，绝不碰真人配置；本夹具又设了 ENV 覆盖，
     // 收尾 helper 必须保留 ENV 选择、不登记产品托管路径（用 preference 不存在来断言）。
     const preference=join(directory,'engine.json')
-    const run=()=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[])],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_ENGINE_PREFERENCE_FILE:preference,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
+    const run=(extra:string[]=[])=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[]),...extra],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_ENGINE_PREFERENCE_FILE:preference,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
     return {directory,product,prefix,doctor,log,imports,preference,run,wheel}
   }
 
@@ -141,6 +141,8 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(argv[argv.indexOf('--retries')+1]).toBe('3')
         expect(argv).toContain('--disable-pip-version-check')
         expect(argv[argv.indexOf('--index-url')+1]).toBe('https://pypi.org/simple')
+        expect(argv).not.toContain('warp-lang==1.13.0')
+        expect(argv.some(value=>value.includes('requirements-human-cuda'))).toBe(false)
         if(provider==='isaac'){
           // 通用大 Kit 缓存由固定 pin 的 helper 分段续传并按长度/SHA256 校验后，以本地已验证 wheel
           // 交给正常 pip；仍不请求整个 [extscache] 组，也不把未验证的通用缓存名直接交给 pip。
@@ -167,6 +169,63 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(readFileSync(f.imports,'utf8')).toContain('import numpy,scipy,trimesh,coacd')
         expect(JSON.parse(readFileSync(f.doctor,'utf8'))).toEqual([provider,'--managed-sdk'])
         expect(existsSync(f.preference)).toBe(false)
+      }finally{rmSync(f.directory,{recursive:true,force:true})}
+    }
+  })
+
+  test('仅显式Mu CUDA扩展给自己的稳定前缀补固定Warp，禁依赖升级且重复安装幂等',()=>{
+    const f=fixture('mujoco')
+    try{
+      for(let i=0;i<2;i++){
+        const result=f.run(['--human-cuda']);expect(result.status,result.stderr).toBe(0)
+      }
+      const calls=readFileSync(f.log,'utf8').trim().split('\n').map(line=>JSON.parse(line)as string[])
+      expect(calls).toHaveLength(2)
+      for(const argv of calls){expect(argv).toContain('--no-deps');expect(argv).toContain('--only-binary=:all:');expect(argv).toContain('--require-hashes');expect(argv).not.toContain('mujoco==3.13.0');expect(argv[argv.indexOf('-r')+1]).toBe(join(f.product,'packages/sim-mujoco/requirements-human-cuda.txt'))}
+      expect(readFileSync(f.imports,'utf8').match(/HUMAN_GPU_IDENTITY_PROBE/g)).toHaveLength(4)
+      expect(readFileSync(f.imports,'utf8')).toContain('human-cuda-required-kernel-check')
+      expect(existsSync(f.preference)).toBe(false)
+    }finally{rmSync(f.directory,{recursive:true,force:true})}
+  })
+
+  test('CUDA扩展基础Mu不匹配/源码缺件/错误Provider均在pip前具名拒绝',()=>{
+    for(const kind of ['base','payload','provider']as const){
+      const f=fixture(kind==='provider'?'isaac':'mujoco',false,false,kind==='base')
+      try{
+        if(kind==='payload')rmSync(join(f.product,'packages/sim-mujoco/python/human_gpu.py'))
+        const result=f.run(['--human-cuda']);expect(result.status,result.stderr).toBe(2);expect(existsSync(f.log)).toBe(false)
+        expect(result.stdout+result.stderr).toContain(kind==='base'?'HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED':kind==='payload'?'RELEASE_PAYLOAD_MISSING':'--human-cuda只适用于MuJoCo')
+      }finally{rmSync(f.directory,{recursive:true,force:true})}
+    }
+  })
+
+  test('CUDA设备或真实kernel自检失败必须非零，保留前缀且不进入CPU doctor成功分支',()=>{
+    const f=fixture('mujoco',false,false,false,true)
+    try{
+      const result=f.run(['--human-cuda'])
+      expect(result.status,result.stderr).toBe(2)
+      expect(result.stdout).toContain('HUMAN_CUDA_CHECK_FAILED')
+      expect(result.stderr).toContain('HUMAN_CUDA_UNAVAILABLE')
+      expect(existsSync(f.doctor)).toBe(false)
+      expect(existsSync(join(f.prefix,'bin/python'))).toBe(true)
+      expect(readFileSync(f.log,'utf8').trim().split('\n')).toHaveLength(1)
+    }finally{rmSync(f.directory,{recursive:true,force:true})}
+  })
+
+  test('CUDA安装拒绝外指前缀和非Python冲突目录且保留原字节',()=>{
+    for(const outside of [false,true]){
+      const f=fixture('mujoco')
+      try{
+        rmSync(f.prefix,{recursive:true})
+        const target=outside?join(f.directory,'external-sdk'):f.prefix
+        mkdirSync(target,{recursive:true});writeFileSync(join(target,'keep.txt'),'原SDK不得修改')
+        if(outside)symlinkSync(target,f.prefix,'dir')
+        const result=f.run(['--human-cuda'])
+        expect(result.status,result.stderr).toBe(2)
+        expect(result.stdout).toContain(outside?'PROVIDER_PREFIX_OUTSIDE_ROOT':'PROVIDER_PREFIX_CONFLICT')
+        expect(readFileSync(join(target,'keep.txt'),'utf8')).toBe('原SDK不得修改')
+        expect(existsSync(f.log)).toBe(false)
+        expect(existsSync(f.doctor)).toBe(false)
       }finally{rmSync(f.directory,{recursive:true,force:true})}
     }
   })

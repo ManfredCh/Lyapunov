@@ -1,3 +1,4 @@
+import {entityHasDeclaredPhysics,isNativeUsdEntity} from '../../lyapunov-contracts/src/usd.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
 import type {RobotDescription,WorldOptions} from '../../sim-contract/src/index.ts'
 import {uncontrolledFreeRootEntityIds} from './physics-test-space.ts'
@@ -30,19 +31,23 @@ export function sceneWorldPreflight(scene:SceneSnapshot,options:{allowEmpty?:boo
   if(!source||!source.units||!['X','Y','Z'].includes(source.upAxis)||!['left','right'].includes(source.handedness))missing.push(`${e.name||e.entityId}: ${r.resourceId}@${r.version} source`)
  }
  if(missing.length)return {code:'SCENE_RESOURCE_SOURCE_REQUIRED',detail:'资源来源坐标尚不完整；先从已登记原件恢复，不能猜轴或把视觉场景当作物理就绪。',missing}
- const physical=scene.entities.some(e=>Boolean(e.components.collision||e.components.rigidBody||e.components.articulation||e.components.mujoco||e.components.isaac||e.components.newton))
+ const physical=scene.entities.some(e=>entityHasDeclaredPhysics(e))
  if(!physical&&!options.allowEmpty)return {code:'SCENE_PHYSICS_REQUIRED',detail:'当前场景只有视觉资源，尚无已声明碰撞或原生物理模型；物理世界未启动。',missing:['collision/native physics source']}
 }
 /** 自动物理意图只取已保存的模板/实体声明；视觉与默认重力不是启动请求。 */
 export function sceneRequestsPhysics(scene:SceneSnapshot):boolean{
- return scene.physics?.template==='physics-workspace-v1'||scene.physics?.template==='physics-workspace-v2'||scene.entities.some(e=>Boolean(e.components.collision||e.components.rigidBody||e.components.articulation||e.components.mujoco||e.components.isaac||e.components.newton||e.components.physicsBinding))
+ return scene.physics?.template==='physics-workspace-v1'||scene.physics?.template==='physics-workspace-v2'||scene.entities.some(e=>entityHasDeclaredPhysics(e,true))
+}
+/** Host恢复文案使用同一个已保存物理意图判据，纯视觉不能宣称正在恢复物理。 */
+export function sceneHostRecoveryNotice(scene:SceneSnapshot|undefined):{zh:string;en:string}{
+ return scene&&sceneRequestsPhysics(scene)?{zh:'Host 已重启，旧世界句柄已清除；正在按当前场景恢复物理世界。',en:'Host restarted; old world handles were cleared. Restoring physics for the current scene.'}:{zh:'Host 已重启，旧世界句柄已清除；场景可继续显示和编辑，当前未请求自动物理。',en:'Host restarted; old world handles were cleared. The scene remains available for viewing and editing; automatic physics was not requested.'}
 }
 /** 无Provider只阻断确有物理意图/既有world的场景；视觉显示保持可用。 */
 export function sceneWorldWithoutProvider(scene:SceneSnapshot,world:WorldHandle|undefined,detail:string):SceneWorldState{
  return sceneRequestsPhysics(scene)||world?.sceneId===scene.sceneId?{phase:'blocked',sceneId:scene.sceneId,code:'PROVIDER_UNAVAILABLE',detail}:{phase:'idle',sceneId:scene.sceneId,sceneRevision:scene.revision}
 }
 export function intentionalBlankScene(scene:SceneSnapshot):boolean{
- const noPhysics=!scene.entities.some(e=>e.components.collision||e.components.rigidBody||e.components.mujoco||e.components.isaac||e.components.articulation)
+ const noPhysics=!scene.entities.some(e=>isNativeUsdEntity(e)?entityHasDeclaredPhysics(e):e.components.collision||e.components.rigidBody||e.components.mujoco||e.components.isaac||e.components.articulation)
  const noVisual=scene.entities.every(e=>!e.resources.length&&!e.components.visual)
  return noPhysics&&noVisual&&(scene.entities.length===0||scene.physics?.template==='blank'||scene.entities.every(e=>e.components.camera||e.components.viewerCamera))
 }

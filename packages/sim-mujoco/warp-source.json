@@ -1,0 +1,23 @@
+{
+  "package": "warp-lang",
+  "version": "1.13.0",
+  "source": "https://pypi.org/pypi/warp-lang/1.13.0/json",
+  "repository": "https://github.com/NVIDIA/warp",
+  "revision": "v1.13.0",
+  "platform": "linux-x64",
+  "filename": "warp_lang-1.13.0-py3-none-manylinux_2_28_x86_64.whl",
+  "url": "https://files.pythonhosted.org/packages/58/8e/b42f0ddeaca25251e5bbf7db6a89351a0722432ce075ebcdece9118e955a/warp_lang-1.13.0-py3-none-manylinux_2_28_x86_64.whl",
+  "bytes": 138337580,
+  "sha256": "ac2479c70ad410d58deb088c2a64168792be588efc1bec22dc51f92238e8c8c3",
+  "license": {
+    "spdx": "Apache-2.0",
+    "source": "https://raw.githubusercontent.com/NVIDIA/warp/v1.13.0/LICENSE.md",
+    "path": "WARP-LICENSE.md",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "bytes": 10173
+  },
+  "dependencies": [
+    "numpy"
+  ],
+  "installMode": "optional --human-cuda; --no-deps --require-hashes; existing MuJoCo/NumPy identity preserved"
+}

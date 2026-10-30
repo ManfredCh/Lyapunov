@@ -11,13 +11,15 @@ import type { Entity, ResourceRef, SceneGeometryBinding, SceneMeshCollisionCompo
 import { identityTransform, SCENE_COORDINATES, sceneCollisionAlignmentGate } from "../../lyapunov-contracts/src/types.ts"
 import { isGaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 import { atomicJSON, fileTransaction, readJSON, safeId } from "./persistence.ts"
+import { usdVisual, inspectUsd } from "./usd-assets.ts"
+import type { UsdInstanceOverrides } from "../../lyapunov-contracts/src/usd.ts"
 import { glbEntities, localPath, parseAsset, robotVisual, sourceTransform, gaussianSourceTransform, assetBounds } from "./formats.ts"
 import { authorizedAssetIndex, robotDocumentAssetLocators, ROBOT_VISUAL_MIME_BY_EXTENSION, type AuthorizedAssetIndex } from "./robot-visual-assets.ts"
 import { resourceToken } from "../../lyapunov-contracts/src/product-paths.ts"
 import type {SourceTexturePolicy} from './geometry-source-deps.ts'
 import { compareGlbGeometry, glbGeometryFacts, type GlbGeometryFacts } from "./mesh-geometry.ts"
 import { resolveSceneLayout, type ResolvedSceneLayout, type SceneLayout } from "./layout.ts"
-import { ResourceLibrary, type ResourceRecord, type ResourceNetworkProvenance, type ResourceStorageKind, type ResourcePhysicalizationRequest } from "./resources.ts"
+import { ResourceLibrary, type ResourceRecord, type ResourceNetworkProvenance, type ResourceLicense, type ResourceStorageKind, type ResourcePhysicalizationRequest } from "./resources.ts"
 import { notePhysicalizationSkipped, schedulePhysicalization,pendingPhysicalization,resourcePhysicalizationOptions,physicalizationMatchesRequest,PHYSICALIZATION_POLICY, type PhysicalizeStrategy, type PhysicalizeUsage } from "./physicalization.ts"
 import {activeCollisionUris,ensureCollisionArtifacts,resolveLegacyCollisionUri,validateSceneCollisionReferences,collisionVariant} from './collision-references.ts'
 import {physicalizationBudgets,validatePhysicalizationBudgets,type PhysicalizationBudgetOptions} from './physicalization-parameters.ts'
@@ -378,7 +380,7 @@ export class SceneOperations {
         ref.original = resolved.original
         ref.representations = resolved.representations
         // 文件存在不等于依赖可用；重开机器人前核对真实依赖闭包。
-        if(["application/x-mjcf+xml","application/x-urdf+xml"].includes(ref.original.mimeType))await parseAsset(localPath(ref.original.uri),ref.source)
+        if(["application/x-mjcf+xml","application/x-urdf+xml","model/vnd.usd"].includes(ref.original.mimeType))await parseAsset(localPath(ref.original.uri),ref.source)
       }
       const mujoco = entity.components.mujoco as { sourcePath?: string } | undefined
       if (mujoco?.sourcePath) mujoco.sourcePath = localPath(mujoco.sourcePath, dirname(path))
@@ -639,7 +641,7 @@ export class SceneOperations {
     await atomicJSON(path, snapshot)
     return { path, snapshot, missing: [...new Set(missing)], ...(await this.emitChangeset(diffBase, snapshot, options.diffPath)) }
   }
-  async import(input: { path: string; sceneId?: string; name?: string; resourceId?: string; entityId?: string; source?: ResourceRef["source"]; sourceTexturePolicy?:SourceTexturePolicy; parentId?: string; transform?: Transform; alignBottomToSurface?: boolean; components?: Entity["components"]; sceneGeometryBinding?: SceneGeometryBinding; networkProvenance?: ResourceNetworkProvenance; physicalize?: boolean; physicalizeStrategy?: PhysicalizeStrategy; physicalizeUsage?: PhysicalizeUsage; physicalizeVoxelSizeM?: number; physicalizationRequest?: ResourcePhysicalizationRequest; storage?: ResourceStorageKind; tags?: string[]; folder?: string }): Promise<{ resource: ResourceRecord; snapshot?: SceneSnapshot; entityId?: string }> {
+  async import(input: { path: string; category?:"background"|"scene"|"robot"|"object"; sceneId?: string; name?: string; resourceId?: string; entityId?: string; source?: ResourceRef["source"]; sourceTexturePolicy?:SourceTexturePolicy; parentId?: string; transform?: Transform; alignBottomToSurface?: boolean; components?: Entity["components"]; sceneGeometryBinding?: SceneGeometryBinding; networkProvenance?: ResourceNetworkProvenance; license?:ResourceLicense; physicalize?: boolean; physicalizeStrategy?: PhysicalizeStrategy; physicalizeUsage?: PhysicalizeUsage; physicalizeVoxelSizeM?: number; physicalizationRequest?: ResourcePhysicalizationRequest; storage?: ResourceStorageKind; tags?: string[]; folder?: string }): Promise<{ resource: ResourceRecord; snapshot?: SceneSnapshot; entityId?: string }> {
     const explicit = input.physicalize !== undefined || input.physicalizeUsage !== undefined || input.physicalizeStrategy !== undefined || input.physicalizeVoxelSizeM !== undefined
     if(explicit&&input.physicalizationRequest!==undefined)throw Error('PHYSICS_REQUEST_MIXED: 结构化请求与旧平面物理参数只选一组')
     const request: ResourcePhysicalizationRequest | undefined = explicit
@@ -878,7 +880,7 @@ export class SceneOperations {
       }
     }
     const entityId = input.entityId ?? `entity_${randomUUID()}`
-    let entities: Entity[]
+    let entities: Entity[]=[]
     // 预览与挂载共用同一份落点/底面对齐换算（见 `resolveMountPlacement`）。
     const placement=await resolveMountPlacement(resource,{...(input.transform?{transform:input.transform}:{}),...(input.alignBottomToSurface!==undefined?{alignBottomToSurface:input.alignBottomToSurface}:{})})
     resource=placement.resource
@@ -898,8 +900,17 @@ export class SceneOperations {
         components.visual = { ...components.visual, robot: await robotVisual(sourcePath) }
       }
       // 原生USD绑定资源库已登记原件，材料覆写随实例保存，便携搬家不残留导入前路径。
-      if (resource.parsed.mimeType === "model/vnd.usd") components.isaac = { ...(provided.isaac as Record<string, unknown> | undefined), sourcePath: localPath(resource.ref.original.uri) }
-      entities = [{ entityId, name: resource.name, transform: transform ?? identityTransform(), resources: [resource.ref], components }]
+      if (resource.parsed.kind === "usd") {
+        components.isaac = { ...(provided.isaac as Record<string, unknown> | undefined), sourcePath: localPath(resource.ref.original.uri) }
+        components.usd = (provided.usd ?? {}) as UsdInstanceOverrides
+        const preview=await usdVisual(this.resources,resource,components.usd as UsdInstanceOverrides)
+        components.visual=preview.visual
+        components.usd={...(components.usd as UsdInstanceOverrides),sourceFacts:preview.sourceFacts}
+        const standardRefs:ResourceRef[]=[]
+        for(const dependency of (resource.parsed.metadata.usd as import('../../lyapunov-contracts/src/usd.ts').UsdAssetFacts|undefined)?.standardLibraries??[]){const library=await this.resources.get(dependency.resourceId,dependency.version);if(!(await this.resources.verifyReference(library.ref)).valid)throw Error('USD_STANDARD_LIBRARY_VERSION_UNAVAILABLE');standardRefs.push(library.ref)}
+        entities = [{ entityId, name: resource.name, transform: transform ?? identityTransform(), resources: [resource.ref,preview.ref,...standardRefs], components }]
+      }
+      if (resource.parsed.kind!=="usd") entities = [{ entityId, name: resource.name, transform: transform ?? identityTransform(), resources: [resource.ref], components }]
       if (resource.parsed.kind === "splat") {
         // 可信绑定以外仍保持纯视觉，不从公开 SSOG 猜碰撞。
         applySplatMountFacts(resource, components)
@@ -939,8 +950,7 @@ export class SceneOperations {
    const mimeType = String(resource.parsed.mimeType ?? resource.ref.original.mimeType ?? "")
    if (resource.parsed.kind === "splat") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_SPLAT_UNSUPPORTED", ...identity }
    if (resource.parsed.kind === "source") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_SOURCE_UNSUPPORTED", ...identity }
-   if (mimeType === "model/vnd.usd" || resource.parsed.kind === "robot" && mimeType === "model/vnd.usd") return { status: "UNAVAILABLE", reason: "ASSET_PREVIEW_NATIVE_USD_UNSUPPORTED", ...identity }
-   if (resource.parsed.kind !== "mesh" && resource.parsed.kind !== "robot") return { status: "UNAVAILABLE", reason: `ASSET_PREVIEW_KIND_UNSUPPORTED: ${resource.parsed.kind}`, ...identity }
+   if (resource.parsed.kind !== "mesh" && resource.parsed.kind !== "robot" && resource.parsed.kind !== "usd") return { status: "UNAVAILABLE", reason: `ASSET_PREVIEW_KIND_UNSUPPORTED: ${resource.parsed.kind}`, ...identity }
    const placement = await resolveMountPlacement(resource, { ...(input.transform ? { transform: input.transform } : {}), ...(input.alignBottomToSurface !== undefined ? { alignBottomToSurface: input.alignBottomToSurface } : {}) })
    const previewResource = placement.resource
    const transform = placement.transform ?? identityTransform()
@@ -950,6 +960,18 @@ export class SceneOperations {
     entities = glbEntities(previewResource.ref, previewResource.parsed, entityId, previewResource.name, transform)
     const defaults = previewResource.componentDefaults ? structuredClone(previewResource.componentDefaults) : {}
     if (Object.keys(defaults).length) entities[0]!.components = { ...entities[0]!.components, ...defaults }
+   } else if (previewResource.parsed.kind === "usd") {
+    const inspection=await inspectUsd(localPath(previewResource.ref.original.uri))
+    const preview=inspection.usd.preview,unavailable=new Set<string>()
+    preview.textures=(preview.textures??[]).flatMap(texture=>{
+      const file=previewResource.parsed.dependencies.find(row=>row.sha256===texture.id)
+      if(!file){unavailable.add(texture.id);preview.losses.push('USD_TRANSIENT_PACKAGE_TEXTURE_UNAVAILABLE: 包内纹理在确认放置后提取显示');return []}
+      const {assetPath,...rest}=texture
+      return [{...rest,uri:pathToFileURL(file.path).href}]
+    })
+    if(unavailable.size)for(const shape of preview.shapes)if(shape.material)for(const key of ['baseColorTexture','roughnessTexture','metallicTexture'] as const)if(unavailable.has(shape.material[key]?.textureId??''))delete shape.material[key]
+    if(JSON.stringify(preview).length>256*1024)return {status:"UNAVAILABLE",reason:"USD_TRANSIENT_PREVIEW_BUDGET: 可直接放置；登记后的派生预览不受此临时DTO限额",...identity}
+    entities=[{entityId,name:previewResource.name,transform,resources:[previewResource.ref],components:{visual:{kind:'usd',usdTransientPreview:preview,sourceTransformApplied:false}}}]
    } else {
     const sourcePath = localPath(previewResource.ref.original.uri)
     const components: Entity["components"] = { visual: { kind: "robot", robot: await robotVisual(sourcePath) } }

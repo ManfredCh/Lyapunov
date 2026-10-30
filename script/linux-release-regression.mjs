@@ -19,6 +19,9 @@ try {
   writeFileSync(join(root, 'distribution/linux/sandbox.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'sandbox.mjs'))))
   writeFileSync(join(root, 'packages/lyapunov-product-bundle/src/sdk-python.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, '../../packages/lyapunov-product-bundle/src/sdk-python.mjs'))))
   writeFileSync(join(root, 'distribution/linux/register-managed-sdk.mjs'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'register-managed-sdk.mjs'))))
+  for (const file of ['fetch-extscache-kit.mjs', 'extscache-kit-wheel.json']) {
+    writeFileSync(join(root, 'distribution/linux', file), readFileSync(join(linux, file)))
+  }
   writeFileSync(join(root, 'distribution/linux/physics-check.js'), 'console.log("ok")\n')
   writeFileSync(join(root, 'distribution/linux/install-provider'), await import('node:fs/promises').then(fs => fs.readFile(join(linux, 'install-provider'))))
   chmodSync(join(root, 'distribution/linux/install-provider'), 0o755)
@@ -107,6 +110,8 @@ if [ "${'${1:-}'}" = -c ]; then
   code=${'${2:-}'}
   case "$code" in
     *'os.path.realpath(sys.prefix)'*) printf '%s\\n' "$prefix"; exit 0 ;;
+    # 明确的离线替身：模拟此前已安装同版缓存，不能让回归夹具触发真实5.88GB下载。
+    *'isaacsim-extscache-kit'*) printf '%s\\n' '6.0.1.0'; exit 0 ;;
     *'EULA_ACCEPTED'*)
       mkdir -p "$prefix/lib/python3.12/site-packages/isaacsim/kit"
       printf 'yes\\n' > "$prefix/lib/python3.12/site-packages/isaacsim/kit/EULA_ACCEPTED"

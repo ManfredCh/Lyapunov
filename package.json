@@ -1,6 +1,6 @@
 {
   "name": "lyapunov",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.13",
@@ -28,7 +28,10 @@
     "start": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/launch.ts --mode formal",
     "preflight": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/test-ci.ts --list",
     "gate:drivers": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gate-drivers.ts",
-    "release-gate": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/release-gate.ts"
+    "release-gate": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/release-gate.ts",
+    "gate:usd-assets": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-assets.ts",
+    "gate:usd-isaac": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-isaac.ts",
+    "gate:usd-materials": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-materials.ts"
   },
   "dependencies": {
     "three": "0.180.0",

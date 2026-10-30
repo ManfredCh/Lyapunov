@@ -21,7 +21,7 @@ const row=(channel:string,files:RecordingChannelRow["files"],extra:Partial<Recor
 /** 真 React + jsdom：让播放/暂停真的按定时器推进，而不是只看 SSR 文本。 */
 function withDom(run:(host:HTMLElement,render:(node:unknown)=>Promise<void>)=>Promise<void>){
  return async()=>{
-  const {JSDOM}=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))("jsdom") as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:Window&typeof globalThis}}
+  const {JSDOM}=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))("jsdom") as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:Window&typeof globalThis}}
   const dom=new JSDOM('<div id="root"></div>',{url:"http://fixture.invalid",pretendToBeVisual:true})
   const saved=new Map<string,PropertyDescriptor|undefined>()
   for(const key of ["window","document","HTMLElement","HTMLCanvasElement","Node","navigator","requestAnimationFrame","cancelAnimationFrame","IS_REACT_ACT_ENVIRONMENT"]){
@@ -77,7 +77,7 @@ describe("P7C-review 传感器样本分组与按真实采样时间回放",()=>{
   expect(recordingChannelSamples(channel)).toHaveLength(8)
   expect(recordingChannelSamples(channel).every(sample=>sample.files.length===4)).toBe(true)
   const html=markup(<RecordingChannels channels={[channel]} mediaURL={mediaURL} tr={en}/>)
-  const {JSDOM}=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))("jsdom")
+  const {JSDOM}=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))("jsdom")
   const dom=new JSDOM(html),field=dom.window.document.querySelector('[data-testid="recording-channel-lidar-range"]'),slider=field?.querySelector('input[type="range"]')
   expect(Number(slider?.getAttribute("max"))).toBe(7) // 8 次真实量测，不是 32 个文件
   expect(html).not.toContain('max="31"')

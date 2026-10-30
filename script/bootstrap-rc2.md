@@ -26,7 +26,7 @@ node script/generate-rc2-sdk-patch.mjs --sdk /绝对路径/固定RC2工作区 --
 node --test --test-name-pattern=RC2 script/upstream-patches.test.mjs
 ~~~
 
-旧 postimage 与旧补丁组合测试默认自包含：legacy-sdk-fixture 从 bootstrap 已取得的自有 fork 中保留的 Git 对象，在系统临时目录 clone 到固定 7c3，重放仓库已跟踪的 53 项，再校验原完整签名。不安装依赖、不构建、不启动旧产品；进程结束清理。当前上游为 blob:none 时，隔离仓按固定原 tree/blob 从自有 fork 补齐，checkout 即使退出 0 但报 error 也拒绝，不能用当前 RC2 工作文件代替旧 blob。显式旧 fixture 环境变量仍可用于诊断，但公开 CI 不依赖它。
+旧 postimage 与旧补丁组合测试默认只读本机已有 Git 对象：`legacy-sdk-fixture` 在系统临时目录 clone 到固定 7c3，重放仓库已跟踪的 53 项，再校验原完整签名。默认路径不配置 promisor、不保留可 fetch 的 remote，并在 checkout 前设置 `GIT_NO_LAZY_FETCH=1`；缺旧 tree/blob 时具名失败 `LEGACY_SOURCE_FIXTURE_OBJECTS_MISSING`，不会隐式联网。公开 CI 的 seed 步骤保留完整对象，因此默认测试离线成立。需要临时准备旧源码时，显式运行 `node script/legacy-sdk-fixture.mjs --prepare <目标目录>`（只从锁文件 `forkSnapshot.repository` 的产品 fork `lyapunov-patched-0.1.6` 取固定 7c3，并验证完整签名），或用 `LYAPUNOV_LEGACY_SDK` 指向已验签 fixture；测试本身不静默下载。已存在的目标会先核对 origin、HEAD 与完整签名，只有确为同一个已验签 fixture 才复用，不会对任意目录先 checkout/patch。不安装依赖、不构建、不启动旧产品；进程结束清理。
 
 CI seed 直接读取自有 fork 的精确提交并检验官方 RC2 祖先，不靠可移动分支或上游继续保留版本。当前源码编译/outbound 行为使用当前真实源码与本 SDK 声明，原七条 page/follow/live/reconnect/raw/处置拒绝断言保留。正式快照必须从真实锁签名在干净 checkout 核完整 final 与幂等；合成生成器 fixture 不能替代它。
 

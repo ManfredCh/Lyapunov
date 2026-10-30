@@ -141,12 +141,14 @@ describe("scene_save 的增量导出（变更集）", () => {
 })
 
 describe("原生源与材料经原physics操作保存重开", () => {
+  // 这条用例真实启动多个解析器（flex／cable／独立 USD／MPM 声明）并完整保存重开；审计机器实测 5.75s，
+  // 默认 5s 预算会在正常负载下误杀。只放宽这一条到 15s，保留全部断言、真实解析与独立进程，不改全局 timeout。
   test("flex、cable、独立USD与MPM声明随便携工程搬家，原件字节不变且不保存瞬态帧", async () => {
     // 这里只验证真实文件/SceneStore/ResourceLibrary闭环；原生求解由各引擎的硬件测试独立验收。
     const sceneId = "native-roundtrip"
     await operations.create({ sceneId })
     const xml = '<mujoco model="native"><worldbody><body name="base"><geom type="sphere" size=".02"/></body></worldbody></mujoco>'
-    const usd = '#usda 1.0\n(defaultPrim = "Root")\ndef Xform "Root" { def Points "Fluid" { point3f[] points = [(0,0,1),(.1,0,1)] } }\n'
+    const usd = '#usda 1.0\n(\n defaultPrim="Root"\n metersPerUnit=1\n upAxis="Z"\n)\ndef Xform "Root"\n{\n def Points "Fluid"\n {\n  point3f[] points = [(0,0,1),(.1,0,1)]\n }\n}\n'
     const examples = [
       { entityId: "soft", filename: "flex.xml", bytes: xml, components: { mujoco: { flexMaterials: { soft: { youngPa: 20000, poisson: .3, rayleighDamping: .02 } } } } },
       { entityId: "cable", filename: "cable.xml", bytes: xml.replace('model="native"', 'model="cable"'), components: { mujoco: { cableMaterials: { compositewire: { bendPa: 1000, twistPa: 500 } } } } },
@@ -186,10 +188,13 @@ describe("原生源与材料经原physics操作保存重开", () => {
       const path = fileURLToPath(ref.original.uri)
       expect(path.startsWith(moved + "/")).toBe(true)
       expect(await stat(path)).toBeDefined()
+      if(ref.original.mimeType==='application/vnd.lyapunov.usd-preview+json'){
+        const preview=JSON.parse(await readFile(path,'utf8'));expect(preview.schema).toBe('lyapunov.usd-preview.v1');expect(preview.sourceResourceId).toBe(entity.resources.find(row=>row.original.mimeType==='model/vnd.usd')!.resourceId);continue
+      }
       const expected = examples.find(row => row.entityId === entity.entityId)!.bytes
       expect(await readFile(path, "utf8")).toBe(expected)
       const native = (entity.components.mujoco ?? entity.components.isaac) as {sourcePath?: string} | undefined
       if (native?.sourcePath) expect(resolve(dirname(join(moved, "scene.json")), native.sourcePath)).toBe(path)
     }
-  })
+  }, 15000)
 })

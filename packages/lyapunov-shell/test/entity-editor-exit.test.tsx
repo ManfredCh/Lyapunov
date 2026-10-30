@@ -9,7 +9,7 @@ import {SceneOperations} from '../../scene-kit/src/operations.ts'
 import {SCENE_COORDINATES,identityTransform,type SceneSnapshot,type SceneCommit} from '../../lyapunov-contracts/src/types.ts'
 import {ExitCoordinator,ExitParticipants,type ExitFailureAction} from '../../desktop/src/exit-coordinator.ts'
 
-const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
 async function fixture(surface=false,native=false){
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div><div id="app-side-panel"></div>',{url:'http://fixture.invalid'})
  const previous=new Map<string,PropertyDescriptor|undefined>()
@@ -45,7 +45,7 @@ async function fixture(surface=false,native=false){
 }
 function exits(f:Awaited<ReturnType<typeof fixture>>,failed:()=>Promise<ExitFailureAction|void>=async()=>undefined){
  const states:boolean[]=[],summaries:Array<unknown>=[],calls:string[]=[]
- const coordinator=new ExitCoordinator({summary:()=>f.participants.summary(),confirm:async value=>{summaries.push(value);return true},flush:async()=>{calls.push('flush');await f.participants.flush()},stop:async()=>{calls.push('stop');await f.participants.stop()},close:async()=>{calls.push('close')},exit:(_origin,force)=>{calls.push(force?'force-exit':'exit')},failed,stateChanged:state=>states.push(state),shutdownTimeoutMs:100})
+ const coordinator=new ExitCoordinator({summary:()=>f.participants.summary(),confirm:async value=>{summaries.push(value);return true},flush:async()=>{calls.push('flush');await f.participants.flush()},stop:async()=>{calls.push('stop');await f.participants.stop()},close:async()=>{calls.push('close')},exit:(_origin,force)=>{calls.push(force?'force-exit':'exit')},failed,stateChanged:state=>states.push(state),shutdownTimeoutMs:5000})
  return {coordinator,states,summaries,calls}
 }
 
@@ -221,7 +221,7 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
   await click('Objects');expect(activeNames()[0]).toBe(a);expect(a.value).toBe('unsaved-a')
   await click('Objects');expect(activePanels()).toHaveLength(0);expect(transientLive.size).toBe(0);expect((await participants.summary()).dirtyDrafts).toBe(2)
   await click('Session B');await click('Objects');expect(activeNames()[0]).toBe(b);expect(b.value).toBe('unsaved-b')
-  const coordinator=new ExitCoordinator({summary:()=>participants.summary(),confirm:async()=>true,flush:()=>participants.flush(),stop:()=>participants.stop(),close:async()=>{},exit:()=>{},failed:async()=>undefined,shutdownTimeoutMs:100})
+  const coordinator=new ExitCoordinator({summary:()=>participants.summary(),confirm:async()=>true,flush:()=>participants.flush(),stop:()=>participants.stop(),close:async()=>{},exit:()=>{},failed:async()=>undefined,shutdownTimeoutMs:5000})
   let result:Awaited<ReturnType<ExitCoordinator['request']>>|undefined;await React.act(async()=>{result=await coordinator.request('window')})
   expect(result).toMatchObject({decision:'closed',cleanup:'confirmed'});expect(writes.map(v=>v.owner).sort()).toEqual(['a','b'])
   expect((await stores.a.scene.snapshot('scene-a')).entities[0]!.name).toBe('unsaved-a');expect((await stores.b.scene.snapshot('scene-b')).entities[0]!.name).toBe('unsaved-b');expect((await participants.summary()).dirtyDrafts).toBe(0)

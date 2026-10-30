@@ -1,8 +1,8 @@
 /** 已授权公开小文件探针：使用实际SDK HTTP provider/代理库，零认证，零大文件。 */
 import { writeFile, mkdir } from "node:fs/promises"
 import { resolve } from "node:path"
-import { HttpFetchProvider } from "../.upstream/deepseek-harness-20260911-candidate/packages/web/web-fetch-http/src/provider.ts"
-import { installProxyFromEnvironment, proxyRouteFor } from "../.upstream/deepseek-harness-20260911-candidate/packages/util/http-proxy/src/index.ts"
+import { HttpFetchProvider } from "../.upstream/deepseek-harness-0.2.0-rc.2/packages/web/web-fetch-http/src/provider.ts"
+import { installProxyFromEnvironment, proxyRouteFor } from "../.upstream/deepseek-harness-0.2.0-rc.2/packages/util/http-proxy/src/index.ts"
 
 const out = resolve(process.argv[2] ?? ".runtime/web-fetch-probe.json")
 const provider = new HttpFetchProvider({ maxResponseBytes: 4096, maxBodyChars: 4096, timeoutMs: 5000, maxRedirects: 1, userAgent: "Lyapunov-public-small-file-probe" })

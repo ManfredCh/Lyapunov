@@ -23,13 +23,15 @@ import { publicCommandError, publicErrorCode, publicErrorCodeOfToken, publicErro
 describe("A07 Isaac 与几何运行环境故障",()=>{
   test("Isaac 专属故障使用既有 P500 固定说明，不提示调整模型请求或回显内部路径",()=>{
     for(const code of ['ISAAC_SDK_UNAVAILABLE','ISAAC_SDK_VERSION_INCOMPATIBLE','ISAAC_LICENSE_CONFIRMATION_REQUIRED',
-      'ISAAC_ENGINE_CONFIG_UNSUPPORTED','ISAAC_GPU_DEVICE_UNAVAILABLE','ISAAC_KIT_START_FAILED','ISAAC_EXTENSION_UNAVAILABLE','ISAAC_PHYSX_UNAVAILABLE']){
+      'ISAAC_ENGINE_CONFIG_UNSUPPORTED','ISAAC_SDF_COOKING_REQUIRES_CUDA','ISAAC_GPU_DEVICE_UNAVAILABLE','ISAAC_KIT_START_FAILED','ISAAC_EXTENSION_UNAVAILABLE','ISAAC_PHYSX_UNAVAILABLE']){
       const result=publicCommandError(`${code}: private_marker /home/alice/sdk/python: internal metadata`)
       expect(result.code,code).toBe('P500')
       expect(result.message).not.toContain('请求内容')
       expect(result.message).not.toContain('private_marker')
       expect(result.message).not.toContain('/home/alice')
     }
+    const sdf=publicCommandError('ISAAC_SDF_COOKING_REQUIRES_CUDA: /private/source/mesh')
+    expect(sdf.message).toContain('SDF');expect(sdf.message).toContain('GPU 物理');expect(sdf.message).not.toContain('/private')
   })
   test("几何依赖故障与派生失败保留固定提示；其它 UNAVAILABLE 家族的原映射不变",()=>{
     expect(publicCommandError('ASSET_BAKE_DEPENDENCY_UNAVAILABLE: private_marker').message).toContain('几何依赖')

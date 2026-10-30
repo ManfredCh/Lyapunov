@@ -191,11 +191,12 @@ def gait_probe_targets(legs,time_s,forward,turn,frequency,stride,lift):
 def empty_frame(world):
     return {'worldId':world.id,'generation':world.generation,'sceneRevision':world.revision,'stepIndex':world.index,'simTime':world.sim_time,'frameId':f'{world.id}:{world.generation}:{world.index}','assistAdvanceCount':world.assist_advances,'entities':[]}
 
-def native_capabilities(device):
+def native_capabilities(device,rendering_mode=None):
+    human_ready=device=='cpu' and not rendering_mode
     cuda=device.startswith('cuda:')
     reason='UNSUPPORTED_CAPABILITY: 原生可变形体/PBD 液体需要 physicsDevice=cuda:0 / Native deformables and PBD fluids require a CUDA GPU'
-    return {'engine':'isaac','supported':{'staticTriangleMesh':True,'nativeUsd':True,'observe.dynamicGeometry':True,'deformable':cuda,'fluid':cuda},
-            'unsupported':{'dynamicTriangleMesh':'UNSUPPORTED_CAPABILITY','cable':'UNSUPPORTED_CAPABILITY: 本轮未接入原生实体缆线 / Native cable is not integrated',
+    return {'engine':'isaac','supported':{'staticTriangleMesh':True,'nativeUsd':True,'humanKinematic':human_ready,'observe.dynamicGeometry':True,'deformable':cuda,'fluid':cuda},
+            'unsupported':{'humanRagdoll':'HUMAN_ISAAC_RAGDOLL_UNSUPPORTED','humanPlanarNavigation':'HUMAN_ISAAC_NAVIGATION_UNSUPPORTED',**({}if human_ready else{'humanKinematic':'HUMAN_ISAAC_DEVICE_UNSUPPORTED: CPU/rendering:none only'}),'dynamicTriangleMesh':'UNSUPPORTED_CAPABILITY','cable':'UNSUPPORTED_CAPABILITY: 本轮未接入原生实体缆线 / Native cable is not integrated',
                            **({}if cuda else{'deformable':reason,'fluid':reason})},
             'notes':['明确static/environment+triangle_mesh绑定使用原生none三角面；真实接触以本世界Frame为准，默认mesh仍凸包',
                      '可变形体使用原生 OmniPhysicsVolumeDeformableSimAPI 或 OmniPhysicsSurfaceDeformableSimAPI；液体使用 PhysxParticleSetAPI + fluid=true + UsdGeom.Points / Native USD schemas are required',
@@ -314,7 +315,7 @@ class World:
     def handle(self):
         result={'worldId':self.id,'sceneId':self.scene['sceneId'],'engineId':'isaac','engineVersion':state['sdkVersion'],'worldGeneration':self.generation,'appliedSceneRevision':self.revision,'status':self.run_status(),'clock':self.clock,'timestepS':self.dt,'groundGeomNames':self.ground_geom_names(),'supportsPause':True}
         if self.status in ('ready','running'):result['worldPhysics']=self.world_physics()
-        result['capabilities']=native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'))
+        result['capabilities']=native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'),rendering)
         # 本次 populate 真实发生的 GLB 导入回执（无丢弃项时不出现该键，不产生噪音）。
         warnings_out=list(self.import_warnings)
         # ISAAC-10：纯视觉实体（无原生源、只有 GLB 视觉；USD 层 collider 为 purpose=guide、非物理）此前在
@@ -400,6 +401,8 @@ class World:
         try:return bool(omni.physx.get_physx_simulation_interface().is_sleeping(self.stage_id,PhysicsSchemaTools.sdfPathToInt(prim.GetPath())))
         except Exception:self.sleep_query=False;return None
     def sync(self,scene,force=False):
+        import human_adapter
+        human_adapter.preflight(scene,SceneError)
         if self.scene and scene['sceneId']!=self.scene['sceneId']:raise SceneError('SCENE_MISMATCH','world与scene绑定不可改变')
         # 回执声明的 clearsOn 含 sim_sync：临时相机 override 属于上一个代次的渲染状态，任何一次被接受的
         # sync 都按源快照恢复并丢弃（同 revision 的空 sync 也清，绝不继续冒充）。
@@ -1038,6 +1041,10 @@ class World:
                         gravity=bool(array(e['pose'].get_enabled_gravities()).reshape(-1).any())
                 item['physics']={'source':'isaac-compiled','dynamic':dynamic,'massKg':mass_kg,'gravityEnabled':gravity,
                                  'collisionEnabled':any(enabled),'colliderCount':len(collider_prims),'bodyName':e['path']}
+            if e.get('human'):
+                import human_adapter
+                item['humanPose']=human_adapter.observe(self,e)
+                item['physics']={'source':'isaac-compiled','dynamic':False,'massKg':None,'gravityEnabled':False,'collisionEnabled':True,'colliderCount':len(e['humanSegments']),'bodyName':e['humanRootPath']}
             native_objects=[]
             if e.get('nativeGeometry'):
                 item['dynamicGeometry'],native_objects=observe_native_geometry(self.stage,e['path'],e['nativeGeometry'])
@@ -1057,6 +1064,9 @@ class World:
             e['lastObserveSimTime']=self.sim_time
             if selection.get('sensors',True):
                 item['sensors']={'bodyLinearVelocityMps':velocity[:3],'bodyAngularVelocityRadps':velocity[3:],'asleep':asleep}
+                if e.get('metadata',{}).get('nativeUsd'):
+                    from usd_observation import usd_body_world_poses
+                    item['sensors']['usdBodyWorldPoses']=usd_body_world_poses(self,e)
                 if e.get('nativeGeometry'):
                     item['sensors']['nativePhysics']={'engine':'isaac','source':'physx-usd-readback',
                         'requestedDevice':os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'),
@@ -1163,6 +1173,9 @@ class World:
         m=copy.deepcopy(motion);e=self.entry(m['entityId']);kind=m['kind'];cfg=e['controller']
         # thrust 与无关节实体的动作在取 articulation **之前**分派：无关节实体没有 self.robot
         # 可取，误入那条路径只会给出 ENTITY_NOT_ARTICULATED 这种与真实原因无关的错误。
+        if kind=='human':
+            import human_adapter
+            return human_adapter.prepare(self,e,m,SceneError)
         if kind=='thrust':return self.prepare_thrust(m,e)
         if kind=='vehicle'and e['articulation'] is None:
             raise SceneError('UNSUPPORTED_CAPABILITY','无关节实体不可作为 vehicle 动作目标：没有 wheel/steering 执行器通道（entityId='+m['entityId']+'）')
@@ -1481,6 +1494,9 @@ class World:
         return receipt
     def apply_motion(self,m,elapsed):
         e=self.entry(m['entityId']);robot=e['articulation'];cfg=e['controller']
+        if m['kind']=='human':
+            import human_adapter
+            return human_adapter.shared.advance(self,e,m,elapsed)
         if m['kind']=='thrust':return self.apply_thrust(m)
         with use_backend('tensor',raise_on_fallback=True):
             if m['kind']=='control':
@@ -1512,6 +1528,11 @@ class World:
                         r=max(0,min(1,(elapsed-left['timeS'])/(right['timeS']-left['timeS'])));target=[a+(b-a)*r for a,b in zip(left['positions'],right['positions'])];break
                 lift=cfg.get('lift',{});compensated=[v+lift.get('gravityCompensationM',0) if name==lift.get('joint') else v for name,v in zip(m['jointNames'],target)]
                 robot.set_dof_position_targets(compensated,dof_indices=[e['indices'][n]for n in m['jointNames']])
+    def release_human_owner(self,aid,m):
+        """仅撤销当前aid的人物目标；不改别的机器人/新人物动作，也不推进physics。"""
+        if m.get('_humanOwnerReleased'):return
+        m['_humanOwnerReleased']=True;m['_neutralized']=True;eid=m['entityId']
+        if self.control_owners.get(eid)==aid:self.neutral(eid);self.control_owners.pop(eid,None)
     def neutral(self,eid):
         """把该实体控制通道写回中性；唯一出口，stop/finish/close/sync 都走这里，禁止旁路。
 
@@ -1519,6 +1540,9 @@ class World:
         动作完成后外力会留在 PhysX 上（力是写接口、没有“窗口结束自动清零”的语义保证）。
         """
         e=self.entry(eid);robot=e['articulation']
+        if e.get('human'):
+            import human_adapter
+            human_adapter.stop(e)
         if robot is None:
             if self.has_thrust_channel(e):self.write_wrench(e,[0.,0.,0.],[0.,0.,0.],zero=True)
             return
@@ -1529,9 +1553,12 @@ class World:
         return True
     def _motion_effect(self,aid,m,status):
         """单个成员在**当前物理步**的逐成员事实；部分停止在停止当时调用它冻结被撤销成员，不沿用后来状态。"""
+        if m['kind']=='human':self.release_human_owner(aid,m)
         receipt=self.receipts[aid]
         e=self.entry(m['entityId']);frame=self.observe({'entityIds':[m['entityId']]});actual=frame['entities'][0];effect={'entityId':m['entityId'],'kind':m['kind'],'displacementM':(np.asarray(actual['transform']['position'])-np.asarray(m['_initialPosition'])).tolist()}
-        if m['kind']=='thrust':
+        if m['kind']=='human':
+            effect.update({'mode':'kinematic','nativePose':actual.get('humanPose'),'targetReached':None,'controller':'physx-kinematic-target'})
+        elif m['kind']=='thrust':
             # 推力回执必须让消费者能分清“请求/计划控制/映射估算/真实可观测”，并在完成时也撤销推力。
             effect.update(self.thrust_effect(m,e))
         elif m['kind']=='control':
@@ -1597,16 +1624,17 @@ class World:
             if entity_filter:
                 hits=[m for m in motions if m['entityId']in selected]
                 if not hits:continue
-                affected.update(m['entityId']for m in hits)
+                affected.update(m['entityId']for m in hits if m['kind']!='human'or self.control_owners.get(m['entityId'])==aid)
                 misses=[m for m in motions if not any(m is h for h in hits)]
                 if misses:
                     # 部分停止：父 batch 留给未命中成员继续，命中成员的控制/效果在停止当时冻结。
                     self._cancel_members(aid,action,hits);continue
                 self.finish(aid,'cancelled','STOP_CONFIRMED');result.append(self.receipts[aid])
             else:
-                affected.update(m['entityId']for m in motions)
+                affected.update(m['entityId']for m in motions if m['kind']!='human'or self.control_owners.get(m['entityId'])==aid)
                 self.finish(aid,'cancelled','STOP_CONFIRMED');result.append(self.receipts[aid])
-        for eid in affected:self.neutral(eid);self.control_owners.pop(eid,None)
+        for eid in affected:
+            if not self.entry(eid).get('human'):self.neutral(eid);self.control_owners.pop(eid,None)
         if self.status in ('ready','running'):self.status='running' if self.actions else 'ready'
         return {'stopped':True,'stepIndex':self.index,'receipts':result,'affectedEntityIds':sorted(affected)}
 
@@ -1691,6 +1719,16 @@ class World:
             del self.frozen[eid];restored.append(eid)
         return {'worldId':self.id,'generation':self.generation,'freezeId':freeze_id,'status':'restored' if restored else ('not-frozen' if not_frozen else 'mismatched'),'entityIds':list(ids),'restoredEntityIds':restored,'notFrozenEntityIds':not_frozen,'freezeMismatchEntityIds':mismatched,'stillActiveActions':sorted(self.actions.keys()),'controlConfigPreserved':True}
 
+    human_error=SceneError
+    def human_root_position(self,entry):
+        import human_adapter
+        return human_adapter.root_position(self,entry)
+    def human_obstacle_distance(self,origin,direction,limit):
+        import human_adapter
+        return human_adapter.obstacle_distance(self,origin,direction,limit)
+    def commit_human_pose(self,entry,root,q,sampled):
+        import human_adapter
+        return human_adapter.commit(self,entry,root,q,sampled)
     def tick(self):
         if self.paused:return
         if self.status not in ('ready','running'):return
@@ -1716,6 +1754,9 @@ class World:
         # 唯一推进点；Timeline自动更新被关闭，Viewer/渲染不会推进physics。
         SM.step(steps=1,update_fabric=False);self.assert_native_physics();self.index+=1;self.sim_time+=self.dt
         for aid,action in list(self.actions.items()):
+            if action['startTime']is not None:
+                for motion in action['motions']:
+                    if motion['kind']=='human'and self.sim_time-action['startTime']+1e-12>=motion['_duration']:self.release_human_owner(aid,motion)
             complete=self.index>=action['endStep'] if 'endStep'in action else action['startTime']is not None and self.sim_time-action['startTime']+1e-12>=max(m['_end']for m in action['motions'])
             if complete:self.finish(aid,'completed')
         self.status='running'if self.actions else'ready'
@@ -2557,7 +2598,7 @@ def reader():
         except Exception as error:emit({'event':'protocol-error','message':str(error)})
     requests.put({'id':'eof','method':'shutdown','args':{}})
 threading.Thread(target=reader,daemon=True).start();world=None;running=True
-emit({'event':'ready','engine':'isaac','version':state['sdkVersion'],'pid':os.getpid(),'capabilities':native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'))})
+emit({'event':'ready','engine':'isaac','version':state['sdkVersion'],'pid':os.getpid(),'capabilities':native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'),rendering)})
 while running and omni.kit.app.get_app().is_running():
     while not requests.empty():
         request=requests.get();args=request.get('args',{});method=request['method']

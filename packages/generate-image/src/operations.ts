@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { createHash } from "node:crypto"
 import { formalGenerationRoute, type GenerationRoutingOptions } from "@lyapunov/api-client/generation"
+import { canonical } from "@lyapunov/api-client/generation-approval"
 import type { GenerationAuthorizer } from "@lyapunov/api-client/generation-approval"
 import { createJobRecordPersister, writeFileAtomic0600 } from "../../generate-hunyuan/src/job-record.ts"
 import {
@@ -139,19 +140,6 @@ function extensionFor(mediaType: string) {
   if (mediaType === "image/webp") return "webp"
   if (mediaType === "image/gif") return "gif"
   return "png"
-}
-
-/** 与共享 `generation-approval` 同一套指纹口径（canonical JSON + sha256），便于两层对得上。 */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === "object")
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, item]) => item !== undefined && typeof item !== "function")
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, item]) => [key, canonical(item)]),
-    )
-  return value
 }
 
 /**

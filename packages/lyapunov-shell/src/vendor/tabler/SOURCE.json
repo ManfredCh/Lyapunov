@@ -23,7 +23,8 @@
   "terminal": "terminal-2",
   "deliverable": "stack-2",
   "engine": "cpu",
-  "annotation": "lyapunov-note"
+  "annotation": "lyapunov-note",
+  "crowd": "walk"
  },
  "iconSources": {
   "robot": {
@@ -115,6 +116,25 @@
    "pathsSha256Method": "各条 path 的 d 值以换行连接后的 sha256",
    "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"physics\"（单条 path 的 d 逐字节一致）",
    "note": "RC Physics（物理世界独立面板）入口用；几何逐字节取自该 revision 的 Tabler outline/wave-sine.svg（MIT）。本 vendor 集只把官方 stroke-width=2 统一为 1.7（见 icons.tsx 的 common），path 的 d 与官方原件一致。"
+  },
+  "crowd": {
+   "name": "walk",
+   "url": "https://raw.githubusercontent.com/tabler/tabler-icons/55f87a73f45cf1d9eaf16d7da705065483a9e4f9/icons/outline/walk.svg",
+   "fetchedAt": "2026-10-30T08:20:00Z",
+   "httpStatus": 200,
+   "bytes": 523,
+   "sha256": "f2c5bd771519e3be6096467b682460b41aff8090d1105ead9be9cc367316b59b",
+   "svgVersion": "1.14",
+   "svgUnicode": "ec87",
+   "paths": [
+    "M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+    "M7 21l3 -4",
+    "M16 21l-2 -4l-3 -3l1 -6",
+    "M6 12l2 -3l4 -1l3 3l3 1"
+   ],
+   "pathsSha256": "be7fb3d235cabfe629f2a1b9a86d0c4462fce685778e47b68c7c2d12a09c5c86",
+   "pathsSha256Method": "四条 path 的 d 值以 \\n 连接后的 sha256",
+   "inlinedIn": "packages/lyapunov-shell/src/vendor/tabler/icons.tsx 的 case \"crowd\"（逐字节一致，仅省略行尾空格）"
   }
  },
  "revisionChecks": {

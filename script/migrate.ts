@@ -1,6 +1,7 @@
 import {parseArgs} from "node:util"
 import {resolve,join,dirname} from "node:path"
 import {readFile,writeFile} from "node:fs/promises"
+import {existsSync,statSync} from "node:fs"
 import {spawn} from "node:child_process"
 if(process.versions.bun){
   const child=spawn("node",[process.argv[1]!,...process.argv.slice(2)],{stdio:"inherit",env:process.env})
@@ -13,7 +14,16 @@ const root=resolve(import.meta.dirname,"..")
 const {values}=parseArgs({args:process.argv.slice(2),options:{source:{type:"string"},"source-json":{type:"string"},home:{type:"string"},"scene-root":{type:"string"},"account-key":{type:"string"},label:{type:"string",default:"lyapunov-old"},report:{type:"string"},resources:{type:"string",multiple:true},"resource-root":{type:"string"},mode:{type:"string"},preferences:{type:"string"},"profile-dir":{type:"string"},"include-preferences":{type:"boolean",default:false}}})
 if(!values.home||!values["scene-root"]||!values["account-key"])throw new Error("必须显式指定 --home、--scene-root 和 --account-key，迁移不会写旧源")
 if(values.source&&values["source-json"])throw new Error("--source与--source-json不能同时指定")
-const source=values["source-json"]?{sourceJsonDirectory:resolve(values["source-json"])}:{sourceDatabase:values.source??join(root,"../.lya/developer-runtime/data/opencode/opencode-local.db")}
+/** 旧 0.1.0 数据根只能由用户显式给出（--source / --source-json / LYAPUNOV_LEGACY_ROOT）；不猜开发机路径，也不自动搜索旧数据。 */
+const legacyRoot=process.env.LYAPUNOV_LEGACY_ROOT
+if(!values.source&&!values["source-json"]&&!legacyRoot)throw new Error("LEGACY_SOURCE_REQUIRED: 需要显式指定 --source 或 --source-json（也可用 LYAPUNOV_LEGACY_ROOT 显式给出旧 0.1.0 数据根）；迁移不会自动搜索或伪造旧数据")
+const defaultSource=legacyRoot?join(resolve(legacyRoot),".lya/developer-runtime/data/opencode/opencode-local.db"):undefined
+const sourcePath=resolve(values["source-json"]??values.source??defaultSource!)
+const sourceDescription=values["source-json"]?"--source-json 指向的旧 JSON 存储":values.source?"--source 指定的旧 SQLite 数据":"LYAPUNOV_LEGACY_ROOT 推导出的旧 SQLite 数据"
+if(!existsSync(sourcePath))throw new Error(`LEGACY_SOURCE_MISSING: ${sourcePath}（${sourceDescription}不存在；迁移不会伪造旧数据，也不会在检查前写新目录）`)
+if(values["source-json"]&&!statSync(sourcePath).isDirectory())throw new Error(`LEGACY_SOURCE_INVALID: ${sourcePath}（--source-json 需要旧 JSON 存储目录）`)
+if(!values["source-json"]&&!statSync(sourcePath).isFile())throw new Error(`LEGACY_SOURCE_INVALID: ${sourcePath}（--source 需要旧 SQLite 数据库文件）`)
+const source=values["source-json"]?{sourceJsonDirectory:sourcePath}:{sourceDatabase:sourcePath}
 let preferences:import("../packages/lyaup-migrations/src/index.ts").ScopedPreferenceSources|undefined
 if(values.mode&&!['formal','developer'].includes(values.mode))throw new Error('--mode 必须为formal或developer')
 if(values.preferences||values['include-preferences']){

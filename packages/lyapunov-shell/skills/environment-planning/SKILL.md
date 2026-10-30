@@ -5,6 +5,15 @@ description: "Plan environment tasks from photos, CAD, text, existing scenes, or
 
 # Environment task planning
 
+## SimReady 与 USD 来源优先
+
+未指定来源时，先检查 `asset_list` 的本地资源，再用 `simready_search` 检查已登记/已选择厂商库（含旧 Warehouse 固定 CSV 源）；选定候选后 `simready_detail` 核对固定 revision、许可、root USD 和 BOM，再用 `simready_import` 取得完整原生包。确实没有合适候选后才使用其他结构化库或 `web_search` / `web_fetch` 补缺。`BLOCKED` / `PARTIAL` 的来源失败不等于 `NO_MATCH`。用户明确指定来源/生成方式时仍遵从其要求。
+
+旧 Warehouse 使用独立 `warehouse-csv-v1`：目录缓存命中不代表当次镜像成功，`refresh:true` 的失败单独报告；它没有新版 BOM/验证记录。旧 CSV 的 mass 未标明单位时不猜 kg。缩略图必须由受控镜像获取成功后展示，不将原文官方 URL 直接用于浏览器图片。
+
+USD、USDA、USDC、USDZ 是主资产，不能为了入库强制转 GLB。Viewer 保留源身份，支持默认时刻几何、UsdPreviewSurface 基础色/粗糙度/金属度与 UsdUVTexture+st 纹理；MDL、任意shader、细分与蒙皮/动画未渲染。源网络、关节/驱动和碰撞保留在 USD，原生物理按具体 Provider 复验。实例变体用 `scene_usd_instance`，变换用 `scene_edit`，保存重开沿现有 Scene/Resource 操作。计划-only 阶段只读 search/detail，不导入或启动物理。
+
+
 Choose planning detail from the user's goal, unknowns, and task complexity. A routing match alone does not require a complete plan. **In native plan mode, use the existing planning entry point and approval rules; do not call `todo_write`.** For multi-step implementation, use native Todo to track progress. Simple opening, importing, or local adjustments can be executed and checked directly without a separate planning repository.
 
 The router provides **conservative suggestions** based on message text, attachment facts, native todo, and workbench selection. It does not replace intent judgment or authorization. Follow the user's actual intent when it misclassifies a request, and explain scope where needed. Correct these common cases:

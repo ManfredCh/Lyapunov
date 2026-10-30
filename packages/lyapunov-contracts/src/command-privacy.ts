@@ -217,10 +217,13 @@ const PUBLIC_CODE_BY_CODE: ReadonlyMap<string, string> = new Map<string, string>
   ["INVALID_ACCOUNT_IDENTITY", "P500"],
   // Isaac 启动环境/配置故障不由调整模型请求修复。只改这些完整码，
   // 其余 UNAVAILABLE 家族保留原合同；人类面固定说明，不回显 SDK 路径。
+  ["USD_RUNTIME_UNAVAILABLE", "P500"],
+  ["USD_RUNTIME_DEPENDENCY_MISSING", "P500"],
   ["ISAAC_SDK_UNAVAILABLE", "P500"],
   ["ISAAC_SDK_VERSION_INCOMPATIBLE", "P500"],
   ["ISAAC_LICENSE_CONFIRMATION_REQUIRED", "P500"],
   ["ISAAC_ENGINE_CONFIG_UNSUPPORTED", "P500"],
+  ["ISAAC_SDF_COOKING_REQUIRES_CUDA", "P500"],
   ["ISAAC_GPU_DEVICE_UNAVAILABLE", "P500"],
   ["ISAAC_KIT_START_FAILED", "P500"],
   ["ISAAC_EXTENSION_UNAVAILABLE", "P500"],
@@ -307,10 +310,13 @@ export const ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE = "当前选择的 Isaac SDK �
 
 function publicErrorMessage(internal: string, raw: string): string {
   const isaacMessage: Readonly<Record<string, string>> = {
+    USD_RUNTIME_UNAVAILABLE: "USD解析器未就绪；请在安装目录运行 distribution/linux/install-usd-parser，或检查 LYAPUNOV_USD_PYTHON 指向的环境，然后重新启动 Lyapunov。",
+    USD_RUNTIME_DEPENDENCY_MISSING: "指定的USD解析器环境缺少必要模块；请运行 distribution/linux/install-usd-parser 准备解析器，或修复指定环境后重启 Lyapunov。",
     ISAAC_SDK_UNAVAILABLE: ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE,
     ISAAC_SDK_VERSION_INCOMPATIBLE: "当前 Isaac SDK 版本不兼容，请在物理设置中选择 Isaac Sim 6.0.1。",
     ISAAC_LICENSE_CONFIRMATION_REQUIRED: "当前 Isaac SDK 需要你确认 NVIDIA Omniverse 许可，请在物理设置中查看许可状态。",
     ISAAC_ENGINE_CONFIG_UNSUPPORTED: "当前 Isaac 设备或渲染配置不受支持，请检查物理引擎设置。",
+    ISAAC_SDF_COOKING_REQUIRES_CUDA: "此原生 USD 的 SDF 碰撞需要 CUDA 烘焙，CPU／无渲染模式无法加载；请在物理引擎设置中显式选择 GPU 物理后重试。",
     ISAAC_GPU_DEVICE_UNAVAILABLE: "当前会话无法访问 Isaac 所需的 GPU，请检查设备与驱动访问。",
     ISAAC_KIT_START_FAILED: "Isaac Kit 初始化失败，请查看物理引擎诊断中的启动阶段与原因。",
     ISAAC_EXTENSION_UNAVAILABLE: "Isaac 所需扩展未能加载，请检查所选 SDK 安装。",

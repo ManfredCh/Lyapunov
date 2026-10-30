@@ -71,6 +71,7 @@ export interface MissingAssetRescan {
   records:Array<MissingAssetRecord & {sourcePath:{state:"missing"|"present"|"not-file";size?:number;mtimeMs?:number}}>
 }
 export interface AssetRecord {
+  category?:"background"|"scene"|"robot"|"object"
   ref:{resourceId:string;version:number;original:{uri:string;mimeType:string}}
   name:string
   tags:string[]

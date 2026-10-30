@@ -214,7 +214,7 @@ beforeEach(async () => {
   await writeFile(join(world, "source.blend"), await blendFixtureBytes())
   await writeFile(join(world, "visuals", "wall_west.glb"), glbBytes("fixture-wall"))
   await writeFile(join(world, "visuals", "lion_west.glb"), glbBytes("fixture-lion"))
-  await writeFile(join(world, "isaac", "architecture.usda"), "#usda 1.0\n".repeat(8))
+  await writeFile(join(world, "isaac", "architecture.usda"), '#usda 1.0\n(\n defaultPrim="Architecture"\n metersPerUnit=1\n upAxis="Z"\n)\ndef Xform "Architecture" {}\n')
   await writeFile(join(world, "isaac", "import.json"), "{}\n")
   const composed = await composeSession(dataRoot, true)
   ctx = composed.ctx

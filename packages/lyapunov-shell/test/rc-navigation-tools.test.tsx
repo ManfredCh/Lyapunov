@@ -20,7 +20,7 @@ const lower = RAIL_ENTRIES.filter(entry => entry.group === "work").map(entry => 
 
 describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
   test("上组依次 Scene/Objects/Env/Robots/Camera/Capture/Recording/Notes；下组 Physics/Campaigns/引擎/Files/Terminal/Outputs", () => {
-    expect(upper).toEqual(["scene", "object", "environment", "robot", "camera", "capture", "recording", "annotation"])
+    expect(upper).toEqual(["scene", "object", "environment", "robot", "crowd", "camera", "capture", "recording", "annotation"])
     expect(lower).toEqual(["physics", "campaign", "engine", "file", "terminal", "deliverable"])
     // 泛用 Library 退出一级轨（R-008）；Physics 在下组但行为是工具面板，不是抽屉/偏好。
     expect(RAIL_ENTRIES.some(entry => (entry.id as string) === "asset")).toBe(false)
@@ -33,11 +33,11 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
     }
   })
 
-  test("P17 视觉减法：工具轨 14 入口原顺序不变，宽屏也图标化，名称全部走 aria-label/title", () => {
-    // 14 项入口是产品契约，不减项、不换序；可见文字不再常驻（CSS 由 .lya-rail-item .lya-rail-label 隐藏）。
-    expect(RAIL_ENTRIES.length).toBe(14)
+  test("P17 视觉减法：工具轨 15 入口原顺序不变，宽屏也图标化，名称全部走 aria-label/title", () => {
+    // 15 项入口是产品契约（人群双通道控制新增「人群」，紧随 Robots），不减项、不换序；可见文字不再常驻（CSS 由 .lya-rail-item .lya-rail-label 隐藏）。
+    expect(RAIL_ENTRIES.length).toBe(15)
     expect(RAIL_ENTRIES.map(entry => entry.id)).toEqual([
-      "scene", "object", "environment", "robot", "camera", "capture", "recording", "annotation",
+      "scene", "object", "environment", "robot", "crowd", "camera", "capture", "recording", "annotation",
       "physics", "campaign", "engine", "file", "terminal", "deliverable",
     ])
     for (const entry of RAIL_ENTRIES) expect(entry.en.trim().length).toBeGreaterThan(0)
@@ -76,7 +76,7 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
   })
 
   test("真渲染 ToolRail：点击 Physics 切到独立面板，引擎按钮只切偏好并提供当前名", async () => {
-    const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+    const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
     const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
     const saved = new Map<string, PropertyDescriptor | undefined>()
     for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -92,11 +92,11 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
       expect(labels).toContain("Objects")
       expect(labels).toContain("Physics")
       expect(labels).toContain("Environment")
-      // P17：图标化后仍是 14 个完整入口，名称全部走 aria-label/title（不靠图标下常驻文字）。
+      // P17：图标化后仍是 15 个完整入口，名称全部走 aria-label/title（不靠图标下常驻文字）。
       const nav = document.querySelector<HTMLElement>(".lya-rail")!
       expect(nav.getAttribute("data-compact")).toBe("icon")
       const items = [...document.querySelectorAll<HTMLButtonElement>(".lya-rail-item")]
-      expect(items.length).toBe(14)
+      expect(items.length).toBe(15)
       for (const item of items) {
         expect((item.getAttribute("aria-label") ?? "").trim().length).toBeGreaterThan(0)
         expect((item.getAttribute("title") ?? "").trim().length).toBeGreaterThan(0)
@@ -121,7 +121,7 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
 
 describe("R-009 引擎偏好往返：下一次动作按最新 preference，不按运行中 engine", () => {
   test("运行中引擎不变时，连续点击按保存偏好 MuJoCo→Isaac→MuJoCo→Isaac 请求", async () => {
-    const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+    const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
     const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
     const saved = new Map<string, PropertyDescriptor | undefined>()
     for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {

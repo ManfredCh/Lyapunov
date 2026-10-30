@@ -35,7 +35,7 @@ export function AssetPlacementBar({asset,point,status='idle',reason,tr,alignment
    <label title={tr('模型原点放在点击位置；底面对齐需要可用的模型几何范围。','Model origin goes at the clicked point; bottom alignment requires available model geometry bounds.')}>{tr('放置基准','Placement basis')} <select aria-label={tr('放置基准','Placement basis')} value={asset.alignBottomToSurface?'bottom':'origin'} onChange={event=>alignment(event.target.value==='bottom')}><option value="origin">{tr('模型原点','Model origin')}</option><option value="bottom">{tr('底面对齐','Align bottom')}</option></select></label>
    <span className="lya-placement-point" data-testid="asset-placement-point">{point?point.map(value=>value.toFixed(2)).join(', '):tr('尚未选择位置','No position yet')}</span>
    {reason&&<p className="lya-help lya-error" role="alert">{reason}</p>}
-   {asset.nativeUsd&&<p className="lya-help">{tr('原生 USD 默认按源原点放置；启动对应引擎后读取可变形体或粒子状态。','Native USD defaults to its source origin; start the matching engine to read deformable or particle state.')}</p>}
+   {asset.nativeUsd&&<p className="lya-help">{tr('原生 USD 默认按源原点放置，原件保留关节、材质与物理属性。Viewer 支持 UsdPreviewSurface 基础材质与 st 纹理；MDL、任意 shader、细分和蒙皮/动画需原生引擎检查。','Native USD defaults to its source origin. Originals preserve joints, materials and physics. Viewer supports UsdPreviewSurface and st textures; inspect MDL, arbitrary shaders, subdivision, skinning and animation in the native engine.')}</p>}
   </details>
  </div>
 }
@@ -241,6 +241,8 @@ export type AssetDomain = "robot" | "object" | "environment" | "scene"
  */
 export function inAssetDomain(domain: AssetDomain, asset: AssetRecord): boolean {
   const kind = asset.parsed?.kind
+  if(asset.ref.original.mimeType==='application/vnd.lyapunov.usd-preview+json')return false
+  if(kind==='usd'){const purpose=asset.category??'object';return purpose==='robot'?domain==='robot':purpose==='scene'?domain==='scene'||domain==='environment':domain==='object'}
   const usage=(asset.physicalizationRequest&&asset.physicalizationRequest.usage)||asset.physicalization?.usage
   if(kind!=='robot'&&usage){
     if(domain==='robot')return false

@@ -1,14 +1,13 @@
 /**
- * 文件与会话状态的**唯一**所有者 + 两个可组合呈现。
+ * 文件与会话状态的**唯一**所有者 + 文件工作面呈现。
  *
- * 为什么这样切：工作台要在中央视图里显示文件工作面、在底部抽屉里显示终端，而"文件草稿/保存与
- * 冲突/目录/搜索/终端选择"这摊业务只能有一份。于是状态集中在 `useWorkspaceSessionState`，
- * 由 `WorkspaceSessionProvider` 挂在工作台的会话座位上渲染一次；`FileSurface`（中央视图）与
- * `TerminalPanel`（底部抽屉）从同一个 context 读它——两个位置共享同一个实例，不是"渲染两处
- * ＝两个 owner"。`WorkspaceSession` 仍是自包含复合体（Provider + 两个呈现 + 一个开合按钮），
- * 供没有工作台外壳时直接使用。
+ * 为什么这样切：工作台要在中央视图里显示文件工作面，而"文件草稿/保存与冲突/目录/搜索"这摊业务
+ * 只能有一份。于是状态集中在 `useWorkspaceSessionState`，由 `WorkspaceSessionProvider` 挂在
+ * 工作台的会话座位上渲染一次；`FileSurface`（中央视图）从同一个 context 读它。
+ * 终端不再由本包持有：产品入口统一打开 DSH 原生侧栏终端标签，生命周期归原生 owner。
+ * `WorkspaceSession` 仍是自包含复合体（Provider + 文件呈现 + 一个开合按钮），供没有工作台外壳时直接使用。
  *
- * 保留读取身份、草稿纪元、自动保存与终端调用；根槽位切会话时显式复位会话状态，并在异步结果落地时核对所属会话。
+ * 保留读取身份、草稿纪元与自动保存；根槽位切会话时显式复位会话状态，并在异步结果落地时核对所属会话。
  */
 import {createContext,useContext,useEffect,useRef,useState,useSyncExternalStore} from "react"
 import type {ReactNode} from "react"
@@ -20,17 +19,13 @@ export type {WorkbenchReveal}
 import {WORKSPACE_PREFERENCES,workspaceDefaults,workspaceActions,matchWorkspaceShortcut,workspaceFont,type WorkspacePreferences,type WorkspaceAction} from "./preferences.ts"
 import {selectedFileContext,addSelectionToContext} from "./selection-context.ts"
 import {ReviewPanel} from "./review-panel.tsx"
-import {TerminalXterm} from "./terminal-xterm.tsx"
 import {workspaceStyle} from "./workspace-style.ts"
 
 type Entry={name:string;path:string;type:string}
-type Terminal={sessionId:string;name?:string;status:{kind:string}}
-export interface WorkspaceSurface{navigateFiles?:(options:{picker?:boolean;section?:"files"|"search"|"review";toggleTree?:boolean;newWorktree?:boolean})=>void;openDocument?:(sessionId:string,path:string,create?:boolean)=>Promise<void>|void;scope:ConfigForm<WorkspacePreferences>;current:(id:string)=>boolean;addSelection:(id:string,selection:ReturnType<typeof selectedFileContext>)=>void}
+export interface WorkspaceSurface{/** 打开该会话的 DSH 原生侧栏终端标签；产品不持有 PTY 或客户端终端模型。 */openTerminal:(sessionId:string)=>void;navigateFiles?:(options:{picker?:boolean;section?:"files"|"search"|"review";toggleTree?:boolean;newWorktree?:boolean})=>void;openDocument?:(sessionId:string,path:string,create?:boolean)=>Promise<void>|void;scope:ConfigForm<WorkspacePreferences>;current:(id:string)=>boolean;addSelection:(id:string,selection:ReturnType<typeof selectedFileContext>)=>void}
 type FileDraft={file:{path:string;version?:string;content:string};draft:string}
 // 仅保留当前浏览器页面中的编辑视图，不写文件、不创建另一套会话存储。
 const sessionDrafts=new Map<string,FileDraft>()
-// 只缓存会话内选中的终端ID，PTY及输出仍从Host读取；原生文件导航页不写这份选择。
-const terminalSelections=new Map<string,string>()
 
 export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string,surface:WorkspaceSurface,exposed:boolean,reveal?:WorkbenchReveal){
   const preferenceState=useSyncExternalStore(listener=>surface.scope.subscribe(listener),()=>surface.scope.getSnapshot(),()=>surface.scope.getSnapshot()),preferences=preferenceState.value??workspaceDefaults,autoSave=preferenceState.status==="ready"&&preferences.autoSave
@@ -43,12 +38,12 @@ export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string
   const tr=(zh:string,en:string)=>t("open")==="Files & terminal"?en:zh
   // 复合体自己的开合；工作台里由外壳决定呈现，exposed 直接生效。
   const [legacyOpen,setLegacyOpen]=useState(false),[tab,setTab]=useState("files"),[cwd,setCwd]=useState(""),[path,setPath]=useState("."),[entries,setEntries]=useState<Entry[]>([]),[file,setFile]=useState<FileDraft['file']|undefined>(restored?.file),[draft,setDraft]=useState(restored?.draft??""),[error,setError]=useState(""),[notice,setNotice]=useState(""),[newFilePath,setNewFilePath]=useState<string|undefined>()
-  const [query,setQuery]=useState(""),[matches,setMatches]=useState<Array<{path:string;line:number;text:string}>>([]),[terminals,setTerminals]=useState<Terminal[]>([]),[terminal,setTerminal]=useState(()=>reveal?terminalSelections.get(sessionId)??"":""),[output,setOutput]=useState(""),[command,setCommand]=useState(""),[sending,setSending]=useState(false)
+  const [query,setQuery]=useState(""),[matches,setMatches]=useState<Array<{path:string;line:number;text:string}>>([])
   const [fileTree,setFileTree]=useState(true),[picker,setPicker]=useState(false),[pickerQuery,setPickerQuery]=useState(""),[pickerPaths,setPickerPaths]=useState<string[]>([]),[worktreeRequest,setWorktreeRequest]=useState(0)
   // 目录树的展开状态与子目录缓存按路径持有：收起/导航都不丢缓存，只有会话切换才清。
   const [treeChildren,setTreeChildren]=useState<Record<string,Entry[]>>({}),[treeExpanded,setTreeExpanded]=useState<Record<string,boolean>>({}),[treeLoading,setTreeLoading]=useState<Record<string,boolean>>({})
-  const [saving,setSaving]=useState(false),[finding,setFinding]=useState(false),[findText,setFindText]=useState(""),[terminalVisible,setTerminalVisible]=useState(false)
-  // 根槽位在切会话时保留DOM。只复位会话的编辑/终端状态，画布和原生对话继续留在原位。
+  const [saving,setSaving]=useState(false),[finding,setFinding]=useState(false),[findText,setFindText]=useState("")
+  // 根槽位在切会话时保留DOM。只复位会话的编辑状态，画布和原生对话继续留在原位。
   if(sessionTurn.current.sessionId!==sessionId){
     if(file)sessionDrafts.set(sessionTurn.current.sessionId,{file,draft})
     sessionTurn.current={sessionId}
@@ -58,12 +53,10 @@ export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string
     setFile(saved?.file);setDraft(saved?.draft??"");setCwd("");setPath(".");setEntries([]);setTab("files")
     setError("");setNotice("");setNewFilePath(undefined);setQuery("");setMatches([])
     setTreeChildren({});setTreeExpanded({});setTreeLoading({})
-    setTerminals([]);setTerminal(reveal?terminalSelections.get(sessionId)??"":"");setOutput("");setCommand("");setSending(false)
     setPicker(false);setPickerQuery("");setPickerPaths([]);setWorktreeRequest(0)
     setSaving(false);setFinding(false);setFindText("")
   }
   const turn=sessionTurn.current,isCurrent=()=>alive.current&&sessionTurn.current===turn
-  useEffect(()=>{if(reveal&&sessionId)terminalSelections.set(sessionId,terminal)},[sessionId,terminal,Boolean(reveal)])
   const open=exposed||legacyOpen
   const call=async<T=any>(action:string,input:unknown={}):Promise<T>=>{const stale=()=>new Error(tr("会话已切换，旧响应未应用。","Session changed; old response discarded."));if(!isCurrent())throw stale();const response=await fetch("/api/lyapunov/workspace",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sessionId,action,input})});const value=await response.json();if(!isCurrent())throw stale();if(!response.ok)throw new Error(value.error??response.statusText);return value}
   const run=(fn:()=>Promise<unknown>)=>{if(!isCurrent())return;setError("");setNotice("");void fn().catch(error=>{if(isCurrent())setError(String(error.message??error))})}
@@ -142,21 +135,18 @@ export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string
     if(index<0){setNotice(tr("当前文件没有匹配文本。","No matches in this file."));return}
     node.focus();node.setSelectionRange(index,index+findText.length);setNotice("")
   }
-  const createTerminal=async()=>{const value=await call("terminal-open");if(!isCurrent())return;const list=await call("terminal-list");if(!isCurrent())return;setTerminal(value.sessionId);setTerminals(list);setOutput(value.motd??"");reveal?.terminal?.();setTerminalVisible(true);return value}
+  // 终端动作只登记“打开当前会话的原生侧栏标签”，不在这里建 PTY/backlog/SSE 或全局终端状态。
+  const createTerminal=()=>{surface.openTerminal(sessionId)}
   const addSelection=()=>{const node=editor.current;if(!file||!node)throw new Error(tr("请先打开文件并选择文本。","Open a file and select text first."));surface.addSelection(sessionId,selectedFileContext(file.path,draft,node.selectionStart,node.selectionEnd,draft!==file.content));setNotice(tr("选区已加入当前会话草稿。","Selection added to the session draft."))}
   const search=async()=>{const result=await call("search",{query});if(!isCurrent())return;setMatches(result.matches);if(result.truncated)setNotice(tr("结果已截断，请缩小关键词范围","Results truncated; narrow the query"))}
-  const readTerminal=async(id=terminal)=>{if(!id)return;const value=await call("terminal-read",{id});if(isCurrent())setOutput(value.text)}
-  const interruptTerminal=async()=>{if(terminal)await call("terminal-interrupt",{id:terminal})}
-  const closeTerminal=async()=>{if(!terminal)return;await call("terminal-close",{id:terminal});if(!isCurrent())return;setTerminal("");setOutput("");const list=await call("terminal-list");if(isCurrent())setTerminals(list)}
-  const sendCommand=async()=>{if(!terminal||sending)return;setSending(true);try{await call("terminal-send",{id:terminal,text:command,submit:true});if(!isCurrent())return;setCommand("");await readTerminal()}finally{if(isCurrent())setSending(false)}}
   /** 文件工作面内的键位：只处理与当前工作面有关的动作；需要换呈现的动作交给 reveal。 */
   const shortcut=(action:WorkspaceAction)=>{
     if(action==="fileOpen"){reveal?.file?.();setTab("files");setPicker(true);setPickerQuery("");return}
     if(action==="panelClose"){if(picker)setPicker(false);else reveal?.canvas?.();return}
-    if(action==="terminalToggle"){(reveal?.toggleTerminal??reveal?.terminal)?.();return}
+    if(action==="terminalToggle"){createTerminal();return}
     if(action==="reviewToggle"){reveal?.file?.();setTab("review");return}
     if(action==="fileTreeToggle"){reveal?.file?.();setTab("files");setFileTree(value=>!value);return}
-    if(action==="terminalNew"){run(createTerminal);return}
+    if(action==="terminalNew"){createTerminal();return}
     if(action==="worktreeNew"){reveal?.file?.();setTab("review");setWorktreeRequest(value=>value+1);return}
     if(action==="addSelection")run(async()=>addSelection())
   }
@@ -171,14 +161,12 @@ export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string
   useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
   useEffect(()=>{if(file)sessionDrafts.set(sessionId,{file,draft});else sessionDrafts.delete(sessionId)},[sessionId,file,draft])
   useEffect(()=>{if(!file||draft===file.content)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue=""};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn)},[file,draft])
-  useEffect(()=>{if(!open||!sessionId)return;let live=true;void call("info").then(value=>{if(live){setCwd(value.cwd);setTerminals(value.terminals)}}).catch(error=>{if(live&&isCurrent())setError(error.message)});run(()=>list(path));return()=>{live=false}},[open,sessionId])
-  // 终端轮询只在终端真的显示时进行（抽屉收起＝停轮询，会话本身不动）。
-  useEffect(()=>{if(!terminalVisible||!terminal)return;const timer=setInterval(()=>{void readTerminal().catch(error=>{if(isCurrent())setError(error.message)})},1000);return()=>clearInterval(timer)},[terminalVisible,terminal,sessionId])
+  useEffect(()=>{if(!open||!sessionId)return;let live=true;void call("info").then(value=>{if(live)setCwd(value.cwd)}).catch(error=>{if(live&&isCurrent())setError(error.message)});run(()=>list(path));return()=>{live=false}},[open,sessionId])
   return {
-    sessionId,tr,preferences,autoSave,cwd,path,entries,file,draft,error,notice,query,matches,terminals,terminal,output,command,sending,tab,fileTree,picker,pickerQuery,pickerPaths,worktreeRequest,saving,finding,findText,newFilePath,open,terminalVisible,treeChildren,treeExpanded,treeLoading,
+    sessionId,tr,preferences,autoSave,cwd,path,entries,file,draft,error,notice,query,matches,tab,fileTree,picker,pickerQuery,pickerPaths,worktreeRequest,saving,finding,findText,newFilePath,open,treeChildren,treeExpanded,treeLoading,
     refs:{section,pickerInput,editor,findInput},
-    setters:{setPath,setDraft,setQuery,setCommand,setTab,setFileTree,setPicker,setPickerQuery,setNewFilePath,setFinding,setFindText,setTerminal,setOutput,setTerminals,setLegacyOpen,setTerminalVisible},
-    actions:{call,list,expand,toggleTreeNode,openFile,reloadFile,newFile,createNewFile,saveFile,findInFile,createTerminal,addSelection,search,readTerminal,interruptTerminal,closeTerminal,sendCommand,shortcut,run,editEpoch},
+    setters:{setPath,setDraft,setQuery,setTab,setFileTree,setPicker,setPickerQuery,setNewFilePath,setFinding,setFindText,setLegacyOpen},
+    actions:{call,list,expand,toggleTreeNode,openFile,reloadFile,newFile,createNewFile,saveFile,findInFile,createTerminal,addSelection,search,shortcut,run,editEpoch},
   }
 }
 export type WorkspaceSession=ReturnType<typeof useWorkspaceSessionState>
@@ -218,18 +206,7 @@ export function FileSurface({t}:PropsRuntime<"lyapunov.workbench.centre">&PropsL
   if(!session.sessionId)return <div className="lya-wb-missing" role="status"><div><strong>{session.tr("先选择工作区","Choose a workspace")}</strong><p>{session.tr("在左侧添加或选择工作区后，就可以浏览和编辑文件。","Add or choose a workspace on the left to browse and edit its files.")}</p></div></div>
   return <FileSurfaceBody session={session}/>
 }
-/** 终端抽屉（底部）：真实 PTY 会话，切位置不换会话。 */
-export function TerminalPanel({t,visible}:PropsRuntime<"lyapunov.workbench.drawer">&PropsLocale<"lyapunovWorkspace">){
-  const session=useWorkspaceSession()
-  const setVisible=session?.setters.setTerminalVisible
-  // 抽屉宿主常驻挂载，可见性来自 owner 参数：可见才轮询输出，收起就停；终端会话本身不动。
-  useEffect(()=>{setVisible?.(visible===true);return()=>{setVisible?.(false)}},[setVisible,visible])
-  if(!session)return <p className="code-error" role="alert">{t("unmounted")}</p>
-  if(!session.sessionId)return <div className="lya-wb-missing" role="status"><div><strong>{session.tr("先选择工作区","Choose a workspace")}</strong><p>{session.tr("终端会在当前工作区中运行。请先在左侧添加或选择工作区。","Terminals run in the current workspace. Add or choose one on the left first.")}</p></div></div>
-  return <><div className="code-toolbar"><span>{session.tr("终端","Terminal")}</span><button type="button" onClick={()=>{void session.actions.closeTerminal()}}>{session.tr("关闭终端","Close terminal")}</button></div><TerminalBody session={session}/></>
-}
-
-/** 自包含复合体：Provider + 两个呈现 + 开合按钮（没有工作台外壳时使用，行为与原先的浮层一致）。 */
+/** 自包含复合体：Provider + 文件呈现 + 开合按钮（没有工作台外壳时使用）。 */
 export function WorkspaceSession({sessionId,t,surface,reveal}:{sessionId:string;t:(key:"open")=>string;surface:WorkspaceSurface;reveal?:WorkbenchReveal}){
   const session=useWorkspaceSessionState(sessionId,t,surface,false,reveal)
   const {tr,tab,open}=session
@@ -238,8 +215,8 @@ export function WorkspaceSession({sessionId,t,surface,reveal}:{sessionId:string;
     <button type="button" onClick={()=>session.setters.setLegacyOpen(!open)}>{t("open")}</button>
     {open&&<section ref={session.refs.section} className="lyapunov-code" aria-label={t("open")}>
       <header><strong>{t("open")}</strong><small>{session.cwd}</small><button onClick={()=>session.setters.setLegacyOpen(false)}>{tr("收起","Close panel")}</button></header>
-      <nav>{[["files","文件","Files"],["search","搜索","Search"],["terminal","终端","Terminal"],["review","Git / Review","Git / Review"]].map(([id,zh,en])=><button key={id} aria-pressed={tab===id} onClick={()=>session.setters.setTab(id!)}>{tr(zh!,en!)}</button>)}</nav>
-      {tab==="terminal"?<TerminalBody session={session}/>:tab==="review"?<ReviewPanel key={sessionId} request={session.actions.call} worktreeRequest={session.worktreeRequest} english={t("open")==="Files & terminal"}/>:<FileSurfaceBody session={session} embedded={false}/>}
+      <nav>{[["files","文件","Files"],["search","搜索","Search"],["review","Git / Review","Git / Review"]].map(([id,zh,en])=><button key={id} aria-pressed={tab===id} onClick={()=>session.setters.setTab(id!)}>{tr(zh!,en!)}</button>)}<button type="button" onClick={()=>session.actions.createTerminal()}>{tr("终端","Terminal")}</button></nav>
+      {tab==="review"?<ReviewPanel key={sessionId} request={session.actions.call} worktreeRequest={session.worktreeRequest} english={t("open")==="Files & terminal"}/>:<FileSurfaceBody session={session} embedded={false}/>}
     </section>}
   </WorkspaceContext.Provider>
 }
@@ -287,8 +264,7 @@ export function FileSurfaceBody({session,embedded=true,active=true,navigationOnl
       if(target?.closest('[role=dialog],.xterm,.monaco-editor')&&!owned)return
       const action=workspaceActions.find(action=>matchWorkspaceShortcut(event,preferences.shortcuts[action],/Mac|iPhone|iPad/.test(navigator.platform)))
       if(!action||action==="panelClose"&&!picker&&!owned||action==="addSelection"&&(!owned||target!==editor.current))return
-      // 原生文件页只处理文件键位；终端键位交给仍挂载的会话终端宿主。
-      if(navigationOnly&&(action==="terminalNew"||action==="terminalToggle"))return
+      // 终端键位也在文件页生效：动作只打开当前会话的原生侧栏终端标签。
       event.preventDefault();event.stopPropagation();shortcut(action)
     }
     document.addEventListener("keydown",keydown);return()=>document.removeEventListener("keydown",keydown)
@@ -306,10 +282,4 @@ export function FileSurfaceBody({session,embedded=true,active=true,navigationOnl
     {tab==="search"&&<article className="lya-file-article"><form onSubmit={event=>{event.preventDefault();run(search)}}><input aria-label={tr("搜索文本","Search text")} value={query} onChange={event=>setQuery(event.target.value)}/><button>{tr("搜索","Search")}</button></form>{matches.map((match,i)=><button className="code-match" key={i} onClick={()=>run(async()=>{await openFile(match.path);setTab("files")})}><strong>{match.path}:{match.line}</strong><pre>{match.text}</pre></button>)}</article>}
     {tab==="review"&&<ReviewPanel key={session.sessionId} request={session.actions.call} worktreeRequest={session.worktreeRequest} english={tr("zh","en")==="en"}/>}
   </section>
-}
-
-/** 终端主体：输出 + 命令输入 + 会话选择（PTY 由 host ctx.terminals 持有）。 */
-function TerminalBody({session}:{session:WorkspaceSession}){
-  // 真实交互终端（xterm.js + Host node-pty）；旧的行式命令通道保留给 Agent 工具使用。
-  return <TerminalXterm sessionId={session.sessionId} tr={session.tr}/>
 }

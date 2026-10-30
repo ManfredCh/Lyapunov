@@ -39,7 +39,7 @@ function fakeViewer(calls: FakeCall[], options: { blockedReason?: string } = {})
 }
 
 test("真实 ComponentsPanel：部件树选中、展开/合拢按钮真的驱动 Viewer 端口", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -133,7 +133,7 @@ test("真实 ComponentsPanel：部件树选中、展开/合拢按钮真的驱动
 })
 
 test("不可炸开/无部件时面板如实说明，不给假成功", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -161,7 +161,7 @@ test("不可炸开/无部件时面板如实说明，不给假成功", async () =
 })
 
 test("展示层状态以 Viewer 读数为准：外部合拢/切身份/资源加载完成后滑杆回 0，且无实施批次文案", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -247,7 +247,7 @@ test("新展开控件真实 Viewer 闭环：身份/显示矩阵隔离、显式 F
   const matrices = () => [...objects.values()].flatMap(loaded => loaded.robot.parts.map((part: any) => {
     part.node.updateWorldMatrix(true, true); return [...part.node.matrixWorld.elements]
   }))
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom")
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom")
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -356,7 +356,7 @@ test("观察载荷携带同帧 presentation（displayOnly/entity/spread/资源�
 })
 
 test("R-013：Components 只多一个具名 Extract part 入口；预检按需展开、不支持不给提取、重组在成对存在时可见", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -421,7 +421,7 @@ test("R-013：Components 只多一个具名 Extract part 入口；预检按需�
  * 端口身份必须逐字不变，且真实 ComponentsPanel 必须出现 `components-extract-body`。
  */
 test("useStableExtractionPort：父级重渲染不换端口身份，真实内部 body 选择框出现", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {
@@ -467,7 +467,7 @@ test("useStableExtractionPort：父级重渲染不换端口身份，真实内部
  * 未确认 sync 时不得显示 "Native ready"。
  */
 test("Reassemble 由成对标记决定：remaining 只剩 root 仍可重组，sync 反馈不虚称原生已就绪", async () => {
-  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
+  const {JSDOM} = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))("jsdom") as {JSDOM: new (html: string, options?: {url?: string}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid"})
   const saved = new Map<string, PropertyDescriptor | undefined>()
   for (const key of ["window", "document", "HTMLElement", "Node", "navigator", "IS_REACT_ACT_ENVIRONMENT"]) {

@@ -23,6 +23,7 @@ import type {} from "@deepseek-ai/dsh-tool-todo"
 import {scopeOf,type ScopeKey} from "@deepseek-ai/dsh-scope"
 import {requireWritableScene,type SceneService} from "../../scene-kit/src/plugin.ts"
 import type {SceneOperations} from "../../scene-kit/src/operations.ts"
+import type {SceneReadVersion} from "../../scene-kit/src/store.ts"
 import type {SimService,SimWorlds} from "../../sim-contract/src/index.ts"
 // 会话身份与命名空间的唯一规则（与 scene-kit / sim-contract / robot-tools 共用这一份，不在各处各拼一遍前缀）。
 import {bindSessionId,requireSessionId,sessionNamespace,SESSION_SCOPE_UNAVAILABLE} from "../../lyapunov-contracts/src/session-scope.ts"
@@ -108,7 +109,7 @@ declare module "@deepseek-ai/dsh-jobs" { interface JobKindMap { fastgs_external:
 
 export const name="lyapunov-shell"
 export const inject=["connection","commands","agents","scene","sessions","attachments","systemPrompt","sessionController","sessionQuery","tools","jobs","subprocess"]
-export interface Config { knownMcpDefaults?:import('../../../script/known-mcp.ts').KnownMcpDefault[]; captureRoot?:string; recordingRoot?:string; /** 目录索引根（<运行根>/catalog）：资源字节校验读它的 index.json。省略时退回 dataRoot/旧单根。 */ catalogRoot?:string; /** @deprecated 分治前的单根；仅旧布局兼容。 */ dataRoot?:string;administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key'; /**
+export interface Config { knownMcpDefaults?:import('../../../script/known-mcp.ts').KnownMcpDefault[]; captureRoot?:string; recordingRoot?:string; /** 目录索引根（<运行根>/catalog）：资源字节校验读它的 index.json。省略时退回 dataRoot/旧单根。 */ catalogRoot?:string; /** @deprecated 分治前的单根；仅旧布局兼容。 */ dataRoot?:string; /** 受信任的产品根注入：仅供测试/嵌入明确把“被测安装与发现根”指到隔离夹具；省略时仍是本包根。 */ productRoot?:string;administrator?:VerifiedAdministrator['admin'];modelBilling?:'own-key'; /**
  * W22：computer-use 的桌面设置后端（`gsettings`/`notify-send` 命令执行器）。省略＝真执行器。
  * 存在的唯一理由是**测试替身**：测试不能真的去读/写用户桌面的 a11y 设置、更不能真的弹通知。
  */ computerUse?:{runner?:CommandRunner}; /** 原生恢复预算与只读图裁剪，不改变领域执行者。 */ graph?:GraphConfig }
@@ -200,6 +201,7 @@ export async function apply(ctx:Context,config:Config={}){
   // 只在真的谈到 Blender 或"可编辑建筑"时命中，不与 scene-construction 抢泛场景请求。
   // 技能内部已写明"优先用已连接的 Blender MCP、未连接时用 blender_run"，指针不必判断 MCP 是否挂载。
   {skill:"architectural-world",label:"Blender architectural modeling",pattern:/blender|blend\s*文件|mcp.*(blender|建模)|(blender|建模).*mcp|可编辑.*(建筑|模型|工程)|建筑.*(可编辑|漫游|建模)|architectural world/i},
+  {skill:"crowd-control",label:"Crowd control",pattern:/行人|人群|路人|徘徊|散步|来回走|绕圈|原地站|crowd|pedestrian|walker/i},
   {skill:"action-execution",label:"Action execution",pattern:/抓|举起|拿起|放置|搬|开过去|走两步|走去|走到|货叉|升降|起飞|降落|步态|执行.*(策略|动作)|协同|规划|避障|停止.*(动作|模拟)|pick|grasp|lift|place|move\s|drive|walk|execute|policy|avoid|stop|fleet|gait|takeoff/i},
   {skill:"scene-construction",label:"Scene construction",pattern:/场景|房间|庭院|世界|环境|下载.*(环境|地图)|放个|加.*(桌子|椅子|墙|地板)|scene|room|courtyard|environment|world|build a|place a|furniture|table/i},
   // 生成入口统一由本指针路由：命中即注入 asset-generation 技能指针，由技能内部按形态选路
@@ -503,7 +505,7 @@ export async function apply(ctx:Context,config:Config={}){
   *   · 谁在等这张图（waiter）——按 observeId 登记，超时/取消/结束都在同一处撤销。
   * 于是"图像来自哪个窗口、哪个场景、哪个 rev"有据可查：回来后三样都对上才认这张图。
   */
- type ObserveClient={at:number;sceneId?:string;revision?:number}
+ type ObserveClient={at:number;sceneId?:string;revision?:number;deliveredScene?:SceneReadVersion}
  /** 观察结果只有两种：真实采集（含原生附件引用）或带原因的失败。 */
  type ObserveSettlement={ok:true;capture:CaptureRecord;attachment:ImageAttachmentRef}|{ok:false;error:string}
  /**
@@ -552,7 +554,8 @@ export async function apply(ctx:Context,config:Config={}){
  const noteObserveClient=(sessionKey:string,clientId:string|undefined,sceneId?:string,revision?:number)=>{
   if(!clientId)return
   const clients=observeClients.get(sessionKey)??new Map<string,ObserveClient>()
-  clients.set(clientId,{at:Date.now(),...(sceneId?{sceneId}:{}),...(Number.isInteger(revision)?{revision}:{})})
+  const deliveredScene=clients.get(clientId)?.deliveredScene
+  clients.set(clientId,{at:Date.now(),...(sceneId?{sceneId}:{}),...(Number.isInteger(revision)?{revision}:{}),...deliveredScene?{deliveredScene}:{}})
   observeClients.set(sessionKey,clients)
  }
  /**
@@ -940,7 +943,7 @@ export async function apply(ctx:Context,config:Config={}){
 ctx.tools.register(defineTool({
   name:"ui_action",
   description:"Control the Lyapunov workbench interface. openTool opens a panel; openFiles/openTerminal/showCanvas switch the working surface. openResource takes path and target=preview|source and returns after a window in the current session actually displays that file. selectEntity selects an object. focus frames it from outside; enterSceneCenter moves the camera to a robust center of the subject. Neither moves the model or requires traversing the raw 3DGS bbox. selectScene switches to an existing scene. aimCameraView enters the actual cameraId (or Scene camera entityId) at its locked installation origin for orientation/FOV editing while retaining body FK. exitCameraView discards a pending installation draft and restores the main view. locateTcp/locateBase open the robot panel and show current native markers; if readback is missing, provide the real configuration entry. Change model position with the complete transform in scene_edit. Except for openResource, acknowledgement only establishes that an action was queued; verify the displayed result with viewer_observe.",
-  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","object","camera","capture","recording","annotation","physics","asset"],description:"Target panel for openTool. Legacy 'asset' (generic library) is migrated to Objects; use the business panels instead."},cameraId:{type:"string",description:"Exact current camera_list cameraName or Scene rig key for aimCameraView; never infer a camera name."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase/aimCameraView. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
+  parameters:{input:{type:"object",required:true,additionalProperties:false,description:"Interface action.",properties:{action:{type:"string",enum:[...uiActionNames],description:"Action name."},tool:{type:"string",enum:["scene","environment","robot","crowd","object","camera","capture","recording","annotation","physics","asset"],description:"Target panel for openTool. Legacy 'asset' (generic library) is migrated to Objects; use the business panels instead."},cameraId:{type:"string",description:"Exact current camera_list cameraName or Scene rig key for aimCameraView; never infer a camera name."},entityId:{type:"string",description:"Target entity for selectEntity/focus/enterSceneCenter/locateTcp/locateBase/aimCameraView. Without one, focus frames the whole scene and enterSceneCenter uses the current scene subject center."},sceneId:{type:"string",description:"Target scene ID for selectScene; it must exist in the scene list."},path:{type:"string",description:"File path for openResource, relative to the current session workspace or an absolute path inside that workspace."},target:{type:"string",enum:["preview","source"],description:"openResource mode: preview displays a page/model (default); source opens the source editor, including explicit source editing for HTML."},clientId:{type:"string",description:"Optional target window to disambiguate multiple windows. Otherwise use the active, most recently operated window; resolve automatically only when one window is present or only one displays this scene."}}}},
   output:{schema:{type:"json"},render:(_args,value)=>[{type:"text",text:uiActionModelText(value)}]},
   execute:async(args,exec)=>{
    const input=(args.input??args) as {action?:string;tool?:string;entityId?:string;sceneId?:string;clientId?:string;path?:string;target?:string;cameraId?:string}
@@ -1509,7 +1512,8 @@ function derivedPose(record:{camera?:unknown;attachment?:{width?:number;height?:
   ...(typeof fov==="number"?{fovDeg:fov}:{}),
   ...(typeof width==="number"&&typeof height==="number"?{imageWidth:width,imageHeight:height,...height?{aspect:width/height}:{}}:{})}
 }
-const PRODUCT_ROOT_FOR_ENGINE=resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
+// 默认仍是本包根；只有明确注入时才把引擎安装/发现根指到隔离夹具（不改用户环境，也不改变正常装配）。
+ const PRODUCT_ROOT_FOR_ENGINE=config.productRoot!==undefined?resolve(config.productRoot):resolve(dirname(fileURLToPath(import.meta.url)),"../../..")
 const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:Request)=>Promise<Response>)=>ctx.effect(()=>ctx.connection.fetch.register({
   path:"/api/lyapunov/"+path,methods,requestBody:"buffered",
   fetch:async request=>{try{return await handler(request)}catch(error){return Response.json({error:error instanceof Error?error.message:String(error)},{status:400})}},
@@ -2444,7 +2448,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const input=resolveProductPaths(body.input,productPathRoots)
   const resolved=await ctx.sessionController.resolveAgent(SessionId(sessionId));if('error' in resolved)throw resolved.error
   const agent=resolved.agent
-  if(!/^(scene_|asset_|policy_|sim_|robot_|joint_|vehicle_|viewer_|sensor_|camera_|segment_|recording_|fastgs_|ui_|campaign_|skill_|pack_skill_)/.test(name))throw new Error("UNKNOWN_DOMAIN_COMMAND")
+  if(!/^(scene_|asset_|simready_|policy_|sim_|robot_|human_|crowd_|joint_|vehicle_|viewer_|sensor_|camera_|segment_|recording_|fastgs_|ui_|campaign_|skill_|pack_skill_)/.test(name))throw new Error("UNKNOWN_DOMAIN_COMMAND")
   // 归属核对基准 = 命令发出时（客户端内部请求携带）的选择身份；只有拿不到元数据的旧/非 UI 调用
   // 才退回服务端此刻的记录。不能用请求到达后才采到的新选择去解释一条更早发出的命令。
   const atStart=dispatchedIdentity(selection)??selectionIdentity(agent)
@@ -2576,12 +2580,22 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   // 缺会话一律明确失败（不落回全局共享状态——修前这里读的是 Host 级唯一实例，A/B 会话看同一份 world 列表）。
   const sessionKey=await bindSessionId(ctx,query.get("sessionId"),"工作台状态")
   const sim=existingSimFor(sessionKey)
-  const scene=sceneId?await sceneSnapshot(sessionKey,sceneId):undefined,worlds=sim?await sim.listWorlds():[]
+  const worlds=sim?await sim.listWorlds():[]
   const agent=ctx.agents.get(SessionId(sessionKey))
   // 前端在场事实随**既有的** state 轮询上报：clientId + 该窗口当前显示的场景/版本。
   // 不新增通道；`viewer_observe` 的"目标窗口唯一性"与"这张图属于哪个版本"都以此为准。
   const clientId=query.get("clientId")??undefined,displayRevision=integerQuery(query.get("displayRevision"))
-  if(agent&&clientId)noteObserveClient(sessionKey,clientId,query.get("displaySceneId")??undefined,displayRevision)
+  const displaySceneId=query.get("displaySceneId")??undefined
+  if(agent&&clientId)noteObserveClient(sessionKey,clientId,displaySceneId,displayRevision)
+  const windowClient=agent&&clientId?observeClients.get(sessionKey)?.get(clientId):undefined
+  const delivered=windowClient?.deliveredScene
+  // 官方 Scene 属于活动 world，继续走原实时投影；普通 Scene 仅凭本窗口已收过的完整文档
+  // 加上本次真实显示标记与已校验文件身份省读，不能信任新窗口/其它会话自报的同 ID/rev。
+  const ordinary=sceneId&&!worlds.some(world=>world.engineId===OFFICIAL_ENGINE_ID&&world.status!=="closed"&&world.sceneId===sceneId)
+  const store=ordinary?sceneFor(sessionKey).scene:undefined
+  const unchanged=Boolean(sceneId&&delivered&&displaySceneId===sceneId&&displayRevision===delivered.revision&&delivered.sceneId===sceneId&&await store?.unchangedSince?.(sceneId,delivered))
+  const scene=sceneId&&!unchanged?await sceneSnapshot(sessionKey,sceneId):undefined
+  const outboundScene=scene?await projectSceneOutbound(scene,sessionKey):undefined
   // 本窗口**自己**的选择事实（按 clientId 读自己那一槽）：多窗口下另一个窗口的选择不回灌给这个窗口。
   const selectionScope=agent?scopeOf((agent as {ctx?:unknown}).ctx as Parameters<typeof scopeOf>[0]):undefined
   const ownSelection=clientId&&selectionScope?selections.get(selectionScope)?.get(clientId):undefined
@@ -2605,7 +2619,9 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   // campaign 投影按会话取：agent-graph 的 campaign_* 调用落 `lyapunov/campaign-state` 卡；
   // 投影未注册（agent-graph 未装配）或本会话无 campaign 时就是空表，不另造第二份状态。
   const campaignCards=agent?campaignsOf(ctx,agent.session)?.campaigns:undefined
-  return Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...scene?{scene:await projectSceneOutbound(scene,sessionKey)}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,videos,recentActions,...campaignCards?{campaigns:campaignCards}:{},...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
+  const response=Response.json({hostInstanceId,...lastSceneId?{lastSceneId}:{},...config.administrator?{administrator:config.administrator,modelBilling:config.modelBilling}:{},...outboundScene?{scene:outboundScene}:{},worlds,providerAvailable:Boolean(ctx.get("sim")),captures,videos,recentActions,...campaignCards?{campaigns:campaignCards}:{},...ownSelection?{selection:{clientId,facts:ownSelection.facts}}:{},uiActions:deliveredUiActions,computerUse:computerUseFacts()})
+  if(windowClient&&scene)windowClient.deliveredScene=store?.readVersion?.(scene)
+  return response
  })
  // 场景清单归 scene-kit 所有：布局改造后场景文档在 <worlds>/scenes，shell 不再自己猜目录
  // （旧实现读 config.dataRoot/单根，迁移后恒返回空列表，3D 视口因此永远停在空态）。

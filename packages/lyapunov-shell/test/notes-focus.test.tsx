@@ -23,7 +23,7 @@ function baseProps(over:Record<string,unknown>={}){
 
 const saved=new Map<string,PropertyDescriptor|undefined>()
 function installDom(){
- const req=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))
+ const req=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))
  const {JSDOM}=req("jsdom"),dom=new JSDOM('<div id="root"></div>',{url:"http://fixture.invalid",pretendToBeVisual:true})
  for(const key of ["window","document","HTMLElement","Node","navigator","KeyboardEvent","IS_REACT_ACT_ENVIRONMENT"]){
   saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key))

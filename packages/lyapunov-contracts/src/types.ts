@@ -1,3 +1,6 @@
+import type { HumanComponent, HumanPose } from './human.ts'
+export * from './human.ts'
+import type { UsdNativePrimIdentity } from './usd.ts'
 /** 共享值以米、弧度、秒及右手 Z-up 表达；引擎对象不得进入这些类型。 */
 export type Vec3 = [number, number, number]
 export type Quaternion = [number, number, number, number]
@@ -40,6 +43,7 @@ export interface Entity {
     articulation?: Record<string, unknown>
     controller?: Record<string, unknown>
     sensor?: Record<string, unknown>
+    human?: HumanComponent
     [namespace: string]: unknown
   }
 }
@@ -148,6 +152,7 @@ export interface EntityObservation {
    * 逐条关节/系数/单位见 robot_describe 的 tendonActuators）。没有 tendon 的实体不出现该字段。
    * 肌腱不是关节：它们只出现在这个顶层字段里，不混入 joints。
    */
+  humanPose?: HumanPose
   tendons?: TendonObservation
   /**
    * 与本实体位姿、joints 同属当前帧。实体出现在帧中且此字段缺省/为空时清除旧动态显示；
@@ -220,7 +225,7 @@ export interface CollisionTopology {
   generation:number
   sceneRevision:number
   stepIndex:number
-  geoms:Array<{geomId:number;name:string;entityId?:string;ground:boolean;positionM:Vec3;quaternionXyzw:Quaternion;geometry?:ColliderGeometry;collisionEnabled?:boolean;collisionMask?:{contype:number;conaffinity:number;explicitPair:boolean};filteredPairs?:string[];contactOffsetM?:number;restOffsetM?:number;dynamic?:boolean}>
+  geoms:Array<UsdNativePrimIdentity & {geomId:number;name:string;entityId?:string;ground:boolean;positionM:Vec3;quaternionXyzw:Quaternion;geometry?:ColliderGeometry;collisionEnabled?:boolean;collisionMask?:{contype:number;conaffinity:number;explicitPair:boolean};filteredPairs?:string[];contactOffsetM?:number;restOffsetM?:number;dynamic?:boolean}>
   omitted:number
   geometryIncluded:boolean
 }
@@ -437,3 +442,5 @@ export function sceneGeometrySourceKey(
 }
 
 export type { NoticeSource } from './message-sources.ts'
+
+export type { UsdAssetFacts, UsdInstanceOverrides, UsdPreview, UsdPreviewShape, UsdNativePrimIdentity, UsdBodyWorldPose, UsdPreviewMaterial, UsdPreviewTexture, UsdTextureBinding } from "./usd.ts"

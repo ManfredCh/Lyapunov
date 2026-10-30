@@ -9,7 +9,7 @@ import {deriveEventMessage} from '@deepseek-ai/dsh-session/surface'
 import {Context} from '@deepseek-ai/cordis'
 import SessionStore,{SessionId} from '@deepseek-ai/dsh-session'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
-const sdkRoot=new URL('../../../.upstream/deepseek-harness-20260911-candidate/',import.meta.url).href
+const sdkRoot=new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/',import.meta.url).href
 const sdkFixture=async()=>{const path=sdkRoot+'packages/client/ui-chat/src/client/conversation-nodes/';return {...await import(path+'command.ts'),...await import(sdkRoot+'packages/client/ui-conversation/src/client/conversation/assembler.ts'),...await import(path+'chat-snapshot-builder.ts')}}
 const display=(sequence:number,phase:'update'|'final'|'stop'='update')=>({kind:'control-gesture' as const,clientId:'client',gestureId:'gesture',worldId:'world',generation:2,entityId:'robot',jointName:'j1',sequence,phase})
 const at=(seq:number,type:string,data:any)=>({seq,time:seq*10,type,data})

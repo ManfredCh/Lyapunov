@@ -1,4 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises"
+import { inspectUsd } from "./usd-assets.ts"
+import {readUsdStandardLibrary,USD_STANDARD_LIBRARY_MIME} from './usd-standard-libraries.ts'
 import { blendExternalFiles } from "./blend-deps.ts"
 import {geometrySourceFacts,objMaterialFiles,type SourceTexturePolicy} from './geometry-source-deps.ts'
 import { splatBounds } from "./splat-bounds.ts"
@@ -14,7 +16,7 @@ import type { Entity, ResourceRef, Transform, Vec3 } from "../../lyapunov-contra
 import { identityTransform } from "../../lyapunov-contracts/src/types.ts"
 import { isGaussianCameraFrame, parseGaussianCameraFramePlyHeader, scanPlyHeader, type GaussianCameraFrame } from "../../lyapunov-contracts/src/gaussian-frame.ts"
 
-export type AssetKind = "mesh" | "splat" | "robot" | "source"
+export type AssetKind = "mesh" | "splat" | "robot" | "source" | "usd"
 export interface FileStamp { path: string; size: number; mtimeMs: number; sha256?: string }
 export interface ParsedAsset {
   kind: AssetKind
@@ -334,6 +336,21 @@ export async function parseAsset(path: string, override?: ResourceRef["source"],
   const stamp = await fileStamp(path)
   const extension = extname(path).toLowerCase()
   const defaultSource: ResourceRef["source"] = { units: "m", upAxis: "Z", handedness: "right", metersPerUnit: 1 }
+  if(path.endsWith('.usd-library.json')){
+    const library=await readUsdStandardLibrary(path)
+    return {kind:'source',mimeType:USD_STANDARD_LIBRARY_MIME,source:override??defaultSource,dependencies:await Promise.all(library.files.map(file=>fileStamp(file))),metadata:{format:'usd-standard-library',usdStandardLibrary:library.manifest}}
+  }
+  if(path.endsWith('.usd-preview.json')) {
+    const preview=JSON.parse(await readFile(path,'utf8'))
+    if(preview.schema!=='lyapunov.usd-preview.v1'||!Array.isArray(preview.preview?.shapes))throw Error('USD_PREVIEW_INVALID')
+    const textures=(preview.preview.textures??[]) as Array<{id:string;file:string;mimeType:string}>
+    const dependencies=[stamp]
+    for(const texture of textures){
+      if(!/^[a-f0-9]{64}$/.test(texture.id)||!new RegExp('^'+texture.id+'\\.(png|jpe?g|webp)$').test(texture.file))throw Error('USD_PREVIEW_TEXTURE_PATH_INVALID')
+      const file=await fileStamp(resolve(dirname(path),texture.file));if(file.sha256!==texture.id)throw Error('USD_PREVIEW_TEXTURE_HASH_MISMATCH');dependencies.push(file)
+    }
+    return {kind:'source',mimeType:'application/vnd.lyapunov.usd-preview+json',source:override??defaultSource,dependencies,metadata:{format:'usd-preview',sourceResourceId:preview.sourceResourceId,sourceVersion:preview.sourceVersion,usdPreviewTextures:textures}}
+  }
   if(extension==='.max')throw new Error('MAX_CONVERSION_REQUIRED: .max 不是可直接读取的通用模型；请在3ds Max中导出FBX（含材质/纹理）或GLB后导入，不能改后缀冒充支持')
   if(extension==='.obj'||extension==='.fbx'){
     if(extension==='.fbx'){
@@ -430,7 +447,25 @@ export async function parseAsset(path: string, override?: ResourceRef["source"],
       : { format: "blend", externals: "unknown", externalsReason: externals.reason }
     return { kind: "source", mimeType: "application/x-blender", source: override ?? defaultSource, dependencies, metadata }
   }
-  if ([".usd", ".usda", ".usdc"].includes(extension)) return { kind: "source", mimeType: "model/vnd.usd", source: override ?? defaultSource, dependencies: [stamp], metadata: { format: extension.slice(1) } }
+  if ([".usd", ".usda", ".usdc", ".usdz"].includes(extension)) {
+    const inspection = await inspectUsd(path)
+    const usd = inspection.usd
+    if (!Number.isFinite(usd.metersPerUnit) || usd.metersPerUnit <= 0 || !["Y","Z"].includes(usd.upAxis)) throw Error("USD_SOURCE_COORDINATES_INVALID")
+    if(override&&(override.upAxis!==usd.upAxis||override.handedness!=='right'||(override.metersPerUnit??1)!==usd.metersPerUnit))throw Error('USD_SOURCE_METADATA_CONFLICT: USD自带单位和坐标；外部覆盖必须与原件一致')
+    const files=new Set(inspection.files)
+    // SimReady源包清单由取件器在包根写入，闭包包含原始descriptor/metadata/逐BOM文件，便携导出保留整包。
+    let simready: Record<string,unknown>|undefined
+    for(let ancestor=dirname(path),depth=0;depth<32;depth++,ancestor=dirname(ancestor)) {
+      const manifest=resolve(ancestor,'lyapunov-source.json')
+      if(!existsSync(manifest))continue
+      const source=JSON.parse(await readFile(manifest,'utf8'))
+      if(source.schema!=='lyapunov.simready-source.v1'||resolve(ancestor,source.rootUsd)!==resolve(path))continue
+      if(!Array.isArray(source.packageFiles))throw Error('SIMREADY_SOURCE_MANIFEST_INVALID')
+      for(const file of source.packageFiles){if(typeof file!=='string'||file.startsWith('/')||file.split('/').includes('..'))throw Error('SIMREADY_SOURCE_PATH_INVALID');files.add(resolve(ancestor,file))}
+      files.add(manifest);simready=source;break
+    }
+    return {kind:"usd",mimeType:"model/vnd.usd",source:override??{units:"m",upAxis:usd.upAxis,handedness:"right",metersPerUnit:usd.metersPerUnit},dependencies:await Promise.all([...files].map(file=>fileStamp(file))),metadata:{format:usd.format,usd:{...usd,preview:{...usd.preview,textures:usd.preview.textures?.map(({assetPath,uri,...texture})=>texture),shapes:[],shapeCount:usd.preview.shapes.length}},...inspection.aabb?{aabb:inspection.aabb}:{},absoluteAssetPaths:inspection.absoluteAssetPaths,...simready?{simready}:{}}}
+  }
   throw new Error(`UNSUPPORTED_RESOURCE_FORMAT: ${extension}`)
 }
 

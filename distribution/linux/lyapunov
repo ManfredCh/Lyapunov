@@ -38,7 +38,7 @@ if [ "${1:-desktop}" != github ] && [ "${1:-desktop}" != architecture ] && [ "${
 fi
 case "${1:-desktop}" in
   --help|help)
-    printf '%s\n' 'LyapunovDSH Linux 便携包' './lyapunov [desktop] [Electron 参数]' './lyapunov administrator --credentials-file <管理员凭据.json> --auth-file <模型凭据.json> [--port 4181]' './lyapunov administrator --help' './lyapunov architecture --blender <Blender> --addon <addon.py> --mcp-command <blender-mcp> [--engine none|mujoco|isaac]' './lyapunov terminal [--cwd <目录>] [--resume <会话ID>] [--runtime-root <私有根>]（开发原型）' './lyapunov benchmark [--provider libero|gymnasium] [--mode formal|developer] [--check] [--host-id <私有ID>] [--port 0-65535]' './lyapunov github install|inspect|run [参数]' './lyapunov fastgs download|install|doctor|train [参数]' './lyapunov doctor [desktop|mujoco|isaac|newton|policy-cpu] [--managed-sdk]' 'sudo ./lyapunov setup-sandbox（当前系统需要时执行一次）' './lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula]' './lyapunov benchmark --help' './lyapunov physics-check [--managed-sdk]' './lyapunov --version'
+    printf '%s\n' 'LyapunovDSH Linux 便携包' './lyapunov [desktop] [Electron 参数]' './lyapunov desktop --nvidia-rendering（当前进程显式 NVIDIA / ANGLE Vulkan）' 'LYAPUNOV_HUMAN_COMPUTE_DEVICE=cuda:0 ./lyapunov desktop（需先 install-provider mujoco --human-cuda）' './lyapunov administrator --credentials-file <管理员凭据.json> --auth-file <模型凭据.json> [--port 4181]' './lyapunov administrator --help' './lyapunov architecture --blender <Blender> --addon <addon.py> --mcp-command <blender-mcp> [--engine none|mujoco|isaac]' './lyapunov terminal [--cwd <目录>] [--resume <会话ID>] [--runtime-root <私有根>]（开发原型）' './lyapunov benchmark [--provider libero|gymnasium] [--mode formal|developer] [--check] [--host-id <私有ID>] [--port 0-65535]' './lyapunov github install|inspect|run [参数]' './lyapunov fastgs download|install|doctor|train [参数]' './lyapunov doctor [desktop|mujoco|isaac|newton|policy-cpu] [--managed-sdk]' 'sudo ./lyapunov setup-sandbox（当前系统需要时执行一次）' './lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula] [--human-cuda（仅MuJoCo）]' './lyapunov benchmark --help' './lyapunov physics-check [--managed-sdk]' './lyapunov --version'
     ;;
   --version) require_file distribution/linux/sandbox.mjs; run_node distribution/linux/doctor.mjs version ;;
   doctor) shift; if [ "${1:-}" = policy-cpu ]; then shift; run_node distribution/linux/policy-cpu.mjs doctor "$@"; else require_file distribution/linux/sandbox.mjs; run_node distribution/linux/doctor.mjs "$@"; fi ;;
@@ -58,6 +58,17 @@ case "${1:-desktop}" in
     require_file distribution/linux/sandbox.mjs
     "$root/runtime/node/bin/node" "$root/distribution/linux/sandbox.mjs" check
     configure_desktop_fonts
+    # 必须在 Electron 启动前设置；只改变此 exec 的环境，不写用户或系统 PRIME 配置。
+    for desktop_arg in "$@"; do
+      if [ "$desktop_arg" = --nvidia-rendering ]; then
+        export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only
+        if [ -z "${VK_DRIVER_FILES:-}" ]; then
+          for nvidia_icd in /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; do
+            if [ -f "$nvidia_icd" ]; then export VK_DRIVER_FILES="$nvidia_icd"; break; fi
+          done
+        fi
+      fi
+    done
     export NODE_ENV=production
     exec "$root/runtime/electron/lyapunov-desktop" "$@"
     ;;

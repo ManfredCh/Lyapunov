@@ -613,6 +613,10 @@ describe("ENV-04/59 plugin.ts 的真实接线", () => {
       expect(text).toContain("asset-generation")
       expect(text).toContain("A miss in one catalog establishes only that catalog miss")
       expect(text).toContain("Existing-library reuse")
+      expect(text).toContain("先asset_list检查本地，再simready_search/detail")
+      expect(text).toContain("确实无合适候选才用其它库和web补缺")
+      expect(text).toContain("访问失败不算未命中")
+      expect(text.indexOf("asset_list")).toBeLessThan(text.indexOf("simready_search/detail"))
     } finally { await dispose() }
   })
 

@@ -223,7 +223,7 @@ describe("第一人称速度与 Shift 加速",() => {
 })
 
 test("真实DOM画布中键转头、Shift中键平移及window释放，不使用指针capture",()=>{
-  const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+  const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom')
   const dom=new JSDOM('<canvas></canvas>',{pretendToBeVisual:true}),canvas=dom.window.document.querySelector('canvas') as HTMLCanvasElement
   const camera=new THREE.PerspectiveCamera(60,1,.1,100),target=new THREE.Vector3(0,1,0);camera.up.set(0,0,1);camera.lookAt(target)
   canvas.setPointerCapture=()=>{throw Error('不应捕获指针')};canvas.hasPointerCapture=()=>false

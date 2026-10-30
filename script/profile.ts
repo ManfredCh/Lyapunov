@@ -372,10 +372,17 @@ export async function backendEnvironment(mode:RunMode, paths:ReturnType<typeof r
   // Profile 在父进程已按这三条规范 SDK 路径生成；子 Host 的设置页/Provider 再读时必须是同一份。
   // 只转发明确登记的解释器路径，formal/local 其余父环境和模型密钥仍受上面的有界白名单约束。
   if(parent[RUNTIME_ENV.policyPython]!==undefined)env[RUNTIME_ENV.policyPython]=parent[RUNTIME_ENV.policyPython]
-  for(const key of Object.values(SDK_PYTHON_ENV)){
+  for(const key of [RUNTIME_ENV.usdPython,...Object.values(SDK_PYTHON_ENV)]){
     const path=parent[key]?.trim()
     if(path)env[key]=path
     else delete env[key]
+  }
+  // 人体 CUDA 是用户显式开关（install-provider mujoco --human-cuda 后在入口环境设置）；
+  // 只转发合法值 cpu/cuda:0，非法值不进 Host，Provider 侧 resolveHumanComputeDevice 兜底校验。
+  {
+    const device=parent[RUNTIME_ENV.humanComputeDevice]?.trim()
+    if(device==="cpu"||device==="cuda:0")env[RUNTIME_ENV.humanComputeDevice]=device
+    else delete env[RUNTIME_ENV.humanComputeDevice]
   }
   if(mode==="developer"&&!env.DEEPSEEK_API_KEY){
     const file=readRuntimeEnv(parent,"developerAuthFile") ?? join(PRODUCT_ROOT,".runtime/session-secrets/deepseek-auth.json")

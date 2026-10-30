@@ -197,9 +197,9 @@ describe('沙箱运行时载荷', () => {
 
 describe('打包脚本接线（漂移守卫）', () => {
   test('沙箱模块进入发行载荷，打包前调用同一份真实 staging 判据', () => {
-    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','install-provider','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json']")
+    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json']")
     // 通用大 Kit 缓存的分段续传 helper 与固定 pin 必须被 payload-contract 视为运行文件（缺件即失败关闭）。
-    for(const file of ['distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json'])expect(PRODUCT_RUNTIME_FILES).toContain(file)
+    for(const file of ['distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','distribution/linux/install-usd-parser','packages/scene-kit/dist/usd_asset.py','packages/scene-kit/dist/usd_materials.py','packages/scene-kit/source-catalogs/warehouse-01/catalog.csv','packages/scene-kit/source-catalogs/warehouse-01/files.json.gz','packages/scene-kit/source-catalogs/warehouse-01/README.upstream.md','packages/scene-kit/source-catalogs/warehouse-01/pins.json','packages/sim-isaac/python/usd_observation.py'])expect(PRODUCT_RUNTIME_FILES).toContain(file)
     expect(packager).toContain('const sandboxProblems=sandboxRuntimeViolations(stage)')
     expect(packager).toContain("if(sandboxProblems.length)throw new Error(sandboxProblems.join('；'))")
     expect(packager).toContain("await cp(join(electronPackage,'dist/chrome-sandbox'),join(stage,'runtime/electron/chrome-sandbox'),{dereference:true})")
@@ -243,6 +243,7 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
     const stage=mkdtempSync(join(tmpdir(),'lyapunov-product-runtime-'))
     const put=(file:string,text='离线载荷存在性夹具\n')=>{mkdirSync(dirname(join(stage,file)),{recursive:true});writeFileSync(join(stage,file),text)}
     for(const file of PRODUCT_RUNTIME_FILES)put(file)
+    for(const file of ['requirements-human-cuda.txt','warp-source.json','WARP-LICENSE.md'])put('packages/sim-mujoco/'+file,readFileSync(join(root,'packages/sim-mujoco',file),'utf8'))
     cpSync(join(root,'packages/desktop/renderer/fonts'),join(stage,'packages/desktop/renderer/fonts'),{recursive:true})
     put(join(upstream,'packages/llm/llm-pi-ai/lib/index.js'))
     put(join(upstream,'packages/client/ui-conversation/lib/client.js'),'conversation.hero.headline\n')
@@ -340,6 +341,54 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
         writeFileSync(path,original)
       }
       expect(productRuntimeViolations(stage,upstream)).toEqual([])
+    }finally{rmSync(stage,{recursive:true,force:true})}
+  })
+
+  test('人体插件入口/包元数据及两引擎共享helper闭包齐全通过，逐件缺失/空文件/目录/软链均点名拒绝',()=>{
+    // 固定消费方闭包，不从被测清单派生；删漏必需项本身也必须让测试失败。
+    const required=[
+      'packages/human-crowd/package.json',
+      'packages/human-crowd/dist/plugin.js',
+      'packages/sim-mujoco/python/human.py',
+      'packages/sim-mujoco/python/human_batch.py',
+      'packages/sim-mujoco/python/human_gpu.py',
+      'packages/sim-mujoco/python/check_human_cuda.py',
+      'packages/sim-mujoco/requirements-human-cuda.txt',
+      'packages/sim-mujoco/warp-source.json',
+      'packages/sim-mujoco/WARP-LICENSE.md',
+      'packages/sim-mujoco/python/human_navigation.py',
+      'packages/sim-isaac/python/human_adapter.py',
+    ]
+    const {stage}=stageFixture()
+    try{
+      for(const file of required)expect(PRODUCT_RUNTIME_FILES).toContain(file)
+      expect(productRuntimeViolations(stage,upstream)).toEqual([])
+      for(const file of required){
+        const path=join(stage,file),original=readFileSync(path),expected=[`发行载荷缺少非空物理/材质/桌面运行文件：${file}`]
+        rmSync(path)
+        expect(productRuntimeViolations(stage,upstream)).toEqual(expected)
+        writeFileSync(path,'')
+        expect(productRuntimeViolations(stage,upstream)).toEqual(expected)
+        rmSync(path);mkdirSync(path)
+        expect(productRuntimeViolations(stage,upstream)).toEqual(expected)
+        rmSync(path,{recursive:true});symlinkSync(join(stage,'LICENSE'),path)
+        expect(productRuntimeViolations(stage,upstream)).toEqual(expected)
+        rmSync(path);writeFileSync(path,original)
+      }
+      expect(productRuntimeViolations(stage,upstream)).toEqual([])
+    }finally{rmSync(stage,{recursive:true,force:true})}
+  })
+
+  test('人体CUDA wheel hash与来源许可漂移均阻断，不能以文件存在替代身份',()=>{
+    const {stage,put}=stageFixture()
+    try{
+      put('packages/sim-mujoco/requirements-human-cuda.txt','warp-lang==1.13.0\n')
+      put('packages/sim-mujoco/warp-source.json','{}')
+      put('packages/sim-mujoco/WARP-LICENSE.md','wrong license')
+      const problems=productRuntimeViolations(stage,upstream)
+      expect(problems).toContain('发行载荷的人体CUDA扩展未固定官方warp-lang==1.13.0的Linux x64 wheel SHA256')
+      expect(problems).toContain('发行载荷的人体CUDA扩展来源、版本或许可身份不符')
+      expect(problems).toContain('发行载荷的人体CUDA扩展原许可字节不符')
     }finally{rmSync(stage,{recursive:true,force:true})}
   })
 

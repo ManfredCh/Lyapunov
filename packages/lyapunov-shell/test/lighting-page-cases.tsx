@@ -75,7 +75,7 @@ test("未启用时四行仍渲染但禁用，唯一的蓝色主按钮写入真�
 
 test("Studio 预设写入整组确定值；Intensity/Sun elevation 只提交一次真实补丁",async()=>{
  const {createRequire}=await import("node:module")
- const req=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))
+ const req=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))
  const {JSDOM}=req("jsdom")
  const dom=new JSDOM('<div id="root"></div>',{url:"http://fixture.invalid",pretendToBeVisual:true})
  const saved=new Map<string,PropertyDescriptor|undefined>()
@@ -150,7 +150,7 @@ test("Studio 预设写入整组确定值；Intensity/Sun elevation 只提交一�
  */
 test("Lighting 写值经 Workbench 的 scene_edit 命令提交并在回读后更新页面",async()=>{
  const {createRequire}=await import("node:module")
- const req=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))
+ const req=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))
  const {JSDOM}=req("jsdom")
  const dom=new JSDOM('<div id="root"></div>',{url:"http://fixture.invalid",pretendToBeVisual:true})
  const saved=new Map<string,PropertyDescriptor|undefined>()

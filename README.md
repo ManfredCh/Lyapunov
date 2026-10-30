@@ -19,6 +19,12 @@
 
 **Linux x64** · **Apache-2.0**
 
+> **开发者／AI 必读（Lyapunov 0.2.1 开发基线）**
+>
+> 进入本仓库进行设计、修改、评审或派发前，按 **产品 → 开发 → 美学 → 交互** 完整阅读 [核心原则总入口](principles/README.md)：
+> [产品](principles/PRODUCT.md) · [开发](principles/DEVELOPMENT.md) · [美学](principles/AESTHETICS.md) · [交互](principles/INTERACTION.md)。
+> 执行边界见 [AGENTS.md](AGENTS.md)；0.2.1 的发布日期、范围与验证状态见 [0.2.1 发布说明](docs/releases/0.2.1.md)。原则存在不等于实现已满足；本源码树不随包分发的旧账本不作为事实源。
+
 | Publication metadata | Value |
 | --- | --- |
 | Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
@@ -44,7 +50,8 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Current default — [0.2.1](docs/releases/0.2.1.md):** full Linux x64 distribution, with native settings refinement and the complete Agent Graph product.
+- **Current default — [0.2.2](docs/releases/0.2.2.md):** full Linux x64 distribution, adding people and crowds (bundled characters, Crowd panel and natural-language control), first-class USD and SimReady assets, and explicit NVIDIA rendering.
+- **Previous release — [0.2.1](docs/releases/0.2.1.md):** retained with its version directory, tag, release notes and assets.
 - **Previous preview — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** retained with its version directory, tag, release notes and assets.
 - **Previous RC — [0.1.0 RC](docs/releases/0.1.0-rc.md):** retained with its version directory, tag, release notes and assets.
 
@@ -52,7 +59,7 @@ Use the versioned release identifier with `--version` to install a previous rele
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session. The default command below installs **0.2.1**:
+From a regular terminal in your graphical desktop session. The default command below installs **0.2.2**:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -286,3 +293,7 @@ Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机�
 默认安装命令为 `curl -fsSL https://vorynel.com/lyapunov/install.sh | sh`，包含 MuJoCo 运行环境的准备与验证；Isaac Sim 与 Newton 可按需选择安装。安装成功并报告就绪后，由使用者单独启动 Lyapunov。首次启动可通过官网授权登录，使用官网模型服务需先注册账号并充值 Credits，登录后使用 Peiri／中央 Credits；也可显式进入 Guest，使用本地功能并自行配置 provider。游客不连接产品服务器，包括产品账户与计费后端，没有默认模型，也不使用 Peiri 或中央 Credits。机器人按“准备 → 初始化 → 就绪 → 显式执行”操作；相机可从绑定或保存视角返回主视图，WASD 只用于自由视角导航。
 
 完整中文步骤见[安装、升级、回滚与卸载手册](https://vorynel.com/lyapunov/guide.html)，各引擎与机器人差异见[能力总表](docs/CAPABILITY_MATRIX.md)。
+
+人体创建、合法蒙皮角色导入与物理时间动作见 [人体创建与运动](docs/HUMAN_CROWD.md)。MuJoCo支持运动学分段碰撞、有界固定Z平面绕障、拥堵解除与原生ragdoll受力；Isaac CPU/none支持同世界原生USD资产+运动学人体、基础路径、原生停障与停止。稳定平衡/恢复控制器、Isaac高级ragdoll/A*与RTX人体成像尚未完成。
+
+原生 USD/USDA/USDC/USDZ 与 SimReady 来源接入、运行时准备、工具示例和显示/引擎边界见 [SimReady 与 USD 资产](docs/SIMREADY_USD.md)。

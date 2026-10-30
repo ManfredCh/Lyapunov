@@ -260,7 +260,7 @@ export async function gateG01Live(): Promise<GateResult> {
 
     // 4) 只一条语言 Loop：基座恰好一条 agent-loop，产品补丁不自挂第二套。
     const { readFile } = await import("node:fs/promises")
-    const base = await readFile(join(PRODUCT_ROOT, ".upstream/deepseek-harness-20260911-candidate/packages/bundle/base/cordis.patch.yml"), "utf8")
+    const base = await readFile(join(PRODUCT_ROOT, ".upstream/deepseek-harness-0.2.0-rc.2/packages/bundle/base/cordis.patch.yml"), "utf8")
     const productPatch = await readFile(join(PRODUCT_ROOT, "script/runtime-patch.ts"), "utf8")
     const baseLoops = (base.match(/id: agent-loop/g) ?? []).length
     const productLoops = (productPatch.match(/agent-loop|agentLoop/g) ?? []).length

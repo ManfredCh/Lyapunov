@@ -6,7 +6,7 @@ import type {EntityMotion,RobotDescription} from '../../sim-contract/src/index.t
 import type {NativeJointResult} from '../src/robot-control-panel.tsx'
 import type {ControlGestureDisplay} from '../src/control-gesture.ts'
 
-const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
 test('真实React pointer一次ID及final，非法草稿保留，Stop/scope/失败清待发',async()=>{
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'})
  const old=new Map<string,PropertyDescriptor|undefined>()

@@ -2,6 +2,8 @@
 协议是 NDJSON，所有状态数组在 RPC/帧边界复制。无 Viewer/LLM/注册中心依赖。
 """
 import copy
+import contextlib
+import gc
 import hashlib
 import json
 import math
@@ -25,6 +27,8 @@ from world_physics import scene_gravity,declared_ground_ids,explicit_ground_requ
 try:
     import mujoco as mj
     import numpy as np
+    import human
+    import human_batch
     from triangle_surface import validate_exact_triangle_surfaces
     import gait
     import native_deformable
@@ -40,6 +44,21 @@ _static_surface_progress = [0]
 
 def emit(value):
     print(json.dumps(value, allow_nan=False, separators=(',', ':')), flush=True)
+
+def emit_text(text):
+    print(text, flush=True)
+
+# 帧快路径占位符前缀：进程启动一次定死，charset 限[A-Za-z0-9-]，序列化进JSON后不可能与真值碰撞；
+# 若某实体名/值恰好含它，替换前 count!=1 的校验会退回原路径，绝无静默错帧。
+_FRAME_PLACEHOLDER = 'LYHP-' + os.urandom(16).hex() + '-'
+_frame_placeholder_regex = None
+
+
+def _frame_placeholder_pattern():
+    global _frame_placeholder_regex
+    if _frame_placeholder_regex is None:
+        _frame_placeholder_regex = re.compile('"' + re.escape(_FRAME_PLACEHOLDER) + r'(\d+)"')
+    return _frame_placeholder_regex
 
 
 class SimError(Exception):
@@ -897,6 +916,8 @@ def apply_collision_patches(spec, patches, skipped):
 
 
 def native_source(entity):
+    if any(r.get('original',{}).get('mimeType')=='model/vnd.usd' for r in entity.get('resources',[])):
+        raise SimError('UNSUPPORTED_CAPABILITY','原生USD物理尚未接入此Provider；请显式选Isaac，或使用单独登记且已验证的MJCF/URDF资产，不能将USD静默降为视觉: '+str(entity.get('entityId')))
     cfg = entity.get('components', {}).get('mujoco', {})
     if cfg.get('sourcePath') or cfg.get('xml'):
         return cfg
@@ -960,6 +981,12 @@ class World:
         self.model = None
         self.data = None
         self.entities = {}
+        self.human_compute_device = os.environ.get('LYAPUNOV_HUMAN_COMPUTE_DEVICE', 'cpu')
+        if self.human_compute_device not in ('cpu', 'cuda:0'):
+            raise SimError('HUMAN_COMPUTE_DEVICE_INVALID', '人体动作计算设备须为cpu或cuda:0')
+        runtime_root = os.environ.get('LYAPUNOV_SIM_RUNTIME_ROOT')
+        self.human_gpu_cache_root = os.environ.get('LYAPUNOV_HUMAN_GPU_CACHE_ROOT') or (str(Path(runtime_root) / 'scratch' / 'human-cuda') if runtime_root else None)
+        self.human_gpu = None
         self.assisted = {}
         # 本 world 生命周期内真实辅助写回的累计次数：在 tick 的写回点递增，随 observe 帧如实带出。
         self.assist_advances = 0
@@ -969,6 +996,8 @@ class World:
         self.control_owners = {}
         # Freeze：本 world 当前被原生保持的实体（eid → 记录）。sync/close 清空，不在新模型重用旧 eq 索引。
         self.frozen = {}
+        # 编译后不变的执行器属性缓存：(id(model), actuator_id) → 静态核对结果；model重建后键自然失效。
+        self._actuator_statics = {}
         # 已命名相机的临时 override（渲染期生效、close/sync 清除）与真实 capture 记录
         # （captureId → 回执/逐相机标定/标注），供 camera_project_annotation 与数据集导出溯源。
         self.camera_overrides = {}
@@ -1011,6 +1040,36 @@ class World:
         if self.status not in ('ready', 'running') or self.model is None:
             raise SimError('WORLD_UNAVAILABLE', '世界未同步或已关闭: ' + self.status)
 
+    def prepare_human_gpu(self, compiled):
+        if self.human_compute_device == 'cpu':
+            return None
+        candidates = [info['human'] for info in compiled[4].values() if info.get('human', {}).get('mode') == 'kinematic' and info['human']['source']['kind'] == 'rigged-glb' and info['human'].get('clips')]
+        if not candidates:
+            return None
+        if not self.human_gpu_cache_root:
+            raise SimError('HUMAN_GPU_CACHE_REQUIRED', '显式GPU人体需要Provider私有humanGpuCacheRoot或会话运行根')
+        # 仅当前worker进程的CUDA编译缓存；不写共享SDK、用户默认缓存或全局环境。
+        os.environ['CUDA_CACHE_PATH'] = str(Path(self.human_gpu_cache_root) / 'driver')
+        with contextlib.redirect_stdout(sys.stderr):
+            import human_gpu
+        return human_gpu.ModelBatches(candidates[0], id(compiled[2]), self.human_compute_device, self.human_gpu_cache_root)
+
+    def sample_human_clip(self, cfg, roots, quaternions, elapsed, phases, clip):
+        if self.human_compute_device == 'cpu':
+            return human.sample_clip_batch(cfg, roots, quaternions, elapsed, phases, clip)
+        if self.human_gpu is None or self.human_gpu.model_token != id(self.model):
+            raise SimError('HUMAN_GPU_NOT_BOUND', '当前model没有已绑定的CUDA人体计算资源')
+        return self.human_gpu.sample(cfg, roots, quaternions, elapsed, phases, clip)
+
+    def human_crowd_batch(self, key, entries):
+        if self.human_gpu is None or self.human_gpu.model_token != id(self.model):
+            raise SimError('HUMAN_GPU_NOT_BOUND', '当前model没有已绑定的CUDA人体计算资源')
+        return self.human_gpu.crowd_batch(key, entries)
+
+    def human_compute_facts(self):
+        return {'requestedDevice': self.human_compute_device, 'worldId': self.id, 'generation': self.generation,
+                **(self.human_gpu.facts() if self.human_gpu is not None else {'backend': 'cpu-numpy' if self.human_compute_device == 'cpu' else 'not-used', 'kernelCalls': 0})}
+
     def run_status(self):
         if self.status not in ('ready','running'):return self.status
         if self.paused:return 'paused'
@@ -1046,6 +1105,7 @@ class World:
         return {'gravityWorldMps2':self.model.opt.gravity.tolist(),'gravityEnabled':not bool(self.model.opt.disableflags&int(mj.mjtDisableBit.mjDSBL_GRAVITY)),'units':'m/s^2','source':'mujoco-model','groundSources':ground,'collisionCoverage':coverage(self.scene,physical,getattr(self,'replaced_template_ground',[]))}
 
     def compile(self, scene, collision_patches=None):
+        scene = human.hydrate(scene, SimError)
         validate_exact_triangle_surfaces(scene,SimError)
         spec = mj.MjSpec()
         # 地面名与跳过告警先收集在局部变量：编译中途失败时运行中的世界状态不被半成品污染，
@@ -1067,7 +1127,10 @@ class World:
         # 合同的 TRS 口径，碰撞装配用 D 才能把父层非均匀缩放与子层旋转的组合表达出来。
         frames = collision_frame_maps(scene, poses)
         maps = {}
+        human_definitions = {}
         child_specs = []
+        prepared_humans, human_specs = human.install_batch(spec, scene, poses, SimError, human_definitions)
+        child_specs.extend(human_specs)
         static_triangle_counts, explicit_arena_sources, explicit_island_choices, derived_surface_prefixes, default_surface_prefixes = [], [], [], [], []
         # 实体的真实装配 body（eid → (spec body, 该 body 在实体局部帧中的 pos/quat)），
         # 供 Scene 声明相机挂载：相机进的是父实体的真实 body，随物理 FK 一起动。
@@ -1078,7 +1141,13 @@ class World:
             cfg = native_source(e)
             prefix = eid + '/'
             component = e.get('components', {})
-            if cfg:
+            if component.get('human'):
+                if eid in prepared_humans:
+                    info=prepared_humans[eid];root=spec.body(prefix+info['rootName'])
+                else:info, root = human.install(spec, e, p, q, scale, SimError, human_definitions)
+                maps[eid] = info
+                spec_bodies[eid] = (root, np.zeros(3), np.array([1.,0.,0.,0.]))
+            elif cfg:
                 if not np.allclose(scale, [1, 1, 1]):
                     raise SimError('UNSUPPORTED_CAPABILITY', '原生 articulation 缩放须先由资产适配器物理化: ' + eid)
                 if cfg.get('sourcePath'):
@@ -1377,6 +1446,8 @@ class World:
                     geom.conaffinity = int(c.get('conaffinity', 1)) if c.get('enabled', True) else 0
                 spec_bodies[eid] = (body, np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]))
                 maps[eid] = {'entity': copy.deepcopy(e), 'prefix': prefix, 'rootName': 'body', 'controller': copy.deepcopy(component.get('controller', {}))}
+            elif component.get('humanDefinition'):
+                pass
             elif self.scene_camera_declarations(e):
                 # 相机实体没有物理体，但它的相机声明（components.camera 或 viewport 存的
                 # components.viewerCamera.cameras[]）会由下面的相机装配进引擎，因此不算
@@ -1432,8 +1503,12 @@ class World:
         mj.mj_forward(model, data)
         for eid, info in maps.items():
             prefix = info['prefix']
-            bids = [i for i in range(1, model.nbody) if model.body(i).name.startswith(prefix)]
+            bids = [] if info.get('human',{}).get('mode')=='kinematic'else[i for i in range(1, model.nbody) if model.body(i).name.startswith(prefix)]
             info['body'] = model.body(prefix + info['rootName']).id if info['rootName'] else bids[0]
+            human.bind(model, data, info)
+            if info.get('human',{}).get('mode')=='kinematic':
+                info.update({'joints':{},'actuators':{},'freeJoints':{},'tendons':[],'tendonByActuator':{},'heldTargets':{},'flexGeometry':[],'cableGeometry':[],'sites':{'joint/'+name:sid for name,sid in info['humanJointSiteIds'].items()}})
+                continue
             joints = {}
             for i in range(model.njnt):
                 name = model.joint(i).name
@@ -1992,20 +2067,31 @@ class World:
         # 没有旧世界可保留）才维持 unavailable 语义。
         try:
             compiled = self.compile(scene, collision_patches)
+            prepared_gpu = self.prepare_human_gpu(compiled)
         except Exception as exc:
             if self.scene is None:
                 self.status = 'unavailable'
                 self.scene = copy.deepcopy(scene)
                 raise
-            if isinstance(exc, SimError):
+            if isinstance(exc, SimError) or str(getattr(exc, 'code', '')).startswith(('HUMAN_GPU_', 'HUMAN_CUDA_')):
                 raise
             raise SimError('COMPILE_FAILED', '场景重编译失败，上一可用世界已完整保留: ' + str(exc)) from exc
         self.stop({})
+        if self.human_gpu is not None:
+            try:
+                self.human_gpu.close()
+            except BaseException:
+                if prepared_gpu is not None:
+                    prepared_gpu.close()
+                raise
+        self.human_gpu = prepared_gpu
         self.control_owners.clear()
         self.assisted.clear()
         self.spec, self.child_specs, self.model, self.data, self.entities, self.ground_names, self.warnings, self.scene_cameras,self.replaced_template_ground,self.native_ground_names = compiled
         # 新模型没有旧代的 Freeze eq 索引：不把旧 native 保持带到新代次。
         self.frozen = {}
+        # 执行器静态量按 id(model) 缓存；旧 model 释放后 id 可被新 model 复用，换代时必须清空。
+        self._actuator_statics.clear()
         self.scene = copy.deepcopy(scene)
         from collision_topology import patch_ownership
         self.collision_patch_owners = patch_ownership(self, collision_patches)
@@ -2024,6 +2110,11 @@ class World:
         if self.initial_overlap['status'] != 'CLEAR':
             self.warnings.append({'code': 'INITIAL_OVERLAP' if self.initial_overlap['pairs'] else 'INITIAL_OVERLAP_UNVERIFIED',
                                   'message': '初始物理重叠：' + json.dumps(self.initial_overlap, ensure_ascii=False)})
+        # 编译完成后所有长期对象（model/data/entities/GPU批）都已建立：先解冻旧World对象使其
+        # 可被回收（长会话重建不泄漏），清一次再冻结；之后每步gen-2周期GC不再遍历这批长期对象。
+        gc.unfreeze()
+        gc.collect()
+        gc.freeze()
         return self.handle()
 
     def describe(self, eid):
@@ -2078,6 +2169,8 @@ class World:
         describe_source = describe_mujoco.get('sourcePath') or describe_mujoco.get('modelPath')
         model_version = str(describe_source) if describe_source else f"inline-mjcf:{getattr(self.model, 'name', '') or 'unnamed'}#{len(describe_resources) if isinstance(describe_resources, list) else 0}res"
         result = {'entityId': eid, 'modelVersion': model_version, 'expectedGeneration': self.generation, 'collisionContextVersion': str(self.generation), 'joints': result, 'controlledJointNames': [name for name, j in info['joints'].items() if j['actuator']], 'tendonActuators': tendons, 'freeBases': free_bases, 'controller': info['controller']}
+        if info.get('human') and self.human_compute_device != 'cpu':
+            result['controller'] = {**info['controller'], 'humanCompute': self.human_compute_facts()}
         from robot_authoring import authoring_description
         result.update(authoring_description(self, info))
         if info['controller'].get('type') == 'drone':
@@ -2107,13 +2200,15 @@ class World:
                 return self.free_base(name, joint)
         return None
 
-    def observe(self, selection=None):
+    def observe(self, selection=None, _human_text=None):
         self.require_ready()
         selection = selection or {}
         only = selection.get('entityIds')
         entities = []
         scene_poses = None
         authored_poses = world_poses(self.scene)
+        human_infos = [info for eid, info in self.entities.items() if info.get('human') and (not only or eid in only)]
+        human_poses = _human_text if _human_text is not None else human.observe_many(self, human_infos)
         for e in self.scene['entities']:
             eid = e['entityId']
             if only and eid not in only:
@@ -2124,6 +2219,11 @@ class World:
                 q = self.data.xquat[b].tolist()
                 transform = {'position': self.data.xpos[b].tolist(), 'quaternion': [*q[1:], q[0]], 'scale': authored_poses[eid][2].tolist()}
                 item = {'entityId': eid, 'transform': transform, 'joints': {'names': list(info['joints']), 'positions': [float(self.data.qpos[j['qpos']]) for j in info['joints'].values()], 'velocities': [float(self.data.qvel[j['dof']]) for j in info['joints'].values()]}}
+                if info.get('human'):
+                    item['humanPose'] = human_poses[id(info)]
+                    if info['human']['mode'] == 'ragdoll':
+                        # 用原生骨盆body减去已知绑定偏移，得到实体脚底参考帧；绝不回报静态Scene创作姿态。
+                        item['transform'] = human.entity_transform(self, info)
                 if info['tendons']:
                     # 肌腱坐标直接读引擎自身缓存 data.ten_length/ten_velocity，不用关节角重算代替。
                     item['tendons'] = {'names': [t['name'] for t in info['tendons']], 'lengths': [float(self.data.ten_length[t['id']]) for t in info['tendons']], 'velocities': [float(self.data.ten_velocity[t['id']]) for t in info['tendons']]}
@@ -2219,6 +2319,32 @@ class World:
             # count 是发生穿透的 geom 对数量（无穿透为 0），worst 按 minDistanceM 升序取最严重的若干对。
             frame['penetrations'] = {'count': len(pairs), 'worst': sorted(pairs.values(), key=lambda pair: pair['minDistanceM'])[:8]}
         return frame
+
+    def _frame_reference(self):
+        """原路径：逐字节基准。快路径任何不一致一律退回这里。"""
+        return json.dumps({'event': 'frame', 'frame': self.observe()}, allow_nan=False, separators=(',', ':'))
+
+    def frame_text(self):
+        """帧输出快路径：与 _frame_reference() 逐字节相同，但 humanPose 不走 dict→dumps 全量重建。
+
+        humanPose 槽位先放占位字符串，正常 observe 序列化其余部分后整体替换为
+        human.observe_many_text 预渲染片段；占位符带引号计数校验，恰好一次才替换，
+        否则退回原路径。帧字段、精度、键序与原协议完全一致。
+        """
+        humans = [info for info in self.entities.values() if info.get('human')]
+        if not humans:
+            return self._frame_reference()
+        texts = human.observe_many_text(self, humans)
+        placeholders = {id(info): f'{_FRAME_PLACEHOLDER}{k}' for k, info in enumerate(humans)}
+        text = json.dumps({'event': 'frame', 'frame': self.observe(_human_text=placeholders)}, allow_nan=False, separators=(',', ':'))
+        # 单遍扫描校验+替换：每个占位符带引号必须恰好出现一次（0个或多次都退回原路径），
+        # 否则任何实体名/值恰好含占位符都会静默错帧。re.sub 一遍完成全部替换，避免逐人扫全帧。
+        pattern = _frame_placeholder_pattern()
+        found = pattern.findall(text)
+        if len(found) != len(humans) or set(map(int, found)) != set(range(len(humans))):
+            return self._frame_reference()
+        fragments = [texts[id(info)] for info in humans]
+        return pattern.sub(lambda m: fragments[int(m.group(1))], text)
 
     def actuator(self, info, name):
         if name not in info['actuators']:
@@ -2330,7 +2456,15 @@ class World:
         info = self.info(m['entityId'])
         kind = m['kind']
         m['_startPositions'] = self.data.xpos[info['body']].copy()
-        if kind == 'control':
+        if kind == 'human':
+            human.prepare(self, info, m, SimError)
+            if self.human_compute_device != 'cpu' and info['human']['mode'] == 'kinematic':
+                clip = m['_route'].get('clip')
+                if not clip or info['human']['source']['kind'] != 'rigged-glb':
+                    raise SimError('HUMAN_GPU_CLIP_REQUIRED', 'CUDA人体当前支持rigged-glb原始clip；无clip/占位人体请显式选择CPU')
+                positions, quaternions = self.sample_human_clip(info['human'], np.asarray([m['_origin']]), np.asarray([m['_rootQ']]), np.zeros(1), np.asarray([info['human'].get('phase', 0)]), clip)
+                m['_lastClipPose'] = {name: (positions[0, i], quaternions[0, i]) for i, name in enumerate(info['human']['_poseRuntime']['names'])}
+        elif kind == 'control':
             if self.clock != 'manual':
                 raise SimError('UNSUPPORTED_CAPABILITY', '按物理步采样的 control 需要显式 manual world')
             steps = m.get('stepCount')
@@ -2577,8 +2711,10 @@ class World:
         prepared = [self.prepare_motion(m) for m in motions]
         # 载荷事实基线：动作开始前记录全部已加载实体的实测世界位置；finish 只在此基础上报真实位移，
         # 不为没有基线（排队中未开始）的动作编造起点。
+        payload_start = self.entity_positions()
         for motion in prepared:
-            motion['_payloadStart'] = self.entity_positions()
+            # 同一接纳步的不可变原生起点快照共享；逐成员历史仍各自独立。
+            motion['_payloadStart'] = payload_start
             motion['_payloadHistory'] = {}
         controls = [m for m in prepared if m['kind'] == 'control']
         if controls and (len(controls) != len(prepared) or len({m['stepCount'] for m in controls}) != 1):
@@ -2605,7 +2741,28 @@ class World:
                 motion['_lastStep'] = start + motion['_steps'] - 1
         if all(m['kind'] == 'thrust' for m in prepared):
             self.active[aid]['endStep'] = start + max(m['_steps'] for m in prepared) - 1
+        # 动作prepare建立的大量长期对象（motion/_payloadStart/路径表）同步冻结；unfreeze先放行
+        # 已退役的旧对象，避免长会话累积不可回收。
+        gc.unfreeze()
+        gc.collect()
+        gc.freeze()
         return copy.deepcopy(receipt)
+
+    def _actuator_static(self, actuator_id):
+        """编译后不变的执行器属性按(model,actuator_id)缓存；model重建后键自然失效。"""
+        key = (id(self.model), actuator_id)
+        entry = self._actuator_statics.get(key)
+        if entry is None:
+            if len(self._actuator_statics) >= 256:
+                self._actuator_statics.clear()
+            entry = {'servo': fixed_position_servo(self.model, actuator_id),
+                     'name': self.model.actuator(actuator_id).name,
+                     'gear': float(self.model.actuator_gear[actuator_id, 0]),
+                     'gain': float(self.model.actuator_gainprm[actuator_id, 0]),
+                     'ctrllimited': bool(self.model.actuator_ctrllimited[actuator_id]),
+                     'ctrlrange': self.model.actuator_ctrlrange[actuator_id].copy()}
+            self._actuator_statics[key] = entry
+        return entry
 
     def set_joint(self, info, name, target, dt):
         j = info['joints'][name]
@@ -2619,12 +2776,13 @@ class World:
             # gaintype=fixed、biastype=affine、gainprm[0]==-biasprm[1]、biasprm[0]==0）才敢按 gear 换算；
             # 旧启发式判成 position 但力律不匹配的是未知传动映射，明确拒绝，不猜参数。
             actuator_id = a['id']
-            if not fixed_position_servo(self.model, actuator_id):
+            static = self._actuator_static(actuator_id)
+            if not static['servo']:
                 raise SimError('INVALID_CONTROL_MAPPING',
-                               '执行器 ' + self.model.actuator(actuator_id).name + ' 未通过固定位置力律核对（需 dyntype=none、'
+                               '执行器 ' + static['name'] + ' 未通过固定位置力律核对（需 dyntype=none、'
                                'gaintype=fixed、biastype=affine、gainprm[0]==-biasprm[1]、biasprm[0]==0；旧启发式判定为 position），'
                                '无法把关节坐标参考换算成 ctrl，本通道不猜未知传动映射')
-            gear = float(self.model.actuator_gear[actuator_id, 0])
+            gear = static['gear']
             if gear == 0:
                 raise SimError('INVALID_CONTROL_MAPPING',
                                '执行器 ' + self.model.actuator(actuator_id).name + ' 的 gear=0，关节坐标参考无法换算成 ctrl')
@@ -2637,7 +2795,7 @@ class World:
             # 显式 false 的训练 policy 不被隐式改写）。按真实编译模型的 gear/gain 把关节 bias 力矩换算到源
             # ctrl，保留源 kp/kv/gear/forcerange 与 ctrlrange 钳制；gear/gain 为 0 时明确不换算，不猜参数。
             if cfg.get('gravityCompensation', cfg.get('type') != 'quadruped'):
-                gain = float(self.model.actuator_gainprm[actuator_id, 0])
+                gain = static['gain']
                 if gain:
                     ctrl += float(self.data.qfrc_bias[j['dof']]) / (gear * gain)
         elif a['mode'] == 'velocity':
@@ -2654,13 +2812,15 @@ class World:
                                'jointKp/jointKd (or kp/kd); refusing to guess unknown PD parameters')
             info['heldTargets'][name]=target
             ctrl = (target - q) * kp - v * kd + (self.data.qfrc_bias[j['dof']] if cfg.get('gravityCompensation', cfg.get('type') != 'quadruped') else 0)
-        if self.model.actuator_ctrllimited[a['id']]:
-            ctrl = float(np.clip(ctrl, *self.model.actuator_ctrlrange[a['id']]))
+        if self._actuator_static(a['id'])['ctrllimited']:
+            ctrl = float(np.clip(ctrl, *self._actuator_static(a['id'])['ctrlrange']))
         self.data.ctrl[a['id']] = ctrl
 
     def apply_motion(self, m, elapsed):
         info = self.info(m['entityId'])
-        if m['kind'] == 'control':
+        if m['kind'] == 'human':
+            human.advance(self, info, m, elapsed)
+        elif m['kind'] == 'control':
             for entry in m['_controls']:
                 if entry['mode'] == 'position':
                     self.data.ctrl[entry['actuator']] = entry['ctrl']
@@ -2736,7 +2896,19 @@ class World:
             for name, value in zip(m['jointNames'], target):
                 self.set_joint(info, name, value, self.model.opt.timestep)
 
+    def release_human_owner(self, aid, motion):
+        """只撤销该人物当前aid；短成员到窗可释放，旧batch终结不得中性化后来拥有者。"""
+        if motion.get('_humanOwnerReleased'):
+            return
+        motion['_humanOwnerReleased'] = True
+        motion['_neutralized'] = True
+        eid = motion['entityId']
+        if self.control_owners.get(eid) == aid:
+            self.neutralize(eid)
+            self.control_owners.pop(eid, None)
+
     def neutralize(self, eid):
+        human.stop(self, self.info(eid))
         if self.model is None:
             return
         info = self.entities.get(eid)
@@ -2768,12 +2940,11 @@ class World:
         因此按已登记的实体前缀取最长匹配，不切分字符串猜实体，也不猜世界 geom 归属。"""
         if not name:
             return None
-        matched = None
-        for eid, info in self.entities.items():
-            prefix = info['prefix']
-            if name.startswith(prefix) and (matched is None or len(prefix) > len(self.entities[matched]['prefix'])):
-                matched = eid
-        return matched
+        prefix=name
+        while '/'in prefix:
+            prefix=prefix.rsplit('/',1)[0]
+            if prefix in self.entities:return prefix
+        return None
 
     def entity_positions(self):
         """全部已加载实体的实测世界位置快照（动作窗口基线与逐步采样共用）。"""
@@ -2786,39 +2957,41 @@ class World:
     def contact_summary(self, actor):
         """本物理步的真实接触，按"被接触对象"聚合：只统计 actor 实体 geom ↔ 其他实体 geom 的接触对。
         接触来自引擎 data.contact，力来自 mj_contactForce；不推断抓取、不判定任务成功。"""
-        summary = {}
+        return self.contact_summaries({actor}).get(actor,{})
+
+    def contact_summaries(self, actors):
+        """同一步全部动作共享一次真实contact遍历和力读数；不缓存跨步或跨控制修改的接触。"""
+        summaries = {}
         from static_triangle_surface import contact_side, zero_dof_contact
         if self.data is None:
-            return summary
+            return summaries
+        filter_static=any(w.get('code')=='STATIC_TRIANGLE_ISLAND_COMPAT' for w in self.warnings)
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
-            if any(w.get('code')=='STATIC_TRIANGLE_ISLAND_COMPAT' for w in self.warnings) and zero_dof_contact(self.model,contact):
+            if filter_static and zero_dof_contact(self.model,contact):
                 continue
             first = self.entity_of_geom(contact_side(self.model, contact, 0)[2])
             second = self.entity_of_geom(contact_side(self.model, contact, 1)[2])
-            if first == actor:
-                other = second
-            elif second == actor:
-                other = first
-            else:
-                continue
-            if other is None or other == actor:
+            if first is None or second is None or first==second or first not in actors and second not in actors:
                 continue
             force = np.zeros(6)
             mj.mj_contactForce(self.model, self.data, i, force)
-            entry = summary.setdefault(other, {'contactCount': 0, 'maxContactForceN': 0.0})
-            entry['contactCount'] += 1
-            entry['maxContactForceN'] = max(entry['maxContactForceN'], float(np.linalg.norm(force[:3])))
-        return summary
+            magnitude=float(np.linalg.norm(force[:3]))
+            for actor,other in((first,second),(second,first)):
+                if actor not in actors:continue
+                entry = summaries.setdefault(actor,{}).setdefault(other, {'contactCount': 0, 'maxContactForceN': 0.0})
+                entry['contactCount'] += 1
+                entry['maxContactForceN'] = max(entry['maxContactForceN'], magnitude)
+        return summaries
 
-    def sample_payload(self, motion):
+    def sample_payload(self, motion, contacts=None):
         """逐物理步采样载荷事实：接触步数与该对象相对动作起点的最大抬升。
         只累计已开始的动作用户可见窗口，未开始的排队动作不提前采样。"""
         start = motion.get('_payloadStart')
         if start is None:
             return
         history = motion.setdefault('_payloadHistory', {})
-        for eid, entry in self.contact_summary(motion['entityId']).items():
+        for eid, entry in (self.contact_summary(motion['entityId'])if contacts is None else contacts).items():
             record = history.setdefault(eid, {'contactSteps': 0, 'maxLiftM': None})
             record['contactSteps'] += 1
             origin = start.get(eid)
@@ -2860,11 +3033,15 @@ class World:
 
     def _motion_effect(self, aid, active, motion, status):
         """单个成员在**当前物理步**的逐成员事实；部分停止在停止当时调用它冻结被撤销成员，不沿用后来状态。"""
+        if motion['kind'] == 'human':
+            self.release_human_owner(aid, motion)
         receipt = self.receipts[aid]
         info = self.info(motion['entityId'])
         displacement = (self.data.xpos[info['body']] - motion['_startPositions']).tolist()
         effect = {'entityId': motion['entityId'], 'kind': motion['kind'], 'displacementM': displacement}
-        if motion['kind'] == 'thrust':
+        if motion['kind'] == 'human':
+            effect.update({'mode': info['human']['mode'], 'nativePose': human.observe(self, info), 'targetReached': None, 'controller': 'kinematic-path' if info['human']['mode'] == 'kinematic' else 'uncontrolled-ragdoll'})
+        elif motion['kind'] == 'thrust':
             # 回执分开报告四类事实，不把估算标成实测，也不据此宣称悬停/航点等任务成功：
             #   requestedWrench            请求（SI 体坐标语义）
             #   ctrlPlanned / ctrlApplied  计划控制值 / 窗口内真实写入过的控制原值（从未驱动时为 null）
@@ -3030,7 +3207,7 @@ class World:
                 hits = [m for m in motions if m['entityId'] in selected]
                 if not hits:
                     continue
-                affected.update(m['entityId'] for m in hits)
+                affected.update(m['entityId'] for m in hits if m['kind'] != 'human' or self.control_owners.get(m['entityId']) == aid)
                 misses = [m for m in motions if not any(m is h for h in hits)]
                 if misses:
                     # 部分停止：父 batch 留给未命中成员继续，命中成员的控制/效果在停止当时冻结。
@@ -3039,10 +3216,13 @@ class World:
                 self.finish(aid, 'cancelled', 'STOP_CONFIRMED')
                 stopped.append(copy.deepcopy(self.receipts[aid]))
             else:
-                affected.update(m['entityId'] for m in motions)
+                affected.update(m['entityId'] for m in motions if m['kind'] != 'human' or self.control_owners.get(m['entityId']) == aid)
                 self.finish(aid, 'cancelled', 'STOP_CONFIRMED')
                 stopped.append(copy.deepcopy(self.receipts[aid]))
         for eid in affected:
+            # 人物已按命中成员的aid撤控；不再次无条件清除可能属于新动作的归属。
+            if self.info(eid).get('human'):
+                continue
             self.neutralize(eid)
             self.control_owners.pop(eid, None)
         if self.status in ('ready', 'running'):
@@ -3268,8 +3448,12 @@ class World:
             # 在正常情况下逐步等价（mj_step 恰好推进 dt），但不会被引擎自动重置回退的时钟拖回早期相位。
             elapsed = (active['windowSteps'] + 1) * dt
             try:
+                human_motions=[m for m in active['motions']if m['kind']=='human']
+                batched=False
                 for m in active['motions']:
-                    self.apply_motion(m, elapsed)
+                    if m['kind']=='human'and len(human_motions)>1:
+                        if not batched:human_batch.advance(self,human_motions,elapsed);batched=True
+                    else:self.apply_motion(m, elapsed)
             except Exception as exc:
                 self.finish(aid, 'failed', str(exc))
         if self.clock == 'manual' and not self.active:
@@ -3316,12 +3500,17 @@ class World:
         # 载荷事实逐步采样：接触/位置取刚积分完成的这一步（与 observe 同源）；无活动动作或世界上
         # 没有其他实体时不做任何采样，不产生额外开销。
         if self.active and len(self.entities) > 1:
+            summaries=self.contact_summaries({m['entityId']for a in self.active.values()if a['startTime']is not None for m in a['motions']})
             for active in self.active.values():
                 if active['startTime'] is None:
                     continue
                 for motion in active['motions']:
-                    self.sample_payload(motion)
+                    self.sample_payload(motion,summaries.get(motion['entityId'],{}))
         for aid, active in list(self.active.items()):
+            if active['startTime'] is not None:
+                for motion in active['motions']:
+                    if motion['kind'] == 'human' and active['windowSteps'] * dt + 1e-12 >= motion['_duration']:
+                        self.release_human_owner(aid, motion)
             # 定时动作按已驱动步数到窗（步数 = 窗长/dt 向上取整，最多比墙钟口径晚一个 dt）；
             # 与 data.time 之差在正常运行下逐步等价，但不会被引擎重置后的时钟回退无限拖延。
             completed = self.step_index >= active['endStep'] if 'endStep' in active else active['startTime'] is not None and active['windowSteps'] * dt >= max(m['_end'] for m in active['motions'])
@@ -3329,7 +3518,7 @@ class World:
                 self.finish(aid, 'completed')
         self.status = 'running' if self.active else 'ready'
         if time.monotonic() - self.last_frame >= 1 / self.frame_hz:
-            emit({'event': 'frame', 'frame': self.observe()})
+            emit_text(self.frame_text())
             self.last_frame = time.monotonic()
 
     def assist(self, options):
@@ -4473,6 +4662,8 @@ class World:
 
     def close(self):
         self.stop({})
+        if self.human_gpu is not None:
+            self.human_gpu.close()
         self.status = 'closed'
         self.model = self.data = None
         self.entities = {}

@@ -85,15 +85,16 @@ jobs:
       #    `packages/benchmark-gymnasium/python/worker.py` 里 `from PIL import Image`）。
       #  · mujoco==3.13.0：原MJCF参考几何解析/默认落点正例；与发行Mu runtime锁一致，只compile/forward、不step/world。
       # 之后一律用这个 venv 的解释器，**不依赖 ubuntu-latest 是否碰巧预装 PyYAML**（那是偶然事实，不是前提）。
-      - name: Provision CI python venv (PyYAML + numpy + Pillow + pinned MuJoCo parser)
+      - name: Provision CI python venv (PyYAML + numpy + Pillow + pinned MuJoCo/OpenUSD parsers)
         run: |
           set -eu
           python3 -m venv .runtime/ci-py
           export TESTCI_PYTHON="$PWD/.runtime/ci-py/bin/python"
           echo "TESTCI_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
-          "$TESTCI_PYTHON" -m pip install -q pyyaml numpy pillow mujoco==3.13.0
+          "$TESTCI_PYTHON" -m pip install -q pyyaml numpy pillow mujoco==3.13.0 usd-core==26.5
           echo "LYAPUNOV_MUJOCO_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
-          "$TESTCI_PYTHON" -c "import yaml, numpy, PIL, mujoco; assert mujoco.__version__ == '3.13.0'; print('ci-py ok', yaml.__version__, numpy.__version__, PIL.__version__, mujoco.__version__)"
+          echo "LYAPUNOV_USD_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
+          "$TESTCI_PYTHON" -c "from pxr import Usd; assert Usd.GetVersion() == (0, 26, 5); import yaml, numpy, PIL, mujoco; assert mujoco.__version__ == '3.13.0'; print('ci-py ok', yaml.__version__, numpy.__version__, PIL.__version__, mujoco.__version__)"
 
       - name: Validate skill files
         run: |

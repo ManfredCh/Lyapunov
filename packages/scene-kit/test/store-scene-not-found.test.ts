@@ -17,7 +17,7 @@
  * 用真 `SceneStore` / 真 `SceneOperations` / 真文件 / 真临时目录，不是替身。
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile, stat, utimes } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Entity, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
@@ -77,6 +77,44 @@ beforeEach(async () => {
 afterEach(async () => { await rm(base, { recursive: true, force: true }) })
 
 const entity = (entityId: string): Entity => ({ entityId, name: entityId, transform: identityTransform(), resources: [], components: {} })
+
+test('状态省读标记只来自完整校验；同rev原地改写/原子替换/坏JSON/删除均失效', async () => {
+  await operationsA.create({sceneId: SHARED})
+  const initial=await storeA.snapshot(SHARED)
+  await writeFile(storeA.path(SHARED),JSON.stringify({...initial,entities:[entity('initial')]}))
+  const original=await storeA.snapshot(SHARED),version=storeA.readVersion(original)!
+  expect(version.revision).toBe(0)
+  expect(storeA.readVersion(structuredClone(original))).toBeUndefined()
+  expect(await storeA.unchangedSince(SHARED,version)).toBe(true)
+  expect(await storeA.unchangedSince('other',version)).toBe(false)
+  // 写入同字节数、恢复mtime：ctime和纳秒身份仍须让同rev外改失效。
+  const path=storeA.path(SHARED),before=await stat(path)
+  await writeFile(path,JSON.stringify({...original,entities:[entity('updated')]}))
+  await utimes(path,before.atime,before.mtime)
+  expect(await storeA.unchangedSince(SHARED,version)).toBe(false)
+  const changed=await storeA.snapshot(SHARED),changedVersion=storeA.readVersion(changed)!
+  expect(changed.revision).toBe(0);expect(changed.entities[0]!.entityId).toBe('updated')
+  await atomicJSON(path,changed)
+  expect(await storeA.unchangedSince(SHARED,changedVersion)).toBe(false)
+  await writeFile(path,'{broken')
+  expect(await storeA.unchangedSince(SHARED,changedVersion)).toBe(false)
+  await expect(storeA.snapshot(SHARED)).rejects.toThrow()
+  await atomicJSON(path,{...original,entities:[{...entity('invalid'),transform:{position:[0,0,0],quaternion:[0,0,0,0],scale:[1,1,1]}}]})
+  await expect(storeA.snapshot(SHARED)).rejects.toThrow('INVALID_TRANSFORM')
+  await rm(path)
+  await expect(storeA.unchangedSince(SHARED,changedVersion)).rejects.toThrow(`SCENE_NOT_FOUND: ${SHARED}`)
+})
+
+test('省读元数据不能跨会话复用；正常并发提交后下一次检查必读新版本',async()=>{
+  await operationsA.create({sceneId:SHARED})
+  const other=new SceneOperations(sessionB);await other.create({sceneId:SHARED})
+  const snapshot=await storeA.snapshot(SHARED),version=storeA.readVersion(snapshot)!
+  expect(await storeB.unchangedSince(SHARED,version)).toBe(false)
+  const committed=await Promise.allSettled([operationsA.scene.commit({sceneId:SHARED,expectedRevision:0,patch:[{op:'add',entity:entity('first')}]}),operationsA.scene.commit({sceneId:SHARED,expectedRevision:0,patch:[{op:'add',entity:entity('second')}]})])
+  expect(committed.filter(row=>row.status==='fulfilled')).toHaveLength(1)
+  expect(await storeA.unchangedSince(SHARED,version)).toBe(false)
+  expect((await storeA.snapshot(SHARED)).revision).toBe(1)
+})
 
 async function errorOf(run: () => Promise<unknown>): Promise<Error & { code?: string }> {
   try { await run() } catch (error) { return error as Error & { code?: string } }

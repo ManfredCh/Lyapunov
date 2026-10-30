@@ -10,7 +10,7 @@ root=Path(root_path);path=root/('packages/sim-'+engine+'/python/worker.py')
 sys.path.insert(0,str(path.parent))
 spec=importlib.util.spec_from_file_location('ground_runtime_worker',path)
 worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
-worker.emit=lambda value:None
+worker.emit=lambda value:None;worker.emit_text=lambda value:None
 payload=json.loads(Path(scene_path).read_text())
 options={'worldId':'ground-runtime-'+engine,'clock':'realtime','timestepS':.002,'ground':True,'device':'cpu'}
 value=worker.World(payload['default'],options)

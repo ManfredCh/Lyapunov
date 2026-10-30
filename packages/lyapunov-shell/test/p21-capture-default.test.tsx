@@ -18,7 +18,7 @@ const tr=(_zh:string,en:string)=>en
 
 function withDom(run:(dom:{window:any;document:any;root:Root;flush:()=>Promise<void>})=>Promise<void>){
  return async()=>{
-  const {JSDOM}=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))('jsdom') as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:any}}
+  const {JSDOM}=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))('jsdom') as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:any}}
   const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true})
   const saved=new Map<string,PropertyDescriptor|undefined>()
   for(const key of ['window','document','HTMLElement','Node','navigator','requestAnimationFrame','cancelAnimationFrame','IS_REACT_ACT_ENVIRONMENT']){

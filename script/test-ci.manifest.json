@@ -906,6 +906,13 @@
       "reason": "Round71 closed-set natural-language engine install classification and next-turn one-time confirmation tests; pure local logic, no process/install/engine/EULA side effect."
     },
     {
+      "path": "packages/lyapunov-shell/test/crowd-panel.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "人群工具入口与面板：rail「人群」入口次序、Tabler walk 图标路径与 SOURCE.json 一致性、ToolId 白名单、crowd-panel SSR（世界状态/分组计数/预设下拉/禁用原因/空态）、crowd-control 技能随包登记与行人关键词指针注入。纯夹具 SSR/纯函数路由，无网络/引擎。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/engine-panel-decision.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1178,7 +1185,7 @@
       "declaredRunner": "bun:test",
       "markers": [],
       "decision": "include",
-      "reason": "P21：真实 Workbench + jsdom——Native 且有真实 Inspector 才给 Viewer 让列（.lya-wb-canvas paddingRight 280），Notes/关闭工具 0 空白；Capture 首屏三层 details 默认关闭、长帮助与“三张截图”教程不上屏、展开保存视角仍可点。SDK jsdom + viewer/HTTP 替身，不出网不触引擎。"
+      "reason": "P21：真实 Workbench + jsdom——Native 且有真实 Inspector 才给 Viewer 让列（.lya-wb-canvas paddingRight 280），Notes/关闭工具 0 空白；Capture 首屏三层 details 默认关闭、长帮助与“三张截图”教程不上屏、展开保存视角仍可点；产品“终端”入口按当前会话调用原生 terminal tab，A→B→A 不产生产品 xterm 视图，文件/产物入口保留。SDK jsdom + viewer/HTTP 替身，不出网不触引擎。"
     },
     {
       "path": "packages/lyapunov-shell/test/pack-library-actions.test.ts",
@@ -2782,6 +2789,15 @@
       "reason": "A05：真实MuJoCo NDJSON RPC需本机SDK，单独明确运行并记录，默认离线CI不冒充已验。"
     },
     {
+      "path": "packages/sim-mujoco/test/frame-text.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：P1 帧输出快路径单元核对，需真 sim-python 解释器（LYAPUNOV_MUJOCO_PYTHON，含 mujoco）；默认离线CI不冒充已验。独立命令 LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-transform-types --test packages/sim-mujoco/test/frame-text.test.ts，整帧 byte-for-byte 端到端等价由真 worker 等价门覆盖。"
+    },
+    {
       "path": "packages/sim-mujoco/test/lidar-scan.test.ts",
       "declaredRunner": "node:test",
       "markers": [
@@ -3399,8 +3415,8 @@
       "declaredRunner": "node:test",
       "markers": [],
       "decision": "include",
-      "reason": "在固定Git对象的本地隔离副本验证完整源码、补丁组合和拒绝负对照；不启动Host、不修改实际SDK或用户数据、不联网。per-entry 超时300000ms：RC2约14134个源码文件，干净runner的反复clone／字节验签在120000ms上限终止，已有断言通过但入口未完。仅延长此离线入口的有界等待，不改断言、负对照、真实Provider预算或其他入口。",
-      "timeoutMs": 300000
+      "reason": "在固定Git对象的本地隔离副本验证完整源码、补丁组合和拒绝负对照；不启动Host、不修改实际SDK或用户数据、不联网。per-entry 超时600000ms：RC2约14134个源码文件；600000ms 依据 Dev 根 2026-10-26 完整单跑实测 17 pass / 0 fail、473.59s（7分53秒），Issue 尚未单独实测、待主控完整集合验收；原 300000ms 在第三个重活后被截断，600000ms 留约126s余量。仅延长此离线入口的有界等待，不改断言、负对照、真实Provider预算或其他入口。",
+      "timeoutMs": 600000
     },
     {
       "path": "script/verify-asset-layout.test.ts",
@@ -3450,6 +3466,91 @@
       "markers": [],
       "decision": "include",
       "reason": "V10 DomainCommandCard DOM：被动成功读取静默、失败可见，SSR 纯逻辑不出网。；无外部标记：离线纯逻辑，不触碰供应商模型/网络抓取/权重下载/GPU/Unity/Blender/Isaac/本机 lane 凭据"
+    },
+    {
+      "path": "packages/lyapunov-workspace/test/native-terminal-ownership.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "F01：真实 TerminalController + 受控 subprocess 替身验证两个会话可各自持有同名终端、输入只接受当前 attachment、关闭等待真实 terminate 完成且不连带其他会话；静态守卫确认工作区宿主不再保留 node-pty/xtermSessions/xterm-output/xterm-spawn，客户端入口汇入 sidebarRight 原生 terminal 标签，且旧 terminal-xterm/xterm-style 产品宿主文件已删除。离线、不启动真实 shell/引擎。"
+    },
+    {
+      "path": "packages/policy-registry/test/policy-run-ownership.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "F05/F07：受控 match/execute/download 替身 + 原生 Jobs 桩验证 owner key 含原生会话身份（两个会话同名 world/entity 可同时运行、停止只命中自己的 run）；插件释放请求取消本插件创建的执行/下载 Job 并等待原始 Promise done，正常 AbortError 不报清理失败、真实清理错误传播为 POLICY_PLUGIN_CLEANUP_FAILED、匹配期间卸载不再新建 Job，且不等待无关 Job。离线、不启动引擎/模型。"
+    },
+    {
+      "path": "packages/human-crowd/test/shoe-selection.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "显式离线鞋拓扑选择：高foot权重衣摆与鞋仍按原三角连通区分，保UV缝重复点，同高歧义拒绝。仅Python3标准库小夹具，不启动Blender/引擎/GPU/网络。"
+    },
+    {
+      "path": "packages/human-crowd/test/crowd.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "人体创建/合法GLB导入与许可、骨架共享、seed、保存重开、场景隔离及Viewer只消费物理姿态的离线行为。无网络/SDK，不冒充原生碰撞。"
+    },
+    {
+      "path": "packages/scene-kit/test/simready-assets.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "SimReady离线协议：固定revision、镜像官方跳转预检拒绝、未命中与失败区分、BOM哈希、跨厂商别名与缓存。"
+    },
+    {
+      "path": "packages/scene-kit/test/usd-native.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "需要显式安装usd-core与LYAPUNOV_USD_PYTHON；实际OpenUSD解析/多实例/变体/可搬迁导出，不能归入无外部运行时默认集。"
+    },
+    {
+      "path": "packages/human-crowd/test/native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要已安装MuJoCo Python与原生模型/OSMesa条件。显式LYAPUNOV_MUJOCO_PYTHON后运行 node --experimental-transform-types --test packages/human-crowd/test/native.test.ts。真实World逐tick路径连续/暂停停止/墙与Panda默认停障/ragdoll/批量隔离，以及资源库导入GLB动作在产品Provider内采样。缺解释器明确skip，不算原生通过。"
+    },
+    {
+      "path": "packages/viewer/test/usd-visual.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "USD源prim绑定与同Frame body矩阵的真实Three对象更新；覆盖父变换不重复、移动/旋转/缩放和身份拒绝，不含WebGL/GPU。"
+    },
+    {
+      "path": "packages/human-crowd/test/isaac-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要显式已有Isaac6.0.1及既有EULA确认、usd-core解释器；CPU/rendering:none真实同world原生USD静态/关节/自由刚体+人体，原生PhysX kinematic targets、默认停障/接触、暂停/选择性停止/同帧Viewer和高级能力具名拒绝。运行LYAPUNOV_ISAAC_PYTHON=<SDK> LYAPUNOV_USD_PYTHON=<usd-core> node --experimental-transform-types --test packages/human-crowd/test/isaac-native.test.ts；缺条件明确skip，不算原生通过。"
+    },
+    {
+      "path": "packages/human-crowd/test/external-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "not-run：需要已验证固定字节的Khronos官方CesiumMan外部GLB/许可文件与既有MuJoCo解释器；不在默认CI联网。显式LYAPUNOV_EXTERNAL_HUMAN_ASSETS=<缓存目录> LYAPUNOV_MUJOCO_PYTHON=<已有解释器> node --experimental-transform-types --test packages/human-crowd/test/external-native.test.ts。真实57条通道、矩阵/单位、水平根轨迹和髋部Z起伏、保存重开与原生动作；缺条件明确skip，不冒充外部通用性通过。"
+    },
+    {
+      "path": "packages/scene-kit/test/warehouse-catalog.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "旧Warehouse固定源元数据快照/CSV字段、LFS与Git身份、资产检索详情、刷新失败显式状态和禁止自动官方缩略图；默认不访问网络、不下载真实资产。"
     }
   ]
 }

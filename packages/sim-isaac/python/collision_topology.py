@@ -88,7 +88,20 @@ def collision_topology(world,selection,rendering=False):
                 if ancestor.HasAPI(UsdPhysics.RigidBodyAPI):row['dynamic']=UsdPhysics.RigidBodyAPI(ancestor).GetRigidBodyEnabledAttr().Get()is not False;break
                 ancestor=ancestor.GetParent()
             if 'dynamic'not in row:row['dynamic']=False
-            if eid:row['entityId']=eid
+            if eid:
+                row['entityId']=eid
+                entry=world.entities[eid]
+                if entry.get('metadata',{}).get('nativeUsd'):
+                    source_root=entry['metadata'].get('nativeReferencedPrim')
+                    runtime_root=entry['path']+'/source'
+                    if source_root and (path==runtime_root or path.startswith(runtime_root+'/')):
+                        row['runtimePrimPath']=path
+                        row['sourcePrimPath']=source_root+path[len(runtime_root):]
+                        row['name']=eid+row['sourcePrimPath']
+                        if ancestor and ancestor.IsValid():
+                            body_path=str(ancestor.GetPath())
+                            if body_path==runtime_root or body_path.startswith(runtime_root+'/'):row['sourceBodyPrimPath']=source_root+body_path[len(runtime_root):]
+
             if include:row['geometry']={k:v for k,v in shape.items()if k!='axis'}
             geoms.append(row)
     return {'source':'isaac-compiled','worldId':world.id,'generation':world.generation,'sceneRevision':world.revision,'stepIndex':world.index,'geoms':geoms,'geometryIncluded':bool(include),'omitted':omitted}

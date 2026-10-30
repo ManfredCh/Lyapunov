@@ -48,13 +48,15 @@ test("漫游帮助写明Q下降/E上升及Shift倍率，视角中心与模型平
 
 
 test("原Workbench同Scene重建与旧promise隔离；右键当帧批注跨布局仍建marker并保存",async()=>{
- const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+ const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','HTMLElement','Node','navigator','localStorage','sessionStorage','requestAnimationFrame','cancelAnimationFrame','IS_REACT_ACT_ENVIRONMENT']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,value:key==='IS_REACT_ACT_ENVIRONMENT'?true:typeof dom.window[key]==='function'&&key.includes('AnimationFrame')?dom.window[key].bind(dom.window):dom.window[key]})}
  saved.set('ResizeObserver',Object.getOwnPropertyDescriptor(globalThis,'ResizeObserver'));Object.defineProperty(globalThis,'ResizeObserver',{configurable:true,value:class{observe(){}disconnect(){}}})
  saved.set('fetch',Object.getOwnPropertyDescriptor(globalThis,'fetch'))
- const scene={sceneId:'same-scene',revision:1,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'annotation-entity',name:'Toolbox body',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}}]};let host='host-a'
- globalThis.fetch=(async(input:any)=>{const url=String(input);const data=url.includes('/state?')?{hostInstanceId:host,scene,worlds:[],providerAvailable:false}:url.includes('/scenes')?[{sceneId:scene.sceneId}]:url.includes('/engine-preference')?{engine:'mujoco'}:url.includes('/selection')?{updated:true}:url.includes('/assets')?[]:[];return Response.json(data)}) as typeof fetch
+ const scene={sceneId:'same-scene',revision:1,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[{entityId:'annotation-entity',name:'Toolbox body',transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{}}]};let host='host-a',serverScene=scene,deliveredScene:typeof scene|undefined,deliveredHost:string|undefined
+ globalThis.fetch=(async(input:any)=>{const url=String(input);let data:unknown
+ if(url.includes('/state?')){const query=new URL(url,'http://fixture.invalid').searchParams,unchanged=deliveredHost===host&&deliveredScene===serverScene&&query.get('displaySceneId')===serverScene.sceneId&&query.get('displayRevision')===String(serverScene.revision);data={hostInstanceId:host,...unchanged?{}:{scene:serverScene},worlds:[],providerAvailable:false};deliveredHost=host;deliveredScene=serverScene}
+ else data=url.includes('/scenes')?[{sceneId:scene.sceneId}]:url.includes('/engine-preference')?{engine:'mujoco'}:url.includes('/selection')?{updated:true}:url.includes('/assets')?[]:[];return Response.json(data)}) as typeof fetch
  const instances:any[]=[];const view={position:[5,-6,4],quaternion:[0,0,0,1],target:[0,0,.7],up:[0,0,1],fov:50,near:.1,far:1000,zoom:1,navigation:'orbit'}
  viewerFactory=(options:any)=>{let resolve!:()=>void;const pending=new Promise<void>(done=>{resolve=done}),state={mode:'free',navigation:'orbit',dirty:false,saving:false,scope:{}};const calls:any[]=[];const mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial()),group=new THREE.Group(),camera=new THREE.PerspectiveCamera(50,1,.1,100);group.userData.entityId='annotation-entity';group.add(mesh);group.updateMatrixWorld(true);camera.position.set(0,0,5);camera.lookAt(0,0,0);camera.updateMatrixWorld(true);let width=200;const canvas=document.createElement('canvas');canvas.getBoundingClientRect=()=>({left:0,top:0,width,height:200,right:width,bottom:200,x:0,y:0,toJSON(){}});options.container.appendChild(canvas)
  const instance:any=new Proxy({calls,resolve,options,camera,renderer:{domElement:canvas},objects:new Map([['annotation-entity',{group}]]),markers:new Map(),annotationRoot:new THREE.Group(),annotations:[],selected:'annotation-entity',resize:()=>{width=800},select:(id:string)=>{instance.selected=id},setAnnotations:SceneViewer.prototype.setAnnotations,annotationHitAtPointer:(SceneViewer.prototype as any).annotationHitAtPointer,applyAnnotationHit:(SceneViewer.prototype as any).applyAnnotationHit,openContextMenu:(SceneViewer.prototype as any).openContextMenu,setScene:(value:any)=>{instance.snapshot=value;calls.push(['setScene',value]);return pending},subscribeObserverState:()=>()=>{},observerState:()=>state,getViewState:()=>view,environmentStatus:()=>({hdriMimeTypes:[],warnings:[],ignored:[]}),collisionStatus:()=>({status:'disabled'}),animationStatus:()=>({playing:false,clips:[]})},{get(target,key){if(key in target)return (target as any)[key];return (...args:any[])=>{calls.push([key,...args])}}});instances.push(instance);return instance}
@@ -78,11 +80,20 @@ test("原Workbench同Scene重建与旧promise隔离；右键当帧批注跨布�
   expect(rebuilt.annotations[0].anchor.world[2]).toBeCloseTo(.512);expect(rebuilt.annotations[0].anchor.normal).toEqual([0,0,1])
   expect(JSON.parse(localStorage.getItem('lyapunov.annotations.same-scene')??'[]').length).toBe(1)
   await flush();expect(rebuilt.markers.size).toBe(1);expect(JSON.parse(localStorage.getItem('lyapunov.annotations.same-scene')??'[]').length).toBe(1)
+  // 轻响应必须保留真实Scene和重开缓存；同rev文件变化的完整响应必须真的交给Viewer。
+  expect(JSON.parse(sessionStorage.getItem('lyapunov.workbench.rebuild-session')??'{}').sceneId).toBe(scene.sceneId)
+  const before=rebuilt.calls.filter((call:any[])=>call[0]==='setScene').length
+  serverScene={...scene,entities:[{...scene.entities[0]!,name:'同版本外部更正'}]}
+  await flush();await flush()
+  expect(rebuilt.snapshot.entities[0].name).toBe('同版本外部更正')
+  expect(rebuilt.calls.filter((call:any[])=>call[0]==='setScene').length).toBe(before+1)
+  await flush();expect(rebuilt.calls.filter((call:any[])=>call[0]==='setScene').length).toBe(before+1)
+  expect(JSON.parse(sessionStorage.getItem('lyapunov.workbench.rebuild-session')??'{}').sceneId).toBe(scene.sceneId)
  }finally{await act(async()=>root.unmount());viewerFactory=()=>({});dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as any)[key]}}
-})
+},10000)
 
 test("原环境/材质/面积灯面板提交真实补丁；空数值不写0，重置恢复源引用",async()=>{
- const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+ const {createRequire}=await import('node:module'),req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="controls"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','HTMLElement','Node','navigator','IS_REACT_ACT_ENVIRONMENT']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key]})}
  dom.window.HTMLElement.prototype.attachEvent=()=>{};dom.window.HTMLElement.prototype.detachEvent=()=>{}
@@ -151,7 +162,7 @@ test("原环境/材质/面积灯面板提交真实补丁；空数值不写0，�
 
 // 真实SDK jsdom + 原素材库/放置条，继续使用已发布放置基准开关，不是原生窗口点击验收。
 test('原生USD素材库真实DOM按源原点进入scene_mount，明确选择底面对齐与取消仍走原放置条',async()=>{
- const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
+ const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
  const dom=new JSDOM('<div id="native-placement"></div>',{url:'http://fixture.invalid'}),previous=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
  const React=await import('react'),{createRoot}=await import('react-dom/client'),{Simulate}=await import('react-dom/test-utils'),root=createRoot(document.getElementById('native-placement')!)
@@ -167,7 +178,7 @@ test('原生USD素材库真实DOM按源原点进入scene_mount，明确选择底
   expect(button().disabled).toBe(false)
   await React.act(async()=>Simulate.click(button()))
   const basis=()=>document.querySelector('select[aria-label="Placement basis"]') as HTMLSelectElement
-  expect(basis().value).toBe('origin');expect(document.body.textContent).toContain('Native USD defaults to its source origin')
+  expect(basis().value).toBe('origin');expect(document.body.textContent).toContain('Native USD defaults to its source origin');expect(document.body.textContent).toContain('UsdPreviewSurface and st textures');expect(document.body.textContent).toContain('MDL, arbitrary shaders')
   // 设计稿 placement：主按钮文案是 Place object（不是 Place）。
  const confirm=()=>[...document.querySelectorAll('button')].find(row=>row.textContent==='Place object')!
   await React.act(async()=>Simulate.click(confirm()))
@@ -208,7 +219,7 @@ test("放置预览 A 慢/B 快：旧回调只清自己的 token，B 的 ghost �
 
 test("放置确认单飞：双击 Place 只提交一次 scene_mount，确认中禁用；取消零写由原放置条用例保留", async () => {
   const {createRequire} = await import('node:module')
-  const req = createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json', import.meta.url))
+  const req = createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json', import.meta.url))
   const {JSDOM} = req('jsdom') as {JSDOM: new (html: string, options?: {url?: string; pretendToBeVisual?: boolean}) => {window: Window & typeof globalThis}}
   const dom = new JSDOM('<div id="root"></div>', {url: 'http://fixture.invalid', pretendToBeVisual: true})
   const saved = new Map<string, PropertyDescriptor | undefined>()
@@ -227,7 +238,7 @@ test("放置确认单飞：双击 Place 只提交一次 scene_mount，确认中�
   const scene = {sceneId: 'place-scene', revision: 1, coordinates: {units: 'm', upAxis: 'Z', handedness: 'right', quaternion: 'xyzw'}, entities: []}
   const mountedSnapshot = {...scene, revision: 2, entities: [{entityId: 'mounted-box', name: 'Box', transform: {position: [1,2,3], quaternion: [0,0,0,1], scale: [1,1,1]}, resources: [], components: {}}]}
   const box = {ref: {resourceId: 'res-box', version: 1, original: {uri: 'res:box', mimeType: 'model/gltf-binary'}}, name: 'Box', tags: [], folder: '', parsed: {kind: 'mesh'}, sizeBytes: 32}
-  let mountCalls = 0, releaseMount!: () => void
+  let stateDelivered = false, mountCalls = 0, releaseMount!: () => void
   const mountGate = new Promise<void>(resolve => {releaseMount = resolve})
   let previewCalls = 0, releasePreviewA!: () => void
   const previewGateA = new Promise<void>(resolve => {releasePreviewA = resolve})
@@ -244,13 +255,15 @@ test("放置确认单飞：双击 Place 只提交一次 scene_mount，确认中�
       if (body.name === 'scene_mount') { mountCalls += 1; await mountGate; return Response.json({kind: 'success', ui: {snapshot: mountedSnapshot, entityId: 'mounted-box'}}) }
       return Response.json({kind: 'success', ui: {}})
     }
-    const data = url.includes('/state?') ? {hostInstanceId: 'host-place', scene, worlds: [], providerAvailable: false}
+    const query=new URL(url,'http://fixture.invalid').searchParams,unchanged=stateDelivered&&query.get('displaySceneId')===scene.sceneId&&query.get('displayRevision')===String(scene.revision)
+    const data = url.includes('/state?') ? {hostInstanceId: 'host-place', ...unchanged?{}:{scene}, worlds: [], providerAvailable: false}
       : url.includes('/scenes') ? [{sceneId: scene.sceneId}]
       : url.includes('/engine-preference') ? {engine: 'mujoco'}
       : url.includes('/selection') ? {updated: true}
       : url.includes('builtin-assets') ? {resources: []}
       : url.includes('/assets') || url.includes('missing-assets') ? [box]
       : []
+    if(url.includes('/state?'))stateDelivered=true
     return Response.json(data)
   }) as typeof fetch
   let instance: any, activePreviewToken = ''

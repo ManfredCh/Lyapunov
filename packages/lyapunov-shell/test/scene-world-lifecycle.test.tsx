@@ -1,3 +1,4 @@
+import {sceneNodeRole} from '../../lyapunov-contracts/src/scene-edit-target.ts'
 import {expect,test} from 'bun:test'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {mkdtemp,writeFile,rm} from 'node:fs/promises'
@@ -5,7 +6,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SceneOperations} from '../../scene-kit/src/operations.ts'
 import {solidGlb,box} from '../../scene-kit/test/glb-geometry-fixture.ts'
-import {SceneWorldLifecycle,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,SCENE_WORLD_CLOSED_PUBLIC_MESSAGE,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
+import {SceneWorldLifecycle,sceneHostRecoveryNotice,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,SCENE_WORLD_CLOSED_PUBLIC_MESSAGE,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
 import {SceneWorldStatus,sceneWorldStatusDetail} from '../src/scene-world-status.tsx'
 import {ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE} from '../../lyapunov-contracts/src/command-privacy.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
@@ -334,4 +335,25 @@ test('D1 明确Close的内置状态句按界面语言投影，未登记诊断文
  const zh=renderToStaticMarkup(<SceneWorldStatus state={state} tr={cn=>cn} retry={noop} cancel={noop}/>)
  expect(zh).toContain(SCENE_WORLD_CLOSED_PUBLIC_MESSAGE)
  expect(sceneWorldStatusDetail({detail:'ORIGINAL_DIAGNOSTIC'},(_cn,en)=>en)).toBe('ORIGINAL_DIAGNOSTIC')
+})
+
+test('一等USD格式/isaac来源不是机器人或自动物理请求；选择材质场景不准备地面、不增revision',async()=>{
+ const s=scene('usd-materials');s.revision=3;s.entities=[{...s.entities[0]!,resources:[{resourceId:'usd',version:1,original:{uri:'file:///fixture/material.usda',mimeType:'model/vnd.usd'},representations:[],source:{units:'m',upAxis:'Z',handedness:'right',metersPerUnit:1}}],components:{visual:{kind:'usd'},isaac:{sourcePath:'/fixture/material.usda'},usd:{}}}]
+ expect(sceneNodeRole(s.entities[0]!)).toBe('usd');expect(sceneRequestsPhysics(s)).toBe(false);expect(sceneWorldPreflight(s)?.code).toBe('SCENE_PHYSICS_REQUIRED')
+ const calls:string[]=[],states:SceneWorldState[]=[],p=port(calls)
+ p.reconcile=async()=>{throw Error('USD_VISUAL_MUST_NOT_RECONCILE')};p.prepareWorld=async()=>{throw Error('USD_VISUAL_MUST_NOT_PREPARE')};p.open=async()=>{throw Error('USD_VISUAL_MUST_NOT_OPEN')}
+ expect(await new SceneWorldLifecycle(state=>states.push(state)).ensure('owner','host',s,p)).toBeUndefined();expect(calls).toEqual(['list']);expect(states.at(-1)?.phase).toBe('idle');expect(s.revision).toBe(3);expect(s.physics).toBeUndefined()
+ const sourceFacts={resourceId:'usd',version:1,purpose:'object',physics:{collisions:0,rigidBodies:0,joints:0,articulations:0}}
+ s.entities[0]!.components.usd={sourceFacts};expect(sceneNodeRole(s.entities[0]!)).toBe('usd');expect(sceneRequestsPhysics(s)).toBe(false)
+ sourceFacts.physics.collisions=1;expect(sceneNodeRole(s.entities[0]!)).toBe('physics');expect(sceneRequestsPhysics(s)).toBe(true);expect(sceneWorldPreflight(s)).toBeUndefined()
+ sourceFacts.purpose='robot';expect(sceneNodeRole(s.entities[0]!)).toBe('robot')
+ sourceFacts.version=2;expect(sceneNodeRole(s.entities[0]!)).toBe('usd');expect(sceneRequestsPhysics(s)).toBe(false)
+ expect(sceneRequestsPhysics({...s,physics:{gravityWorldMps2:[0,0,-9.81],template:'physics-workspace-v2'}})).toBe(true)
+ const legacy=scene('legacy');legacy.entities[0]!.components={isaac:{sourcePath:'/fixture/native.usd'}};expect(sceneNodeRole(legacy.entities[0]!)).toBe('robot');expect(sceneRequestsPhysics(legacy)).toBe(true)
+})
+
+test('Host重连投影只在物理Scene声明恢复物理；纯视觉保留可编辑说明',()=>{
+ const visual=scene('visual');visual.entities[0]!.components={visual:{kind:'mesh'}}
+ expect(sceneHostRecoveryNotice(visual).zh).toContain('未请求自动物理');expect(sceneHostRecoveryNotice(visual).en).not.toContain('Restoring physics')
+ expect(sceneHostRecoveryNotice(scene()).en).toContain('Restoring physics');expect(sceneHostRecoveryNotice(undefined).zh).toContain('可继续显示和编辑')
 })

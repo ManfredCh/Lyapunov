@@ -395,7 +395,8 @@ export const CASES: readonly CaseSpec[] = [
   // V11（2026-10-21）：`floor-drift` 点名 minPass 8 < 实测 10（删掉 2 条仍然绿）⇒ 连同 minAssert/minSites
   //   一起按实测值上调（rcui-v11-20261020T220730Z 门读数 10 pass / 208 expect，静态站点 117）。**上调，不是放宽。**
   { id: 'domain-instance-projection', path: 'packages/lyapunov-shell/test/domain-instance-projection.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；V10新增已解析预览位姿与确认一致性，实际GUI/SDK单独签收', minPass: 10, minAssert: 208, minSites: 117, citedBy: 0 },
-  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 32, minAssert: 29, minSites: 29, citedBy: 0 },
+  // 0.2.2（GATE-FLOOR-DRIFT）：人群面板用例接进后实测 34 pass，下限只上调。
+  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 34, minAssert: 29, minSites: 29, citedBy: 0 },
   { id: 'scene-ptc-input', path: 'packages/scene-kit/test/scene-ptc-input.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 1, minAssert: 8, minSites: 6, citedBy: 0 },
   { id: 'peiri-search-client', path: 'packages/lyapunov-api-client/test/search-client.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 10, minAssert: 93, minSites: 43, citedBy: 0 },
   { id: 'brand-welcome', path: 'packages/lyapunov-shell/test/brand-welcome.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 6, minAssert: 27, minSites: 23, citedBy: 0 },
@@ -512,7 +513,8 @@ export const CASES: readonly CaseSpec[] = [
     // 24 → 25（GATE-CLOSER，同一判据再点一次：实测 25 pass / 0 fail / 123 expect；**上调，不是放宽**）
     purpose: '打包取件有界 + 缓存命中 0 网络（W16）', minPass: 25, minAssert: 61, claimPass: 14, minSites: 61, citedBy: 2 },
   { id: 'payload-contract', path: 'distribution/linux/payload-contract.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
-    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 24, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
+    // minPass 24 → 26（0.2.2，GATE-FLOOR-DRIFT：本版新增人群载荷断言，实测 26 pass；只上调）
+    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 26, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
   { id: 'vla-official-scene-binding', path: 'packages/policy-registry/test/vla-official-scene-binding.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
     purpose: '官方策略取件与场景绑定', minPass: 6, minAssert: 9, claimPass: 6, minSites: 9, citedBy: 1 },
   { id: 'operations-bounded-fetch', path: 'packages/lyapunov-share/test/operations-bounded-fetch.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
@@ -540,7 +542,8 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'g17-legacy-residue', path: 'script/gates/g17-legacy-residue.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'g17 哑探针的失败能力单测（(?:…) 在 POSIX ERE 下无效）', minPass: 12, minAssert: 44, claimPass: 12, minSites: 34, citedBy: 1 },
   { id: 'package-linux', path: 'script/package-linux.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 20, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
+    // minPass 20 → 24（0.2.2，GATE-FLOOR-DRIFT：本版新增 4 条打包用例，实测 24 pass；只上调）
+    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 24, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
   { id: 'g19-building-robot-task', path: 'packages/scene-kit/test/g19-building-robot-task.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'G19 建筑-机器人任务链', minPass: 2, minAssert: 30, minSites: 31, citedBy: 2 },
   { id: 'g19-building-scale-animation', path: 'packages/scene-kit/test/g19-building-scale-animation.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
@@ -574,7 +577,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'viewer-texture-and-autoframe', path: 'packages/viewer/test/texture-and-autoframe.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 由 15 上调到 27（2026-09-27，GATE-FLOOR-DRIFT，验收报告 §4-N8 点名的那一条）：
     // DEV-034 把该文件从 15 条长到 27 条，下限留在 15 就等于"删掉 12 条用例仍然绿"。
-    purpose: '2D 纹理真的进材质 + 自动取景只看可见有限几何（DEV-034）', minPass: 31, minAssert: 42, minSites: 42, citedBy: 2 },
+    purpose: '2D 纹理真的进材质 + 自动取景只看可见有限几何（DEV-034）', minPass: 32, minAssert: 42, minSites: 42, citedBy: 2 },
   // ↓ 2026-09-26 第二轮 caseset-coverage 反查又点出的 4 条 DRIFT（同一机制、同一理由：不接进门，发布门就不跑它）。
   //   四条都实测于本轮（bun 1.3.13 / 工作树 HEAD b1b6427）：minPass=实测通过数、minAssert=实测 expect 读数、
   //   minSites=门的 countAssertSites 静态站点数。四条都**无外部标记**（不起 python/不联网/不碰真机），
@@ -1042,8 +1045,12 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   // V10主控：新增放置预览与确认同位姿回归，domain-instance-projection只上调7→8。
   // V11（2026-10-21）：domain-instance-projection 随 CASES.minPass 同抬 8→10；digest 按排序后 id=pass 重算
   //   e0a1545aaa91 → a6b92a64bcac（91 条，只增不删、不降）。
-  at: '2026-10-21T06:40:00Z',
-  digest: 'a6b92a64bcac',
+  // 0.2.2（2026-10-30）：本版新增人群面板/载荷/打包用例使 4 条实测高于下限（floor-drift 点名），
+  //   scene-world-lifecycle 32→34、payload-contract 24→26、package-linux 20→24、
+  //   viewer-texture-and-autoframe 31→32 随 CASES.minPass 同抬；旧 id 不删不降，判据语义未改。
+  //   digest 按排序后 id=pass 重算：a6b92a64bcac → d76f073ef39a（91 条，只增不删、不降）。
+  at: '2026-10-30T00:00:00Z',
+  digest: 'd76f073ef39a',
   // A07：仅上调场景生命周期8→11、上下文2→4；87项未删除，摘要同步实测冻结表。
   pass: {
   'app-side-panel-boundary': 6, 'linux-user-installer': 41,
@@ -1053,7 +1060,7 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   // P16：随 CASES.minPass 同抬 6 → 7（只上调，不删/不降）。
   // V11：随 CASES.minPass 同抬 8 → 10（floor-drift 点名，只上调）。
   'domain-instance-projection': 10,
-  'scene-world-lifecycle': 32,
+  'scene-world-lifecycle': 34,
   'scene-ptc-input': 1,
   'peiri-search-client': 10,
   'brand-welcome': 6,
@@ -1076,14 +1083,14 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   'isaac-startup-budget-entry': 7, 'isaac-startup-budget-wiring': 4, 'job-record-hunyuan': 11,
   'job-record-marble': 3, 'mamba-license': 25, 'migrate-workspace-layout': 11,
   'model-download-routing': 5, 'notification-no-replay': 3, 'open-cancel': 7,
-  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 20, 'payload-contract': 24,
+  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 24, 'payload-contract': 26,
   'policy-source-bounded-fetch': 8, 'policy-source-github-quota': 39, 'portability': 15,
   'prepare-env-guard': 3, 'privacy-boundary': 44, 'provider-installer': 28, 'render-failure': 13,
   'runtime-patch': 32, 'scene-adapter-transform': 7, 'scene-kit-formats-mjcf-sections': 17,
   'scene-projection': 8, 'session-context-cross': 5, 'session-history': 27, 'session-launch': 31,
   'session-ownership-two-sessions': 13, 'share-export': 1, 'target-window': 7, 'terminal-options': 30,
   'test-ci-harness-cli': 34, 'unity-mcp': 11, 'viewer-projection-consumer': 20,
-  'viewer-splat-support': 12, 'viewer-texture-and-autoframe': 31, 'vla-official-scene-binding': 6,
+  'viewer-splat-support': 12, 'viewer-texture-and-autoframe': 32, 'vla-official-scene-binding': 6,
   'workbench-camera-initial-framing': 11, 'worker-robot-metadata': 11, 'worktree-snapshots': 14,
   // CI-FIX 单（2026-09-27）：随 4 条用例接进门**新增**的冻结基线（真实实测通过数，只增不减、不删除/不降低既有条目）。
   'computer-use-wording': 15, 'policy-archive-level3-wiring': 13,
@@ -2604,13 +2611,17 @@ function bunBin(): string {
  * `script/release-gate.test.ts` 的 `caseExec · 真实 CLI 解析口径`）。
  */
 export function caseExec(spec: CaseSpec, root: string): { cmd: string; args: string[] } {
-  if (spec.runner === 'python') return { cmd: process.env.TESTCI_PYTHON?.trim() || 'python3', args: [spec.path] }
+  // 与 `script/test-ci.ts::commandFor` 同一路径口径：先 resolve(root, path) 再交给执行器。
+  // 直接把相对路径交给 `bun test` 会被当成**过滤串**（不是文件），在历史嵌套树里扫到同名用例；
+  // 这里必须用**解析后的确切文件**，Python/plain/bun:test 三支一致，退出码与读数传递一个字不动。
+  const file = resolve(root, spec.path)
+  if (spec.runner === 'python') return { cmd: process.env.TESTCI_PYTHON?.trim() || 'python3', args: [file] }
   const tsconfig = resolve(root, 'tsconfig.json')
   const hasTsconfig = existsSync(tsconfig)
   const flags = ['--no-env-file', ...(hasTsconfig ? [`--tsconfig-override=${tsconfig}`] : [])]
-  if (spec.runner === 'plain') return { cmd: bunBin(), args: hasTsconfig ? ['run', ...flags, spec.path] : [...flags, spec.path] }
+  if (spec.runner === 'plain') return { cmd: bunBin(), args: hasTsconfig ? ['run', ...flags, file] : [...flags, file] }
   // bun:test 与 node:test 都用 bun test（裸 node --test 在本树跑不起来，见 test-ci.ts 实测）
-  return { cmd: bunBin(), args: hasTsconfig ? ['test', ...flags, spec.path] : [...flags, 'test', spec.path] }
+  return { cmd: bunBin(), args: hasTsconfig ? ['test', ...flags, file] : [...flags, 'test', file] }
 }
 
 function tscBin(root: string): { cmd: string; pre: string[]; display: string } {
@@ -2655,6 +2666,8 @@ const TEST_LIKE = /\.(test|spec)\.(ts|tsx|mts|cts|js|mjs)$/
  * 两条独立来源，任何一条单独都能发现"新加了回归用例"：
  *  · 工作树：`git status --porcelain` 里的 test-like 文件（本轮新写/改写的）
  *  · 回执：`bugfixHistory/*-<ROUND>.md` 里被引用的 test-like 路径（**回执自己举证用了哪个用例**）
+ *  · 兜底：**没有本轮回执**时，从 `git ls-files --cached` 取 tracked tests（发布检出没有私有回执）。
+ *    一旦存在本轮回执，就不做全库兜底，避免真实回执与 stale 引用被全库候选掩盖。
  * `git` 不可用 ⇒ 返回 null ⇒ `caseset-coverage` 判 UNPROVEN（不拿"派生不出"冒充"没 drift"）。
  */
 export function deriveRoundCandidates(root: string): { derived: string[]; stale: string[]; fromStatus: number; fromReceipts: number; fromTracked?: number } | null {
@@ -2666,10 +2679,11 @@ export function deriveRoundCandidates(root: string): { derived: string[]; stale:
     .filter((p) => TEST_LIKE.test(p))
 
   const dir = join(root, 'bugfixHistory')
-  const hasInternalHistory = existsSync(dir)
-  const receipts = hasInternalHistory ? readdirSync(dir).filter((f) => f.endsWith(`-${ROUND}.md`)) : []
+  const receipts = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(`-${ROUND}.md`)) : []
   // A release checkout contains reproducible tests, not private development receipts.
-  const tracked = hasInternalHistory ? '' : gitRead(root, ['ls-files', '--cached'])
+  // Only a receipt matching this round closes the tracked fallback: an empty or unrelated
+  // bugfixHistory directory is not evidence that the current round has receipts.
+  const tracked = receipts.length === 0 ? gitRead(root, ['ls-files', '--cached']) : ''
   if (tracked === null) return null
   const fromTracked = tracked.split('\n').filter((p) => TEST_LIKE.test(p))
   const pat = /(?:packages|script|services|distribution)\/[A-Za-z0-9_./-]+\.(?:test|spec)\.(?:ts|tsx|mts|cts|js|mjs)/g

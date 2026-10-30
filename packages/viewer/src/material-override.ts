@@ -76,6 +76,7 @@ export class EntityMaterialOverride {
         const found = copies.get(material)
         if (found) return found
         const clone = material.clone()
+        if(material.userData.usdMaterial){clone.onBeforeCompile=material.onBeforeCompile;clone.customProgramCacheKey=material.customProgramCacheKey}
         if (component.baseColor !== undefined) clone.color.set(component.baseColor)
         if (component.roughness !== undefined) clone.roughness = component.roughness
         if (component.metalness !== undefined) clone.metalness = component.metalness

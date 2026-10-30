@@ -25,7 +25,7 @@ import type { ContentBlock, GenerateOptions, RequestMessage, StreamChunk } from 
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 // 原生 runtime-context 的声明由其发布类型文件拥有；仅加载类型，不调用私有投影 API。
-import type {} from '../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/lib/types/runtime-context.d.ts'
+import type {} from '../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/lib/types/runtime-context.d.ts'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SkillRegistry from '@deepseek-ai/dsh-skill'

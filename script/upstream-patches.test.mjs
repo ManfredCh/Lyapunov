@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
 import {spawnSync} from 'node:child_process'
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync, cpSync} from 'node:fs'
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync, cpSync, realpathSync, lstatSync, readlinkSync} from 'node:fs'
 import {dirname, join, resolve} from 'node:path'
 import {tmpdir} from 'node:os'
-import {test} from 'node:test'
+import {test,after} from 'node:test'
 import ts from 'typescript'
 import {createHash} from 'node:crypto'
 import {verifiedComposedPatch} from './upstream-patches.mjs'
 import {applyUpstreamPatches,upstreamPatches,applyLegacyUpstreamPatches,legacyUpstreamPatches,preflightUpstreamPatches} from './upstream-patches.mjs'
 import {applyPublicModelDiagnosticsPatch} from './public-model-patch.mjs'
 import {verifySDKSourceIntegrity,sdkFileBytes,SDK_BASE_COMMIT,LEGACY_SDK_BASE_COMMIT,RC2_PRODUCT_PATCH,RC2_INTEGRITY_MANIFEST} from './sdk-source-integrity.mjs'
-import {legacySDKFixture} from './legacy-sdk-fixture.mjs'
+import {legacySDKFixture,prepareLegacySDKFixture} from './legacy-sdk-fixture.mjs'
 import {generateRC2SdkPatch} from './generate-rc2-sdk-patch.mjs'
 import {applySignedFilesPatch} from './native-files-patch.mjs'
 
@@ -19,6 +19,71 @@ const upstream = legacySDKFixture(root)
 const rc2Upstream = join(root,JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8')).directory)
 const native = 'packages/api/session-controller/src'
 const isolatedTestTimeoutMs = 120_000
+
+// 只改本文件的临时SDK构造：显式本地对象只读借用，不走clone/upload-pack。
+function localSdkFixture(source,target,base){
+ mkdirSync(target,{recursive:true})
+ run('git',['init','--quiet',target])
+ const objects=realpathSync(resolve(source,run('git',['rev-parse','--git-path','objects'],{cwd:source}).trim()))
+ writeFileSync(join(target,'.git/objects/info/alternates'),objects+'\n')
+ run('git',['config','protocol.allow','never'],{cwd:target})
+ run('git',['checkout','--quiet','--detach',base],{cwd:target})
+ assert.equal(run('git',['rev-parse','HEAD'],{cwd:target}).trim(),base)
+ assert.notEqual(realpathSync(join(target,'.git/objects')),objects)
+ assert.equal(realpathSync(resolve(target,run('git',['rev-parse','--git-path','index'],{cwd:target}).trim())),realpathSync(join(target,'.git/index')))
+ assert.notEqual(resolve(target,run('git',['rev-parse','--absolute-git-dir'],{cwd:target}).trim()),resolve(source,run('git',['rev-parse','--absolute-git-dir'],{cwd:source}).trim()))
+ assert.equal(spawnSync('git',['config','--get-regexp','^remote\\.'],{cwd:target,encoding:'utf8'}).status,1)
+ assert.equal(spawnSync('git',['config','--get-regexp','promisor|partialclone'],{cwd:target,encoding:'utf8'}).status,1)
+ return target
+}
+function sdkSourceSnapshot(source){
+ const names=[...new Set(run('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:source,maxBuffer:32<<20}).split('\0').filter(Boolean))].sort()
+ const digest=createHash('sha256')
+ for(const name of names){digest.update(name+'\0');const path=join(source,name)
+  let st;try{st=lstatSync(path)}catch(error){if(error.code!=='ENOENT')throw error;digest.update('missing\0');continue}
+  digest.update(st.mode.toString(8)+'\0')
+  if(st.isSymbolicLink())digest.update(readlinkSync(path));else if(st.isFile())digest.update(readFileSync(path));else digest.update('directory')
+ }
+ const gitPath=name=>resolve(source,run('git',['rev-parse','--git-path',name],{cwd:source}).trim()),hash=path=>existsSync(path)?createHash('sha256').update(readFileSync(path)).digest('hex'):null
+ return {head:run('git',['rev-parse','HEAD'],{cwd:source}).trim(),headBytes:hash(gitPath('HEAD')),config:hash(gitPath('config')),index:hash(gitPath('index')),exclude:hash(gitPath('info/exclude')),refs:createHash('sha256').update(run('git',['for-each-ref','--format=%(refname) %(objectname)'],{cwd:source})).digest('hex'),sourceFiles:names.length,sourceBytes:digest.digest('hex')}
+}
+const sourceSdkBefore=sdkSourceSnapshot(rc2Upstream)
+after(()=>{const after=sdkSourceSnapshot(rc2Upstream);assert.deepEqual(after,sourceSdkBefore,'临时SDK构造/变异/签名测试不得改变来源SDK的HEAD/config/index或受保护源字节');console.log('SDK_SOURCE_READ_ONLY_PROOF '+JSON.stringify({before:sourceSdkBefore,after,unchanged:true}))})
+
+test('本地SDK夹具独立index/ref/对象写入且不配置传输，源SDK字节不变',()=>{
+ const scratch=mkdtempSync(join(tmpdir(),'sdk-local-object-proof-')),sdk=join(scratch,'candidate'),before=sdkSourceSnapshot(rc2Upstream)
+ try{
+  localSdkFixture(rc2Upstream,sdk,SDK_BASE_COMMIT)
+  const content='fixture-own-object '+scratch,sha=run('git',['hash-object','-w','--stdin'],{cwd:sdk,input:content}).trim()
+  assert.equal(run('git',['cat-file','-p',sha],{cwd:sdk}),content)
+  const absent=spawnSync('git',['cat-file','-e',sha],{cwd:rc2Upstream,encoding:'utf8',env:{...process.env,GIT_NO_LAZY_FETCH:'1',GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'}})
+  assert.notEqual(absent.status,0,'fixture新对象不得泄漏到源SDK')
+  const path='packages/core/agent/src/index.ts',source=readFileSync(join(rc2Upstream,path)),original=readFileSync(join(sdk,path))
+  writeFileSync(join(sdk,path),Buffer.concat([original,Buffer.from('\n// fixture-only mutation\n')]))
+  assert.deepEqual(readFileSync(join(rc2Upstream,path)),source)
+  assert.deepEqual(sdkSourceSnapshot(rc2Upstream),before)
+ }finally{rmSync(scratch,{recursive:true,force:true})}
+})
+
+test('显式准备只复用同一个已验签 fixture；已有普通目录/悬空链接不被 checkout 或 patch',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'lyapunov-prepare-guard-'))
+ try{
+  const existing=join(dir,'existing');mkdirSync(existing);writeFileSync(join(existing,'keep.txt'),'keep')
+  assert.throws(()=>prepareLegacySDKFixture(root,existing),/LEGACY_SOURCE_FIXTURE_TARGET_NOT_REUSABLE/)
+  assert.equal(readFileSync(join(existing,'keep.txt'),'utf8'),'keep')
+  const dangling=join(dir,'dangling');symlinkSync(join(dir,'missing-target'),dangling)
+  assert.throws(()=>prepareLegacySDKFixture(root,dangling),/LEGACY_SOURCE_FIXTURE_TARGET_NOT_REUSABLE/)
+ }finally{rmSync(dir,{recursive:true,force:true})}
+})
+
+test('旧源码 fixture 默认只读本机对象：不配置 promisor，也不保留可 fetch 的 remote',()=>{
+ const promisor=spawnSync('git',['-C',upstream,'config','--get','remote.origin.promisor'],{encoding:'utf8'})
+ assert.notEqual(promisor.status,0,'默认 fixture 不得配置 promisor（会把离线测试变成隐式联网）')
+ const remote=spawnSync('git',['-C',upstream,'config','--get','remote.origin.url'],{encoding:'utf8'})
+ assert.notEqual(remote.status,0,'默认 fixture 不得保留 remote.origin.url')
+ const head=spawnSync('git',['-C',upstream,'rev-parse','HEAD'],{encoding:'utf8'})
+ assert.equal(head.stdout.trim(),LEGACY_SDK_BASE_COMMIT)
+})
 
 test('原生提交ACK补丁只消费完整pre/post，草稿事务未知改动与缺件均拒绝保留',()=>{
  const file=join(root,'packages/lyapunov-shell/patches/dsh-native-admission-ack.patch')
@@ -69,7 +134,7 @@ test('电脑目录flow精确补丁真实消费、幂等及未知或缺件保留'
 })
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: isolatedTestTimeoutMs, ...options})
+  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: isolatedTestTimeoutMs,env:command==='git'?{...process.env,GIT_NO_LAZY_FETCH:'1',GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'}:process.env,...options})
   assert.equal(result.status, 0, `${command} ${args.join(' ')}\n${result.error?.message ?? ''}\n${result.stdout}\n${result.stderr}`)
   return result.stdout
 }
@@ -167,7 +232,7 @@ test('PublicDiagnostics全26完整post保护，尾字节/缺件/改patch不能�
 test('实际registry在接受前拒固定base未覆本体与unknown新增source，标准ignored构建物按Git保留', {timeout: isolatedTestTimeoutMs}, ()=>{
   const scratch=mkdtempSync(join(root,'.tmp-sdk-integrity-'))
   try{
-    run('git',['clone','--shared','--quiet',upstream,scratch]);run('git',['checkout','--quiet','--detach','7c3f05885033aa3aed74904d59a94692d12a47f7'],{cwd:scratch})
+    localSdkFixture(upstream,scratch,LEGACY_SDK_BASE_COMMIT)
     applyLegacyUpstreamPatches(root,scratch);assert.equal(applyLegacyUpstreamPatches(root,scratch).filter(row=>row.status==='applied').length,0)
     const baseFile=join(scratch,'packages/core/agent/src/index.ts'),bytes=readFileSync(baseFile);writeFileSync(baseFile,Buffer.concat([bytes,Buffer.from('\n// unknown base bytes\n')]))
     assert.throws(()=>applyLegacyUpstreamPatches(root,scratch),/BASE_BYTES_MISMATCH/);assert.equal(readFileSync(baseFile).subarray(bytes.length).toString(),'\n// unknown base bytes\n');writeFileSync(baseFile,bytes)
@@ -219,8 +284,7 @@ test('当前正式RC2签定bundle真实干净重放、完整final/幂等与原�
   const dir=mkdtempSync(join(tmpdir(),'lyapunov-current-signed-bundle-')),sdk=join(dir,'sdk')
   try{
     preflightUpstreamPatches(root)
-    run('git',['clone','--shared','--no-checkout','--quiet',rc2Upstream,sdk])
-    run('git',['checkout','--quiet','--detach',SDK_BASE_COMMIT],{cwd:sdk})
+    localSdkFixture(rc2Upstream,sdk,SDK_BASE_COMMIT)
     const snapshotLock=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8'))
     assert.deepEqual(applyUpstreamPatches(root,sdk).map(row=>row.status),[snapshotLock.sdkProductPatch.includedInFork?'already-applied':'applied'])
     const patches=upstreamPatches(root),proof=verifySDKSourceIntegrity(root,sdk,patches,true)
@@ -250,8 +314,7 @@ function rc2Fixture(){
  const lock=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8'))
  const put=(path,bytes)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes)}
  put(join(product,'UPSTREAM_LOCK.json'),JSON.stringify(lock,null,2)+'\n')
- run('git',['clone','--shared','--no-checkout','--quiet',rc2Upstream,sdk])
- run('git',['checkout','--quiet','--detach',SDK_BASE_COMMIT],{cwd:sdk})
+ localSdkFixture(rc2Upstream,sdk,SDK_BASE_COMMIT)
  const modified=['packages/core/agent/src/index.ts','packages/core/agent/src/types.ts']
  for(const path of modified)writeFileSync(join(sdk,path),readFileSync(join(sdk,path),'utf8')+'\n// 独立完整RC2生成回归fixture\n')
  const added='packages/core/agent/src/rc2-bootstrap-fixture.ts',deleted='docs/glossary.i18n.yaml'
@@ -268,8 +331,7 @@ function rc2Fixture(){
  const next=JSON.parse(readFileSync(join(product,'UPSTREAM_LOCK.json'),'utf8'))
  for(const [key,value] of Object.entries(lock))if(key!=='sdkSourceIntegrity'&&key!=='sdkProductPatch')assert.deepEqual(next[key],value)
  const replay=join(dir,'replay')
- run('git',['clone','--shared','--no-checkout','--quiet',rc2Upstream,replay])
- run('git',['checkout','--quiet','--detach',SDK_BASE_COMMIT],{cwd:replay})
+ localSdkFixture(rc2Upstream,replay,SDK_BASE_COMMIT)
  const paths=[...modified,added,deleted].sort()
  const snapshot=()=>paths.map(path=>{const bytes=sdkFileBytes(replay,path);return [path,bytes?.toString('hex')??null]})
  return {dir,product,sdk,replay,paths,snapshot,added,deleted,close:()=>rmSync(dir,{recursive:true,force:true})}

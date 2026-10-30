@@ -200,6 +200,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     add("robot-tools")
   }
   add("robot-workflows",{recordingRoot})
+  add("human-crowd")
   // agent-graph 编排面（docs/AGENT_GRAPH_CONTRACT.md §6）：campaign_* 工具 + run 证据收集器 +
   // 确定性谓词判定 sim_task_check。都无装配期配置——campaign 归属取调用方会话工作目录，
   // sim_task_check 在调用时按执行会话取 sim 世界（无引擎时装配不失败，调用时如实报缺）。

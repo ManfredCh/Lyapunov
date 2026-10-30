@@ -12,7 +12,6 @@ import type {Agent} from "@deepseek-ai/dsh-agent"
 import {join,basename,relative,resolve} from "node:path"
 import {mkdir,readFile,writeFile} from "node:fs/promises"
 import {randomUUID} from "node:crypto"
-import {createRequire} from "node:module"
 import {defineTool} from '@deepseek-ai/dsh-tools'
 import {compatibleToolInput} from '../../lyapunov-contracts/src/tool-input.ts'
 import type {} from '@deepseek-ai/dsh-commands'
@@ -26,36 +25,6 @@ import {localPath} from "../../scene-kit/src/formats.ts"
 import {planHtmlOpen} from '../../lyapunov-shell/src/html-preview-entry.ts'
 export const name="lyapunov-workspace"
 
-/** 交互终端（xterm）用的真实 PTY：node-pty 由上游 subprocess-local 提供，产品不另装原生依赖。
- * 只做运行时 require，不写类型侧包名解析——node-pty 只存在于上游 pnpm 依赖树内，
- * 从产品根静态解析不到；这里按实际使用的 IPty 面收窄，不复制上游类型。 */
-type PtyProcess={onData(listener:(data:string)=>void):void;onExit(listener:(event:{exitCode:number})=>void):void;write(data:string):void;resize(columns:number,rows:number):void;kill(signal?:string):void}
-type NodePty={spawn(file:string,args:string[],options:{name:string;cwd:string;cols:number;rows:number;env:Record<string,string>}):PtyProcess}
-const localRequire=createRequire(import.meta.url)
-const nodePty=createRequire(localRequire.resolve("@deepseek-ai/dsh-subprocess-local/package.json"))("node-pty") as NodePty
-type XtermSession={pty:PtyProcess;clients:Set<(chunk:Uint8Array)=>void>;backlog:Uint8Array[];backlogBytes:number}
-const xtermSessions=new Map<string,XtermSession>()
-const XTERM_BACKLOG_LIMIT=65536
-function xtermPush(session:XtermSession,chunk:Uint8Array){
-  session.backlog.push(chunk);session.backlogBytes+=chunk.byteLength
-  while(session.backlogBytes>XTERM_BACKLOG_LIMIT&&session.backlog.length>1){const dropped=session.backlog.shift()!;session.backlogBytes-=dropped.byteLength}
-  for(const send of session.clients)send(chunk)
-}
-function xtermSpawnPty(cwd:string,input:{cols?:number;rows?:number}){
-  const cols=Number.isInteger(input.cols)&&input.cols!>=20&&input.cols!<=400?input.cols!:120
-  const rows=Number.isInteger(input.rows)&&input.rows!>=5&&input.rows!<=200?input.rows!:32
-  const pty=nodePty.spawn(process.env.SHELL||"/bin/bash",["-l"],{name:"xterm-256color",cwd,cols,rows,env:{...process.env,TERM:"xterm-256color"} as Record<string,string>})
-  const session:XtermSession={pty,clients:new Set(),backlog:[],backlogBytes:0}
-  const id=randomUUID()
-  pty.onData(data=>xtermPush(session,new TextEncoder().encode(data)))
-  pty.onExit(({exitCode})=>{
-    xtermPush(session,new TextEncoder().encode(`\r\n\x1b[90m[进程已退出，代码 ${exitCode}]\x1b[0m\r\n`))
-    for(const send of session.clients)send(new Uint8Array(0))
-    xtermSessions.delete(id)
-  })
-  xtermSessions.set(id,session)
-  return {id}
-}
 export const inject=["connection","agents","fs","subprocess","terminals","sandboxPolicy","workspaceRegistry","sessionController"]
 export interface Config{dataDirectory:string;/** 可选的 cache 域覆盖；未给时按 dataDirectory 与产品根的磁盘形状推断（见 resolveCacheRoot）。 */cacheRoot?:string;/** 可选的 Blender 可执行文件覆盖；未给时用 BLENDER_EXECUTABLE 或 PATH 上的 blender。 */blenderExecutable?:string}
 export interface ReviewComment {id:string;path:string;line:number;side:"old"|"new";body:string;createdAt:string}
@@ -281,20 +250,6 @@ export async function apply(ctx:Context,config:Config){
     if(action==="terminal-read")return ctx.terminals.read(agent,TerminalSessionId(input.id),{count:1000})
     if(action==="terminal-interrupt")return ctx.terminals.signal(agent,TerminalSessionId(input.id),"SIGINT")
     if(action==="terminal-close")return {closed:await ctx.terminals.kill(agent,TerminalSessionId(input.id),"用户关闭工作区终端")}
-    if(action==="xterm-spawn")return xtermSpawnPty(cwd,input)
-    if(action==="xterm-write"){
-      const session=xtermSessions.get(input.id);if(!session)throw new Error("XTERM_NOT_FOUND")
-      session.pty.write(String(input.data??""));return {ok:true}
-    }
-    if(action==="xterm-resize"){
-      const session=xtermSessions.get(input.id);if(!session)throw new Error("XTERM_NOT_FOUND")
-      if(Number.isInteger(input.cols)&&Number.isInteger(input.rows))session.pty.resize(Math.min(400,Math.max(20,input.cols)),Math.min(200,Math.max(5,input.rows)))
-      return {ok:true}
-    }
-    if(action==="xterm-kill"){
-      const session=xtermSessions.get(input.id);if(session){session.pty.kill();xtermSessions.delete(input.id)}
-      return {closed:session!==undefined}
-    }
     if(action==="git-status"){
       const status=await run(agent,["git","status","--porcelain=v1","-z","--untracked-files=all"],signal)
       if(status.exitCode!==0)return {...status,isRepository:false}
@@ -367,32 +322,6 @@ export async function apply(ctx:Context,config:Config){
         try{return Response.json(await result)}finally{if(commentWrites.get(agent.id)===result)commentWrites.delete(agent.id)}
       }
       return Response.json(await operation(agent,action,input??{},request.signal))
-    }catch(error){return Response.json({error:error instanceof Error?error.message:String(error)},{status:400})}
-  }}))
-  // 交互终端输出流：base64 分块的 chunked 响应（SSE 帧，帧内无换行问题）；`__exit__` 标记进程退出。
-  ctx.effect(()=>ctx.connection.fetch.register({path:"/api/lyapunov/workspace/xterm-output",methods:["GET"],requestBody:"buffered",fetch:async request=>{
-    try{
-      const url=new URL(request.url,"http://localhost"),sessionId=url.searchParams.get("sessionId")??"",id=url.searchParams.get("id")??""
-      const resolved=await ctx.sessionController.resolveAgent(SessionId(sessionId))
-      if('error' in resolved)throw resolved.error
-      const session=xtermSessions.get(id)
-      if(!session)return Response.json({error:"XTERM_NOT_FOUND"},{status:404})
-      const encoder=new TextEncoder()
-      let active=true
-      const stream=new ReadableStream<Uint8Array>({
-        start(controller){
-          const send=(chunk:Uint8Array)=>{
-            if(!active)return
-            if(chunk.byteLength===0){try{controller.enqueue(encoder.encode("data: __exit__\n\n"))}catch{};try{controller.close()}catch{};active=false;return}
-            try{controller.enqueue(encoder.encode("data: "+btoa(String.fromCharCode(...chunk))+"\n\n"))}catch{}
-          }
-          for(const chunk of session.backlog)send(chunk)
-          if(active)session.clients.add(send)
-          request.signal.addEventListener("abort",()=>{active=false;session.clients.delete(send);try{controller.close()}catch{}},{once:true})
-        },
-        cancel(){active=false},
-      })
-      return new Response(stream,{headers:{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-store","x-accel-buffering":"no"}})
     }catch(error){return Response.json({error:error instanceof Error?error.message:String(error)},{status:400})}
   }}))
   // 模型预览的字节直取路由：原件与转换产物都从这里出字节（大文件走 Range，不必整份过 POST 的 base64）。

@@ -1,5 +1,6 @@
+import { repathUsdCopies } from "./usd-assets.ts"
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { copyFile, link, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 import type { ResourceRef } from '../../lyapunov-contracts/src/types.ts'
@@ -140,12 +141,12 @@ export class PortableArchive {
    * 见 resources.ts planCasStore），照单再复制一次只会让同一张纹理在包里出现两次。已经在包内的源文件
    * 保持它自己的位置（重复保存不改写文档里已写好的路径）。
    */
-  async place(source:string,expected:FileStamp,target:string,label:string):Promise<string>{
+  async place(source:string,expected:FileStamp,target:string,label:string,preserveRelativeLayout=false):Promise<string>{
    if(!inside(this.root,target))throw new Error(`PORTABLE_TARGET_OUTSIDE_ROOT: ${target}`)
    const content=expected.sha256?`${expected.sha256}:${expected.size}`:undefined
    const known=content?this.byContent.get(content):undefined
-   if(known&&known!==target&&!inside(this.root,source))target=known
-   if(content)this.byContent.set(content,target)
+   if(known&&known!==target&&!inside(this.root,source)&&!preserveRelativeLayout)target=known
+   if(content&&(!preserveRelativeLayout||!known))this.byContent.set(content,target)
    this.placed.set(target,expected)
    const rewritten=this.rewrites.get(target)
    if(target!==source){
@@ -155,7 +156,9 @@ export class PortableArchive {
     const settled=kept&&(kept.size===expected.size&&kept.sha256===expected.sha256||Boolean(rewritten&&kept.size===rewritten.after.size&&kept.sha256===rewritten.after.sha256))
     if(!settled){
      await mkdir(dirname(target),{recursive:true})
-     await copyFile(source,target)
+     // USD相对layer/纹理路径必须保留。layer稍后可能改写绝对引用，独立复制以免硬链接串改；不可改写的贴图等仍复用包内字节。
+     if(preserveRelativeLayout&&known&&known!==target&&!['.usd','.usda','.usdc','.usdz'].includes(extname(source).toLowerCase()))await link(known,target).catch(async error=>{if((error as NodeJS.ErrnoException).code!=='EEXIST')await copyFile(source,target)})
+     else await copyFile(source,target)
     }
    }
    const actual=await fileStamp(target,Boolean(expected.sha256||rewritten)),sourceAfter=await fileStamp(source,false)
@@ -184,9 +187,10 @@ export class PortableArchive {
    const rest=[...dependencies.keys()].filter(path=>!grouped.has(path))
    if(rest.length){
     const bundle=join(this.root,'resources',`${ref.resourceId}-v${ref.version}`),common=commonDirectory(rest)
-    for(const path of rest){const target=await this.place(path,dependencies.get(path)!,this.targetFor(path,join(bundle,relative(common,path))),`${ref.resourceId}@${ref.version}`);copied.set(path,target)}
+    for(const path of rest){const target=await this.place(path,dependencies.get(path)!,this.targetFor(path,join(bundle,relative(common,path))),`${ref.resourceId}@${ref.version}`,parsed.kind==='usd'||parsed.metadata.format==='usd-preview'||parsed.metadata.format==='usd-standard-library');copied.set(path,target)}
    }
    for(const [file,target] of copied)if(['.xml','.mjcf','.urdf'].includes(extname(file).toLowerCase())&&await rewriteXML(file,target,copied))await this.markDerived(target)
+   if(parsed.kind==='usd')for(const target of await repathUsdCopies(copied))await this.markDerived(target)
    // 检查副本实际引用的闭包；不能把“复制过一些文件”当作脱离原路径。
    const portable=await parseAsset(copied.get(source)!,ref.source)
    for(const stamp of portable.dependencies)if(!inside(this.root,stamp.path))throw new Error(`PORTABLE_EXTERNAL_DEPENDENCY: ${stamp.path}`)

@@ -3,7 +3,7 @@ import {createRequire} from 'node:module'
 import {readFileSync} from 'node:fs'
 import {watchWorkspaceBoot,mountWorkspaceBootFailure,safeWorkspaceBootDetail} from '../src/workspace-boot-recovery.ts'
 
-const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
 const {JSDOM}=sdkRequire('jsdom')
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0))
 

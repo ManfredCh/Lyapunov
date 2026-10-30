@@ -243,7 +243,7 @@ async function readBounded(declared: string | undefined, body: AsyncIterable<Uin
 }
 
 /** 读体钩子：onBytes 在每个真实到达的字节块上同步回调（用于按到达量而非成功量计费）。 */
-export interface NetworkAssetReadHooks { onBytes?: (count: number) => void }
+export interface NetworkAssetReadHooks { onBytes?: (count: number) => void; onRedirect?: (location: string | undefined, status: number) => void }
 
 /** 传输层钩子：默认是真实 https 请求，测试用本机 HTTP 夹具替换（TLS 证书无法在本机信任）。 */
 export type NetworkAssetTransport = (url: URL, options: RequestOptions, listener: (response: IncomingMessage) => void) => ClientRequest
@@ -323,7 +323,7 @@ export async function fetchPublicHttpsBytes(url: URL, resolve: HostResolver, max
           incoming.once("end", () => { responseEnded = true })
           const status = incoming.statusCode ?? 0
           const contentType = headerValue(incoming.headers["content-type"]) ?? ""
-          if (status >= 300 && status < 400) { fail(new Error(`NETWORK_ASSET_REDIRECT_REJECTED: ${status}`)); return }
+          if (status >= 300 && status < 400) { readHooks.onRedirect?.(headerValue(incoming.headers.location),status); fail(new Error(`NETWORK_ASSET_REDIRECT_REJECTED: ${status}`)); return }
           if (status < 200 || status >= 300) { fail(new Error(`NETWORK_ASSET_HTTP_${status}`)); return }
           readBounded(headerValue(incoming.headers["content-length"]), incoming, maxBytes, armStall, readHooks.onBytes).then(bytes => finish(() => accept({ bytes, contentType })), error => fail(error))
         })
@@ -342,6 +342,8 @@ export async function fetchPublicHttpsBytes(url: URL, resolve: HostResolver, max
 
 /** 带重试的一次请求：除传输参数外只有两个钩子——按到达字节计费的 onBytes 与读体后的字节校验 verify。 */
 export interface NetworkAssetRetryRequest {
+  /** 只观察跳转目标；请求仍先拒绝，由特定来源适配显式验证后发下一次请求。 */
+  onRedirect?: (location: string | undefined, status: number) => void;
   transport?: NetworkAssetTransport
   signal?: AbortSignal
   acceptHeader?: string
@@ -388,7 +390,7 @@ export async function fetchPublicHttpsBytesWithRetry(url: URL, resolve: HostReso
     let fetched: { bytes: Buffer; contentType: string }
     try {
       // 额度按「总上限 - 已取回」收窄：重试拿到的不是新的一份 maxBytes，而是这次预算的剩余量。
-      fetched = await fetchPublicHttpsBytes(url, resolve, Math.max(0, maxBytes - transferred), request.transport, signal, acceptHeader, request.timeouts, { onBytes: charge })
+      fetched = await fetchPublicHttpsBytes(url, resolve, Math.max(0, maxBytes - transferred), request.transport, signal, acceptHeader, request.timeouts, { onBytes: charge, onRedirect:request.onRedirect })
     } catch (error) {
       await retryOrThrow(error, false, attempt)
       continue

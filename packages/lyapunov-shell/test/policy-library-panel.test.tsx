@@ -142,7 +142,7 @@ test('B3 旧路径不可证：资格只能来自本实例重准备，主按钮�
 
 const savedDom=new Map<string,PropertyDescriptor|undefined>()
 function installDom(){
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
  const {JSDOM}=req('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true})
  for(const key of ['window','document','HTMLElement','Node','navigator','IS_REACT_ACT_ENVIRONMENT']){
   savedDom.set(key,Object.getOwnPropertyDescriptor(globalThis,key))

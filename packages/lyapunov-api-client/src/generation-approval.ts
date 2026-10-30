@@ -7,7 +7,7 @@ import type {GenerationProduct,GenerationQuote} from './generation.ts'
 import {generationPublicName} from './generation.ts'
 export interface GenerationApproval {product:GenerationProduct;requestId:string;mode:'formal'|'developer';accountId:string;apiUrl:string;request:unknown;quote?:GenerationQuote}
 export type GenerationAuthorizer=(request:GenerationApproval,signal?:AbortSignal)=>Promise<void>
-function canonical(value:any):any {if(Array.isArray(value))return value.map(canonical);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([,v])=>v!==undefined&&typeof v!=='function').sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)]));return value}
+export function canonical(value:any):any {if(Array.isArray(value))return value.map(canonical);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([,v])=>v!==undefined&&typeof v!=='function').sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)]));return value}
 /**
  * 请求参数说明。`actualModel` 是服务端实际生效的模型（来自报价）：有这个值时只显示它，
  * 请求体里的 model 可能被服务端覆盖，绝不能当成实际模型展示。

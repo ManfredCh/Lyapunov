@@ -7,7 +7,7 @@
  */
 import { expect, test } from 'bun:test'
 import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
-import type {} from '../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/lib/types/runtime-context.d.ts'
+import type {} from '../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/lib/types/runtime-context.d.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'

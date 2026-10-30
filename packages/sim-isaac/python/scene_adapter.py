@@ -13,9 +13,10 @@ from isaacsim.asset.importer.mjcf import MJCFImporter,MJCFImporterConfig
 from isaacsim.asset.importer.urdf import URDFImporter,URDFImporterConfig
 from glb_visual import convert_glb
 if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu' and os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='rtx':
-    from cpu_prims import Articulation,RigidPrim,XformPrim
+    from cpu_prims import Articulation,RigidPrim,XformPrim,use_backend
 else:
     from isaacsim.core.experimental.prims import Articulation,RigidPrim,XformPrim
+    from isaacsim.core.experimental.utils.backend import use_backend
 from isaacsim.core.experimental.utils import stage as stage_utils
 
 
@@ -43,7 +44,7 @@ def native_source(entity):
     if cfg.get('sourcePath'):return local_path(cfg['sourcePath']),cfg
     for resource in entity.get('resources',[]):
         for rep in [*resource.get('representations',[]),resource.get('original',{})]:
-            if rep.get('uri','').lower().endswith(('.usd','.usda','.usdc','.xml','.urdf')):return local_path(rep['uri']),cfg
+            if rep.get('uri','').lower().endswith(('.usd','.usda','.usdc','.usdz','.xml','.urdf')):return local_path(rep['uri']),cfg
     # 通用消费者可继续持有原生MJCF表示；这是文件格式输入，不依赖另一个Provider。
     if components.get('mujoco',{}).get('sourcePath'):return local_path(components['mujoco']['sourcePath']),{**components['mujoco'],**cfg}
     if components.get('mujoco',{}).get('xml'):return None,{**components['mujoco'],**cfg}
@@ -796,6 +797,33 @@ def require_native_gpu(geometry,device):
     if geometry and not device.startswith('cuda:'):
         raise SceneError('UNSUPPORTED_CAPABILITY','Isaac 原生可变形体与 PBD 粒子液体需要 CUDA GPU；请配置 physicsDevice=cuda:0 / Native deformables and PBD particle fluids require a CUDA GPU')
 
+def require_native_usd_sdf_device(source,overrides,device,rendering_mode='none'):
+    # SDF cooking会申请CUDA context，CPU/none沙箱不能借宿主可见GPU偷偷完成。
+    # 用未注册到PhysX的匿名组合stage预检；不要先加进runtime stage再等cooking返回。
+    if device!='cpu' or rendering_mode!='none':return
+    root=Sdf.Layer.FindOrOpen(source)
+    stage=Usd.Stage.Open(root,Sdf.Layer.CreateAnonymous(),load=Usd.Stage.LoadAll)
+    if not stage:raise SceneError('IMPORT_FAILED','无法预检原生USD / Cannot inspect native USD: '+source)
+    stage.SetEditTarget(stage.GetSessionLayer())
+    default=stage.GetDefaultPrim()
+    source_root=overrides.get('primPath') or (str(default.GetPath()) if default else None)
+    if not source_root:raise SceneError('USD_DEFAULT_PRIM_REQUIRED','原生USD需要defaultPrim或components.usd.primPath')
+    selected=stage.GetPrimAtPath(source_root)
+    if not selected:raise SceneError('USD_PRIM_MISSING',source_root)
+    for path,selections in (overrides.get('variants') or {}).items():
+        if str(Sdf.Path(path).MakeRelativePath(Sdf.Path(source_root))).startswith('..'):raise SceneError('USD_VARIANT_OUTSIDE_ROOT',path)
+        prim=stage.GetPrimAtPath(path)
+        if not prim:raise SceneError('USD_PRIM_MISSING',path)
+        for name,value in selections.items():
+            variant=prim.GetVariantSet(name)
+            if value not in variant.GetVariantNames():raise SceneError('USD_VARIANT_INVALID',path+':'+name+'='+value)
+            variant.SetVariantSelection(value)
+    for prim in Usd.PrimRange(selected,Usd.TraverseInstanceProxies()):
+        if not prim.IsA(UsdGeom.Mesh)or not prim.HasAPI(UsdPhysics.CollisionAPI):continue
+        if UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is False:continue
+        if UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Get()=='sdf':
+            raise SceneError('ISAAC_SDF_COOKING_REQUIRES_CUDA','ISAAC_SDF_COOKING_REQUIRES_CUDA: usd-sdf-preflight；原生SDF碰撞烘焙需要CUDA，CPU/rendering:none不可用；请显式选择GPU物理（physicsDevice=cuda:0）。源碰撞保持不变：'+str(prim.GetPath()))
+
 def mesh_triangles(counts,indices):
     result=[];offset=0
     for count in counts:
@@ -867,6 +895,11 @@ class SceneAdapter:
     def __init__(self,cache_root):
         self.cache_root=Path(cache_root).resolve();self.cache_root.mkdir(parents=True,exist_ok=True);self.converted={}
     def convert(self,entity,covered_by_scene_visual=False):
+        if entity.get('components',{}).get('human'):
+            import human_adapter
+            human_adapter.validate(entity['components']['human'],SceneError)
+            return None,{},{'humanKinematic':True}
+        if entity.get('components',{}).get('humanDefinition'):return None,{},{}
         source,cfg=native_source(entity)
         base=entity.get('components',{}).get('baseBinding')
         if base and base.get('mode')!='source':
@@ -878,10 +911,10 @@ class SceneAdapter:
             visual=visual_source(entity,self.cache_root)
             return visual,cfg,{'visualOnly':bool(visual)}
         if not Path(source).exists():raise SceneError('RESOURCE_MISSING',source)
-        if source.endswith(('.usd','.usda','.usdc')):
+        if source.endswith(('.usd','.usda','.usdc','.usdz')):
             native_stage=Usd.Stage.Open(source,Usd.Stage.LoadNone)
             if not native_stage:raise SceneError('IMPORT_FAILED','无法打开原生 USD / Cannot open native USD: '+source)
-            return source,cfg,{'nativeSourceCoordinates':{'metersPerUnit':UsdGeom.GetStageMetersPerUnit(native_stage),'kilogramsPerUnit':UsdPhysics.GetStageKilogramsPerUnit(native_stage),'upAxis':str(UsdGeom.GetStageUpAxis(native_stage))}}
+            return source,cfg,{'nativeUsd':True,'nativeDefaultPrim':str(native_stage.GetDefaultPrim().GetPath()) if native_stage.GetDefaultPrim() else None,'nativeSourceCoordinates':{'metersPerUnit':UsdGeom.GetStageMetersPerUnit(native_stage),'kilogramsPerUnit':UsdPhysics.GetStageKilogramsPerUnit(native_stage),'upAxis':str(UsdGeom.GetStageUpAxis(native_stage))}}
         key=(source,Path(source).stat().st_mtime_ns,json.dumps(cfg,sort_keys=True),declared_resources(entity))
         if key in self.converted:return self.converted[key]
         output=self.cache_root/'imports'/str(uuid.uuid4());output.mkdir(parents=True)
@@ -903,6 +936,8 @@ class SceneAdapter:
             metadata['driveForceLimits']={'limits':limits,'appliedPrims':applied}
         result=(usd,cfg,metadata);self.converted[key]=result;return result
     def populate(self,scene,options):
+        import human_adapter
+        scene=human_adapter.shared.hydrate(scene,SceneError)
         # 完成全部转换再切stage，编译失败不会留下半个ready world。
         byid={e['entityId']:e for e in scene['entities']}
         def covered(entity):
@@ -913,6 +948,9 @@ class SceneAdapter:
                 parent=ancestor.get('parentId')
             return False
         sources={e['entityId']:self.convert(e,covered(e)) for e in scene['entities']}
+        for entity in scene['entities']:
+            source,_cfg,metadata=sources[entity['entityId']]
+            if metadata.get('nativeUsd'):require_native_usd_sdf_device(source,entity.get('components',{}).get('usd')or{},options.get('physicsDevice','cpu'),os.environ.get('LYAPUNOV_ISAAC_RENDERING','none'))
         stage=stage_utils.create_new_stage();UsdGeom.SetStageUpAxis(stage,UsdGeom.Tokens.z);UsdGeom.SetStageMetersPerUnit(stage,1)
         UsdGeom.Xform.Define(stage,'/World');worldposes=poses(scene)
         from world_physics import scene_gravity,explicit_ground_requested
@@ -926,10 +964,29 @@ class SceneAdapter:
             eid=e['entityId'];path=f'/World/entities/e{i}';source,cfg,metadata=sources[eid];components=e.get('components',{});root=UsdGeom.Xform.Define(stage,path)
             if source:
                 visual_only=metadata.get('visualOnly',False)
-                reference_path=path+'/visual' if visual_only else path
+                reference_path=path+'/visual' if visual_only else path+'/source' if metadata.get('nativeUsd') else path
                 if visual_only:
                     prim=UsdGeom.Xform.Define(stage,reference_path).GetPrim()
                     prim.GetReferences().AddReference(source)
+                elif metadata.get('nativeUsd'):
+                    # Scene实例仅覆盖父Xform与session变体，保留源根Xform/关节/驱动/碰撞。
+                    usd_overrides=components.get('usd') or {}
+                    source_prim=usd_overrides.get('primPath') or metadata.get('nativeDefaultPrim')
+                    if not source_prim:raise SceneError('USD_DEFAULT_PRIM_REQUIRED','原生USD需要defaultPrim或components.usd.primPath: '+source)
+                    if metadata['nativeSourceCoordinates']!={'metersPerUnit':1.,'kilogramsPerUnit':1.,'upAxis':'Z'}:
+                        raise SceneError('UNSUPPORTED_CAPABILITY','原生USD物理当前要求米/千克/Z-up源坐标；原件仍可入库与派生预览: '+source)
+                    metadata['nativeReferencedPrim']=source_prim
+                    prim=UsdGeom.Xform.Define(stage,reference_path).GetPrim()
+                    prim.GetReferences().AddReference(source,source_prim)
+                    for source_path,selections in (usd_overrides.get('variants') or {}).items():
+                        relative_path=Sdf.Path(source_path).MakeRelativePath(Sdf.Path(source_prim))
+                        if str(relative_path).startswith('..'):raise SceneError('USD_VARIANT_OUTSIDE_ROOT',source_path)
+                        target=stage.GetPrimAtPath(Sdf.Path(reference_path).AppendPath(relative_path))
+                        if not target:raise SceneError('USD_PRIM_MISSING',source_path)
+                        for set_name,selection in selections.items():
+                            variant=target.GetVariantSet(set_name)
+                            if selection not in variant.GetVariantNames():raise SceneError('USD_VARIANT_INVALID',source_path+':'+set_name+'='+selection)
+                            variant.SetVariantSelection(selection)
                 else:
                     prim=stage_utils.add_reference_to_stage(usd_path=source,path=reference_path)
                 if visual_only:
@@ -950,8 +1007,8 @@ class SceneAdapter:
                             elif origin.get('upAxis')=='X':matrix=matrix*Gf.Matrix4d(1).SetRotate(Gf.Rotation(Gf.Vec3d(0,1,0),-90))
                         correction=UsdGeom.Xformable(prim)
                         correction.AddTransformOp(opSuffix='sourceCoordinates').Set(matrix)
-                else:
-                    # 原生机构的变换按规范化Scene pose设置一次。
+                elif not metadata.get('nativeUsd'):
+                    # 导入器原生机构沿既有变换路径；USD以父层覆盖保留源根变换。
                     root=UsdGeom.Xform(prim)
             collision_record=None
             if components.get('collision') and (not source or metadata.get('visualOnly')):
@@ -971,6 +1028,8 @@ class SceneAdapter:
                 # 组合碰撞的真实落点是 geometry<i>，不能只把单个 /geometry 标成 guide。
                 for collider_path in (collision_record or {}).get('colliderPaths',[path+'/geometry']):
                     UsdGeom.Imageable(stage.GetPrimAtPath(collider_path)).CreatePurposeAttr(UsdGeom.Tokens.guide)
+            human_runtime=human_adapter.install(stage,path,e,worldposes[eid],SceneError)if components.get('human')else None
+            if human_runtime:collision_record={'shape':'human-segments','colliderPaths':[row['path']for row in human_runtime['humanSegments']],'mass':{'type':'kinematic','massKg':None,'source':'not-applicable'}}
             prim=stage.GetPrimAtPath(path)
             apply_native_material_overrides(stage,path,cfg.get('materialOverrides'))
             native_geometry=native_geometry_prims(prim)
@@ -1021,6 +1080,7 @@ class SceneAdapter:
                          # Scene 声明碰撞实际落成的东西（collider 路径、材质与质量来源）；没有声明
                          # 碰撞的实体（走导入源碰撞）这里为 None，不假装有 Scene 侧消费记录。
                          'collision':collision_record}
+            if human_runtime:result[eid].update(human_runtime);human_adapter.bind(result[eid],RigidPrim)
         from robot_authoring import capture_model_origin,snapshot_model_origin
         for eid,entry in result.items():
             if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu' and os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='rtx':

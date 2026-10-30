@@ -41,10 +41,11 @@ export interface Harness {
   routes: Map<string, (request: Request) => Promise<Response>>
   root: string
   operations: SceneOperations
+  operationsFor: (sessionId: string) => SceneOperations
   dispose: () => Promise<void>
 }
 
-export async function boot(options: { root?: string; sceneRoot?: string } = {}): Promise<Harness> {
+export async function boot(options: { root?: string; sceneRoot?: string; sessionIds?: string[] } = {}): Promise<Harness> {
   const root = options.root ?? await mkdtemp(join(tmpdir(), "lyapunov-route-base-"))
   const sceneRoot = options.sceneRoot ?? root
   const ctx = new Context() as any
@@ -54,12 +55,14 @@ export async function boot(options: { root?: string; sceneRoot?: string } = {}):
   ctx.provide("settings", { register: (ns: string) => { namespaces.add(ns); return () => namespaces.delete(ns) }, describe: () => [...namespaces].map(ns => ({ ns, user: undefined, revision: 1, value: {} })), mutate: async () => undefined, replace: async () => undefined })
   // 真 SceneOperations：真场景存储 + 真资源库（真 index.json、真 sha256 核对）。
   const operations = new SceneOperations(sceneRoot)
-  ctx.provide("scene", { forSession: () => operations })
-  const agent = { id: SessionId(SESSION), ctx: createScope(ctx, { session: SESSION }).ctx, steer() {}, inject() {}, session: { id: SESSION, header: { id: SESSION }, snapshotEvents: () => [] } }
-  const agents = new Map<string, unknown>([[SESSION, agent]])
+  const operationsBySession=new Map([[SESSION,operations]])
+  for(const id of options.sessionIds??[])if(!operationsBySession.has(id))operationsBySession.set(id,new SceneOperations(join(sceneRoot,'sessions',id)))
+  const operationsFor=(id:string)=>{const found=operationsBySession.get(id);if(!found)throw Error('SESSION_NOT_FOUND');return found}
+  ctx.provide("scene", { forSession: operationsFor })
+  const agents = new Map<string, unknown>([...operationsBySession.keys()].map(id=>[id,{ id: SessionId(id), ctx: createScope(ctx, { session: id }).ctx, steer() {}, inject() {}, session: { id, header: { id }, snapshotEvents: () => [] } }]))
   ctx.provide("agents", { get: (id: unknown) => agents.get(String(id)) })
   ctx.provide("sessions", { flush: async () => undefined })
-  ctx.provide("sessionController", { resolveAgent: async (id: unknown) => agents.has(String(id)) ? { agent } : { error: new Error("SESSION_NOT_FOUND") } })
+  ctx.provide("sessionController", { resolveAgent: async (id: unknown) => agents.has(String(id)) ? { agent:agents.get(String(id)) } : { error: new Error("SESSION_NOT_FOUND") } })
   ctx.provide("sessionQuery", { observeSession: async (id: unknown) => agents.has(String(id)) ? ({ header: { id: String(id) }, dispose: () => undefined }) : undefined })
   ctx.provide("commands", { register: () => () => undefined, execute: async () => undefined })
   // jobs/subprocess 本夹具不碰（provider 安装、后台作业）；只提供建路由期会调到的那个形状。
@@ -75,7 +78,7 @@ export async function boot(options: { root?: string; sceneRoot?: string } = {}):
     inject: ["connection", "commands", "agents", "scene", "sessions", "attachments", "systemPrompt", "sessionController", "sessionQuery", "tools", "jobs", "subprocess"],
     apply: (scoped: any) => apply(scoped, { captureRoot: join(root, "captures"), recordingRoot: join(root, "recordings"), dataRoot: root, catalogRoot: join(root, "catalog") }),
   } as never, undefined as never)
-  return { routes, root, operations, dispose: async () => { await rm(root, { recursive: true, force: true }) } }
+  return { routes, root, operations, operationsFor, dispose: async () => { await rm(root, { recursive: true, force: true }) } }
 }
 
 /** 场景文档写进真 `SceneStore` 读的那条路径（`SceneOperations(directory)` 省略 layout ⇒ worlds=directory）。 */

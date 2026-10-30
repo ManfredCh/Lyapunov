@@ -27,6 +27,7 @@ export const LOD_HYSTERESIS = 0.9
 
 /** 实体里承载可视几何的那个资源引用。与 `index.ts` 选基础表示用的是**同一条判据**（只有这一份）。 */
 export function primaryResource(entity: Entity): ResourceRef | undefined {
+  if(entity.components.visual?.kind==='usd')return entity.resources.find(ref=>ref.original.mimeType==='model/vnd.usd')
   return entity.resources.find(ref => ref.representations.some(rep => rep.role === "visual" || rep.mimeType === "model/gltf-binary")) ?? entity.resources[0]
 }
 /** 实体基础级别**实际加载**的那条表示（`index.ts` 的 `loadVisual` 用的是同一条判据）。 */

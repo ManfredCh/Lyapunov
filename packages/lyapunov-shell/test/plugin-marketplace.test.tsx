@@ -16,7 +16,7 @@ const settingsUiBuild=await Bun.build({entrypoints:[join(productRootForUi,'packa
 if(!settingsUiBuild.success)throw new AggregateError(settingsUiBuild.logs,'设置组件测试编译失败')
 await writeFile(join(settingsUiDir,'settings-ui.mjs'),await settingsUiBuild.outputs.find(row=>row.path.endsWith('.js'))!.text())
 // react-dom 在首次加载时探测 DOM；先建立独立探测文档，再由每条测试建立自身文档。
-const {JSDOM:InitialDom}=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))('jsdom')
+const {JSDOM:InitialDom}=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))('jsdom')
 const initialDom=new InitialDom('<!doctype html><html><body></body></html>'),initialGlobals=new Map<string,PropertyDescriptor|undefined>()
 for(const key of ['window','document','navigator']){initialGlobals.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:initialDom.window[key],configurable:true,writable:true})}
 const {ExternalToolsSettings,applyExternalToolsSettings}=await import(join(settingsUiDir,'settings-ui.mjs')) as typeof import('../src/external-tools-settings.tsx')
@@ -130,7 +130,7 @@ describe('插件市场原生读数的薄投影',()=>{
 })
 
 test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；不显示secret值、不调用模型',async()=>{
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom')
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  const names=['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']
  for(const name of names){saved.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{value:name==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[name],configurable:true,writable:true})}
@@ -164,16 +164,16 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
 
 // 原SDK外壳和原inventory组件参加交互，不由产品重写官方列表。
 test('原插件列表仍默认且可打开集成；软件下载不藏details，正常按钮提交原acquire而非模型会话',async()=>{
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<!DOCTYPE html><div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<!DOCTYPE html><div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
  // SDK与产品独立安装React；以既有Bun编译原组件并固定本测试同一React，不改SDK/共享依赖。
- const nativeDir=await mkdtemp(join(tmpdir(),'native-plugin-settings-ui-')),productRoot=fileURLToPath(new URL('../../../',import.meta.url)),sdkRoot=fileURLToPath(new URL('../../../.upstream/deepseek-harness-20260911-candidate/',import.meta.url))
+ const nativeDir=await mkdtemp(join(tmpdir(),'native-plugin-settings-ui-')),productRoot=fileURLToPath(new URL('../../../',import.meta.url)),sdkRoot=fileURLToPath(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/',import.meta.url))
  await writeFile(join(nativeDir,'entry.ts'),`export {SettingsRoot} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-general/src/client/SettingsRoot.tsx'))};\nexport {PluginInventorySettingsTab} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx'))};\nexport {AgentPresetSection} from ${JSON.stringify(join(sdkRoot,'packages/client/ui-agent-preset/src/client/AgentPresetSection.tsx'))};\n`)
  await symlink(join(productRoot,'node_modules'),join(nativeDir,'node_modules'),'dir')
  const built=await Bun.build({entrypoints:[join(nativeDir,'entry.ts')],target:'bun',format:'esm',plugins:[{name:'test-single-react',setup(builder){builder.onResolve({filter:/^react(?:\/.*)?$/},args=>({path:Bun.resolveSync(args.path,productRoot),external:true}))}}]})
  if(!built.success)throw new AggregateError(built.logs,'原SDK插件设置组件测试编译失败')
  const javascript=built.outputs.find(row=>row.path.endsWith('.js'))!;await writeFile(join(nativeDir,'native-ui.mjs'),await javascript.text())
- const {SettingsRoot,PluginInventorySettingsTab,AgentPresetSection}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
+ const {SettingsRoot,PluginInventorySettingsTab,AgentPresetSection}=await import(join(nativeDir,'native-ui.mjs')),{en:sectionEn}=await import('../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/ui-settings-plugins/src/client/locales.ts'),{en:inventoryEn}=await import('../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/ui-settings-plugin-inventory/src/client/locales.ts')
  const entries:any[]=[{id:'general',order:0,label:'General'},{id:'models',order:10,label:'Models'},{id:'plugins',order:15,label:'Plugin list'},{id:'agent-presets',order:20,label:'Agent presets'},{id:'lyapunov-engine',order:30,label:'Physics engine'},{id:'lyapunov-robots',order:40,label:'Robot library'}],clientCtx=new Context();let documentCalls=0,documentFailure=false,documentGate:Promise<void>|undefined,rejectDocument!:(error:Error)=>void
  const remoteSettings={openSettingsDocument:async()=>{documentCalls++;if(documentGate)await documentGate;return documentFailure?{ok:false,error:{message:'Native configuration document open failed'}}:{ok:true}}}
  clientCtx.provide('locale',{bind:()=>()=> 'Scene workbench'} as never)
@@ -181,7 +181,7 @@ test('原插件列表仍默认且可打开集成；软件下载不藏details，�
  clientCtx.provide('sessions',{list:{getSnapshot:()=>({byId:{}})}} as never)
  clientCtx.provide('remote',{settings:remoteSettings} as never);clientCtx.provide('remote.settings',remoteSettings as never)
  await clientCtx.plugin({name:'product-settings-native-context-fixture',inject:['slots','locale','sessions'],apply:applyExternalToolsSettings});await new Promise(r=>setTimeout(r,0))
- const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0,presetLoads=0,creatorRequests=0;const {en:presetEn}=await import('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-agent-preset/src/client/locales.ts')
+ const rows=entries.sort((a,b)=>a.order-b.order),calls:any[]=[];let modelCalls=0,openerExit=0,presetLoads=0,creatorRequests=0;const {en:presetEn}=await import('../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/ui-agent-preset/src/client/locales.ts')
  const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{applyExternalToolsHost}=await import('../src/external-tools-host.ts'),hostCtx=new Context(),routes=new Map<string,(r:Request)=>Promise<Response>>()
  hostCtx.provide('systemPrompt',{tools:()=>()=>{},section:()=>()=>{},getSectionOrder:()=>0} as never);await hostCtx.plugin((await import('@deepseek-ai/dsh-tools')).default)
  await hostCtx.plugin(NativeJobs);const removeController=hostCtx.jobs.attachController('plugin-download-ui-fixture');const waitForJob=async(count:number)=>{for(let i=0;i<300&&hostCtx.jobs.list().length<count;i++)await new Promise(r=>setTimeout(r,10));if(hostCtx.jobs.list().length<count)throw Error('Native acquisition Job was not created')}

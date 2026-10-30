@@ -23,10 +23,6 @@
       ]
     }
   },
-  "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0"
-  },
   "peerDependencies": {
     "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2"
   },

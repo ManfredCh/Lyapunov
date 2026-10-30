@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
 import type { WorldOptions } from '../../sim-contract/src/index.ts'
@@ -7,11 +7,20 @@ import type { SceneSnapshot, WorldHandle, WorldWarning } from '../../lyapunov-co
 import { SceneCollisionBuilder, type SceneCollisionBuildResult, type SceneCollisionCompilation } from './scene-collision/index.ts'
 export interface MuJoCoConfig {
   pythonPath?: string; workerPath?: string; renderBackend?: MuJoCoGlBackend
+  /** 人体原始clip/FK的显式计算设备；物理仍由同一MuJoCo World拥有。 */
+  humanComputeDevice?: 'cpu' | 'cuda:0'
+  /** 直连Provider的私有GPU内核缓存；产品会话优先沿既有运行根的scratch解析。 */
+  humanGpuCacheRoot?: string
   /**
    * 按会话的执行接线（装配方造）：worker 收到的会话身份、会话运行根与原生有效权限策略都由此而来。
    * 不注入 = 保持历史直连 spawn（没有会话沙箱接线，调用方不得据此声称沙箱已生效）。
    */
   launch?: SimWorkerLaunchHook
+}
+export function resolveHumanComputeDevice(value: unknown = process.env.LYAPUNOV_HUMAN_COMPUTE_DEVICE): 'cpu' | 'cuda:0' {
+  const device = value ?? 'cpu'
+  if (device !== 'cpu' && device !== 'cuda:0') throw new RangeError('HUMAN_COMPUTE_DEVICE_INVALID: 人体计算设备须为cpu或cuda:0')
+  return device
 }
 export class MuJoCoProvider extends ProcessSimProvider {
   /**
@@ -23,7 +32,10 @@ export class MuJoCoProvider extends ProcessSimProvider {
   private readonly collisionWorlds = new Map<string, { key: string; result: SceneCollisionBuildResult }>()
   constructor(config: MuJoCoConfig = {}) {
     const here = dirname(fileURLToPath(import.meta.url))
-    super({ pythonPath: config.pythonPath ?? process.env.LYAPUNOV_MUJOCO_PYTHON ?? resolve(here, '../../../.runtime/sim-python/bin/python'), workerPath: config.workerPath ?? resolve(here, '../python/worker.py'), engineName: 'MuJoCo', env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.renderBackend) }, ...(config.launch === undefined ? {} : { launch: config.launch }) })
+    const humanComputeDevice = resolveHumanComputeDevice(config.humanComputeDevice)
+    const humanGpuCacheRoot = config.humanGpuCacheRoot ?? process.env.LYAPUNOV_HUMAN_GPU_CACHE_ROOT
+    if (humanGpuCacheRoot !== undefined && !isAbsolute(humanGpuCacheRoot)) throw new RangeError('HUMAN_GPU_CACHE_INVALID: GPU缓存须为明确的绝对私有路径')
+    super({ pythonPath: config.pythonPath ?? process.env.LYAPUNOV_MUJOCO_PYTHON ?? resolve(here, '../../../.runtime/sim-python/bin/python'), workerPath: config.workerPath ?? resolve(here, '../python/worker.py'), engineName: 'MuJoCo', env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.renderBackend), LYAPUNOV_HUMAN_COMPUTE_DEVICE: humanComputeDevice, ...(humanGpuCacheRoot === undefined ? {} : { LYAPUNOV_HUMAN_GPU_CACHE_ROOT: humanGpuCacheRoot }) }, ...(config.launch === undefined ? {} : { launch: config.launch }) })
   }
   /**
    * open 期碰撞缓存以占位键登记（此时 worldId 未定），open 返回后迁到真实 worldId。

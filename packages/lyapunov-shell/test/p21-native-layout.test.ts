@@ -124,7 +124,7 @@ describe("V10 pinned Scene 首开 alongside 正常默认（公开 ILayout 动作
 
 test("V10 真实 Layout store：预置 alongside 后首开保持 984px，不再落成 45% 的 648px",async()=>{
  resetSidebarCompactionForTests()
- const {createLayoutStore}=await import("../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-layout/src/client/stores.ts")
+ const {createLayoutStore}=await import("../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/ui-layout/src/client/stores.ts")
  withGlobals({window:windowStub(1440)},()=>{
   const {store,actions}=createLayoutStore().create()
   // 与真实首开顺序一致：先折左栏（280→0），再注册 pinned Scene 前预置 alongside。

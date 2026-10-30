@@ -29,8 +29,9 @@ import { expect, mock, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import * as realEnvironment from '../../lyapunov-shell/src/environment-readiness.ts'
-import type { GpuFacts } from '../../lyapunov-shell/src/environment-readiness.ts'
+import * as realEnvironment from '../../sim-contract/src/gpu-facts.ts'
+import * as realShellEnvironment from '../../lyapunov-shell/src/environment-readiness.ts'
+import type { GpuFacts } from '../../sim-contract/src/gpu-facts.ts'
 
 const { classifyGpu, gpuRefusal, gpuRuntimeDecision, gpuStatus, probeGpuFacts: realProbeGpuFacts } = realEnvironment
 
@@ -61,8 +62,13 @@ function facts(over: Partial<GpuFacts> = {}): GpuFacts {
  * `forcedFacts=null` 时原样委托真探测，宿主观测层拿到的是真机读数。
  */
 let forcedFacts: GpuFacts | null = null
-mock.module('../../lyapunov-shell/src/environment-readiness.ts', () => ({
+mock.module('../../sim-contract/src/gpu-facts.ts', () => ({
   ...realEnvironment,
+  probeGpuFacts: (...args: Parameters<typeof realProbeGpuFacts>) => forcedFacts ?? realProbeGpuFacts(...args),
+}))
+// 引擎选择仍从 Shell 的兼容导出读同一份判据；这里同步替身，避免两条入口读到不同事实。
+mock.module('../../lyapunov-shell/src/environment-readiness.ts', () => ({
+  ...realShellEnvironment,
   probeGpuFacts: (...args: Parameters<typeof realProbeGpuFacts>) => forcedFacts ?? realProbeGpuFacts(...args),
 }))
 // mock **之后**动态 import：engine-preference 拿到的是替身探针。
@@ -164,7 +170,7 @@ test('合同·card-unknown（驱动在但没有任何"有卡"证据）：不许�
 test('装配点源码契约：调用同一份判定，旧那句"没有任何 NVIDIA 设备节点"已不在', () => {
   expect(isaacPluginSource).toContain('gpuRefusal(')
   expect(isaacPluginSource).toContain('probeGpuFacts()')
-  expect(isaacPluginSource).toContain("from '../../lyapunov-shell/src/environment-readiness.ts'")
+  expect(isaacPluginSource).toContain("from '../../sim-contract/src/gpu-facts.ts'")
   // 就是把不可见说成没有的那句话——必须消失。
   expect(isaacPluginSource).not.toContain('没有任何 NVIDIA 设备节点可暴露')
   expect(isaacPluginSource).not.toContain('拿不到 GPU 的 worker')

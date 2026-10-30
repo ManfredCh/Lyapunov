@@ -6,7 +6,7 @@ import AgentLoop from "@deepseek-ai/dsh-agent-loop"
 import { mountAgentLoopTestDependencies } from "@deepseek-ai/dsh-agent-loop-testkit"
 import { createUserMessage } from "@deepseek-ai/dsh-llm"
 import { SessionId } from "@deepseek-ai/dsh-session"
-import { MockAdapter } from "../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/tests/mock-adapter.ts"
+import { MockAdapter } from "../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/tests/mock-adapter.ts"
 import type {} from '../../lyapunov-contracts/src/message-sources.ts'
 import { OrientationChecks } from "../src/orientation-check.ts"
 

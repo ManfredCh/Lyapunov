@@ -55,7 +55,7 @@ test('适配层确实产出 visualOnly（无原生源、只有 GLB 视觉时才�
   const adapter = readFileSync(join(import.meta.dirname, '../python/scene_adapter.py'), 'utf8')
   expect(adapter).toContain("return visual,cfg,{'visualOnly':bool(visual)}")
   // 有原生源（MJCF/URDF/USD）的分支不返回 visualOnly —— 这正是负对照成立的原因。
-  const usdBranch = adapter.split("if source.endswith(('.usd','.usda','.usdc')):")[1]?.split('        key=')[0]
+  const usdBranch = adapter.split("if source.endswith(('.usd','.usda','.usdc','.usdz')):")[1]?.split('        key=')[0]
   expect(usdBranch).toBeDefined()
   expect(usdBranch!.includes('visualOnly')).toBe(false)
   expect(usdBranch!.includes('nativeSourceCoordinates')).toBe(true)

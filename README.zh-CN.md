@@ -19,6 +19,12 @@
 
 **Linux x64** · **Apache-2.0**
 
+> **开发者／AI 必读（Lyapunov 0.2.1 开发基线）**
+>
+> 进入本仓库进行设计、修改、评审或派发前，按 **产品 → 开发 → 美学 → 交互** 完整阅读 [核心原则总入口](principles/README.md)：
+> [产品](principles/PRODUCT.md) · [开发](principles/DEVELOPMENT.md) · [美学](principles/AESTHETICS.md) · [交互](principles/INTERACTION.md)。
+> 执行边界见 [AGENTS.md](AGENTS.md)；0.2.1 的发布日期、范围与验证状态见 [0.2.1 发布说明](docs/releases/0.2.1.md)。原则存在不等于实现已满足；本源码树不随包分发的旧账本不作为事实源。
+
 | 出版信息 | 内容 |
 | --- | --- |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
@@ -44,7 +50,8 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前默认 — [0.2.1](docs/releases/0.2.1.md)：**完整 Linux x64 发行版，包含原生设置整理与完整 Agent Graph 产品能力。
+- **当前默认 — [0.2.2](docs/releases/0.2.2.md)：**完整 Linux x64 发行版，新增人物与人群（随包角色、「人群」面板与自然语言控制）、USD 与 SimReady 一等资产，以及显式 NVIDIA 渲染。
+- **上一版本 — [0.2.1](docs/releases/0.2.1.md)：**保留固定版本目录、标签、说明及下载资产。
 - **历史预览版 — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md)：**保留固定版本目录、标签、说明及下载资产。
 - **历史候选版 — [0.1.0 RC](docs/releases/0.1.0-rc.md)：**保留固定版本目录、标签、说明及下载资产。
 
@@ -52,7 +59,7 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 在 Linux 上安装
 
-在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.1**：
+在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.2**：
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh

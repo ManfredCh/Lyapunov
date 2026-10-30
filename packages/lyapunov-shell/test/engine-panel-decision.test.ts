@@ -86,7 +86,7 @@ async function boot() {
   const installerIsolation = isolateProviderInstaller(workspace)
   try {
     const { apply } = await import("../src/plugin.ts")
-    await apply(ctx as never, { captureRoot: join(workspace, "captures"), recordingRoot: join(workspace, "recordings") } as never)
+    await apply(ctx as never, { productRoot: workspace, captureRoot: join(workspace, "captures"), recordingRoot: join(workspace, "recordings") } as never)
     installerIsolation.assertCalled()
   } finally { installerIsolation.restore() }
 
@@ -106,7 +106,7 @@ async function boot() {
 }
 
 /** 上游在"没有本次启动参数"时会给的答案（面板的"应该是什么/为什么"就用它，测试也用它算期望）。 */
-const upstreamNext = () => resolveEngine({ productRoot: PRODUCT_ROOT, env: { ...process.env, LYAPUNOV_SIM_ENGINE: undefined } })
+const upstreamNext = () => resolveEngine({ productRoot: root!, env: { ...process.env, LYAPUNOV_SIM_ENGINE: undefined } })
 /** 只模拟解释器的发现/版本回执；不导入 MuJoCo，不写产品的托管安装前缀。 */
 function externalMujocoPython(): string {
   const prefix = join(root!, "external-mujoco")
@@ -248,7 +248,7 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
   })
 
   test("外置 MuJoCo 可发现而托管前缀缺失：两种状态分列，切回 Auto 不热切当前 Host", async () => {
-    const managedPython = resolveSdkPython(PRODUCT_ROOT, "mujoco", { ...process.env, LYAPUNOV_MUJOCO_PYTHON: undefined }).python
+    const managedPython = resolveSdkPython(root!, "mujoco", { ...process.env, LYAPUNOV_MUJOCO_PYTHON: undefined }).python
     expect(existsSync(dirname(dirname(managedPython)))).toBe(false)
     const external = externalMujocoPython()
     process.env.LYAPUNOV_MUJOCO_PYTHON = external
@@ -278,7 +278,7 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
   test("没有外置覆盖且托管前缀缺失：当前解释器与托管安装均明确不可用", async () => {
     delete process.env.LYAPUNOV_MUJOCO_PYTHON
     process.env.LYAPUNOV_ENGINE_PREFERENCE_FILE = join(root!, "engine-missing.json")
-    const managedPython = resolveSdkPython(PRODUCT_ROOT, "mujoco", process.env).python
+    const managedPython = resolveSdkPython(root!, "mujoco", process.env).python
     expect(existsSync(dirname(dirname(managedPython)))).toBe(false)
     const host = await boot()
     try {

@@ -7,7 +7,7 @@
  * 其余 13 枚仍是 Tabler 原图，许可与来源不变。
  */
 import {NOTE_ICON_PATH,NOTE_ICON_TOOLBAR_STROKE_WIDTH} from "../../../../lyapunov-contracts/src/note-icon.ts"
-export type WorkbenchIconId = 'scene'|'environment'|'robot'|'object'|'camera'|'capture'|'recording'|'physics'|'asset'|'file'|'terminal'|'deliverable'|'engine'|'annotation'
+export type WorkbenchIconId = 'scene'|'environment'|'robot'|'object'|'camera'|'capture'|'recording'|'physics'|'asset'|'file'|'terminal'|'deliverable'|'engine'|'annotation'|'crowd'
 /**
  * 各入口共用同一套几何：24 网格、1.7 线宽、圆头端点与圆角连接，只有尺寸可调，
  * 因此图标放到标题栏（size=18）时与 66px 工具栏里的视觉重量、圆角、对齐一致。
@@ -22,6 +22,7 @@ export function WorkbenchIcon({id,size=22}:{id:WorkbenchIconId;size?:number}) {
   case "scene":return <svg {...common}><path d="M12 3l8 4.5l0 9l-8 4.5l-8 -4.5l0 -9l8 -4.5"/><path d="M12 12l8 -4.5"/><path d="M12 12l0 9"/><path d="M12 12l-8 -4.5"/></svg>
   case "environment":return <svg {...common}><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></svg>
   case "robot":return <svg {...common}><path d="M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2"/><path d="M9 16c1 .667 2 1 3 1s2 -.333 3 -1"/><path d="M9 7l-1 -4"/><path d="M15 7l1 -4"/><path d="M9 12v-1"/><path d="M15 12v-1"/></svg>
+  case "crowd":return <svg {...common}><path d="M12 4a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M7 21l3 -4"/><path d="M16 21l-2 -4l-3 -3l1 -6"/><path d="M6 12l2 -3l4 -1l3 3l3 1"/></svg>
   case "object":return <svg {...common}><path d="M19.875 6.27c.7 .398 1.13 1.143 1.125 1.948v7.284c0 .809 -.443 1.555 -1.158 1.948l-6.75 4.27a2.27 2.27 0 0 1 -2.184 0l-6.75 -4.27a2.23 2.23 0 0 1 -1.158 -1.948v-7.285c0 -.809 .443 -1.554 1.158 -1.947l6.75 -3.98a2.33 2.33 0 0 1 2.25 0l6.75 3.98l-.033 0"/><path d="M15.5 9.422c.312 .18 .503 .515 .5 .876v3.277c0 .364 -.197 .7 -.515 .877l-3 1.922a1 1 0 0 1 -.97 0l-3 -1.922a1 1 0 0 1 -.515 -.876v-3.278c0 -.364 .197 -.7 .514 -.877l3 -1.79c.311 -.174 .69 -.174 1 0l3 1.79h-.014l0 .001"/></svg>
   case "camera":return <svg {...common}><path d="M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2"/><path d="M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></svg>
   case "capture":return <svg {...common}><path d="M12 20h-7a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v3.5"/><path d="M16 19h6"/><path d="M19 16v6"/><path d="M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></svg>

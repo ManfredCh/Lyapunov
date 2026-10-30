@@ -24,6 +24,22 @@ const upstream = JSON.parse(readFileSync(join(root, "UPSTREAM_LOCK.json"), "utf8
 const webBundle = readFileSync(join(root, upstream, "packages/bundle/web-app/cordis.patch.yml"), "utf8")
 const productBundle = readFileSync(join(root, "packages/lyapunov-product-bundle/cordis.patch.yml"), "utf8")
 
+/** 临时 Unity 供给 fixture：从本仓打包件复刻 distribution→固定 cache→venv 形状。仅证合同，不安装、不联网，也不宣称 Unity Editor 运行。 */
+async function preparedUnityFixture(box: string) {
+  const wheel = readFileSync(join(root, "distribution/native/unity-mcp/mcpforunityserver-10.2.0-py3-none-any.whl"))
+  const license = readFileSync(join(root, "distribution/licenses/unity-mcp-10.2.0.LICENSE"))
+  const seed = join(box, "seed")
+  const wheelPath = join(seed, "distribution/native/unity-mcp/mcpforunityserver-10.2.0-py3-none-any.whl")
+  const licensePath = join(seed, "distribution/licenses/unity-mcp-10.2.0.LICENSE")
+  await mkdir(join(seed, "distribution/native/unity-mcp"), { recursive: true })
+  await mkdir(join(seed, "distribution/licenses"), { recursive: true })
+  await writeFile(wheelPath, wheel)
+  await writeFile(licensePath, license)
+  const { prepareUnityMcpSupply, unityMcpSupplyPaths } = await import("./unity-mcp-supply.ts")
+  const metadata = await prepareUnityMcpSupply(seed)
+  return { seed, paths: unityMcpSupplyPaths(seed), metadata, wheel, license }
+}
+
 test("Isaac 产品默认 GPU 物理、显式 cpu/none 不被环境覆盖，插件配置写入真实生效值", () => {
   expect(isaacRuntimeOptions({}, {} as NodeJS.ProcessEnv)).toEqual({ physicsDevice: "cuda:0", rendering: "none" })
   expect(isaacRuntimeOptions({}, { LYAPUNOV_ISAAC_DEVICE: "cpu", LYAPUNOV_ISAAC_RENDERING: "none" })).toEqual({ physicsDevice: "cpu", rendering: "none" })
@@ -43,6 +59,9 @@ test("local 的真实运行补丁与假 DSH 子进程读同一组三条 SDK 路�
   const savedUndo = process.env.LYAPUNOV_SESSION_UNDO
   try {
     process.env.LYAPUNOV_SESSION_UNDO = "0"
+    // 本用例只验证三条 SDK 路径与父进程秘密隔离；显式 Unity 命令隔离默认供给，避免在未备 venv 的根触发真实 pip。
+    const unityCommand = join(box, "unity-mcp-explicit-fixture")
+    await writeFile(unityCommand, "#!/bin/sh\nexit 0\n", { mode: 0o755 })
     const paths = runtimePaths({ mode: "local", root: join(box, "runtime") })
     const parent: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
@@ -71,7 +90,7 @@ test("local 的真实运行补丁与假 DSH 子进程读同一组三条 SDK 路�
     const profile = async (name: string, sdkEnvironment: NodeJS.ProcessEnv) => {
       const dir = join(paths.dshHome, "profiles", name)
       await mkdir(dir, { recursive: true })
-      const file = await runtimePatch({ dir, mode: "local", surface: "web", sceneRoot: paths.sceneRoot, domains: paths, accountApiUrl: "https://api.example.invalid", engine: "isaac", grasp: "none", sdkEnvironment })
+      const file = await runtimePatch({ dir, mode: "local", surface: "web", sceneRoot: paths.sceneRoot, domains: paths, accountApiUrl: "https://api.example.invalid", engine: "isaac", grasp: "none", sdkEnvironment: { ...sdkEnvironment, LYAPUNOV_UNITY_MCP_COMMAND: unityCommand } })
       const text = await readFile(file, "utf8")
       expect(text).not.toContain(parent.DEEPSEEK_API_KEY!)
       expect(text).not.toContain(parent.OTHER_MODEL_SECRET!)
@@ -729,7 +748,9 @@ test('实际web补丁禁首用自动默认工程，只保存chooser公共起点�
   const box=await mkdtemp(join(tmpdir(),'lyapunov-public-home-overlay-')),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
   try{
     process.env.LYAPUNOV_SESSION_UNDO='0';const dir=join(box,'profile');await mkdir(dir)
-    const file=await runtimePatch({dir,mode:'guest',surface:'web',sceneRoot:join(box,'scene'),engine:'none',grasp:'none',sdkEnvironment:{HOME:'/home/customer'}})
+    // 显式 Unity 命令只隔离装配用例，避免调用默认 supply 时触发真实 pip；HOME 仍保留公共 chooser 的断言值。
+    const unityCommand=join(box,'unity-mcp-explicit-fixture');await writeFile(unityCommand,'#!/bin/sh\nexit 0\n',{mode:0o755})
+    const file=await runtimePatch({dir,mode:'guest',surface:'web',sceneRoot:join(box,'scene'),engine:'none',grasp:'none',sdkEnvironment:{HOME:'/home/customer',LYAPUNOV_UNITY_MCP_COMMAND:unityCommand}})
     const yaml=await import('yaml'),patches=yaml.parse(await readFile(file,'utf8')) as PatchOptions[]
     const existing:EntryOptions[]=[{id:'workspace-controller',name:'@deepseek-ai/dsh-api-workspace-controller',config:{documentsDirectory:'/declared/existing-documents'}},{id:'directory-picker',name:'original-native-picker'}]
     const effective=applyEntryPatches(existing,patches,()=>{})
@@ -777,31 +798,41 @@ test('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checks
 
 test('三个known原生默认包括Unity固定stdio供给，公开registry和optional更新参数明确',async()=>{
  const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
- const {unityMcpSupplyPaths,unityMcpSupplyReady,prepareUnityMcpSupply}=await import('./unity-mcp-supply.ts')
+ const {unityMcpSupplyReady,installedUnityMcpCommand}=await import('./unity-mcp-supply.ts')
  const box=await mkdtemp(join(tmpdir(),'unity-native-default-'))
  try{
-  expect(unityMcpSupplyReady()).toBe(true)
+  // 自有临时 fixture：只证供给合同（打包件→固定 cache→可执行入口），不安装、不联网，也不宣称 Unity Editor 运行。
+  const {seed,paths,metadata}=await preparedUnityFixture(box)
+  expect(metadata).toMatchObject({version:'10.2.0',license:'MIT',editorIncluded:false,wheelSha256:'596e2a7322d829b6cf73510bad5ad87ba7e0ba2eee7e1b19645e8caf4ebf1460'})
+  await mkdir(join(paths.root,'bin'),{recursive:true})
+  await mkdir(join(paths.venv,'bin'),{recursive:true})
+  await writeFile(join(paths.venv,'bin','mcp-for-unity'),'#!/bin/sh\nexec "$(dirname "$0")/../python" -I -m main "$@"\n',{mode:0o755})
+  await symlink(join(paths.venv,'bin','mcp-for-unity'),paths.command)
+  const metaDir=join(paths.venv,'lib','python3.12','site-packages','mcpforunityserver-10.2.0.dist-info')
+  await mkdir(metaDir,{recursive:true})
+  await writeFile(join(metaDir,'METADATA'),'Metadata-Version: 2.1\nName: mcpforunityserver\nVersion: 10.2.0\n')
+  expect(unityMcpSupplyReady(seed)).toBe(true)
   const env={HOME:box,PATH:'/usr/bin:/bin'}
-  expect(installedKnownMcpDefaults(env).find(row=>row.kind==='unity')).toEqual({kind:'unity',command:unityMcpSupplyPaths().command,args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:join(box,'.unity-mcp'),FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}})
-  expect(installedKnownMcpDefaults({...env,LYAPUNOV_UNITY_MCP_URL:'http://localhost:8888/mcp'}).some(row=>row.kind==='unity')).toBe(false)
-  expect(await prepareUnityMcpSupply()).toMatchObject({version:'10.2.0',license:'MIT',editorIncluded:false,wheelSha256:'596e2a7322d829b6cf73510bad5ad87ba7e0ba2eee7e1b19645e8caf4ebf1460'})
+  expect(installedUnityMcpCommand(env,seed)).toBe(paths.command)
+  expect(installedKnownMcpDefaults(env,'linux',seed).find(row=>row.kind==='unity')).toEqual({kind:'unity',command:paths.command,args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:join(box,'.unity-mcp'),FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}})
+  expect(installedKnownMcpDefaults({...env,LYAPUNOV_UNITY_MCP_URL:'http://localhost:8888/mcp'},'linux',seed).some(row=>row.kind==='unity')).toBe(false)
+  expect(installedKnownMcpDefaults({...env,LYAPUNOV_UNITY_MCP_COMMAND:paths.command},'linux',seed).some(row=>row.kind==='unity')).toBe(false)
  }finally{await rm(box,{recursive:true,force:true})}
 })
 
-
 test('Unity发行缓存无需distribution，三个pins损坏明确拒绝而不回退',async()=>{
  const {prepareUnityMcpSupply,unityMcpSupplyPaths,ensureUnityMcp}=await import('./unity-mcp-supply.ts')
- const box=await mkdtemp(join(tmpdir(),'unity-packed-cache-')),paths=unityMcpSupplyPaths(box)
- const wheel=readFileSync(join(root,'distribution/native/unity-mcp/mcpforunityserver-10.2.0-py3-none-any.whl')),license=readFileSync(join(root,'distribution/licenses/unity-mcp-10.2.0.LICENSE'))
+ const box=await mkdtemp(join(tmpdir(),'unity-packed-cache-')),cache=join(box,'cache-root'),paths=unityMcpSupplyPaths(cache)
  try{
-  const metadata=await prepareUnityMcpSupply()
+  // 固定版本/许可证/来源回执来自临时 seed；cache 根没有 distribution，仍必须只凭缓存验 pins。
+  const {metadata,wheel,license}=await preparedUnityFixture(box)
   await mkdir(join(paths.root,'cache'),{recursive:true});await writeFile(paths.wheel,wheel);await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify(metadata))
-  expect(existsSync(join(box,'distribution'))).toBe(false)
-  expect(await prepareUnityMcpSupply(box)).toEqual(metadata)
-  await expect(ensureUnityMcp({root:box,env:{HOME:join(box,'fresh-home'),PATH:'/usr/bin:/bin'},offline:true,forceProduct:true})).rejects.toThrow('UNITY_MCP_RUNTIME_MISSING')
-  await writeFile(paths.wheel,'damaged');await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_WHEEL_CHECKSUM_FAILED');expect(await readFile(paths.wheel,'utf8')).toBe('damaged')
-  await writeFile(paths.wheel,wheel);await writeFile(paths.license,'damaged');await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
-  await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify({...metadata,version:'invalid'}));await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_PROVENANCE_PIN_MISMATCH')
-  await rm(paths.provenance);await expect(prepareUnityMcpSupply(box)).rejects.toThrow('UNITY_MCP_PACKED_SUPPLY_INCOMPLETE')
+  expect(existsSync(join(cache,'distribution'))).toBe(false)
+  expect(await prepareUnityMcpSupply(cache)).toEqual(metadata)
+  await expect(ensureUnityMcp({root:cache,env:{HOME:join(cache,'fresh-home'),PATH:'/usr/bin:/bin'},offline:true,forceProduct:true})).rejects.toThrow('UNITY_MCP_RUNTIME_MISSING')
+  await writeFile(paths.wheel,'damaged');await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_WHEEL_CHECKSUM_FAILED');expect(await readFile(paths.wheel,'utf8')).toBe('damaged')
+  await writeFile(paths.wheel,wheel);await writeFile(paths.license,'damaged');await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
+  await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify({...metadata,version:'invalid'}));await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_PROVENANCE_PIN_MISMATCH')
+  await rm(paths.provenance);await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_PACKED_SUPPLY_INCOMPLETE')
  }finally{await rm(box,{recursive:true,force:true})}
 })

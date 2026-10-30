@@ -16,7 +16,7 @@ type Pending={resolve:(value:unknown)=>void;reject:(reason:unknown)=>void;signal
 
 function withDom(run:(host:HTMLElement,root:Root,render:(props:any)=>Promise<void>)=>Promise<void>){
  return async()=>{
-  const {JSDOM}=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))('jsdom') as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:Window&typeof globalThis}}
+  const {JSDOM}=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))('jsdom') as {JSDOM:new(html:string,options?:{url?:string;pretendToBeVisual?:boolean})=>{window:Window&typeof globalThis}}
   const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true})
   const saved=new Map<string,PropertyDescriptor|undefined>()
   for(const key of ['window','document','HTMLElement','HTMLCanvasElement','Node','navigator','localStorage','sessionStorage','requestAnimationFrame','cancelAnimationFrame','IS_REACT_ACT_ENVIRONMENT']){

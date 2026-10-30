@@ -16,10 +16,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // 测试专用替身：**真实 `plugin.apply()` / 真实 session launcher / 真实 Provider** 都照跑，
-// 只有 `environment-readiness` 的两个探针被换成"可控夹具"（见下方 mock 段）——"无 GPU 会话"
+// 只有 `sim-contract/gpu-facts` 的两个探针被换成"可控夹具"（见下方 mock 段）——"无 GPU 会话"
 // 因此可重复构造，不再依赖宿主恰好没有 `/dev/nvidia*`。
-import * as realEnvironment from '../../lyapunov-shell/src/environment-readiness.ts'
-import type { GpuFacts } from '../../lyapunov-shell/src/environment-readiness.ts'
+import * as realEnvironment from '../../sim-contract/src/gpu-facts.ts'
+import type { GpuFacts } from '../../sim-contract/src/gpu-facts.ts'
 import type { IsaacProvider } from '../src/provider.ts'
 import { SimError } from '../../sim-contract/src/index.ts'
 import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
@@ -54,7 +54,7 @@ function hiddenGpuFacts(): GpuFacts {
 let forceHiddenGpu = false
 const realProbeVisibility = realEnvironment.probeGpuDeviceVisibility
 const realProbeFacts = realEnvironment.probeGpuFacts
-mock.module('../../lyapunov-shell/src/environment-readiness.ts', () => ({
+mock.module('../../sim-contract/src/gpu-facts.ts', () => ({
   ...realEnvironment,
   probeGpuDeviceVisibility: (...args: Parameters<typeof realProbeVisibility>) =>
     forceHiddenGpu
@@ -315,7 +315,7 @@ describe('ISAAC-01 装配期：配置要求 GPU 但本会话没有设备节点�
     forceHiddenGpu = true
     try {
       // mock **之后**动态 import 同一模块 ⇒ 拿到替身（`mock.module` 的解析口径见本文件顶部）。
-      const env = await import('../../lyapunov-shell/src/environment-readiness.ts')
+      const env = await import('../../sim-contract/src/gpu-facts.ts')
       const visibility = env.probeGpuDeviceVisibility()
       const facts = env.probeGpuFacts()
       expect(visibility.visible).toBe(false)

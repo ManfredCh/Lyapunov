@@ -1,9 +1,10 @@
 /**
  * 工作台自身的槽位契约（声明者是 Lyapunov 工作台，不是 DSH 平台）。
  *
- * 中央工作区分成三块内容：画布（固定入口，属于 lyapunov-shell）、文件编辑工作面与底部抽屉里的
- * 终端（属于 lyapunov-workspace）。两个客户端插件各自打包，跨插件复用同一份呈现只能用槽位，
- * 不能互相 import 源码（那会把同一份业务打进两个 bundle，等于复制）。
+ * 中央工作区分成两块内容：画布（固定入口，属于 lyapunov-shell）与文件编辑工作面
+ * （属于 lyapunov-workspace）。产品终端统一使用 DSH 原生侧栏终端标签，不再经过工作台槽位。
+ * 两个客户端插件各自打包，跨插件复用同一份呈现只能用槽位，不能互相 import 源码
+ * （那会把同一份业务打进两个 bundle，等于复制）。
  *
  * 槽位由工作台的注册项声明（与原生 ui-conversation 用 `main` key `conversation` 声明
  * `main.conversation` 的做法一致），工作台在自己的布局里渲染它们；注册方只贡献呈现，
@@ -24,7 +25,7 @@ export interface WorkbenchSurfaceOwnerProps {
 }
 
 /**
- * 呈现层开合请求：外壳把"切到文件工作面 / 打开终端抽屉 / 回到画布"的能力交给占用者。
+ * 呈现层开合请求：外壳把"切到文件工作面 / 打开原生终端标签 / 回到画布"的能力交给占用者。
  * 这几个是**同进程的回调函数**（不是端点、不是新状态），占用者只在自己界面里转发点击意图。
  */
 export interface WorkbenchReveal {
@@ -34,11 +35,11 @@ export interface WorkbenchReveal {
   toggleTerminal?: () => void
 }
 
-/** 会话级组合座位：占用者用同一个客户端状态包住工作台的中央视图与抽屉。 */
+/** 会话级组合座位：占用者用同一个客户端状态包住工作台的中央视图与产物抽屉。 */
 export interface WorkbenchSessionOwnerProps extends WorkbenchSurfaceOwnerProps {
-  /** 工作台自己的中央视图 + 底部抽屉：占用者必须原样渲染（透传，不复制）。 */
+  /** 工作台自己的中央视图 + 产物抽屉：占用者必须原样渲染（透传，不复制）。 */
   children?: ReactNode
-  /** 占用者提供的工作面当前是否在屏（据实决定是否加载目录/轮询终端，不猜）。 */
+  /** 占用者提供的工作面当前是否在屏（据实决定是否加载目录，不猜）。 */
   exposed?: boolean
   /** 开合请求（见 WorkbenchReveal）。 */
   reveal?: WorkbenchReveal
@@ -48,8 +49,8 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface SlotMap {
     /**
      * 会话级业务状态座位（single/root）：`lyapunov-workspace` 在这里挂**一份**客户端状态
-     * （文件草稿 / 保存与冲突 / 终端选择）并渲染 `children`，中央视图与抽屉里的两个消费组件
-     * 用同一个 context 读它——不存在"两处渲染＝两个 owner"。未占用时 children 原样透传。
+     * （文件草稿 / 保存与冲突）并渲染 `children`，中央视图与消费组件用同一个 context 读它
+     * ——不存在"两处渲染＝两个 owner"。未占用时 children 原样透传。
      */
     "lyapunov.workbench.session": {
       kind: "single"
@@ -61,15 +62,6 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
      * 场景画布不走这里——它是工作台自己的固定入口。
      */
     "lyapunov.workbench.centre": {
-      kind: "keyed"
-      scope: "session"
-      owner: WorkbenchSurfaceOwnerProps
-    }
-    /**
-     * 底部抽屉内容，按 key 派发：`terminal` 是真实终端（lyapunov-workspace 提供，
-     * host ctx.terminals 的同一个 PTY 会话，切换只换渲染位置）。
-     */
-    "lyapunov.workbench.drawer": {
       kind: "keyed"
       scope: "session"
       owner: WorkbenchSurfaceOwnerProps

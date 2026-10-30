@@ -4,10 +4,18 @@ export PYTHONNOUSERSITE=1
 unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP NODE_PATH NODE_OPTIONS
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 provider=${1:-}
-case "$provider" in mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium) shift ;; *) printf '%s\n' '用法：./lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula]' >&2; exit 2 ;; esac
+case "$provider" in mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium) shift ;; *) printf '%s\n' '用法：./lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula] [--human-cuda（仅MuJoCo）]' >&2; exit 2 ;; esac
 accept_eula=false
-if [ "${1:-}" = --accept-omniverse-eula ]; then accept_eula=true; shift; fi
-if [ "$#" -ne 0 ]; then printf '%s\n' '无效安装参数' >&2; exit 2; fi
+human_cuda=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --accept-omniverse-eula) accept_eula=true ;;
+    --human-cuda) human_cuda=true ;;
+    *) printf '%s\n' '无效安装参数' >&2; exit 2 ;;
+  esac
+  shift
+done
+if [ "$human_cuda" = true ] && [ "$provider" != mujoco ]; then printf '%s\n' '--human-cuda只适用于MuJoCo，不改其它SDK' >&2; exit 2; fi
 if [ "$provider" = isaac ] && [ "$accept_eula" != true ]; then
   printf '%s\n' '{"provider":"isaac","status":"BLOCKED","code":"LICENSE_CONFIRMATION_REQUIRED","message":"安装并运行 Isaac 前请阅读 NVIDIA Omniverse 许可；明确同意后使用 --accept-omniverse-eula。","eulaUrl":"https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html"}'
   exit 2
@@ -33,6 +41,11 @@ case "$provider" in
     [ -f "$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $file；请重新完整解包。"
   done ;;
 esac
+if [ "$human_cuda" = true ]; then
+  for file in packages/sim-mujoco/python/human_gpu.py packages/sim-mujoco/python/check_human_cuda.py packages/sim-mujoco/requirements-human-cuda.txt packages/sim-mujoco/warp-source.json packages/sim-mujoco/WARP-LICENSE.md; do
+    [ -s "$root/$file" ] || json_blocked mujoco RELEASE_PAYLOAD_MISSING "缺少非空 $file；请重新完整解包。"
+  done
+fi
 case "$provider" in
   policy-cpu) for file in distribution/linux/policy-cpu.mjs packages/lyapunov-product-bundle/src/policy-runtime.mjs packages/policy-registry/requirements-cpu.txt; do
        [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
@@ -111,8 +124,32 @@ ensure_pip
 # 取值与冲突依据见 docs/robot-dependencies.md。
 transport_pins='pyzmq==27.2.0 msgpack==1.2.2 msgpack-numpy==0.4.8'
 physics_pins='mujoco==3.13.0 mink==1.3.0 ompl==2.0.1 daqp==0.9.1'
+human_runtime_identity() {
+  "$prefix/bin/python" -c '
+# HUMAN_GPU_IDENTITY_PROBE：已有前缀只加Warp，不升级或替换Mu/NumPy。
+import hashlib,importlib.metadata as m,json,pathlib,mujoco,numpy
+if mujoco.__version__ != "3.13.0":raise SystemExit("HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED: 需要现有MuJoCo3.13.0，未执行任何升级")
+result={}
+for name,module in [("mujoco",mujoco),("numpy",numpy)]:
+ d=m.distribution(name);files={str(p):hashlib.sha256(pathlib.Path(d.locate_file(p)).read_bytes()).hexdigest() for p in d.files or [] if p.suffix in (".so",".pyd")}
+ result[name]={"version":module.__version__,"moduleFile":str(pathlib.Path(module.__file__).resolve()),"nativeFiles":files}
+print(json.dumps(result,sort_keys=True,separators=(",",":")))'
+}
 if [ "$provider" = mujoco ]; then
-  pip_install --index-url https://pypi.org/simple $physics_pins $transport_pins -r "$assetbake_requirements"
+  if [ "$human_cuda" != true ] || [ "$reuse_prefix" != true ]; then
+    pip_install --index-url https://pypi.org/simple $physics_pins $transport_pins -r "$assetbake_requirements"
+  fi
+  if [ "$human_cuda" = true ]; then
+    runtime_before=$(human_runtime_identity) || json_blocked mujoco HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED '当前Mu/NumPy基础运行时不匹配或不完整，未自动升级；先核对标准MuJoCo安装。'
+    [ -n "$runtime_before" ] || json_blocked mujoco HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED '无法读取当前Mu/NumPy身份，未安装GPU扩展。'
+    # Warp只依赖已有NumPy；显式禁止依赖解析改动稳定的Mu/NumPy或拉入Torch/Isaac。
+    pip_install --index-url https://pypi.org/simple --only-binary=:all: --no-deps --require-hashes -r "$root/packages/sim-mujoco/requirements-human-cuda.txt"
+    runtime_after=$(human_runtime_identity) || json_blocked mujoco HUMAN_GPU_RUNTIME_IDENTITY_CHANGED 'GPU安装后无法核验原Mu/NumPy身份。'
+    [ "$runtime_before" = "$runtime_after" ] || json_blocked mujoco HUMAN_GPU_RUNTIME_IDENTITY_CHANGED 'GPU扩展安装改变了原Mu/NumPy版本、位置或原生文件SHA；未报告成功。'
+    # 使用随包真实helper在CUDA执行一次FP64 clip/FK。无设备或kernel失败不能被CPU doctor掩盖。
+    "$prefix/bin/python" "$root/packages/sim-mujoco/python/check_human_cuda.py" --cache-root "$root/.runtime/cache/human-cuda-install" ||
+      json_blocked mujoco HUMAN_CUDA_CHECK_FAILED 'CUDA人体运行时检查未通过；请查看前一条具名错误。依赖前缀保留，可修复设备/驱动条件后重试同一命令。'
+  fi
 elif [ "$provider" = policy-cpu ]; then
   # CPU策略与物理SDK使用独立前缀，安装器收尾只核包内本次前缀。
   policy_wheel=$("$node_bin" "$root/distribution/linux/policy-cpu.mjs" wheel)

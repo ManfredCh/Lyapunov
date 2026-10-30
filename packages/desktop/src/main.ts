@@ -17,6 +17,7 @@ import {createAccountSessionStore,ACCOUNT_SESSION_KEY,ACCOUNT_SESSION_STORE,ACCO
 import {DesktopAccountController} from "./account-controller.ts"
 import {resolveAccountApiUrl} from '../../lyapunov-product-bundle/src/account/url.ts'
 import {applySoftwareGlSwitches} from "./software-rendering.ts"
+import {applyNvidiaGlSwitches,nvidiaRenderingEnvironment,assertNvidiaRendering} from "./nvidia-rendering.ts"
 import {resolveDesktopDataRoot} from "./data-root.ts"
 import {classifyStartupFailure,planRestartRecovery,readWorkspaceRecords,resolveWorkspaceHostMode} from "./restart-recovery.ts"
 import {LOCAL_IMPORT_FILE_FILTERS} from "../../lyapunov-shell/src/local-file-import.ts"
@@ -33,9 +34,13 @@ const configuredDataRoot=readRuntimeEnv(process.env,"desktopDataDir")?.trim()
 const dataRoot=resolveDesktopDataRoot({configured:configuredDataRoot,packaged:app.isPackaged,defaultUserData:app.getPath("userData"),productRoot:PRODUCT_ROOT,mode})
 mkdirSync(dataRoot,{recursive:true})
 app.setPath("userData",dataRoot)
-if(process.argv.includes("--software-rendering"))applySoftwareGlSwitches()
+const nvidiaRendering=process.argv.includes("--nvidia-rendering"),softwareRendering=process.argv.includes("--software-rendering")
+if(nvidiaRendering&&softwareRendering)throw new Error("DESKTOP_RENDERING_CONFLICT: --nvidia-rendering 与 --software-rendering 不可同时使用")
+if(nvidiaRendering){Object.assign(process.env,nvidiaRenderingEnvironment(process.env,process.platform));applyNvidiaGlSwitches(app.commandLine)}
+if(softwareRendering)applySoftwareGlSwitches()
 const diagnosticsArg=process.argv.find(value=>value.startsWith("--acceptance-output="))
 const diagnostics=!app.isPackaged&&diagnosticsArg?resolve(diagnosticsArg.slice("--acceptance-output=".length)):undefined
+let nvidiaRendererFacts:unknown
 const owner=new RuntimeOwner()
 const localeMirror=new DesktopLocaleMirror(accountLocale(app.getLocale())??"en")
 let workspaceView:WebContentsView|undefined,viewAttached=false,workspaceMode:"formal"|"developer"|"guest"|undefined
@@ -96,7 +101,7 @@ function configure(target:BrowserWindow,contents:WebContents=target.webContents)
         // `enginePreference` 是**已在偏好文件里保存的**值。两者是不同读回值，不能互相顶替：
         // 保存偏好只影响下次启动，当前 Host 不会因它换引擎。
         engine:host?.engine.engine??null,engineSource:host?.engine.source??null,engineReason:host?.engine.reason??null,enginePreference:readEnginePreference()??null,
-        webPreferences:{contextIsolation:preferences.contextIsolation,nodeIntegration:preferences.nodeIntegration,sandbox:preferences.sandbox},time:new Date().toISOString()},null,2))
+        webPreferences:{contextIsolation:preferences.contextIsolation,nodeIntegration:preferences.nodeIntegration,sandbox:preferences.sandbox},focused:target.isFocused(),gpu:{requested:nvidiaRendering?"nvidia":softwareRendering?"software":"automatic",webgl:nvidiaRendererFacts??null,featureStatus:app.getGPUFeatureStatus(),info:await app.getGPUInfo("complete")},time:new Date().toISOString()},null,2))
       try{const image=await contents.capturePage();await writeFile(join(diagnostics,"shell.png"),image.toPNG())}
       catch(error){console.error("桌面截图失败（回执已落盘）：",error instanceof Error?error.message:String(error))}
     })().catch(error=>console.error("桌面诊断写入失败：",error instanceof Error?error.message:String(error)))},1500)
@@ -282,6 +287,20 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
   // 登录先行：先把登录页装进同一窗口，再做会话恢复；恢复成功由控制器在同一窗口加载工作台，
   // 未授权/过期/失败则保留登录页，绝不启动匿名 Host。
   if(mode==="developer")await openWorkspace();else if(process.argv.includes("--guest")){await showAccount();await controller!.enterGuest()}else{await showAccount();await controller!.restore()}
+  if(nvidiaRendering){
+    // Linux Electron GPUInfo 可能仅返回枚举快照；直接读取本实例 Renderer 的真实 WebGL 上下文。
+    // 已有 Viewer 画布优先；账户页只创建未挂载的探测 context，并立即释放，不引入场景或动画。
+    nvidiaRendererFacts=await exitOwnerContents()!.executeJavaScript(`(()=>{
+      const existing=[...document.querySelectorAll("canvas")].find(canvas=>canvas.getContext("webgl2")||canvas.getContext("webgl"))
+      const canvas=existing||document.createElement("canvas"),gl=canvas.getContext("webgl2",{antialias:false,alpha:false,preserveDrawingBuffer:true})||canvas.getContext("webgl",{antialias:false,alpha:false,preserveDrawingBuffer:true})
+      if(!gl)return {renderer:null,vendor:null,contextLost:null,usedExistingCanvas:Boolean(existing)}
+      const debug=gl.getExtension("WEBGL_debug_renderer_info"),facts={renderer:String(gl.getParameter(debug?debug.UNMASKED_RENDERER_WEBGL:gl.RENDERER)),vendor:String(gl.getParameter(debug?debug.UNMASKED_VENDOR_WEBGL:gl.VENDOR)),contextLost:gl.isContextLost(),usedExistingCanvas:Boolean(existing)}
+      if(!existing)gl.getExtension("WEBGL_lose_context")?.loseContext()
+      return facts
+    })()`)
+    console.log("NVIDIA_RENDERING_CONTEXT",JSON.stringify(nvidiaRendererFacts))
+    assertNvidiaRendering((nvidiaRendererFacts as {renderer?:unknown})?.renderer,app.getGPUFeatureStatus())
+  }
   startupFinished=true
 }
 }).catch(error=>{const message=String(error?.message??error).replace(/([?&]token=)[^\s]+/g,"$1[redacted]");const failure=classifyStartupFailure(message);console.error(`桌面启动失败[${failure.kind}]：`,message);dialog.showErrorBox(`Lyapunov 启动失败（${failure.kind}）`,`${message}\n\n归因：${failure.reason}`);void exits.request("startup-error")})

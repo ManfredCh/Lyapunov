@@ -136,7 +136,17 @@ export const PRODUCT_RUNTIME_FILES = [
   'NOTICE',
   'runtime/electron/chrome-sandbox',
   'packages/sim-isaac/python/worker.py',
+  'packages/sim-isaac/python/human_adapter.py',
   'packages/sim-isaac/python/collision_topology.py',
+  // Isaac人体适配同样复用这组兄弟包helper；源码包存在不能替代缺件判据。
+  'packages/sim-mujoco/python/human.py',
+  'packages/sim-mujoco/python/human_batch.py',
+  'packages/sim-mujoco/python/human_gpu.py',
+  'packages/sim-mujoco/python/check_human_cuda.py',
+  'packages/sim-mujoco/requirements-human-cuda.txt',
+  'packages/sim-mujoco/warp-source.json',
+  'packages/sim-mujoco/WARP-LICENSE.md',
+  'packages/sim-mujoco/python/human_navigation.py',
   'packages/sim-mujoco/python/collision_topology.py',
   'packages/asset-bake/src/bake.py',
   'packages/asset-bake/dist/bake.py',
@@ -144,7 +154,17 @@ export const PRODUCT_RUNTIME_FILES = [
   'packages/asset-bake/requirements-isaac.txt',
   'packages/asset-bake/requirements-common.txt',
   'packages/scene-kit/dist/bake.py',
+  'packages/scene-kit/dist/usd_asset.py',
+  'packages/scene-kit/dist/usd_materials.py',
+  'packages/scene-kit/source-catalogs/warehouse-01/catalog.csv',
+  'packages/scene-kit/source-catalogs/warehouse-01/files.json.gz',
+  'packages/scene-kit/source-catalogs/warehouse-01/README.upstream.md',
+  'packages/scene-kit/source-catalogs/warehouse-01/pins.json',
+  'packages/sim-isaac/python/usd_observation.py',
+  'distribution/linux/install-usd-parser',
   'packages/robot-workflows/dist/plugin.js',
+  'packages/human-crowd/package.json',
+  'packages/human-crowd/dist/plugin.js',
   'packages/blender/src/world.py',
   'packages/blender/dist/world.py',
   'packages/lyapunov-workspace/src/model-convert.ts',
@@ -211,6 +231,17 @@ export function productRuntimeViolations(stage:string,upstreamDirectory:string):
       violations.push(`发行载荷的中文字体或原许可字节不符：${file}`)
   }
   const common='packages/asset-bake/requirements-common.txt'
+  const warpRequirement='packages/sim-mujoco/requirements-human-cuda.txt',warpSource='packages/sim-mujoco/warp-source.json',warpLicense='packages/sim-mujoco/WARP-LICENSE.md'
+  const warpHash='ac2479c70ad410d58deb088c2a64168792be588efc1bec22dc51f92238e8c8c3',warpLicenseHash='a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9'
+  if(available.has(warpRequirement)&&!readFileSync(join(stage,warpRequirement),'utf8').split('\n').some(line=>line.trim()===`warp-lang==1.13.0 --hash=sha256:${warpHash}`))
+    violations.push('发行载荷的人体CUDA扩展未固定官方warp-lang==1.13.0的Linux x64 wheel SHA256')
+  if(available.has(warpSource))try{
+    const source=JSON.parse(readFileSync(join(stage,warpSource),'utf8'))
+    if(source.package!=='warp-lang'||source.version!=='1.13.0'||source.sha256!==warpHash||source.bytes!==138337580||source.filename!=='warp_lang-1.13.0-py3-none-manylinux_2_28_x86_64.whl'||source.source!=='https://pypi.org/pypi/warp-lang/1.13.0/json'||source.license?.spdx!=='Apache-2.0'||source.license?.sha256!==warpLicenseHash)
+      violations.push('发行载荷的人体CUDA扩展来源、版本或许可身份不符')
+  }catch{violations.push('发行载荷的人体CUDA扩展warp-source.json无法解析')}
+  if(available.has(warpLicense)&&createHash('sha256').update(readFileSync(join(stage,warpLicense))).digest('hex')!==warpLicenseHash)
+    violations.push('发行载荷的人体CUDA扩展原许可字节不符')
   if(available.has(common)&&!/^coacd==1\.0\.7\s*$/m.test(readFileSync(join(stage,common),'utf8')))
     violations.push('发行载荷的asset-bake公共requirements未声明coacd==1.0.7')
   for(const file of ['packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt'])

@@ -1,3 +1,5 @@
+import type { HumanMotion } from '../../lyapunov-contracts/src/human.ts'
+export type { HumanMotion } from '../../lyapunov-contracts/src/human.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt, MotionPlan, WorldWarning, PenetrationSummary, PenetrationPair } from '../../lyapunov-contracts/src/types.ts'
 import { requireSessionId } from '../../lyapunov-contracts/src/session-scope.ts'
 import type {} from '@deepseek-ai/cordis'
@@ -75,7 +77,7 @@ export type BodyWrench = { kind: 'thrust'; entityId: string; thrustN: number; to
  * 只表示【已真实写入控制且】坐标落在容差内，不代表抓取或任何任务成功。
  */
 export interface TendonTarget { kind: 'tendon'; entityId: string; tendonNames: string[]; lengths: number[]; durationS: number; tolerance?: number; settleTimeS?: number }
-export type EntityMotion = GaitMotion | JointTrajectory | JointTarget | VehicleDrive | LiftTarget | GripperTarget | ControlStep | BodyWrench | TendonTarget
+export type EntityMotion = HumanMotion | GaitMotion | JointTrajectory | JointTarget | VehicleDrive | LiftTarget | GripperTarget | ControlStep | BodyWrench | TendonTarget
 export type SimAction = { actionId: string; expectedGeneration: number; startStep?: number } & (EntityMotion | { kind: 'batch'; motions: EntityMotion[] })
 /** 当前 realm 的模拟 Provider 由 Profile/DSH 插件选择，open 不切换引擎。 */
 export interface WorldOptions { worldId?: string; timestepS?: number; realtimeFactor?: number; frameRateHz?: number; ground?: boolean; clock?: 'realtime' | 'manual'; /** 在首个对外物理步之前原子暂停；不改变时钟、重力或模型。省略保持原默认行为。 */ startPaused?: boolean }

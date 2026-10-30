@@ -4,7 +4,8 @@ import { SessionSimFactory } from '../../sim-contract/src/session-provider.ts'
 import { createSimSessionLauncher } from '../../sim-contract/src/session-launch.ts'
 import { sessionNamespace } from '../../lyapunov-contracts/src/session-scope.ts'
 import type {} from '../../sim-contract/src/index.ts'
-import { MuJoCoProvider, type MuJoCoConfig } from './provider.ts'
+import { MuJoCoProvider, resolveHumanComputeDevice, type MuJoCoConfig } from './provider.ts'
+import { probeGpuDeviceVisibility } from '../../sim-contract/src/gpu-facts.ts'
 
 export const name = 'lyapunov-sim-mujoco'
 export const inject: string[] = []
@@ -33,6 +34,7 @@ export function apply(ctx: Context, config: MuJoCoPluginConfig = {}) {
   // 会话模式被显式改变后，下一次启动就是新模式。产品会话产物根按会话键展开成会话自己的目录，
   // 是媒体中转的唯一边界。
   const productRoots = config.productRoots ?? []
+  const humanComputeDevice = resolveHumanComputeDevice(config.humanComputeDevice)
   const launchFor = createSimSessionLauncher(ctx, {
     readOnlyRoots: config.readOnlyRoots,
     engineName: 'MuJoCo',
@@ -41,8 +43,13 @@ export function apply(ctx: Context, config: MuJoCoPluginConfig = {}) {
     // read-only 仍禁止用户截图/导出，不把原件目录或整个会话运行根挂成可写。
     internalWritableRoots: ({ privateRoot }) => [join(privateRoot, 'sim', 'scratch')],
     internalTempDir: ({ privateRoot }) => join(privateRoot, 'sim', 'tmp'),
+    // 仅显式CUDA人体请求暴露已有GPU设备；缺卡由对应World具名拒绝，不拖垮无人体的CPU世界。
+    ...(humanComputeDevice === 'cpu' ? {} : { engineDevices: () => {
+      const visibility = probeGpuDeviceVisibility()
+      return visibility.visible ? [...visibility.exposable] : []
+    } }),
   })
-  const sim = new SessionSimFactory({ create: sessionKey => new MuJoCoProvider({ ...config, launch: launchFor(sessionKey) }) })
+  const sim = new SessionSimFactory({ create: sessionKey => new MuJoCoProvider({ ...config, humanComputeDevice, launch: launchFor(sessionKey) }) })
   ctx.reflect.provide('sim', sim)
   // 插件卸载（Host 关闭）才释放全部会话实例；单个会话结束用 sim.release(sessionKey)。
   ctx.effect(() => () => sim.dispose())

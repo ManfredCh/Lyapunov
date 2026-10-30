@@ -1,8 +1,8 @@
 /**
- * 工作台展示状态：布局模式、中央视图、工具面板、底部抽屉。
+ * 工作台展示状态：布局模式、中央视图、工具面板、产物抽屉。
  *
  * 这里只有"怎么显示"。会话、消息、输入、权限属于原生 ui-conversation；场景/world/选择/资产
- * 属于既有 host 所有者；文件草稿与终端属于 lyapunov-workspace。展示状态本身是**一台界面一份**
+ * 属于既有 host 所有者；文件草稿属于 lyapunov-workspace，终端属于 DSH 原生侧栏。展示状态本身是**一台界面一份**
  * 的偏好（不是会话数据），所以只有唯一一个模块级实例，切换会话不需要也不能把它复制成 N 份：
  * 既不是无界缓存，也不会出现同一会话两个 owner 各持一份、互相覆盖。
  * 跨会话/刷新保留靠 localStorage，字段逐个取白名单校验，坏值一律回默认。
@@ -25,10 +25,13 @@ export type LayoutMode="chat"|"collab"|"scene"
  * Robots 机器人、Camera 机器人机位、Capture 自由视角、Recording 记录作业、Annotate/Notes 画布批注；
  * Physics 是运行环境，独立成面板。旧 `asset`（泛用素材库）退出一级入口，见下方 `LEGACY_TOOL_MIGRATIONS` 迁移。
  */
-export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"|"campaign"
+export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"|"campaign"|"crowd"
 /** 中央视图：场景画布（固定入口）⟷ 文件工作面。 */
 export type CentreId="canvas"|"file"
-/** 底部抽屉：终端 / 运行产物，一次一个。 */
+/**
+ * 底部抽屉：只渲染运行产物。`terminal` 仅为旧版持久化状态的迁移值——工作台看到它会
+ * 打开 DSH 原生侧栏终端标签并清掉抽屉，不再渲染第二套终端宿主。
+ */
 export type DrawerId="terminal"|"deliverable"
 
 export interface WorkbenchUIState {
@@ -90,7 +93,7 @@ const clampConversationWidth=(value:number)=>Math.min(CONVERSATION_MAX_WIDTH,Mat
 
 /**
  * 会改**页面级工作面**的界面动作：四个改共享布局偏好的动作（openTool／showCanvas／selectEntity／focus）
- * 加三个改右侧栏可见标签的动作（openFiles／openTerminal／openResource —— "把前台切到文件/终端/指定资源"就是它们）。
+ * 加三个改右侧栏可见标签的动作（openFiles／openTerminal／openResource —— "把前台切到文件/原生终端/指定资源"就是它们）。
  * 相机定位会切换画布和机器人面板，退出相机会恢复观察位并聚焦画布，也必须由前台执行。
  * 其余动作（selectScene／captureViewer／applyCameraViewer／renderCameraViewer／sampleCameraViewer）落在本会话自己的
  * 场景、选中与窗口上，不是页面共享偏好，不受这条规则限制。
@@ -103,7 +106,7 @@ const clampConversationWidth=(value:number)=>Math.min(CONVERSATION_MAX_WIDTH,Mat
  */
 
 const MODES:LayoutMode[]=["chat","collab","scene"]
-const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics","campaign"]
+const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics","campaign","crowd"]
 /**
  * 旧存储/旧调用里的 `asset` 是泛用素材库（R-008 已把它并回业务类别）。存量 localStorage 没有
  * 上下文，最接近的语义是 Objects 的导入/复用；`asset` 的旧 `ui_action` 也会走这条迁移，
@@ -166,7 +169,7 @@ function createStore(){
     toggleCentre:(centre:CentreId)=>set({centre:state.mode!=="chat"&&state.centre===centre&&centre!=="canvas"?"canvas":centre,tool:null,mode:state.mode==="chat"?"collab":state.mode}),
     /** 抽屉入口：显示指定抽屉；再点当前抽屉＝关闭。 */
     toggleDrawer:(drawer:DrawerId)=>set({drawer:state.mode!=="chat"&&state.drawer===drawer?null:drawer,mode:state.mode==="chat"?"collab":state.mode}),
-    /** 来自界面动作的打开（已经是它就不动，用于"新终端后把抽屉露出来"这类跳转）。 */
+    /** 来自界面动作的打开（已经是它就不动，用于"展示产物"这类跳转）。 */
     showDrawer:(drawer:DrawerId)=>set({drawer,mode:state.mode==="chat"?"collab":state.mode}),
     closeDrawer:()=>set({drawer:null}),
     setDrawerHeight:(height:number)=>set({drawerHeight:Math.min(DRAWER_MAX_HEIGHT,Math.max(DRAWER_MIN_HEIGHT,Math.round(height)))}),

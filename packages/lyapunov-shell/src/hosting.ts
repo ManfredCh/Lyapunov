@@ -4,5 +4,4 @@ import type {ChildrenDecl} from "@deepseek-ai/dsh-client-ui-slots"
 export const WORKBENCH_CHILDREN:ChildrenDecl={
   "lyapunov.workbench.session":{kind:"single",scope:"session"},
   "lyapunov.workbench.centre":{kind:"keyed",scope:"session"},
-  "lyapunov.workbench.drawer":{kind:"keyed",scope:"session"},
 }

@@ -22,7 +22,7 @@ import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { MockAdapter } from '../../../.upstream/deepseek-harness-20260911-candidate/packages/core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter } from '../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/tests/mock-adapter.ts'
 import * as agentGraphPlugin from '@lyapunov/agent-graph/plugin'
 import {
   applyCampaignProjection,

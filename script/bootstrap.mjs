@@ -1,5 +1,5 @@
 import {spawnSync} from "node:child_process"
-import {existsSync,readFileSync,mkdirSync} from "node:fs"
+import {existsSync,readFileSync,mkdirSync,lstatSync,readlinkSync} from "node:fs"
 import {resolve,join} from "node:path"
 import {applyUpstreamPatches,preflightUpstreamPatches} from "./upstream-patches.mjs"
 const root=resolve(import.meta.dirname,"..")
@@ -19,8 +19,25 @@ if(!existsSync(upstream)){
 const current=spawnSync("git",["rev-parse","HEAD"],{cwd:upstream,encoding:"utf8"})
 if(current.status!==0||current.stdout.trim()!==lock.commit)throw new Error("现有上游不是固定commit；保留现状，请检查UPSTREAM_LOCK.json")
 applyUpstreamPatches(root,upstream)
+// 旧任务把 `node_modules` 或 `.pnpm` 绝对软链到别的源码树时，安装/构建会悄悄复用那棵树的可变依赖
+// （甚至污染旧任务）。lstat 能看见悬空链接；existsSync 会跟随失败而漏检，所以这里不能用它。
+const upstreamNodeModules=join(upstream,"node_modules")
+const presence=path=>{try{return lstatSync(path)}catch(error){if(error?.code==="ENOENT")return undefined;throw error}}
+const rejectForeignLink=path=>{
+  const target=readlinkSync(path)
+  throw new Error(`UPSTREAM_NODE_MODULES_FOREIGN: ${path} 是符号链接 -> ${target}；拒绝复用旧任务/其他工作区的可变依赖。请先把 ${upstreamNodeModules} 移到本工作区外保全（不要删除其他工作区或用户数据），再重跑 bootstrap，让本工作区按锁文件独立安装。`)
+}
+const nodeModulesStat=presence(upstreamNodeModules)
+if(nodeModulesStat?.isSymbolicLink())rejectForeignLink(upstreamNodeModules)
+const upstreamPnpm=join(upstreamNodeModules,".pnpm")
+const pnpmStat=presence(upstreamPnpm)
+if(pnpmStat?.isSymbolicLink())rejectForeignLink(upstreamPnpm)
+if(pnpmStat&&!pnpmStat.isDirectory())throw new Error(`UPSTREAM_NODE_MODULES_FOREIGN: ${upstreamPnpm} 不是目录；请先把 ${upstreamNodeModules} 移到本工作区外保全，再重跑 bootstrap 生成独立依赖。`)
 // 固定版本使用其根工作区构建；先通过同代补丁与完整性校验，再更新 Host、Client 和 Web 产物。
-run("pnpm",["install","--frozen-lockfile"],upstream)
+// LYAPUNOV_PNPM_STORE_DIR 只用于把 pnpm store 固定到本工作区/受控缓存；不改变上游锁或依赖 pin。
+const pnpmStore=process.env.LYAPUNOV_PNPM_STORE_DIR
+if(pnpmStore)mkdirSync(pnpmStore,{recursive:true})
+run("pnpm",["install","--frozen-lockfile",...(pnpmStore?["--store-dir",pnpmStore]:[])],upstream)
 run("pnpm",["run","build"],upstream)
 const localBun=process.env.BUN_EXECUTABLE??"bun"
 const probe=spawnSync(localBun,["--version"],{encoding:"utf8"})

@@ -9,7 +9,7 @@ import {createRequire} from 'node:module'
 // 冻结基线钉死、本轮不得改动，因此不新增被扫描的 *.test.ts，改为从已登记文件 import 该用例模块。
 import "./lighting-page-cases.tsx"
 
-const require=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+const require=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
 const {JSDOM}=require('jsdom')
 
 const noop=()=>{}

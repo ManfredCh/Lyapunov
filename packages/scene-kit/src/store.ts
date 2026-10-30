@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { mkdirSync, watch } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import {isDeepStrictEqual} from 'node:util'
 import type { Entity, SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 import { SCENE_COORDINATES } from "../../lyapunov-contracts/src/types.ts"
@@ -23,6 +23,9 @@ export interface SceneVersion {
   entityCount: number
   current: boolean
 }
+
+/** 仅由已完整校验的读取派生；不含文档内容，也不替代 Scene 的 revision/CAS。 */
+export interface SceneReadVersion { readonly sceneId: string; readonly revision: number; readonly fileIdentity: string }
 
 function jsonValue(value: unknown, path: string): void {
   if (value === null || typeof value === "string" || typeof value === "boolean") return
@@ -87,8 +90,27 @@ function sceneNotFound(sceneId: string): Error {
 
 /** ctx.scene 仅暴露 snapshot/commit/subscribe；创建和文件传输在 operations。 */
 export class SceneStore {
+  private readonly readVersions = new WeakMap<SceneSnapshot, SceneReadVersion>()
   constructor(readonly directory: string,private readonly beforeCommit?: (draft:SceneSnapshot,current:SceneSnapshot,kind:'commit'|'restore')=>Promise<void>) {}
   path(sceneId: string): string { return join(this.directory, "scenes", `${safeId(sceneId)}.json`) }
+
+  private async fileIdentity(sceneId: string): Promise<string> {
+    try {
+      const file = await stat(this.path(sceneId), { bigint: true })
+      return [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join(":")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+      throw sceneNotFound(sceneId)
+    }
+  }
+
+  /** 只认这份 snapshot 真正读取时的文件身份；提交结果或派生副本不能猜一个身份。 */
+  readVersion(snapshot: SceneSnapshot): SceneReadVersion | undefined { return this.readVersions.get(snapshot) }
+
+  /** 已下发的完整文档仍是同一份文件时，可省去重复读取/校验；同 rev 外改也会失效。 */
+  async unchangedSince(sceneId: string, version: SceneReadVersion): Promise<boolean> {
+    return version.sceneId === sceneId && await this.fileIdentity(sceneId) === version.fileIdentity
+  }
 
   private historyDirectory(sceneId: string): string { return join(this.directory, "scenes", ".history", safeId(sceneId)) }
   private historyPath(sceneId: string, revision: number): string {
@@ -115,6 +137,7 @@ export class SceneStore {
   /** 文件名只是定位；正文 sceneId 必须与请求 ID 一致，否则明确报绑定损坏而不是静默读错场景
    * （CR-003；history/version 侧已有同类绑定检查）。缺失场景报 SCENE_NOT_FOUND（见 sceneNotFound）。 */
   async snapshot(sceneId: string): Promise<SceneSnapshot> {
+    const before = await this.fileIdentity(sceneId)
     let result: SceneSnapshot
     try { result = await readJSON<SceneSnapshot>(this.path(sceneId)) }
     catch (error) {
@@ -123,6 +146,9 @@ export class SceneStore {
     }
     validateSnapshot(result)
     if (result.sceneId !== sceneId) throw new Error(`SCENE_BINDING_INVALID: ${sceneId} != ${result.sceneId}`)
+    const after = await this.fileIdentity(sceneId)
+    // 读取期间发生替换时仍保留原 snapshot 的读取语义，但它不能授权后续跳过读取。
+    if (before === after) this.readVersions.set(result, { sceneId, revision: result.revision, fileIdentity: after })
     return result
   }
 

@@ -10,7 +10,7 @@ import { IsaacProvider, type IsaacConfig } from './provider.ts'
 // `nvidiaDeviceNodes()`（字符设备**或非空目录**），而契约只算字符设备；于是"只暴露了
 // `/dev/nvidia-caps`、没有 `nvidia0`"的容器里，这里不触发守卫、把 caps 当设备交下去，
 // 而同一台机器在面板里仍显示"会话看不见设备"。现在判据与暴露清单都来自契约这一份。
-import { gpuRefusal, probeGpuDeviceVisibility, probeGpuFacts } from '../../lyapunov-shell/src/environment-readiness.ts'
+import { gpuRefusal, probeGpuDeviceVisibility, probeGpuFacts } from '../../sim-contract/src/gpu-facts.ts'
 export const name = 'lyapunov-sim-isaac'
 export const inject: string[] = []
 /**

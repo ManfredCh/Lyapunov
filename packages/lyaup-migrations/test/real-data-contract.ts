@@ -11,8 +11,13 @@
  *
  * 用法：
  *   bun run packages/lyaup-migrations/test/real-data-contract.ts \
- *     [--source <旧 opencode 数据目录>] [--scratch <临时根>] [--evidence <输出 JSON>]
- * 环境覆盖：LYAPUNOV_REAL_OLD_DIR / LYAPUNOV_REAL_OLD_COPY / LYAPUNOV_G14_FIXTURE_ROOT。
+ *     --source <旧 opencode 数据目录> --library-workspace <旧资源工作区根> \
+ *     --g14-fixture <G14 夹具根> [--scratch <临时根>] [--evidence <输出 JSON>]
+ * 环境覆盖：LYAPUNOV_REAL_OLD_DIR / LYAPUNOV_REAL_LIBRARY_WORKSPACE /
+ *           LYAPUNOV_REAL_OLD_COPY / LYAPUNOV_G14_FIXTURE_ROOT。
+ *
+ * 旧源、旧资源工作区和 G14 夹具必须分别显式给出；本驱动不从一个 archive 子目录推断另一个，
+ * 也不内置开发机绝对路径。缺配置或路径不存在时在复制/写入前以退出码 2 停止。
  */
 import { Context } from "@deepseek-ai/cordis"
 import { SessionId } from "@deepseek-ai/dsh-session"
@@ -27,13 +32,13 @@ import { runtimePaths } from "../../lyapunov-product-bundle/src/runtime-paths.ts
 
 const DEV_ROOT = resolve(import.meta.dirname, "../../..")
 const DEFAULTS = {
-  source: process.env.LYAPUNOV_REAL_OLD_DIR ?? "/home/s18/WS/Lyapunov/.lya/developer-runtime/data/opencode",
+  source: process.env.LYAPUNOV_REAL_OLD_DIR,
   copy: process.env.LYAPUNOV_REAL_OLD_COPY ?? join(DEV_ROOT, ".runtime/lane-env33/real-old"),
-  g14: process.env.LYAPUNOV_G14_FIXTURE_ROOT ?? "/home/s18/WS/Lyapunov/DSH/bugfixHistory/refactor-execution/B-migration-evidence/fixture-2026-09-06T01-48-11-221Z",
+  g14: process.env.LYAPUNOV_G14_FIXTURE_ROOT,
   /** 历史轮次在同一份真实副本上跑出的账本：用来证明同一账号+同一旧源的 ID 跨轮次稳定。 */
   previousLedger: join(DEV_ROOT, ".runtime/lane-env33/migrate-new/dsh/migrations/lyaup-old/ledger.json"),
-  /** 旧资源索引里的相对路径挂在这个旧工作区根下（只读，不写）。 */
-  libraryWorkspace: "/home/s18/WS/Lyapunov/History/Main",
+  /** 旧资源索引里的相对路径挂在这个旧工作区根下（只读，不写）；必须由调用者独立显式给出。 */
+  libraryWorkspace: process.env.LYAPUNOV_REAL_LIBRARY_WORKSPACE,
 }
 /** 证据文件路径**只从本模块位置推导**（不经过 DEV_ROOT、不依赖 cwd）：多一层 `..` 就会静默写到别的目录。 */
 const evidencePath = (() => {
@@ -139,11 +144,52 @@ function diffPaths(a: any, b: any, prefix = "", out: string[] = []): string[] {
   return out
 }
 
-const { values } = parseArgs({ args: process.argv.slice(2), options: { source: { type: "string" }, scratch: { type: "string" }, evidence: { type: "string" } } })
-const sourceDirectory = resolve(values.source ?? DEFAULTS.source)
+const { values } = parseArgs({ args: process.argv.slice(2), options: { source: { type: "string" }, "library-workspace": { type: "string" }, "g14-fixture": { type: "string" }, scratch: { type: "string" }, evidence: { type: "string" } } })
+const sourceInput = values.source ?? DEFAULTS.source
+if (!sourceInput) {
+  console.error("LEGACY_REAL_OLD_DIR_NOT_CONFIGURED: 必须用 --source 或 LYAPUNOV_REAL_OLD_DIR 显式指定旧 opencode 数据目录；本驱动不会自动搜索或伪造旧数据")
+  process.exit(2)
+}
+const sourceDirectory = resolve(sourceInput)
+if (!existsSync(sourceDirectory)) {
+  console.error(`LEGACY_REAL_OLD_DIR_MISSING: ${sourceDirectory}（--source/LYAPUNOV_REAL_OLD_DIR 指定的旧 opencode 数据目录不存在；本驱动不会伪造旧数据）`)
+  process.exit(2)
+}
+if (!existsSync(join(sourceDirectory, "opencode-local.db"))) {
+  console.error(`LEGACY_REAL_OLD_DIR_INCOMPLETE: ${sourceDirectory}（目录存在但缺少 opencode-local.db；本驱动不会伪造旧数据）`)
+  process.exit(2)
+}
+const libraryInput = values["library-workspace"] ?? DEFAULTS.libraryWorkspace
+if (!libraryInput) {
+  console.error("LEGACY_REAL_LIBRARY_WORKSPACE_NOT_CONFIGURED: 必须用 --library-workspace 或 LYAPUNOV_REAL_LIBRARY_WORKSPACE 显式指定旧资源工作区根；本驱动不会从旧数据目录推断它")
+  process.exit(2)
+}
+const libraryWorkspace = resolve(libraryInput)
+if (!existsSync(libraryWorkspace)) {
+  console.error(`LEGACY_REAL_LIBRARY_WORKSPACE_MISSING: ${libraryWorkspace}（--library-workspace/LYAPUNOV_REAL_LIBRARY_WORKSPACE 指定的旧资源工作区根不存在；本驱动不会伪造旧数据）`)
+  process.exit(2)
+}
+const g14Input = values["g14-fixture"] ?? DEFAULTS.g14
+if (!g14Input) {
+  console.error("LEGACY_G14_FIXTURE_NOT_CONFIGURED: 必须用 --g14-fixture 或 LYAPUNOV_G14_FIXTURE_ROOT 显式指定 G14 附件夹具根；本驱动不内置开发机路径")
+  process.exit(2)
+}
+const g14Fixture = resolve(g14Input)
+if (!existsSync(g14Fixture)) {
+  console.error(`LEGACY_G14_FIXTURE_MISSING: ${g14Fixture}（--g14-fixture/LYAPUNOV_G14_FIXTURE_ROOT 指定的 G14 附件夹具根不存在；本驱动不会伪造旧数据）`)
+  process.exit(2)
+}
+if (!existsSync(DEFAULTS.copy)) {
+  console.error(`LEGACY_REAL_OLD_COPY_MISSING: ${DEFAULTS.copy}（LYAPUNOV_REAL_OLD_COPY/内置历史副本不存在；本驱动不会伪造旧资源索引或 Scene 数据）`)
+  process.exit(2)
+}
+if (!existsSync(join(DEFAULTS.copy, "library.json")) || !existsSync(join(DEFAULTS.copy, "scenes"))) {
+  console.error(`LEGACY_REAL_OLD_COPY_INCOMPLETE: ${DEFAULTS.copy}（历史副本缺少 library.json 或 scenes/；本驱动不会伪造旧资源索引或 Scene 数据）`)
+  process.exit(2)
+}
 const scratch = values.scratch ? resolve(values.scratch) : await mkdtemp("/dev/shm/lyaup-migration-contract-")
 await mkdir(scratch, { recursive: true })
-const evidence: Record<string, unknown> = { driver: "real-data-contract", sourceDirectory, scratch, startedAt: new Date().toISOString(), checks }
+const evidence: Record<string, unknown> = { driver: "real-data-contract", sourceDirectory, libraryWorkspace, g14Fixture, scratch, startedAt: new Date().toISOString(), checks }
 
 try {
   // ── 0. 复制真实旧数据（源目录只读） ────────────────────────────────────────
@@ -164,7 +210,7 @@ try {
     sourceDatabase: join(realOld, "opencode-local.db"),
     sourceLabel: label, accountKey,
     dshHome: join(installRoot, "dsh"), sceneRoot: join(installRoot, "scenes"),
-    resourceLibraries: [{ path: join(realOld, "library.json"), workspaceRoot: DEFAULTS.libraryWorkspace }],
+    resourceLibraries: [{ path: join(realOld, "library.json"), workspaceRoot: libraryWorkspace }],
     sceneFiles,
   })
 
@@ -365,7 +411,7 @@ try {
     { first: jsonRun.sourceCounts, second: jsonRunSecond.sourceCounts })
 
   // ── 8. G14 真实旧库（带附件）：附件字节逐字节保留 + 幂等 ────────────────────
-  const attachment = await attachmentContract()
+  const attachment = await attachmentContract(g14Fixture)
   evidence.attachments = attachment
   check("真实旧库（G14 夹具）：附件迁移后存储对象与原件 sha256 相同，且重跑不新增不丢失",
     attachment.accounts.every(item => item.missing.length === 0 && item.storedShaMatchesSource && item.second.created === 0
@@ -431,8 +477,7 @@ function minimalGLB() {
  * G14 夹具的两个真实账号各迁移两次。夹具自带一处已删除部署的附件绝对 URL，
  * 按 g14 门的同一原则**只改派生副本里的 URL 字段**，夹具原件只读并复核 sha256。
  */
-async function attachmentContract() {
-  const fixture = DEFAULTS.g14
+async function attachmentContract(fixture: string) {
   const root = join(scratch, "g14")
   const fixtureHashesBefore = Object.fromEntries(await Promise.all((["fixture-a", "fixture-b"] as const).map(async account => [account, await sha256(join(fixture, account, "old.db"))])))
   const accounts: any[] = []

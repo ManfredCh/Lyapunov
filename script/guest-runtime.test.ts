@@ -1,3 +1,4 @@
+import {spawnSync} from "node:child_process"
 import {expect,test} from "bun:test"
 import {mkdtemp,rm} from "node:fs/promises"
 import {tmpdir} from "node:os"
@@ -54,4 +55,28 @@ test('隔离Host继承实际桌面窄环境但保持HOME隔离且不透传未知
   const optedOut=await backendEnvironment('guest',runtimePaths({root,mode:'guest'}),{parent:{...parent,COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP:'0'},isolated:true})
   expect(optedOut.COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP).toBe('0')
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('Guest与local真实Host窄环境转发合法人体计算设备，非法值与未设置均不落进Host',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'human-device-env-'))
+ try{for(const mode of ['guest','local'] as const){
+  const paths=runtimePaths({root,mode})
+  const cuda=await backendEnvironment(mode,paths,{parent:{PATH:process.env.PATH,LYAPUNOV_HUMAN_COMPUTE_DEVICE:' cuda:0 '},isolated:true})
+  expect(cuda.LYAPUNOV_HUMAN_COMPUTE_DEVICE).toBe('cuda:0')
+  const cpu=await backendEnvironment(mode,paths,{parent:{PATH:process.env.PATH,LYAPUNOV_HUMAN_COMPUTE_DEVICE:'cpu'},isolated:true})
+  expect(cpu.LYAPUNOV_HUMAN_COMPUTE_DEVICE).toBe('cpu')
+  const invalid=await backendEnvironment(mode,paths,{parent:{PATH:process.env.PATH,LYAPUNOV_HUMAN_COMPUTE_DEVICE:'cuda:1'},isolated:true})
+  expect('LYAPUNOV_HUMAN_COMPUTE_DEVICE' in invalid).toBe(false)
+  const unset=await backendEnvironment(mode,paths,{parent:{PATH:process.env.PATH},isolated:true})
+  expect('LYAPUNOV_HUMAN_COMPUTE_DEVICE' in unset).toBe(false)
+ }}finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('Guest与local真实Host窄环境保留显式USD解释器，子进程不回落且未知秘密仍隔离',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'usd-host-env-'))
+ try{for(const mode of ['guest','local'] as const){
+  const selected='/selected/usd-runtime/bin/python',env=await backendEnvironment(mode,runtimePaths({root,mode}),{parent:{PATH:process.env.PATH,LYAPUNOV_USD_PYTHON:'  '+selected+'  ',OTHER_SECRET:'must-not-cross'},isolated:true})
+  const child=spawnSync(process.execPath,['-e','console.log(JSON.stringify({usd:process.env.LYAPUNOV_USD_PYTHON,secret:process.env.OTHER_SECRET??null}))'],{env,encoding:'utf8'})
+  expect(child.status).toBe(0);expect(JSON.parse(child.stdout)).toEqual({usd:selected,secret:null})
+ }}finally{await rm(root,{recursive:true,force:true})}
 })

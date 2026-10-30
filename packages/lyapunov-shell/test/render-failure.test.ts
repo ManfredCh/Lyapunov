@@ -12,7 +12,7 @@ import type {SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
 
 const tr=(zh:string,_en:string)=>zh
 const snapshot:SceneSnapshot={sceneId:'fixture-scene',revision:0,coordinates:{units:'m',upAxis:'Z',handedness:'right',quaternion:'xyzw'},entities:[]}
-const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
 
 async function inDOM(run:(host:HTMLElement,root:import('react-dom/client').Root,act:typeof import('react').act)=>Promise<void>){
  const {JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid'})

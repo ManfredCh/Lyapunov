@@ -657,7 +657,7 @@ test("C1 装配点源码契约：plugin.ts 用契约的判据，不再自己数�
   // 装配点必须消费**契约的**判据（同一份 `gpuDeviceVisibility`；暴露清单另算）。
   expect(source).toContain("probeGpuDeviceVisibility(")
   expect(source).toContain("gpuRefusal(")
-  expect(source).toContain("from '../../lyapunov-shell/src/environment-readiness.ts'")
+  expect(source).toContain("from '../../sim-contract/src/gpu-facts.ts'")
   // 否定断言只看**代码**：注释里为了说明"旧状是什么"必然要提到旧函数名（这正是可追溯性），
   // 所以先把块注释与行注释剥掉，再钉"代码里不许有第二套判据"。
   const code = source

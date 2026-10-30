@@ -291,6 +291,20 @@
         "@deepseek-ai/dsh-tools",
       ],
     },
+    "packages/human-crowd": {
+      "name": "@lyapunov/human-crowd",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.4",
+        "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+        "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+      },
+      "optionalPeers": [
+        "@deepseek-ai/cordis",
+        "@deepseek-ai/dsh-commands",
+        "@deepseek-ai/dsh-tools",
+      ],
+    },
     "packages/lyapunov-api-client": {
       "name": "@lyapunov/api-client",
       "version": "0.1.0",
@@ -400,10 +414,6 @@
     "packages/lyapunov-workspace": {
       "name": "@lyapunov/workspace",
       "version": "0.1.0",
-      "dependencies": {
-        "@xterm/addon-fit": "^0.11.0",
-        "@xterm/xterm": "^6.0.0",
-      },
       "peerDependencies": {
         "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
       },
@@ -634,6 +644,8 @@
 
     "@lyapunov/grasp-graspgenx": ["@lyapunov/grasp-graspgenx@workspace:packages/grasp-graspgenx"],
 
+    "@lyapunov/human-crowd": ["@lyapunov/human-crowd@workspace:packages/human-crowd"],
+
     "@lyapunov/mcp-extras": ["@lyapunov/mcp-extras@workspace:packages/lyapunov-mcp-extras"],
 
     "@lyapunov/migrations": ["@lyapunov/migrations@workspace:packages/lyaup-migrations"],
@@ -699,10 +711,6 @@
     "@types/webxr": ["@types/webxr@0.5.24", "https://registry.npmmirror.com/@types/webxr/-/webxr-0.5.24.tgz", {}, "sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg=="],
 
     "@webgpu/types": ["@webgpu/types@0.1.72", "https://registry.npmmirror.com/@webgpu/types/-/types-0.1.72.tgz", {}, "sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw=="],
-
-    "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "https://registry.npmmirror.com/@xterm/addon-fit/-/addon-fit-0.11.0.tgz", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
-
-    "@xterm/xterm": ["@xterm/xterm@6.0.0", "https://registry.npmmirror.com/@xterm/xterm/-/xterm-6.0.0.tgz", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
     "ajv": ["ajv@8.20.0", "https://registry.npmmirror.com/ajv/-/ajv-8.20.0.tgz", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
 

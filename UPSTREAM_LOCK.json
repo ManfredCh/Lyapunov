@@ -2,7 +2,7 @@
   "repository": "https://github.com/ManfredCh/deepseek-harness.git",
   "commit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "version": "0.2.0-rc.2",
-  "directory": ".upstream/deepseek-harness-20260911-candidate",
+  "directory": ".upstream/deepseek-harness-0.2.0-rc.2",
   "registryStatus": "Alpha5：按用户stable优先/无stable则最新RC规则固定官方0.2.0-rc.2。旧产品补丁逐项语义迁移；以新的完整性记录和实际测试签收，不使用Alpha，也不复用Alpha4验收声明。",
   "upstreamBase": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",

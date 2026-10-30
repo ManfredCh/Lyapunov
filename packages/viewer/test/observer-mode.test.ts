@@ -68,7 +68,7 @@ function expectSameView(actual:ViewerViewState,expected:ViewerViewState){
 }
 
 test('原导航DOM随同一locale显示Orbit/Roam和相机出口；换语言不通知观察状态或改机位',()=>{
-  const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
+  const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom')
   const dom=new JSDOM('<div id="viewer"></div>',{url:'http://viewer-copy.fixture.invalid'}),previous=new Map<string,PropertyDescriptor|undefined>()
   for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','CustomEvent','Node','localStorage']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true,writable:true})}
   try{
@@ -202,7 +202,7 @@ describe('A08统一观察模式与全部出口',()=>{
     const next={...frame(10),cameras:[{...native,frameId:'world-a:7:10',stepIndex:10,generation:7,sceneRevision:3}]};live.pushFrame(next);live.renderFrame()
     let projected=projectSceneCameraRigs(live.snapshot,live.world,live.displayedFrame)
     expect(projected.find(row=>row.key==='views/View 1')?.source).toBe('engine')
-    const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<aside id="camera-panel"></aside>',{url:'http://camera-exit.fixture.invalid'})
+    const sdkRequire=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=sdkRequire('jsdom'),dom=new JSDOM('<aside id="camera-panel"></aside>',{url:'http://camera-exit.fixture.invalid'})
     const previous=new Map<string,PropertyDescriptor|undefined>()
     for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
     const React=await import('react'),{createRoot}=await import('react-dom/client'),{act,Simulate}=await import('react-dom/test-utils'),host=document.getElementById('camera-panel')!,root=createRoot(host)

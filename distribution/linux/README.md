@@ -1,6 +1,6 @@
 # Lyapunov for Linux
 
-This directory defines the Linux x64 package. The current default is **0.2.1**; 0.2.0-alpha.1 and 0.1.0RC remains available by versioned install. For the per-user installation with the default MuJoCo runtime, use the [website installer](https://vorynel.com/lyapunov/):
+This directory defines the Linux x64 package. The current default is **0.2.2**; 0.2.1, 0.2.0-alpha.1 and 0.1.0RC remain available by versioned install. For the per-user installation with the default MuJoCo runtime, use the [website installer](https://vorynel.com/lyapunov/):
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -119,3 +119,7 @@ Do not run both versions against the same data root. For a manual installation, 
 Linux x64 Alpha 的版本与运行要求以[官网](https://vorynel.com/lyapunov/)版本清单为准，使用 curl 安装入口获取对应版本，默认准备并验证 MuJoCo，按版本保存应用，验证成功后才切换 `current`。手工解包后以包根 `./lyapunov` 为唯一产品入口。首次启动可官网授权登录，或进入独立游客工作台并显式配置自己的 provider。
 
 用户场景、模型、采集和凭据应保存在应用目录外。诊断失败时按 `doctor` 的真实输出处理，保留旧版本与用户数据；Alpha 的硬件、相机与机器人组合按实际支持范围使用。安装、升级、回滚、卸载、相机与录制说明见[中文完整操作手册](https://vorynel.com/lyapunov/manual.html)；历史安装说明见[官网安装指南](https://vorynel.com/lyapunov/guide.html)。
+
+原生 USD 入库可在解包根显式运行 `./distribution/linux/install-usd-parser`，并用 `--check` 检查。它只在本产品 `.runtime/usd-python` 准备固定 OpenUSD 解析器，不安装物理引擎、不更改现有 SDK 或 EULA。源版本、完整包、实例与显示边界见源码 [USD 说明](../../docs/SIMREADY_USD.md)。
+
+人体 CUDA 为显式可选安装：在完整包根运行 `./lyapunov install-provider mujoco --human-cuda`。它只给包内 MuJoCo 3.13.0 前缀补固定 SHA 的 Warp 1.13.0，保留原 MuJoCo/NumPy 身份，并运行真实 CUDA FP64 clip/FK 检查；无参数仍维持 CPU 默认。来源、许可、诊断与证据范围见 [人体 CUDA 运行时说明](../../packages/sim-mujoco/HUMAN_CUDA.md)。

@@ -43,7 +43,7 @@ function sceneFixture() {
 // 预算会截断。仅为这条流程显式声明 20_000ms；全部步骤/断言/DOM 真实 handler 与文件级 120_000ms 上限不动。
 test("真实 Workbench：工具轨、Objects 清单/二级 Inspector 与草稿、Environment 二级、独立 Physics", async () => {
   const {createRequire} = await import("node:module")
-  const req = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))
+  const req = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))
   const {JSDOM} = req("jsdom")
   const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid", pretendToBeVisual: true})
   const saved = new Map<string, PropertyDescriptor | undefined>()

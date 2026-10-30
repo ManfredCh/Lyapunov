@@ -13,14 +13,14 @@ test('真实文件引用保完整实体、资源版本与来源，写后读回�
  await expect(writeViewerReference('session-a',scene,'entity-a',async(action,input:any)=>action==='write'?{path:input.path,version:'v1'}:{path:input.path,version:'v2',content:stored.content})).rejects.toThrow('READBACK_MISMATCH')
 })
 test('真实菜单DOM中英两个动作、键盘导航与Escape关闭，点击只交原回调',async()=>{
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<div id="root"></div>',{pretendToBeVisual:true})
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url)),{JSDOM}=req('jsdom'),dom=new JSDOM('<div id="root"></div>',{pretendToBeVisual:true})
  const saved=new Map<string,PropertyDescriptor|undefined>();for(const key of ['window','document','HTMLElement','Node','navigator']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,value:dom.window[key]})}
  const root=createRoot(document.getElementById('root')!),request={clientX:120,clientY:100,sceneId:'scene/a',sceneRevision:4,entityId:'entity-a',annotate:()=>{}}
  let adds=0,annotations=0,closes=0
  try{
   for(const english of [false,true]){await act(async()=>root.render(createElement(ViewerContextMenu,{request,tr:(zh,en)=>english?en:zh,addToChat:()=>adds++,annotate:()=>annotations++,close:()=>closes++})));const buttons=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];expect(buttons.map(b=>b.textContent)).toEqual(english?['Add to chat','Annotate']:['添加到聊天','批注']);expect(document.activeElement).toBe(buttons[0]);document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));expect(document.activeElement).toBe(buttons[1]);buttons[0]!.click();buttons[1]!.click();document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}
   expect(adds).toBe(2);expect(annotations).toBe(2);expect(closes).toBe(2)
-  const {SessionInputShell}=await import(new URL('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/ui-conversation/src/client/input/facade.ts',import.meta.url).href)
+  const {SessionInputShell}=await import(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/ui-conversation/src/client/input/facade.ts',import.meta.url).href)
   const {Context}=await import('@deepseek-ai/cordis')
   const shell=new SessionInputShell({actx:new Context(),defaultSink:async()=>({kind:'sent'} as never),commandAttachments:{serialize:async()=>[],release:()=>{},unsupportedNotice:()=>''}})
   try{
@@ -36,7 +36,7 @@ test('真实菜单DOM中英两个动作、键盘导航与Escape关闭，点击�
 
 test('发行客户端纯grammar叶经真实ClientModuleSystem加载，不依赖不存在的grammar模块表',async()=>{
  const {nativeClientLeafPlugin}=await import('../../../script/terminal-build.ts')
- const {ClientModuleSystem}=await import(new URL('../../../.upstream/deepseek-harness-20260911-candidate/packages/client/modules/src/client/system.ts',import.meta.url).href)
+ const {ClientModuleSystem}=await import(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/client/modules/src/client/system.ts',import.meta.url).href)
  const react=await import('react'),jsx=await import('react/jsx-runtime')
  const entry=new URL('../src/viewer-context-menu.tsx',import.meta.url).pathname
  const load=async(inline:boolean)=>{

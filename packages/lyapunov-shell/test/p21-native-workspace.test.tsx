@@ -19,7 +19,7 @@ mock.module("@lyapunov/viewer/client", () => ({
 
 test("Native 有 Inspector 才给 Viewer 让列；Notes/关闭工具不占空白（真实 DOM 内联样式）", async () => {
  const {createRequire} = await import("node:module")
- const req = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))
+ const req = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))
  const {JSDOM} = req("jsdom")
  const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid", pretendToBeVisual: true})
  const saved = new Map<string, PropertyDescriptor | undefined>()
@@ -155,7 +155,7 @@ test("Native 有 Inspector 才给 Viewer 让列；Notes/关闭工具不占空白
  */
 test("旧Viewer加载失败不覆盖新版本；卸载后的state响应不写缓存",async()=>{
  const {createRequire}=await import('node:module')
- const req=createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json',import.meta.url))
+ const req=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))
  const {JSDOM}=req('jsdom')
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true})
  const saved=new Map<string,PropertyDescriptor|undefined>()
@@ -234,7 +234,7 @@ test("旧Viewer加载失败不覆盖新版本；卸载后的state响应不写缓
 
 test("Record this camera 预选真实 native source，且不调用 pilotCameraRig", async () => {
  const {createRequire} = await import("node:module")
- const req = createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json", import.meta.url))
+ const req = createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json", import.meta.url))
  const {JSDOM} = req("jsdom")
  const dom = new JSDOM('<div id="root"></div>', {url: "http://fixture.invalid", pretendToBeVisual: true})
  const saved = new Map<string, PropertyDescriptor | undefined>()
@@ -333,9 +333,9 @@ test("Record this camera 预选真实 native source，且不调用 pilotCameraRi
  * 本批宿主集成的共用夹具：真 Workbench + 真 ToolRail + jsdom + Viewer/HTTP 替身。
  * 只服务本文件新增的宿主集成断言；既有用例的 FixtureUI 起点与 15000ms 超时保持不变。
  */
-async function withP21Workbench(run:(ctx:any)=>Promise<void>){
+async function withP21Workbench(run:(ctx:any)=>Promise<void>,options:{openTerminal?:()=>void;openFiles?:()=>void}={}){
  const {createRequire}=await import("node:module")
- const req=createRequire(new URL("../../../.upstream/deepseek-harness-20260911-candidate/package.json",import.meta.url))
+ const req=createRequire(new URL("../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json",import.meta.url))
  const {JSDOM}=req("jsdom") as any
  const dom=new JSDOM('<div id="root"></div>',{url:"http://fixture.invalid",pretendToBeVisual:true})
  const saved=new Map<string,PropertyDescriptor|undefined>()
@@ -369,12 +369,12 @@ async function withP21Workbench(run:(ctx:any)=>Promise<void>){
   else await act(async()=>{fixtureUI!.closeTool();fixtureUI!.setMode("collab");fixtureUI!.showCentre("canvas")})
   await act(async()=>root.render(createElement(Fragment,null,
    createElement(FixtureUI),
-   createElement(Workbench,{key:sessionId,sessionId,nativeTab:true,t:(key:string)=>key==="open"?"Scene workbench":"场景工作台",renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),
-   createElement(ToolRail,{tr,engine:"mujoco"}),
+   createElement(Workbench,{key:sessionId,sessionId,nativeTab:true,openTerminal:options.openTerminal,openFiles:options.openFiles,t:(key:string)=>key==="open"?"Scene workbench":"场景工作台",renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),
+   createElement(ToolRail,{tr,engine:"mujoco",openTerminal:options.openTerminal,openFiles:options.openFiles}),
   )))
   await flush(140);await flush(180)
  }
- try{await run({act,flush,byTestId,rail,click,mount})}
+ try{await run({act,flush,byTestId,rail,click,mount,ui:()=>fixtureUI!})}
  finally{
   await act(async()=>root.unmount())
   dom.window.close()
@@ -384,7 +384,7 @@ async function withP21Workbench(run:(ctx:any)=>Promise<void>){
 
 /** 拍摄会话进行中，宿主设置入口必须真的不可达；停止后同一批入口原样回来。 */
 test("拍摄进行中宿主设置不可达，会话浮条/Viewer 保持，停止后恢复",async()=>{
- await withP21Workbench(async({flush,byTestId,rail,click,mount})=>{
+ await withP21Workbench(async({act,flush,byTestId,rail,click,mount,ui})=>{
   const scene={sceneId:"capture-host-lock",revision:1,coordinates:{units:"m",upAxis:"Z",handedness:"right",quaternion:"xyzw"},entities:[]}
   globalThis.fetch=(async(input:any)=>{
    const url=String(input)
@@ -455,7 +455,7 @@ test("拍摄进行中宿主设置不可达，会话浮条/Viewer 保持，停止
  * Ground 摘要按 groundState + 地面实体 + visual.visible 区分，不一律 Visible。
  */
 test("环境二级页只有一处返回；World/Lighting 副标题与 Ground 状态按真实事实区分",async()=>{
- await withP21Workbench(async({flush,byTestId,rail,click,mount})=>{
+ await withP21Workbench(async({act,flush,byTestId,rail,click,mount,ui})=>{
   const coordinates={units:"m",upAxis:"Z",handedness:"right",quaternion:"xyzw"}
   const component=composeEnvironment(undefined,{}).component
   const baseStatus={component,hdriMimeTypes:[],warnings:[],ignored:[],environmentSource:"builtin",background:"color",colorBackground:"#242a32",exposure:1,toneMapping:"aces",environmentRotationDeg:[0,0,0],shadow:{mapSize:1024,bias:0,normalBias:0},environmentIntensity:.7,hemisphereIntensity:.5,shadows:true,sun:{azimuthDeg:90,elevationDeg:45,intensity:3,source:"manual"},timeHours:12,clock:{playing:false,offsetHours:0,advancedSeconds:0}}
@@ -543,7 +543,7 @@ test("环境二级页只有一处返回；World/Lighting 副标题与 Ground 状
 
 /** 对象资产页：Search assets 是列表第一个控件，导入/设置在资产列表之后，键盘顺序不靠 CSS 调换。 */
 test("对象资产页 Search assets 在导入与资源列表之前",async()=>{
- await withP21Workbench(async({flush,byTestId,rail,click,mount})=>{
+ await withP21Workbench(async({act,flush,byTestId,rail,click,mount,ui})=>{
   const scene={sceneId:"object-order",revision:1,coordinates:{units:"m",upAxis:"Z",handedness:"right",quaternion:"xyzw"},entities:[]}
   const asset={ref:{resourceId:"cube",version:1,original:{uri:"file:///cube.glb",mimeType:"model/gltf-binary"}},name:"Cube",tags:[],folder:"",parsed:{kind:"mesh"}}
   globalThis.fetch=(async(input:any)=>{
@@ -592,4 +592,46 @@ test("对象资产页 Search assets 在导入与资源列表之前",async()=>{
   // 选择区只保留 asset-library-panel 的一份真实搜索；管理折叠里自己的搜索不属于本页选择顺序。
   expect(listRoot!.querySelectorAll('input[aria-label="Search assets"]')).toHaveLength(1)
  })
+},20000)
+
+/** 产品“终端”入口只打开当前会话的 DSH 原生 terminal tab；不再生成可被 dispose 的产品终端视图。 */
+test("终端快捷入口按当前会话打开原生 terminal tab，文件/产物入口保留",async()=>{
+ const calls:string[]=[];let current=""
+ globalThis.fetch=(async(input:any)=>{
+  const url=String(input)
+  const data=url.includes("/state?")?{hostInstanceId:"terminal-entry",scene:null,worlds:[],providerAvailable:false}
+   :url.includes("/scenes")?[]
+   :url.includes("/engine-preference")?{engine:"mujoco"}
+   :url.includes("/selection")?{updated:true}
+   :url.includes("builtin-assets")?{resources:[]}
+   :url.includes("/assets")||url.includes("missing-assets")?[]
+   :[]
+  return Response.json(data)
+ }) as typeof fetch
+ viewerFactory=(options:any)=>{
+  const view={position:[5,-6,4],quaternion:[0,0,0,1],target:[0,0,.7],up:[0,0,1],fov:50,near:.1,far:1000,zoom:1,navigation:"orbit"}
+  const observer={mode:"free",navigation:"orbit",dirty:false,saving:false,scope:{}}
+  const target:any={options,renderer:{domElement:document.createElement("canvas")},getViewState:()=>view,setScene:()=>Promise.resolve(),subscribeObserverState:()=>()=>{},observerState:()=>observer,environmentStatus:()=>({hdriMimeTypes:[],warnings:[],ignored:[],environmentSource:"builtin"}),collisionStatus:()=>({status:"disabled"}),animationStatus:()=>({playing:false,clips:[]}),dispose:()=>{}}
+  return new Proxy(target,{get(t,key){return key in t?(t as any)[key]:()=>{}}})
+ }
+ try{
+  await withP21Workbench(async({act,flush,byTestId,rail,click,mount,ui})=>{
+   current="session-a";await mount("session-a");await click(rail("Terminal"));expect(calls).toEqual(["session-a"])
+   // 旧版持久化的 drawer="terminal" 平稳迁移到原生 terminal tab，并清掉抽屉，不留空白。
+   await act(async()=>ui().showDrawer("terminal"));await flush(60)
+   expect(calls).toEqual(["session-a","session-a"])
+   expect(ui().getSnapshot().drawer).toBeNull()
+   current="session-b";await mount("session-b");await click(rail("Terminal"));expect(calls).toEqual(["session-a","session-a","session-b"])
+   current="session-a";await mount("session-a");await click(rail("Terminal"));expect(calls).toEqual(["session-a","session-a","session-b","session-a"])
+   // 切回 A 不产生/复用被 dispose 的产品 xterm 宿主。
+   expect(document.querySelector(".lya-xterm")).toBeNull()
+   expect(rail("Files")).toBeTruthy()
+   await click(rail("Outputs"));await flush(80)
+   expect(document.querySelector<HTMLElement>(".lya-wb-drawer")?.hidden).toBe(false)
+   expect(byTestId("workspace-terminal-drawer")).toBeNull()
+  },{openTerminal:()=>calls.push(current),openFiles:()=>{}})
+  // 原生接线：SceneTab 的 openTerminal 绑定当前标签的 tab.actions，而不是全局/产品抽屉。
+  const source=await Bun.file(new URL("../src/native-workspace.tsx",import.meta.url)).text()
+  expect(source).toContain('openTerminal={()=>tab.actions.openTab("terminal")}')
+ }finally{current=""}
 },20000)

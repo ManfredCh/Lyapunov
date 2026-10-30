@@ -34,6 +34,7 @@ export const RAIL_ENTRIES:readonly RailEntry[]=[
   {id:"object",zh:"物件",en:"Objects",shortEn:"Objects",group:"tool",behavior:"tool"},
   {id:"environment",zh:"环境",en:"Environment",shortEn:"Env",group:"tool",behavior:"tool"},
   {id:"robot",zh:"机器人",en:"Robots",shortEn:"Robots",group:"tool",behavior:"tool"},
+  {id:"crowd",zh:"人群",en:"Crowd",shortEn:"Crowd",group:"tool",behavior:"tool"},
   {id:"camera",zh:"相机",en:"Camera",shortEn:"Camera",group:"tool",behavior:"tool"},
   {id:"capture",zh:"拍摄",en:"Capture",shortEn:"Capture",group:"tool",behavior:"tool"},
   {id:"recording",zh:"录制",en:"Recording",shortEn:"Recording",group:"tool",behavior:"tool"},
@@ -80,14 +81,15 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
       onClick={()=>{
         if(entry.behavior==="engine"){const base=preference==="isaac"||preference==="mujoco"?preference:engine;onSwitchEngine?.(base==="isaac"?"mujoco":"isaac");return}
         if(entry.id==="file"&&openFiles){openFiles();return}
-        if(entry.id==="terminal"&&openTerminal){openTerminal();return}
+        // 终端只打开 DSH 原生侧栏标签；不再落到产品自建的底部终端抽屉。
+        if(entry.id==="terminal"){openTerminal?.();return}
         revealScene?.()
         if(entry.behavior==="tool"){
           if(nativeSceneActive===false)ui.openTool(entry.id as ToolId)
           else ui.toggleTool(entry.id as ToolId)
         }else if(entry.id==="file")ui.toggleCentre("file")
-        else if(nativeSceneActive===false)ui.showDrawer(entry.id==="terminal"?"terminal":"deliverable")
-        else ui.toggleDrawer(entry.id==="terminal"?"terminal":"deliverable")
+        else if(nativeSceneActive===false)ui.showDrawer("deliverable")
+        else ui.toggleDrawer("deliverable")
       }}
     >
       <WorkbenchIcon id={entry.icon??(entry.id as WorkbenchIconId)} size={16}/>

@@ -39,10 +39,16 @@ const scriptPushed = (days: number) => {
 }
 
 /** 注入 mtime：只把 `packages/<pkg>/package.json`（第 9 类：构建期读取的元数据）推到**所有产物之后**。
- *  不能只推"一天"：`packages/viewer/package.json` 的真实 mtime 是 09-18，而产物是 09-26 ⇒ 推一天仍在产物之前。 */
+ *  不能拿它自己的 mtime 加"30 天"：原包元数据可能远早于今日新构建（实测 09-18 的 package.json 加 30 天仍在
+ *  本次 10-26 新构建之前 ⇒ 负对照假绿）。与 `scriptPushed` 同口径，用**实际全部产出的最大 mtime + 有限偏移**；
+ *  只有 package.json 这一条注入读数被推到 after，其它输入仍取真实 mtime。 */
 const PUSH_DAYS = 30
-const packageJsonPushed = (days: number) => (path: string): number =>
-  statSync(path).mtimeMs + (path.startsWith(join(root, "packages") + "/") && basename(path) === "package.json" ? days * 86400_000 : 0)
+const packageJsonPushed = (days: number) => {
+  const outputs = [...derivePlan(root).targets.map(target => target.output).filter(existsSync)]
+  const after = Math.max(...outputs.map(path => statSync(path).mtimeMs)) + days * 86400_000
+  return (path: string): number =>
+    path.startsWith(join(root, "packages") + "/") && basename(path) === "package.json" ? after : statSync(path).mtimeMs
+}
 
 /**
  * 共享 scan（= "合并 scan"）：同一 `(口径, 注入方式)` 在一次测试进程里只走一次全量闭包。

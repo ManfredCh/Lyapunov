@@ -1,3 +1,4 @@
+import {isNativeUsdEntity,usdSourceFacts,entityHasDeclaredPhysics} from './usd.ts'
 import type { Entity, SceneSnapshot } from './types.ts'
 
 /** 按真实父子/组件归属选编辑实例，不用名字或共用资源把不同物体合组。 */
@@ -17,7 +18,8 @@ export function sceneEditTarget(scene: SceneSnapshot, selected: string): Entity 
   return picked
 }
 
-export function sceneNodeRole(entity: Entity): 'robot' | 'animated' | 'physics' | 'group' | 'child' | 'entity' {
+export function sceneNodeRole(entity: Entity): 'robot' | 'animated' | 'physics' | 'group' | 'child' | 'entity' | 'usd' {
+  if(isNativeUsdEntity(entity)){if(usdSourceFacts(entity)?.purpose==='robot'||entity.components.articulation||entity.components.controller)return 'robot';return entityHasDeclaredPhysics(entity,true)?'physics':'usd'}
   if (entity.components.mujoco || entity.components.isaac || entity.components.articulation) return 'robot'
   if (entity.components.visual?.animatedAssembly === true) return 'animated'
   if (entity.components.collision || entity.components.rigidBody) return 'physics'

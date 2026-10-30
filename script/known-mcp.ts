@@ -7,8 +7,9 @@ import {blenderMcpPaths,blenderMcpLock} from './blender-mcp.ts'
 export interface KnownMcpDefault {kind:'blender'|'computer-use-linux'|'unity';command:string;args:string[];env:Record<string,string>;port?:number}
 const desktopKeys=['AT_SPI_BUS_ADDRESS','DISPLAY','WAYLAND_DISPLAY','DBUS_SESSION_BUS_ADDRESS','XAUTHORITY','XDG_RUNTIME_DIR','XDG_CURRENT_DESKTOP','XDG_SESSION_TYPE','XDG_SESSION_DESKTOP','DESKTOP_SESSION','NIRI_SOCKET','SWAYSOCK','HYPRLAND_INSTANCE_SIGNATURE','I3SOCK','YDOTOOL_SOCKET'] as const
 function executable(path:string):boolean{try{accessSync(path,constants.X_OK);return true}catch{return false}}
-/** 父进程捕获真实用户 HOME，只有计算机服务使用；Host 的身份/配置隔离保持原规则。 */
-export function installedKnownMcpDefaults(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Platform=process.platform):KnownMcpDefault[]{
+/** 父进程捕获真实用户 HOME，只有计算机服务使用；Host 的身份/配置隔离保持原规则。
+ *  `root` 只用于显式隔离（测试夹具/调用方自带产品根）；省略时仍由 `installedUnityMcpCommand` 落到 `PRODUCT_ROOT`。 */
+export function installedKnownMcpDefaults(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Platform=process.platform,root?:string):KnownMcpDefault[]{
  const rows:KnownMcpDefault[]=[],home=(platform==='win32'?env.USERPROFILE:env.HOME)?.trim()
  if(platform==='linux'&&home){
   const override=env.COMPUTER_USE_LINUX_BIN?.trim(),variant=computerUseLinuxVariant(env)
@@ -27,7 +28,7 @@ export function installedKnownMcpDefaults(env:NodeJS.ProcessEnv=process.env,plat
  })
  const portText=env.LYAPUNOV_BLENDER_MCP_PORT??env.BLENDER_PORT??'9876',port=Number(portText)
  if(command&&/^\d+$/.test(portText)&&Number.isInteger(port)&&port>0&&port<=65535)rows.push({kind:'blender',command,args:[],port,env:{BLENDER_HOST:env.BLENDER_HOST??'127.0.0.1',BLENDER_PORT:String(port),DISABLE_TELEMETRY:'1'}})
- const unityCommand=platform==='linux'&&!env.LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!env.LYAPUNOV_UNITY_MCP_URL?.trim()?installedUnityMcpCommand(env):undefined
+ const unityCommand=platform==='linux'&&!env.LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!env.LYAPUNOV_UNITY_MCP_URL?.trim()?installedUnityMcpCommand(env,root):undefined
  if(unityCommand&&home)rows.push({kind:'unity',command:unityCommand,args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:env.UNITY_MCP_STATUS_DIR??join(home,'.unity-mcp'),FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}})
  return rows
 }

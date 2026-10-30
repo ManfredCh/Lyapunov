@@ -16,7 +16,7 @@ const fixture = (entityId: string) => ({
 
 async function withJsdom(fn: (env: any) => Promise<void>) {
   const { createRequire } = await import('node:module')
-  const req = createRequire(new URL('../../../.upstream/deepseek-harness-20260911-candidate/package.json', import.meta.url))
+  const req = createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json', import.meta.url))
   const { JSDOM } = req('jsdom')
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://fixture.invalid', pretendToBeVisual: true })
   const saved = new Map<string, PropertyDescriptor | undefined>()

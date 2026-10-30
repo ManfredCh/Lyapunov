@@ -1,0 +1,18 @@
+{
+  "schema": "lyapunov.warehouse-source-snapshot.v1",
+  "repoId": "nvidia/PhysicalAI-SimReady-Warehouse-01",
+  "revision": "c7fe115cb79c7ddbd0532630d7768b5736b0ecc4",
+  "endpoint": "https://hf-mirror.com",
+  "catalogPath": "physical_ai_simready_warehouse_01.csv",
+  "catalogSha256": "f2bda7a5e6b1e80e5ce588ce678ec381fe4819b76250e28ca9c01860ca7d73c8",
+  "catalogGitBlob": "a85428129b18b9e7e0330a268186e8cec6b9c9de",
+  "readmeSha256": "5321c004fd8fa762549978020ee97ed49eebf2c3412d6afeed9049f84c9b6fd2",
+  "readmeGitBlob": "b099703d5d5b1dda747894ec9271528dfe37e442",
+  "filesSha256": "377ccaed82e3f80fdb4c217a67583150901058c18ce8d42d07674fcd203dcd56",
+  "filesGzipSha256": "bb25900a20b9dfb0eb8a42b1fcdc8b008b6f015ac17fd2c5368c7703c10dc4f6",
+  "catalogRows": 753,
+  "metadataEntriesReturned": 8804,
+  "license": "CC-BY-4.0",
+  "attribution": "NVIDIA Corporation, Physical AI SimReady Warehouse OpenUSD Dataset",
+  "retrieval": "HF镜像入口固定revision读取；CSV/README缓存字节已核对源Git blob，文件身份来自同revision的files_metadata API。缓存命中不代表当次镜像请求成功；不据返回项数推导库内资产总数。"
+}

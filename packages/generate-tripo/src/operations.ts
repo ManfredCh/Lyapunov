@@ -8,7 +8,7 @@ import { allowPrivateAssetURLs } from "../../generate-hunyuan/src/url-safety.ts"
 import { transferArtifacts } from "../../generate-hunyuan/src/artifact-transfer.ts"
 import { createJobRecordPersister } from "../../generate-hunyuan/src/job-record.ts"
 import { formalGenerationRoute, type GenerationRoutingOptions } from "@lyapunov/api-client/generation"
-import type {GenerationAuthorizer} from "@lyapunov/api-client/generation-approval"
+import {canonical, type GenerationAuthorizer} from "@lyapunov/api-client/generation-approval"
 export type { CancellationReport }
 /**
  * 作业状态：submitting/resuming/running 进行中；completed 终态（本地已完成资产仍可用）；
@@ -64,19 +64,6 @@ function remoteJobLostMessage(input: { operationId?: string; detail: string; reo
   return input.reopened
     ? `GENERATION_REMOTE_JOB_LOST: 记录已是终态 remote-lost（${job} 已被供应商确认为不存在）；本次未重新查询供应商、未提交新任务。本产品不会自动重试该作业；如用户判断需要，可显式重试恢复（只重新查询该作业，不会提交新任务）。本地已完成的生成资产不受影响；如需再次生成，请按正常生成流程发起新的生成请求（仍会走既有确认）。原记录：${detail}`
     : `GENERATION_REMOTE_JOB_LOST: ${job} 已被供应商确认为不存在；本产品据此把自动恢复记为终态 remote-lost——不再自动重查远端，也不会在没有新确认的情况下重新提交收费任务。本地已完成的生成资产不受影响；如需再次生成，请按正常生成流程发起新的生成请求（仍会走既有确认）。供应商信息：${detail}`
-}
-
-/** 与共享 `generation-approval` / `generate-image` 同一套指纹口径（canonical JSON + sha256），便于各层对得上。 */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === "object")
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, item]) => item !== undefined && typeof item !== "function")
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, item]) => [key, canonical(item)]),
-    )
-  return value
 }
 
 /**

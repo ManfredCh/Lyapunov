@@ -267,6 +267,7 @@ const SHIPPED_SKILLS = new Set([
   "asset-generation",
   "robot-provisioning",
   "action-execution",
+  "crowd-control",
   "benchmark-evaluation",
   "desktop-automation",
 ])
@@ -665,7 +666,7 @@ export function routeEnvironment(input: EnvironmentRoutingInput): EnvironmentRou
     if (source === "cad" || source === "mixed") companions.push(skill("cad-import", "Read drawing dimensions, topology, and units first; do not invent them."))
     else if (realistic) companions.push(skill("photo-reconstruction", "Follow the photo reconstruction contract: distinguish viewpoints, scale, and unknown back surfaces, and do not treat inference as established fact."))
     if (realistic) companions.push(skill("environment-research", RESEARCH_CONTRACT))
-    if (assetHeavy) companions.push(skill("asset-generation", "Select a route using the user's source/provider requirements, quality, editability, availability, and cost. Existing-library reuse, public assets, task scripts, and authorized generation are candidates. Do not impose one provider or require exhaustive retrieval before making an asset."))
+    if (assetHeavy) companions.push(skill("asset-generation", "Select a route using the user's source/provider requirements, quality, editability, availability, and cost. Existing-library reuse: 先asset_list检查本地，再simready_search/detail检查已登记厂商完整原生USD包；确实无合适候选才用其它库和web补缺，访问失败不算未命中。显式来源/生成方式要求优先。"))
     return companions
   }
 

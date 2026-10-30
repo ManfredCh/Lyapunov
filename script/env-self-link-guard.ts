@@ -646,8 +646,8 @@ export function selftest(): SelfTestRow[] {
     const cases: [string, ScopeId][] = [
       ['node_modules/@lyapunov/@lyapunov', 'node_modules'],
       ['.upstream/.upstream', '.upstream'],
-      ['.upstream/deepseek-harness-20260911-candidate/packages/core/tools/dsh-tools', '.upstream'],
-      ['.upstream/deepseek-harness-20260911-candidate/packages/x/node_modules/@deepseek-ai/y/y', 'node_modules'],
+      ['.upstream/deepseek-harness-0.2.0-rc.2/packages/core/tools/dsh-tools', '.upstream'],
+      ['.upstream/deepseek-harness-0.2.0-rc.2/packages/x/node_modules/@deepseek-ai/y/y', 'node_modules'],
     ]
     const bad = cases.filter(([p, want]) => scopeOf(p) !== want)
     push('作用域归属不重不漏', bad.length === 0, bad.length === 0 ? '4/4' : JSON.stringify(bad))

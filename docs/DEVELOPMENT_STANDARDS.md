@@ -1,12 +1,12 @@
 # Lyapunov 开发标准与流程
 
-本文面向维护 `Dev` 源码的开发者，覆盖目录职责、接口合同、日常开发、检查与发布，以及当前实现中已经确认的接口缺口和重复代码。架构取舍见 [开发原则](DEVELOPMENT_PRINCIPLES.md)，使用说明见 [README](../README.md)。
+本文面向维护 `Dev` 源码的开发者，覆盖目录职责、接口合同、日常开发、检查与发布，以及已经确认的接口缺口和重复代码。架构取舍见 [核心原则总入口](../principles/README.md) 与 [开发原则](../principles/DEVELOPMENT.md)，使用说明见 [README](../README.md)。本页以 Lyapunov 0.2.1 发行源码（`release/0.2.1`，提交 `00d3bc60d9fb5df7b4d45abc63f025f3d4ed1584`）为文档基线；0.2.1 的发布日期、范围与验证状态以 [0.2.1 发布说明](releases/0.2.1.md) 与 [发布说明目录](releases) 为准，本机旧 `main` 的 HEAD 不冒充 0.2.1。
 
-实际推进使用 [开发问题 TODO](DEVELOPMENT_TODO.md)；关闭问题和追溯历史回执使用 [已解决问题与回执归档](RESOLVED_ISSUES.md)。本页第 8 节保留代码核对依据，不另建一份相互竞争的活动清单。
+原 2026-09-19 页首引用的开发状态、TODO 和已解决账本属于当时工作树，已不随本源码分发。本页不再把它们当作“当前入口”，也不伪造替代账本；第 8 节保留历史核对依据，新结论写到发布说明、能力总表、实际回执或本次任务记录中。
 
 ## 1. 当前源码范围与事实入口
 
-原核对日期为 2026-09-19；基准提交为 `d562e421a7c4da6792441713ee71566b4c03ebbf`，包含当时的未提交修改。**当前状态以 [开发状态](../development/STATUS.md) 为准**；本文保留仍可执行的流程、接口合同与核对依据，个别历史读数（如“8 条 TS 错误”）已按现行为更正。
+原核对日期为 2026-09-19；基准提交为 `d562e421a7c4da6792441713ee71566b4c03ebbf`，包含当时的未提交修改。这些是历史核对读数，不等于 0.2.1 的当前状态。**0.2.1 的发布日期、包含能力和验证范围以 [0.2.1 发布说明](releases/0.2.1.md) 与 [发布说明目录](releases) 为准**；本文保留仍可执行的流程、接口合同与历史核对依据，个别历史读数（如“8 条 TS 错误”）已按当时后续行为更正。
 
 本次对 `Dev` 做目录和文件盘点，对产品源码建立符号、注册接口、错误分支与重复函数索引，再逐项核对启动装配、合同和关键调用链。范围包含全部产品包、`script`、`distribution`、`bin`、配置和 CI（当时的 `services/lyapunov-api` 已于 2026-09-26 移出本仓，见下文服务边界）；材料、研究记录、历史证据、上游检出和依赖单独分类。
 
@@ -21,6 +21,10 @@
 | `config/` | 公开配置示例 | 真实凭据保存在忽略文件或仓库外 |
 | `materials/` | 内置物料、机器人模型和来源信息 | `materials/library.json`、各来源许可 |
 | `docs/` | 可公开的开发与使用说明 | 命令与功能边界随实现更新 |
+| `docs/releases/` | 各版本发布说明与验证范围 | `0.2.1.md` 与同目录历史版本记录 |
+| `principles/` | 产品、开发、美学、交互四份长期原则及总入口 | 现行原则唯一维护处；本表其余目录不复制第二套原则 |
+| `packs/` | pack 内容、技能提案与已准入技能 | `packs/<packId>/proposals`、`skills`、`promotions.jsonl` |
+| `.agents/skills/` | Agent Graph 的 worker／campaign／verifier 角色协议 | 三份 `SKILL.md`；角色协议不替代代码守卫 |
 | `bugfixHistory/`、`goals/`、`research/` | 开发证据、任务合同、研究材料 | 可定位历史，不能替代当前源码事实 |
 | `.upstream/` | 固定 DSH 检出 | `UPSTREAM_LOCK.json` 与 `script/upstream-patches.mjs` |
 | `.runtime/`、`workspace` | 本机运行环境与活动工作区映射 | 不作为源码提交，不从目录存在推断可用 |
@@ -31,13 +35,15 @@
 | --- | --- |
 | `lyapunov-contracts` | Scene、Resource、Frame、ActionReceipt 等值合同与工作台槽位 |
 | `scene-kit` | 场景提交、历史、资源库、格式解析、公开资产导入 |
-| `sim-contract` | `SimService`、动作合同、Python 进程传输、渲染后端取值 |
+| `sim-contract` | `SimService`、动作合同、Python 进程传输、渲染后端取值；`gpu-facts.ts` 持有 GPU 事实／分型／拒绝判定 |
 | `sim-mujoco` | MuJoCo 世界、动作、碰撞、相机与观测 |
 | `sim-isaac` | Isaac 世界适配、缓存、设备与渲染配置 |
 | `sim-newton` | Newton 基础世界、同步、观测与明确的未支持能力表 |
 | `viewer` | Three.js／Spark 共享 Viewer、图形显示与拾取 |
 | `robot-tools` | Scene／Sim 的模型 Tool 和人工 Command 适配 |
 | `robot-workflows` | 抓放、车队、货物转运、录制及导出 |
+| `agent-graph` | campaign 状态机、run artifacts、预算护栏、`campaign_*` 工具；持久化在会话工作目录 `.lyapunov/campaigns/` |
+| `sim-task-check` | 对声明了谓词的目标做谓词求值与 spec 级门；判定来自真实观测，不采模型自报 |
 | `motion-mink`、`motion-ompl` | 分别提供 `motion_plan`、`motion_path` |
 | `grasp-analytic`、`grasp-anygrasp`、`grasp-graspgenx` | 同名 `grasp_propose` 的互斥候选 Provider |
 | `asset-bake` | 碰撞派生、烘焙与物理化 |
@@ -45,18 +51,18 @@
 | `generate-marble`、`generate-hunyuan`、`generate-tripo` | 对应生成 Provider、任务状态和产物下载 |
 | `segment-sam3` | 二维分割 Provider 与结果产物 |
 | `fastgs-external`（非插件，包外工具） | 官方 FastGS 的下载/安装/检查/训练转发；算法与环境不随包 |
-| `policy-registry` | 策略来源、下载、校验、适配、匹配、执行与停止 |
+| `policy-registry` | 策略来源、下载、校验、适配、匹配、执行与停止；运行 owner key 含原生会话身份；`skill-library.ts`／`skill-tools.ts` 维护技能提案、验证记录、准入与晋升账本 |
 | `benchmark-contract` | 官方评测任务与结果合同 |
 | `benchmark-libero`、`benchmark-gymnasium` | 官方环境适配、评测工具与只读场景投影 |
-| `lyapunov-shell` | 原生 DSH 工作台装配、场景面板、用户偏好和界面桥接 |
-| `lyapunov-workspace` | 文件、搜索、模型预览、Git Review、终端 |
+| `lyapunov-shell` | 原生 DSH 工作台装配、场景面板、用户偏好、原生设置扩展、campaign 会话投影和界面桥接 |
+| `lyapunov-workspace` | 文件、搜索、模型预览、Git Review、原生终端入口 |
 | `lyapunov-terminal` | 独立终端客户端及连接、输入和会话适配 |
 | `lyapunov-session-undo` | 原生会话历史检出、工作树历史与草稿恢复 |
 | `lyapunov-mcp-extras` | MCP 资源、提示词及 OAuth 补充接口 |
 | `lyapunov-share` | 私有预览、分享服务客户端、发布与撤销 |
 | `lyapunov-product-bundle` | 产品 bundle、账户、运行路径、GitHub／CLI 集成 |
 | `lyaup-migrations` | 旧数据和用户偏好迁移；目录名仍保留旧前缀 |
-| `desktop` | Electron 主进程、preload、账户页、Host 生命周期 |
+| `desktop` | Electron 主进程、preload、账户页、Guest／正式账户入口、Host 生命周期 |
 
 ## 2. 环境与启动标准
 
@@ -92,7 +98,7 @@ bootstrap 会检查固定上游提交、应用登记补丁、安装并构建上�
 
 终端的引擎与 `launch.ts` 共用同一个 owner（`script/engine-preference.ts`）和同一条优先级：
 `--engine` > `LYAPUNOV_SIM_ENGINE` > 界面选过的用户偏好 > 代码默认；**只有代码默认不同**——
-`launch.ts` 用 `defaultEngine()`（Isaac 默认、MuJoCo 回退），终端保持 `none`，
+`launch.ts` 用 `defaultEngine()`：只有 Isaac 的 SDK、已接受许可、已确认加速器三项同时具备时才优先 Isaac，否则明确理由并回退 MuJoCo；GPU 检测只覆盖设备／驱动／加速器，不证明 RTX 成像或完整 world 已验收。终端保持 `none`，
 即从没配过引擎的机器上开终端不会顺手拉起仿真 provider。引擎在 Host 启动时装配，
 所以 `--attach` 不接受本地 `--engine`（远端 Host 的引擎归远端），本地参数里给了会被明确拒绝。
 
@@ -119,9 +125,24 @@ LYAPUNOV_MICROMAMBA="$(command -v micromamba)" \
 
 通用启动器的引擎优先级为显式参数 → 环境变量 → 用户偏好 → 代码默认。常规开发入口会把 YAML 的 `engine` 作为显式参数传入，所以“修改设置后重启”不保证覆盖 YAML。
 
-产品要求的代码默认是 **Isaac 优先、未就绪时回退 MuJoCo**。当前 `config/developer.yaml` 已不再写 `engine` 行（2026-09-27 源码核对），省略即跟随共享解析；需要固定引擎时才显式写一行，作为显式覆盖压过环境变量。本次文档工作未修改配置。
+0.2.1 的代码默认由 `defaultEngine()` 给出：只有 Isaac 的 SDK 运行时、已接受许可、已确认加速器三项同时具备时才优先 `isaac`；缺任一项都明确理由并选择 `mujoco`。当前 `config/developer.yaml` 已不再写 `engine` 行（2026-09-27 源码核对），省略即跟随共享解析；需要固定引擎时才显式写一行，作为显式覆盖压过环境变量。本次文档工作未修改配置。
 
-该优先级由 `script/engine-preference.ts` 的 `resolveEngine()` 唯一实现，`launch.ts`、`developer.ts`、`architecture.ts` 与桌面经 `host.ts` 的 `startWebHost` 共用。旧 09-19 记录的“桌面缺省 `none`、建筑入口缺省 `mujoco`、仅 `launch.ts` 消费偏好”是当时状态，按 09-27 源码已不成立；设置面板写入的是下次启动偏好，不热切换当前世界。
+该优先级由 `script/engine-preference.ts` 的 `resolveEngine()` 唯一实现，`launch.ts`、`developer.ts`、`architecture.ts` 与桌面经 `host.ts` 的 `startWebHost` 共用。旧 09-19 记录的“桌面缺省 `none`、建筑入口缺省 `mujoco`、仅 `launch.ts` 消费偏好”是当时状态，按 09-27 源码已不成立；设置面板写入的是下次启动偏好，不热切换当前世界。显式／环境／用户偏好一旦命中就原样采用，已有偏好不被自动逻辑暗改；真实显式启动失败按实际错误报告，不偷偷换引擎。标准安装准备 MuJoCo 与 Python，Isaac／Newton 按需安装；自动偏好不等于随包或默认安装。
+
+### 2.5 运行模式、Guest 与凭据边界
+
+0.2.1 同时存在 Guest、正式登录和开发三种模式，启动入口和凭据 owner 不同：
+
+| 模式 | 工作区与凭据 | 模型与计费 | 边界 |
+| --- | --- | --- | --- |
+| Guest | 独立本地工作区、`guest-settings.yaml`、`guest-model-credentials.json` | 无默认模型、无中央 Credits；用户可显式配置自己的 provider | 不连接产品账户／计费服务；产品服务目的地守卫拒绝产品服务器；不禁止用户自己的 provider 网络或本地工具 |
+| 正式登录 | 官网身份／账户网关验证后的私有 Host | 账户模型网关与中央 Credits | 不继承开发凭据；余额与订单以账户服务为准 |
+| 开发 | 独立本机开发账号、凭据和运行根 | 开发模型凭据或本机配置 | 不得泄漏到 Guest 或正式账户 |
+
+- 欢迎页明确提供登录与 Guest 两条入口；不能把所有工作台启动都写成必须先登录，也不能把未登录自动回落成 Guest 或把 Guest 自动升级为正式账户。
+- Guest 工程与登录工程分开保存；迁移时先导出 Guest 工程，再登录并显式导入，不自动合并。
+- 开发凭据、正式账户 token、Guest 自有 provider 凭据分别存放，不写入源码、日志、回执或共享配置。
+- 任何模式都不得把“本地可用”写成“已连接产品服务”，也不得把 Guest 写成“不能联网”或“不能使用模型”。
 
 ## 3. 代码和插件标准
 
@@ -165,9 +186,20 @@ LYAPUNOV_MICROMAMBA="$(command -v micromamba)" \
 3. 经 `robot_describe` 与 `policy_match` 核对当前 world／generation、控制量单位、限位与观测来源。模型维度相同不足以认定匹配。先准备失败就记录该层阻断，不启动虚假的执行。
 4. 场景导入检查尺度与轴向；3DGS＋GLB 记录来源配对、配准状态和碰撞角色。复用已有 `scene-collision`／`asset-bake`，按实际引擎核对 box、shapes、mesh、parts、binding 的消费语义。
 5. 做一个限定任务：初态 → 动作 → 实际状态／接触 → 停止／终态。行走验收位移与稳定停止；灵巧手验收抓取、抬升、保持与释放；无人机验收起飞、悬停和航点。室内碰撞还须证明门洞可通行，不能仅证明碰撞体存在。
-6. 保存工具回执和真实图像／视频，说明模型是否参与决策、是否使用结构化状态、是否按仿真时间播放。同步 README、总表、TODO、已解决账本。现有完整 Demo 可以交付，未实现型号或引擎保持独立卡点。
+6. 保存工具回执和真实图像／视频，说明模型是否参与决策、是否使用结构化状态、是否按仿真时间播放。同步 README、能力总表和发布说明；0.2.1 不随包分发旧 TODO／已解决账本，不为它伪造替代账本。现有完整 Demo 可以交付，未实现型号或引擎保持独立卡点。
 
 本轮参考：LIBERO 成功与 policy 尝试。引擎之间复用合同和资产，不照抄成功标签；新增适配仍遵守最薄层要求。
+
+### 3.6 Agent Graph、任务判定与技能库归属
+
+0.2.1 的 Agent Graph 是既有领域能力，不新增 Agent Loop、Session、Jobs 或通用调度器。维护时按以下 owner 核对：
+
+- **Campaign／task／run、预算与 run artifacts**：`packages/agent-graph` 的 `campaign-store.ts`、`state-machine.ts`、`artifacts.ts`。持久化在会话工作目录下的 `.lyapunov/campaigns/<campaignId>/`：`campaign.json`、`runs/<runId>/calls.jsonl`、`runs/<runId>/run.json`；取不到 `session.header.cwd` 时明确失败，不落宿主 cwd。
+- **任务判定**：对声明了 PredicateExpr 目标的 campaign／仿真任务，`packages/sim-task-check` 的 `sim_task_check` 基于真实 `sim.observe`／inspect 读数和谓词求值；官方 benchmark 遵循各自官方 success 判据，其他工作流按领域目标、终态／产物与真实来源验收，均不采模型自报或调用返回冒充达标。spec 级拒绝和 `OBSERVATION_UNAVAILABLE` 如实返回。
+- **工作台投影**：`lyapunov-shell` 的 `campaign-projection.ts` 只消费 `sessionProjection 'campaigns'`，展示 task 状态矩阵和预算用量；不能私建第二份权威 campaign 状态，也不能用面板读数替代 `campaign.json`。
+- **技能库**：`policy-registry` 的 `skill-library.ts`／`skill-tools.ts` 维护 `packs/<packId>/proposals`、`skills` 和 `promotions.jsonl`。`skill_propose` 只写提案；`skill_verify_record` 记录验证；`skill_promote` 只在 verify 记录存在、`passed === true`、`verifierRunId` 与 proposer `devEvidence.runIds` 不重合，并通过输入、提案 JSON 与文件校验时转正。单个 `passed` 布尔值不是充分条件。
+- **角色隔离**：调试与准入验证阶段保持 heldout 隔离是角色流程要求；当前 `state-machine.ts` 的 `assertRunPartition` 只拒绝 worker run 触碰 heldout，verifier／coordinator 的 heldout 复核被允许，`defaultRoleFor('heldout-eval')` 返回 verifier；`artifacts.ts` 的 worker 场景守卫拒绝当前工具参数指向 heldout 场景的访问或修改。不能声称所有 verifier 一律无权访问 heldout。verifier 侧的 `CAMPAIGN_VERIFIER_ISOLATION` 在活动 run 工具参数包含 `.lyapunov/campaigns` 时拒绝 proposer 原始运行产物，它是路径级工具守卫，不冒充 OS 级完整沙箱；verifier 拿到的是经投影的提案和独立验证输入。heldout 的具体角色限制以当前代码守卫为准，不把旧设计文档中的文字写成额外权限。
+- **预算**：`tools/execute` waterfall 按 run 计 `maxToolCalls`、`maxSimSteps`、`maxWallSeconds`；超限拦截后续调用，当次调用允许完成。预算是现有执行通路的计量，不新造收费或物理状态。
 
 ## 4. 接口标准与速查
 
@@ -212,6 +244,7 @@ LYAPUNOV_MICROMAMBA="$(command -v micromamba)" \
 | 资产生产 | `asset_bake`、`blender_run`、`generate_marble`、`generate_hunyuan`、`generate_tripo`、`segment_sam3` | 对应 Provider 的 `plugin.ts` |
 | 策略 | `policy_search/metadata/files/download/verify/prepare/match/execute/stop` | `policy-registry/src/plugin.ts` |
 | 官方评测 | `bench_prepare/catalog/load/step/result/close/run_suite` | `benchmark-libero`／`benchmark-gymnasium` |
+| Agent Graph 与技能库 | `campaign_init/status/record_run/transition`、`sim_task_check`、`pack_skill_list/get`、`skill_propose/verify_record/promote` | `agent-graph`、`sim-task-check`、`policy-registry` |
 | MCP 补充 | `list_mcp_servers/resources/resource_templates/prompts`、`read_mcp_resource`、`get_mcp_prompt` | `lyapunov-mcp-extras` |
 | 分享 | `share_preview/publish/list/revoke` | `lyapunov-share/src/plugin.ts` |
 | 界面桥接 | `ui_action`、`viewer_annotation_read`；截图和相机 UI Commands 另行注册 | `lyapunov-shell/src/plugin.ts` |
@@ -263,8 +296,7 @@ Shell 另注册 `viewer_annotation_send_ui`、`viewer_capture`、`sensor_capture
 | `/api/lyapunov/engine-preference`、`engine-license`、`provider-install` | POST | 偏好、许可记录、依赖安装请求 |
 | `/api/lyapunov/recordings`、`recording`、`recording-resource` | GET | 录制和资源读取 |
 | `/api/lyapunov/capture`、`resource`、`segmentation-resource`、`official-view` | GET | 已准入的媒体、资源及官方视图 |
-| `/api/lyapunov/workspace` | POST | `{sessionId,action,input}` 文件、搜索、Git、终端等操作 |
-| `/api/lyapunov/workspace/xterm-output` | GET | PTY 输出事件流 |
+| `/api/lyapunov/workspace` | POST | `{sessionId,action,input}` 文件、搜索、Git 等操作；交互终端改走原生 `ctx.terminalController`／`ctx.webTerminals`，不再经此 PTY 流 |
 | `/api/lyapunov/model-preview` | GET | 预览文件字节；另有解码器资源路由 |
 | `/api/lyapunov/history-draft` | POST | 会话历史草稿恢复接口；详见对应插件 |
 
@@ -350,6 +382,18 @@ bun run build:desktop
 
 `--all` 也不等于全部功能通过：该聚合仍会对需要独立驱动的门返回指路／阻断，而且不自动运行所有新增门。退出码为 `0` 通过、`1` 实际失败、`2` 阻断，聚合时失败优先于阻断。
 
+#### 5.4.1 按范围的功能、交互、视觉验收
+
+| 类型 | 自动化与离线检查能证明 | 必须由真实环境或人工补证 |
+| --- | --- | --- |
+| 功能 | 类型、合同、参数 schema、离线行为、结构化错误、真实命令退出码 | 真实 SDK／引擎／Provider 的任务终态、接触、产物和恢复 |
+| 交互 | 已纳入的行为用例、关键路径冒烟、状态与接口联动 | 完整用户流程、对象与作用范围、停止／失败／重试、草稿保留、键盘焦点与可达性 |
+| 视觉 | 组件可构建、截图可生成、样式文件可解析 | 真实界面对照认可基准的人工审阅；本次受影响状态、目标窗口范围及适用的三维取景 |
+
+验收范围按本次修改实际影响的功能、交互和视觉范围确定：只对受影响的真实任务、界面和适用状态取证；纯文档或未触达界面的改动不要求全量功能、交互、视觉检查。只有改动触达换手、相机、采集、录制或设置时，才走对应完整流程；禁止每个文案修改都全量重跑换手和相机。三类验收按实际范围分别记录。代码 CI、类型检查和按钮可点击不能代替人工视觉审阅，也不能代替真实任务流程走查。
+
+Agent Graph 改动还要区分：campaign 状态机／投影、run artifacts、预算计数、`sim_task_check` 谓词（仅声明了谓词的目标）和技能晋升分别取证；面板显示 campaign 卡片不等于真实任务成功，`skill_promote` 成功也不等于模型、GPU、机器人任务已验收。
+
 ### 5.5 提交与评审
 
 提交说明写清触发问题、最终行为、接口／数据影响和实际验证。新增文件与修改文件分开核对，确认未带入 `.runtime`、私有配置、数据库、权重或生成构建物。没有运行的验证明确写“未运行”，不要将以前的截图和回执作为新提交的验收。
@@ -367,14 +411,16 @@ Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:
 ## 7. 文档维护标准
 
 - README 写用户能做什么、从哪里进入、需要什么，以及直接影响使用的限制。
-- 开发原则写状态归属和稳定语义；开发标准写可执行步骤、接口与已知差异。
-- 对外链接使用仓库相对路径，不写开发机 `/home/...` 绝对路径。
+- 长期原则唯一维护在 [principles/](../principles/README.md)：产品、开发、美学、交互各一份；[旧路径](DEVELOPMENT_PRINCIPLES.md) 只做迁移导航，历史原文另存到 [2026-10-25 归档](DEVELOPMENT_PRINCIPLES_2026-10-25_ARCHIVE.md)，不保留第二套现行原则。
+- 开发标准写可执行步骤、接口与已知差异；迁移入口页只做导航，不复制原则正文。
+- 对外链接使用仓库相对路径，不写开发机 `/home/...` 或任务目录路径；新增链接必须在干净 0.2.1 加本补丁中存在。
 - 启动和安装命令注明在源码根还是发行包根执行。
 - 功能状态按实际调用链描述，不用目录存在、注释、类型签名或旧回执代替。
-- **同一轮同步**：行为、接口、默认值或能力变更时，在同一次改动里更新 [README](../README.md)、[能力总表](CAPABILITY_MATRIX.md) 以及受影响的 [TODO](DEVELOPMENT_TODO.md)／[开发状态](../development/STATUS.md) 条目，不能让一处更新而另一处仍写旧结论。
+- **同一轮同步**：行为、接口、默认值或能力变更时，在同一次改动里更新 [README](../README.md)、[能力总表](CAPABILITY_MATRIX.md) 和对应的开发文档或当前待发布版本的说明；已发布的 [0.2.1 发布说明](releases/0.2.1.md) 保留当时身份，不因后续改动回写。`docs/releases/` 目录只作版本导航，0.2.1 文档只作为本次固定对齐基线；不把旧 TODO／状态账本当成本源码的当前入口，也不伪造替代账本。
 - **提交说明写文档影响**：说明这次改了什么文档、为什么；确无影响的用一句写明（例如“文档无影响”），不要求新建清单或工具。
-- **当前检查结果集中在 [开发状态](../development/STATUS.md)**；历史回执保留其原日期与限定任务，不因今天重跑而原地改写，新结论写到状态页或新回执。
-- 不新增文档自动化平台或更多规则体系；维护动作落在上述既有文件和本节的提交纪律上。
+- **发布状态与历史证据分开**：0.2.1 的发布日期、包含能力和验证范围以 [0.2.1 发布说明](releases/0.2.1.md) 与 [发布说明目录](releases) 为准；历史回执保留其原日期与限定任务，不因今天重跑而原地改写，新结论写到发布说明、能力总表、实际回执或本次任务记录中。原 2026-09-19 的开发状态、TODO 和已解决账本不随本源码分发，不能作为当前状态入口。
+- **唯一原则维护规则**：现行正文只有 `principles/` 四份加总入口；本页只写开发流程和接口，迁移页只导航，归档只追溯。新增原则条款时同步检查四份正文、本页、根入口和索引的交叉引用，不因一次局部改动重写全篇。
+- 不新增文档自动化平台、状态账本、设计系统或更多规则体系；维护动作落在上述既有文件和本节的提交纪律上。
 
 ## 8. 接口与冗余核对
 
@@ -384,8 +430,8 @@ Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:
 
 | 项目 | 当前代码事实 | 对使用／维护的影响 |
 | --- | --- | --- |
-| 生成产品域已扩展 | 服务端产品域经 v8 迁移含 `marble`／`hunyuan`／`tripo`／`image`（见 [生成路由](GENERATION_ROUTES.md)）；账户 API 与正式网关源码已移出本仓（归 LyapunovOM `backend/dev-server/`） | 本仓保留客户端 HTTP 合同；正式商业链路以独立运维仓库的部署与授权为准，不在本仓验证 |
-| 引擎选择已统一 | `script/engine-preference.ts` 的 `resolveEngine()` 为唯一优先级：显式 `--engine` ＞ `LYAPUNOV_SIM_ENGINE` ＞ 用户偏好 ＞ 默认（Isaac 优先／未就绪回退 MuJoCo）；`launch.ts`、`developer.ts`、`architecture.ts`、桌面经 `host.ts` 共用；开发 YAML 的 `engine` 作为显式覆盖，默认不再写死 | 四个入口不再各自写默认；非法值报错、不静默回退 |
+| 生成产品域已扩展 | 服务端产品域经 v8 迁移含 `marble`／`hunyuan`／`tripo`／`image`（原生成路由文档不随本源码分发，以账户 API 公开合同与对应 Provider 为准）；账户 API 与正式网关源码已移出本仓（归 LyapunovOM `backend/dev-server/`） | 本仓保留客户端 HTTP 合同；正式商业链路以独立运维仓库的部署与授权为准，不在本仓验证 |
+| 引擎选择已统一 | `script/engine-preference.ts` 的 `resolveEngine()` 为唯一优先级：显式 `--engine` ＞ `LYAPUNOV_SIM_ENGINE` ＞ 用户偏好 ＞ 默认（默认由 `defaultEngine()` 判定：Isaac 的 SDK、许可、加速器三项同时具备才优先 Isaac，否则明确理由回退 MuJoCo）；`launch.ts`、`developer.ts`、`architecture.ts`、桌面经 `host.ts` 共用；开发 YAML 的 `engine` 作为显式覆盖，默认不再写死 | 四个入口不再各自写默认；非法值报错、不静默回退；显式启动失败不偷偷换引擎 |
 | Newton 入口已统一 | `ENGINE_CHOICES` 含 `newton`，`developer-config.ts` 与 `architecture.ts` 均按该枚举校验；Linux 顶层 help 的 `doctor [mujoco|isaac|newton]`／`install-provider ...newton...` 与 `ui_engine_switch`（描述取自 `ENGINE_CHOICES`）均已列 `newton`；建筑入口示例行仍写 `none|mujoco|isaac` 属帮助文本维护项（不改实现） | 入口支持统一；帮助文本已按 2026-09-27 源码核对，示例行遗留单独登记 |
 | 相机族按 Provider 如实展示 | Isaac 五个相机接口（列表／调整／多相机采集／像素标注／数据集导出）已实现并挂共享范围（`robot-tools` 声明面同步，见 `bugfixHistory/DEV009-ISAAC-INTERFACES-20260926.md`）；真实 RTX 成像层待设备可见会话复验；Newton 相机族未实现 | 不按公共 TS 接口推断各引擎支持；Isaac 成像面以 rtx 会话读数为准 |
 | 基础验收的引擎参数容易误读 | G02–G07 共用的 `harness()` 写死 MuJoCoProvider | 不能拿 `--engine isaac` 的命令文本当 Isaac 验收证据 |
@@ -393,7 +439,7 @@ Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:
 | 工作台命令桥不是所有工具的统一入口 | `command` 有明确前缀白名单 | 新 UI 调用需要核对注册和代理；模型能调用不代表 HTTP 代理也接受 |
 | CI 类型门槛已收紧 | CI 只保留两个本仓 tsc 入口（根 `tsconfig.json`、`script/tsconfig.gates.json`）并直接采用退出码；旧的“8 条 TS 错误”容忍与账户 API 独立检查（随源码移出）均已删除 | 类型检查为零错误门槛；发布门不等于真实 GPU／身份／安装验收 |
 
-证据：[开发配置解析](../script/developer-config.ts)、[引擎解析](../script/engine-preference.ts)、[建筑入口](../script/architecture.ts)、[基础验收入口](../script/refactor-verify.ts)、[G17 驱动](../script/gates/run-g17.ts)、[Linux 帮助](../distribution/linux/lyapunov)。生成服务与账户 API 源码已移出本仓，公开合同见 [生成路由](GENERATION_ROUTES.md)。
+证据：[开发配置解析](../script/developer-config.ts)、[引擎解析](../script/engine-preference.ts)、[建筑入口](../script/architecture.ts)、[基础验收入口](../script/refactor-verify.ts)、[G17 驱动](../script/gates/run-g17.ts)、[Linux 帮助](../distribution/linux/lyapunov)。生成服务与账户 API 源码已移出本仓，公开合同以本节账户 API 章节和对应 Provider 为准；原生成路由文档不随本源码分发。
 
 ### 8.2 已确认的重复实现与重叠路径（2026-09-19 审查快照，非当前待修清单）
 
@@ -406,7 +452,7 @@ Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:
 | `grasp-anygrasp`、`grasp-graspgenx`、`motion-mink`、`motion-ompl` 的 `src/plugin.ts` | 子进程执行闭包存在相同函数体 | 只有取消、Job 和输出语义相同时再复用，不先建立通用框架 |
 | `benchmark-gymnasium/src/adapter.ts`、`benchmark-libero/src/operations.ts` | 09-19 时 `load` 函数体相同；**2026-09-27 已重核**：两者共用 `benchmark-contract/src/adapter-concurrency.ts` 的 `AdapterConcurrency` 薄层（`serialize`／`disposeOnce`／`pending`），当时的并发重复已收敛 | 已共享的只是生命周期／并发薄层；奖励、动作空间与成功语义仍各自保留 |
 | `script/gates/g01-live.ts`、`g11-live.ts` 等 | NDJSON／连接／PNG 辅助函数重复 | 属于验收维护成本；不是业务重复状态源 |
-| Workspace 与上游终端 | 原生 `ctx.terminals` 路径、产品 `xterm-*`／`node-pty` 路径及上游侧栏终端同时存在；产品终端组件仍有调用 | 存在职责重叠，应先核对当前槽位、会话归属、取消与退出清理，不能仅凭“已换上游终端”的旧注释删除 |
+| Workspace 与原生终端 | 2026-10-26 已收敛：工作区“终端”入口直接打开 DSH 原生侧栏 terminal tab；会话、PTY、快照、重连、resize、关闭与清理全归原生 `terminalController`／`webTerminals`。Agent 终端仍走 `ctx.terminals`。 | 产品不再保留 xterm 渲染适配、`xterm-*` HTTP 流、模块级 `xtermSessions` 或第二套 PTY；旧抽屉状态迁移到原生标签 |
 | `robot_stop`、`sim_stop` | 都委托 `sim.stop` | 是有意的多入口，未复制停止物理实现 |
 | 多个 `grasp_propose` | 三个 Provider 注册相同工具名，运行装配只选择一个 | 属于互斥 Provider，不能同时加载，也不应按重名删除 |
 
@@ -420,7 +466,7 @@ Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:
 
 ## 9. 本次文档核对的验证记录
 
-以下是 2026-09-19 首次核对时的读数；当前状态以 [开发状态](../development/STATUS.md) 为准。
+以下是 2026-09-19 首次核对时的历史读数，不等于 0.2.1 的当前状态；0.2.1 的发布状态以 [0.2.1 发布说明](releases/0.2.1.md) 与 [发布说明目录](releases) 为准。
 
 | 检查 | 结果与范围 |
 | --- | --- |

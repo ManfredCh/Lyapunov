@@ -16,12 +16,12 @@
  *
  * 用法：`bun test packages/lyapunov-shell/test/resource-route-base-token.test.ts`
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test, spyOn } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { boot, writeScene, fetchResource, viewerSubmissions, viewerResourceURI } from "./resource-route-harness.ts"
+import { boot, writeScene, fetchResource, viewerSubmissions, viewerResourceURI, SESSION } from "./resource-route-harness.ts"
 import { resourceToken, RESOURCE_TOKEN_PREFIX } from "../../lyapunov-contracts/src/product-paths.ts"
 import type { Entity, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
 
@@ -165,5 +165,69 @@ describe("静态对齐：宿主侧夹具里复刻的那一句必须与产品源�
     expect(product).toBe(String.raw`/^(res:[^?#]+)\?ext=\.[A-Za-z0-9]+$/.exec(uri)?.[1]??uri`)
     expect(viewerResourceURI("/x")).toBe("/x")
     expect(viewerResourceURI("res:abc?ext=.STL")).toBe("res:abc")
+  })
+})
+
+describe('state 同版本条件投影：真SceneStore、真HTTP、真文件身份',()=>{
+  const scene=(name='初始'):SceneSnapshot=>({sceneId:'state-scene',revision:0,coordinates:COORDINATES,entities:[{entityId:'actor',name,transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},resources:[],components:{human:{schema:1,mode:'kinematic',collision:'detailed',heightM:1.7,phase:0,source:{kind:'procedural',license:'fixture',sourceUpAxis:'Z'},rig:[{name:'root',offsetM:[0,0,0],quaternionXyzw:[0,0,0,1]}],clips:[{name:'walk',durationS:1,tracks:[{joint:'root',timesS:[0,1],rotationsXyzw:[[0,0,0,1],[0,0,.1,.99498743710662]],interpolation:'LINEAR'}]}]}}}]})
+  const state=async(harness:Awaited<ReturnType<typeof boot>>,extra:Record<string,string>={})=>{
+    const query=new URLSearchParams({sessionId:SESSION,sceneId:'state-scene',clientId:'window-one',displaySceneId:'state-scene',displayRevision:'0',...extra})
+    const response=await harness.routes.get('/api/lyapunov/state')!(new Request('http://host/api/lyapunov/state?'+query))
+    return {status:response.status,body:await response.json() as {scene?:SceneSnapshot;error?:string;hostInstanceId?:string}}
+  }
+  test('首次全量、后续同窗口省读和投影；缺标记/新窗口/切场景/过期与未来版本均全量',async()=>{
+    const h=await boot()
+    const read=spyOn(h.operations.scene,'snapshot'),project=spyOn(h.operations,'completeResourceSources')
+    try{
+      await writeScene(h,scene())
+      const first=await state(h)
+      expect(first.status).toBe(200);expect(first.body.scene?.entities[0]?.components.human).toEqual(scene().entities[0]!.components.human)
+      const reads=read.mock.calls.length,projections=project.mock.calls.length
+      expect(reads).toBe(1)
+      const second=await state(h)
+      expect(second.status).toBe(200);expect(second.body.scene).toBeUndefined();expect(second.body.hostInstanceId).toBe(first.body.hostInstanceId)
+      expect(read.mock.calls.length).toBe(reads);expect(project.mock.calls.length).toBe(projections)
+      const fallbacks:Record<string,string>[]=[{clientId:'new-window'},{clientId:''},{displaySceneId:''},{displayRevision:''},{displayRevision:'-1'},{displayRevision:'999'},{displaySceneId:'other-scene'}]
+      for(const extra of fallbacks){
+        const before=read.mock.calls.length,result=await state(h,extra)
+        expect(result.status).toBe(200);expect(result.body.scene?.sceneId).toBe('state-scene');expect(read.mock.calls.length).toBe(before+1)
+      }
+      await h.operations.create({sceneId:'other-scene'})
+      expect((await state(h,{sceneId:'other-scene'})).body.scene?.sceneId).toBe('other-scene')
+      expect((await state(h,{displaySceneId:'other-scene'})).body.scene?.sceneId).toBe('state-scene')
+    }finally{read.mockRestore();project.mockRestore();await h.dispose()}
+  })
+  test('同rev外部改写重新读取全量；坏JSON和删除报错；并发CAS提交后返回获胜的新版本',async()=>{
+    const h=await boot()
+    try{
+      await writeScene(h,scene());await state(h)
+      await writeScene(h,scene('外改'))
+      expect((await state(h)).body.scene?.entities[0]?.name).toBe('外改')
+      expect((await state(h)).body.scene).toBeUndefined()
+      await writeFile(h.operations.scene.path('state-scene'),'{broken')
+      const broken=await state(h);expect(broken.status).toBeGreaterThanOrEqual(400);expect(broken.body.scene).toBeUndefined();expect(broken.body.error).toBeTruthy()
+      await writeScene(h,scene('恢复'));expect((await state(h)).body.scene?.entities[0]?.name).toBe('恢复')
+      const edits=await Promise.allSettled(['甲','乙'].map(name=>h.operations.scene.commit({sceneId:'state-scene',expectedRevision:0,patch:[{op:'update',entityId:'actor',changes:{name}}]})))
+      expect(edits.filter(row=>row.status==='fulfilled')).toHaveLength(1)
+      const changed=await state(h);expect(changed.body.scene?.revision).toBe(1);expect(changed.body.scene?.entities[0]?.name).toBe((edits.find(row=>row.status==='fulfilled') as PromiseFulfilledResult<SceneSnapshot>).value.entities[0]!.name)
+      expect((await state(h,{displayRevision:'1'})).body.scene).toBeUndefined()
+      await import('node:fs/promises').then(fs=>fs.rm(h.operations.scene.path('state-scene')))
+      const missing=await state(h,{displayRevision:'1'});expect(missing.status).toBeGreaterThanOrEqual(400);expect(missing.body.error).toContain('SCENE_NOT_FOUND')
+    }finally{await h.dispose()}
+  })
+  test('同Host相同窗口ID、同SceneId和rev跨会话仍首次全量；Host重开不复用旧下发身份',async()=>{
+    const other='session-route-other',h=await boot({sessionIds:[other]})
+    try{
+      await writeScene(h,scene('会话甲'))
+      const ops=h.operationsFor(other);await ops.create({sceneId:'state-scene'})
+      await writeFile(ops.scene.path('state-scene'),JSON.stringify(scene('会话乙')))
+      expect((await state(h)).body.scene?.entities[0]?.name).toBe('会话甲')
+      expect((await state(h)).body.scene).toBeUndefined()
+      expect((await state(h,{sessionId:other})).body.scene?.entities[0]?.name).toBe('会话乙')
+      expect((await state(h,{sessionId:other})).body.scene).toBeUndefined()
+      expect((await state(h)).body.scene).toBeUndefined()
+      const reopened=await boot({sceneRoot:h.root})
+      try{expect((await state(reopened)).body.scene?.entities[0]?.name).toBe('会话甲')}finally{await reopened.dispose()}
+    }finally{await h.dispose()}
   })
 })
