@@ -45,6 +45,10 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 ## 版本通道
 
 - **当前默认 — [0.2.2](docs/releases/0.2.2.md)：**完整 Linux x64 发行版，新增人物与人群（随包角色、「人群」面板与自然语言控制）、USD 与 SimReady 一等资产，以及显式 NVIDIA 渲染。
+  - **人物与人群：**随包 12 个 Rocketbox 真人角色，默认创建 20 人、四种外观混合；支持路线、遇障停步和固定平面自动绕障。
+  - **两种控制方式：**右侧工具栏新增「人群」面板（按组或全部开始/停止，来回走、绕圈、原地站立预设），也可以直接用自然语言让智能体操作。
+  - **USD 与 SimReady：**USD 作为一等资产入库，保留图层、材质与物理属性；按固定版本经 Hugging Face 镜像导入 SimReady 资产包，并核对许可与文件清单。
+  - **Linux NVIDIA：**`./lyapunov desktop --nvidia-rendering` 显式使用 NVIDIA 渲染；`install-provider mujoco --human-cuda` 可选启用 CUDA 人体计算。
 - **上一版本 — [0.2.1](docs/releases/0.2.1.md)：**保留固定版本目录、标签、说明及下载资产。
 - **历史预览版 — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md)：**保留固定版本目录、标签、说明及下载资产。
 - **历史候选版 — [0.1.0 RC](docs/releases/0.1.0-rc.md)：**保留固定版本目录、标签、说明及下载资产。

@@ -45,6 +45,10 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 ## Release channels
 
 - **Current default — [0.2.2](docs/releases/0.2.2.md):** full Linux x64 distribution, adding people and crowds (bundled characters, Crowd panel and natural-language control), first-class USD and SimReady assets, and explicit NVIDIA rendering.
+  - **People and crowds:** 12 bundled Rocketbox characters, a default 20-person crowd in four appearances, routes with obstacle stops and optional fixed-plane navigation.
+  - **Two ways to control them:** the new **Crowd** panel on the right tool rail (start/stop per group or everyone, back-and-forth / square-loop / stand presets) and natural-language requests to the agent.
+  - **USD and SimReady:** USD files are first-class assets with layers, materials and physics preserved; pinned SimReady packages import with license and file verification through the Hugging Face mirror.
+  - **NVIDIA on Linux:** `./lyapunov desktop --nvidia-rendering`, and optional CUDA human motion via `install-provider mujoco --human-cuda`.
 - **Previous release — [0.2.1](docs/releases/0.2.1.md):** retained with its version directory, tag, release notes and assets.
 - **Previous preview — [0.2.0 Alpha 1](docs/releases/0.2.0-alpha.1.md):** retained with its version directory, tag, release notes and assets.
 - **Previous RC — [0.1.0 RC](docs/releases/0.1.0-rc.md):** retained with its version directory, tag, release notes and assets.
