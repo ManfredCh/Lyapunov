@@ -19,12 +19,6 @@
 
 **Linux x64** · **Apache-2.0**
 
-> **开发者／AI 必读（Lyapunov 0.2.1 开发基线）**
->
-> 进入本仓库进行设计、修改、评审或派发前，按 **产品 → 开发 → 美学 → 交互** 完整阅读 [核心原则总入口](principles/README.md)：
-> [产品](principles/PRODUCT.md) · [开发](principles/DEVELOPMENT.md) · [美学](principles/AESTHETICS.md) · [交互](principles/INTERACTION.md)。
-> 执行边界见 [AGENTS.md](AGENTS.md)；0.2.1 的发布日期、范围与验证状态见 [0.2.1 发布说明](docs/releases/0.2.1.md)。原则存在不等于实现已满足；本源码树不随包分发的旧账本不作为事实源。
-
 | 出版信息 | 内容 |
 | --- | --- |
 | 作者团队 | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
@@ -64,6 +58,8 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
+
+**直接下载（Vorynel OSS/CDN）：**[Linux x64 0.2.2 安装包](https://vorynel.com/lyapunov/releases/0.2.2-20261030/lyapunov-linux-x64-0.2.2-20261030.tar.gz)（1,052,456,167 字节）· [JSON 清单](https://vorynel.com/lyapunov/releases/0.2.2-20261030/linux-x64.json) · [SHA256SUMS](https://vorynel.com/lyapunov/releases/0.2.2-20261030/SHA256SUMS)。SHA256：`545c3b584c7c75416762a4c6f383a14910927da4cdd8482c2fd447e2ded5f4cd`。同样的文件也附在 [GitHub Release](https://github.com/ManfredCh/Lyapunov/releases/tag/v0.2.2)。
 
 安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 
