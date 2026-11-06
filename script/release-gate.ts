@@ -674,6 +674,7 @@ export const CASES: readonly CaseSpec[] = [
  * 唯一出口，所以它要显式、可审计、且会在输出里以 WAIVED 出现。
  */
 export const COVERAGE_WAIVERS: readonly { path: string; reason: string }[] = [
+  { path: 'script/test_publish_release.py', reason: '发行运维CLI的离线回归已纳入完整test:ci；覆盖GitHub汇总、不可变分发及真实临时Git/HTTP，不属于本门聚焦的产品/仿真驱动CASES，不调用生产。' },
   {
     path: 'script/env-self-link-guard.test.ts',
     reason:

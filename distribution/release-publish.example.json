@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "devRepo": "ManfredCh/LyapunovDev",
+  "publicRepo": "ManfredCh/Lyapunov",
+  "websiteRepo": "ManfredCh/Official-Website-All",
+  "websiteGit": "../WebsiteAll-git",
+  "artifactRoots": [".runtime/release-inputs"],
+  "baseUrl": "https://vorynel.com",
+  "cdnUrl": "https://cdn.vorynel.com",
+  "cloud": {"cli": "aliyun", "region": "cn-hangzhou", "instance": "填写已授权的ECS实例ID"},
+  "oss": {"cli": "填写服务器上已有的ossutil绝对路径", "bucket": "填写现有bucket", "container": "填写提供既有OSS凭据的容器名", "prefix": "lyapunov"},
+  "server": {"site": "/var/www/lyapunov", "home": "/var/www/官网目录", "nginxSnippet": "/etc/nginx/snippets/下载路由.conf", "backups": "/var/backups/lyapunov", "work": "/var/tmp/lyapunov-publish"}
+}

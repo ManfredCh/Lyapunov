@@ -400,6 +400,9 @@ Agent Graph 改动还要区分：campaign 状态机／投影、run artifacts、�
 
 ## 6. CI 与发布流程
 
+统一发布入口为 `bun run release:publish`，操作说明见[一条命令发布](RELEASE_PUBLISH.md)。只发布已提交 main 与已准备的双平台包；最终验收必须包含 GitHub `statusCheckRollup`、OSS/官网清单和真实下载字节，未全绿不报告完成。
+
+
 当前 [CI](../.github/workflows/ci.yml) 包含固定上游准备、bootstrap、桌面构建、技能文件格式、**两个本仓 TypeScript 检查**（根 `tsconfig.json` 与 `script/tsconfig.gates.json`，均直接采用 tsc 退出码、**零错误门槛**）、离线行为测试（`bun run test:ci`，未审用例 fail-closed）、资产布局、上游提交一致性与产物存在检查。旧的“允许最多 8 条 TS 错误”容忍值已删除；账户 API 的独立类型检查随其源码移出本仓。
 
 根项目 TypeScript 检查以退出码 0 完成（含 `packages/lyapunov-api-client`）。门驱动、外部供应商、GPU、账户部署和完整发行行为不由当前 CI 全部覆盖；`bun run release-gate` 也只覆盖离线行为与静态合同，**不等于真实 GPU／身份／安装验收**。

@@ -301,3 +301,7 @@ node script/bootstrap.mjs
 Lyapunov 项目自有代码采用 [Apache License 2.0](LICENSE)，版权 **© 2026 Vorynel Co., Ltd.**。项目已填写的版权和许可适用声明见 [NOTICE](NOTICE)；LICENSE 附录保留 Apache 官方用于演示如何应用许可的标准示例。使用、修改和分发遵循 Apache 2.0，不再附加月活或营业收入门槛。已发布归档保留原始字节和其中的历史许可声明，后续发行包将携带更新后的 LICENSE 与 NOTICE。
 
 原 OpenCode MIT 版权与授权通知完整保留在 [NOTICE](NOTICE)。各独立包、随附 DSH／Node／MuJoCo 组件、机器人资产、模型权重和外部服务保留自己的许可。
+
+## 维护者发布
+
+已提交 main 与双平台出包准备完成后，运行 `bun run release:publish`，自动同步 GitHub、OSS 和官网；下载入口与 main 汇总全部通过才报告完成。配置、重跑及核验方式见[一条命令发布](docs/RELEASE_PUBLISH.md)。

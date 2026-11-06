@@ -309,3 +309,7 @@ Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机�
 人体创建、合法蒙皮角色导入与物理时间动作见 [人体创建与运动](docs/HUMAN_CROWD.md)。MuJoCo支持运动学分段碰撞、有界固定Z平面绕障、拥堵解除与原生ragdoll受力；Isaac CPU/none支持同世界原生USD资产+运动学人体、基础路径、原生停障与停止。稳定平衡/恢复控制器、Isaac高级ragdoll/A*与RTX人体成像尚未完成。
 
 原生 USD/USDA/USDC/USDZ 与 SimReady 来源接入、运行时准备、工具示例和显示/引擎边界见 [SimReady 与 USD 资产](docs/SIMREADY_USD.md)。
+
+## 维护者发布
+
+已提交 main 与双平台出包准备完成后，运行 `bun run release:publish`，自动同步 GitHub、OSS 和官网；下载入口与 main 汇总全部通过才报告完成。配置、重跑及核验方式见[一条命令发布](docs/RELEASE_PUBLISH.md)。

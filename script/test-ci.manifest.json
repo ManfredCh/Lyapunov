@@ -3644,6 +3644,13 @@
       "markers": [],
       "decision": "include",
       "reason": "旧Warehouse固定源元数据快照/CSV字段、LFS与Git身份、资产检索详情、刷新失败显式状态和禁止自动官方缩略图；默认不访问网络、不下载真实资产。"
+    },
+    {
+      "path": "script/test_publish_release.py",
+      "declaredRunner": "python",
+      "markers": [],
+      "decision": "include",
+      "reason": "统一发布CLI离线回归：真实临时Git/文件/本机HTTP，GitHub/OSS写入均用替身；核对取消检查不能冒充全绿、显式发布标签、不可变资产冲突与工作区保护，不访问生产或外网。"
     }
   ]
 }

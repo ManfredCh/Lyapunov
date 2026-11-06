@@ -107,6 +107,10 @@ Demo 可用已实现工具、确定机位和限定任务绕开非必要接入问
 
 MuJoCo 人体动作可显式 `humanComputeDevice=cuda:0`（Warp 1.13 fp64，全体 clip 行人单 graph），可选安装 `install-provider mujoco --human-cuda`。2026-10-30 实测 20 人+Panda realtime RTF 约 0.32–0.37、工作台 12–16fps，**未达实时**；见 [RTX人体动作计算与渲染](HUMAN_GPU.md)。
 
+## 维护者发行入口
+
+`bun run release:publish` 从已提交 main 和已准备的 Linux/Mac 归档同步 GitHub、OSS 与官网，核对下载字节及 main 的完整汇总状态后报告结果。工作区修改、运行数据和人群资源按独立边界保留；用法及验收范围见[一条命令发布](RELEASE_PUBLISH.md)。
+
 ## 2026-10-28 源码增补：SimReady 与 USD
 
 USD主资产登记、OpenUSD依赖闭包、实例变体/变换、便携保存重开与派生几何预览已接入；Isaac原生刚体矩阵通过现有Frame传入Viewer并驱动源body绑定子几何；SimReady Central固定版本/BOM与旧Warehouse CSV的独立源身份/逐layer闭包接入同一资源库，均严格镜像；CSV目录发现已接入，真实小包获取仍按外部取证结果报告。Viewer支持基础UsdPreviewSurface与st纹理；MDL/任意网络、细分、蒙皮/动画仍未渲染；原生物理按Isaac具体实测回执记录，MuJoCo/Newton原生USD明确不可用。自动化几何/文档检查不代替界面或物理验收，详见 [使用与边界](SIMREADY_USD.md)。

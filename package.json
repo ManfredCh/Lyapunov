@@ -32,7 +32,8 @@
     "release-gate": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/release-gate.ts",
     "gate:usd-assets": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-assets.ts",
     "gate:usd-isaac": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-isaac.ts",
-    "gate:usd-materials": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-materials.ts"
+    "gate:usd-materials": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/gates/run-usd-materials.ts",
+    "release:publish": "python3 script/publish-release.py"
   },
   "dependencies": {
     "three": "0.180.0",
