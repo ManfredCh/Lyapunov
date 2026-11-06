@@ -351,6 +351,11 @@ def synchronize_source(shell, gh, config, source, tree, version):
     tags = {}
     for repo, commit in [(dev, source), (public, published)]:
         existing = gh.ref(repo, 'tags/' + tag)
+        if existing and existing != commit:
+            release = gh.release(repo, tag)
+            if not release or release['draft']:
+                require(shell.git('rev-parse', existing + '^{tree}') == shell.git('rev-parse', commit + '^{tree}'),
+                        '未发布标签指向另一份源码，请先处理该候选或使用新版本: ' + repo + '/' + tag)
         refs = [commit + ':refs/heads/main']
         if existing is None:
             refs.append(commit + ':refs/tags/' + tag)

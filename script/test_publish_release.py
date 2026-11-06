@@ -237,6 +237,21 @@ class PublisherTests(unittest.TestCase):
             with self.assertRaises(pub.PublishError): shell.git('push', 'origin', 'HEAD:main')
             self.assertEqual(run.call_count, 1)
 
+    def test_stale_unpublished_tag_cannot_silently_ship_new_source(self):
+        class Shell:
+            def __init__(self): self.pushes = []
+            def git(self, *args, **kwargs):
+                if args[0] == 'rev-parse': return 'new-tree' if args[1].startswith(('a', 'b')) else 'old-tree'
+                if args[0] == 'push': self.pushes.append(args)
+                return ''
+        class GH:
+            def ref(self, repo, ref='heads/main'): return 'b' * 40 if repo == 'owner/public' else 'c' * 40
+            def release(self, *args): return None
+        shell = Shell()
+        with self.assertRaisesRegex(pub.PublishError, '未发布标签'):
+            pub.synchronize_source(shell, GH(), {'devRepo': 'owner/dev', 'publicRepo': 'owner/public'}, 'a' * 40, 'new-tree', '0.2.4')
+        self.assertEqual(shell.pushes, [])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
