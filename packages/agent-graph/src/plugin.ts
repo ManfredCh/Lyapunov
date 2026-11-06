@@ -10,11 +10,14 @@
  *
  * run 的生命周期：transition 进入活动状态（exploring/debugging/verifying/heldout-eval）开 run、
  * record_run 关闭；同会话同任务同角色的连续迁移复用同一 run（角色切换才开新 run）。
+ * 原生一次性子会话结束后，漏关的run由原Campaign owner按真实计量记aborted；续接epoch不处理。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ParameterSchemaSpec, ToolExecutionInput } from '@deepseek-ai/dsh-tools'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-session-query'
 import { randomUUID } from 'node:crypto'
 import { compatibleToolInput } from '../../lyapunov-contracts/src/tool-input.ts'
 import type { Campaign, CampaignTask, PredicateExpr, TaskPartition, TaskStatus } from '../../lyapunov-contracts/src/agent-graph.ts'
@@ -92,6 +95,16 @@ export function apply(ctx: Context, config: Config = {}) {
   const store = new CampaignStore(workDirFor)
   const runtime = new CampaignRuntime(store, config.now ?? (() => Date.now()))
   applyArtifactCollector(ctx, runtime)
+  ctx.on('subagent/end', async info => {
+    if (!info.local || !runtime.hasOpenRuns(info.id)) return
+    const query = ctx.get('sessionQuery')
+    if (!query) { ctx.logger.warn('一次性子会话run收尾缺少原sessionQuery，原件保留'); return }
+    using source = await query.observeSession(info.id, { projectionMode: 'none' })
+    const { foldSubagentDescriptor } = await import('@deepseek-ai/dsh-subagent')
+    // 续接会话的epoch结束仍可继续，不能按一次性任务关闭；模式只认原descriptor。
+    if (foldSubagentDescriptor(source.events.slice(source.inheritedEventCount))?.mode !== 'one-shot') return
+    await runtime.abortUnclosedRuns(source, info.stopReason)
+  })
 
   const findTask = (campaign: Campaign, taskId: unknown): CampaignTask => {
     const task = campaign.tasks.find(row => row.taskId === taskId)

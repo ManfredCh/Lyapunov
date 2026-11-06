@@ -11,6 +11,7 @@ import { IsaacProvider, type IsaacConfig } from './provider.ts'
 // `/dev/nvidia-caps`、没有 `nvidia0`"的容器里，这里不触发守卫、把 caps 当设备交下去，
 // 而同一台机器在面板里仍显示"会话看不见设备"。现在判据与暴露清单都来自契约这一份。
 import { gpuRefusal, probeGpuDeviceVisibility, probeGpuFacts } from '../../sim-contract/src/gpu-facts.ts'
+import { probeWslGpuDevices } from '../../sim-contract/src/gpu-facts.ts'
 export const name = 'lyapunov-sim-isaac'
 export const inject: string[] = []
 /**
@@ -91,6 +92,10 @@ export function apply(ctx: Context, config: IsaacPluginConfig = {}) {
         // `packages/lyapunov-shell/test/gpu-misdiagnosis-guard.test.ts` 的 B3 两条。
         const visibility = probeGpuDeviceVisibility()
         if (!visibility.visible) {
+          // WSL2 的 GPU 不是 `/dev/nvidia*`，而是 `/dev/dxg`（CUDA 库在 `/usr/lib/wsl/lib`，
+          // 见 `probeWslGpuDevices`）：两者都在才按设备节点暴露，否则仍按同一稳定码拒绝。
+          const wsl = probeWslGpuDevices()
+          if (wsl.devices.length > 0) return [...wsl.devices]
           // W21：这里**不许**说成"没有任何 NVIDIA 设备节点"——那会把"设备对本会话不可见"说成"没有设备"，
           // 而两者的处置完全不同（用户会去重装驱动/换卡，其实只需要让这个会话看见设备）。
           // 判定问同一份契约（`gpuRuntimeDecision`：卡 → 驱动 → 设备 → 结论 → 处置），不在这里另探一次。
@@ -114,6 +119,9 @@ export function apply(ctx: Context, config: IsaacPluginConfig = {}) {
     internalWritableRoots: ({ privateRoot }) => [engineCacheOf(privateRoot)],
     internalTempDir: ({ privateRoot }) => engineTempOf(privateRoot),
     ...(engineDevices === undefined ? {} : { engineDevices }),
+    // WSL2 的 CUDA 用户态库在独立 overlay 挂载 `/usr/lib/wsl/lib`，`--ro-bind / /` 不会带进沙箱；
+    // 只有 GPU 配置真走到 `/dev/dxg` 时才需要挂（CPU/非 WSL 照样不传）。
+    ...(requiresGpu && process.platform === 'linux' ? { engineReadOnlyMounts: () => { const lib = probeWslGpuDevices().libraryDir; return lib === null ? [] : [lib] } } : {}),
   })
   const sim = new SessionSimFactory({
     create: sessionKey => new IsaacProvider({

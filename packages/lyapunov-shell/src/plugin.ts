@@ -1,4 +1,5 @@
 import {robotLibraryRows,ensureDefaultRobotLibrary} from "./robot-library.ts"
+import {projectNativeCuaObservation} from './native-cua-result.ts'
 import {validateRegisteredControlDisplay,projectControlActionRows} from "./control-gesture.ts"
 import {worldFrameSelection} from "./collision-frame-request.ts"
 import {CameraUIReadCache} from "./camera-ui-query.ts"
@@ -28,6 +29,7 @@ import type {SimService,SimWorlds} from "../../sim-contract/src/index.ts"
 // 会话身份与命名空间的唯一规则（与 scene-kit / sim-contract / robot-tools 共用这一份，不在各处各拼一遍前缀）。
 import {bindSessionId,requireSessionId,sessionNamespace,SESSION_SCOPE_UNAVAILABLE} from "../../lyapunov-contracts/src/session-scope.ts"
 import { SessionId,type Session } from "@deepseek-ai/dsh-session"
+import type {FlightStatusReader} from '../../robot-workflows/src/flight-tools.ts'
 import type { TodoItem } from "@deepseek-ai/dsh-tool-todo"
 import { planDomainPointers, type SkillCatalogFact } from "./environment-routing.ts"
 // W22：computer-use 合成输入的作用域/全局快捷键拒绝清单/桌面设置快照恢复（唯一实现；本文件只做消费点）。
@@ -41,7 +43,7 @@ import { formalModelMessageProjection, needsFormalSystemReset } from "./product-
 import { renderBriefSceneSpec, briefSceneSpec, type EnvironmentStage, type EnvironmentInputSource } from "./environment-routing.ts"
 import {ENGINE_CHOICES,ENGINE_PREFERENCE_CHOICES,AUTO_ENGINE,isEnginePreferenceValue,readEnginePreference,writeEnginePreference,sdkRuntimeFacts,readEngineLicenses,recordEngineLicense,resolveEngine} from "../../../script/engine-preference.ts"
 import {resolveSdkPython} from "../../lyapunov-product-bundle/src/sdk-python.mjs"
-import {resolvePolicyPython,checkPolicyCpu,POLICY_CPU_WHEEL} from "../../lyapunov-product-bundle/src/policy-runtime.mjs"
+import {resolvePolicyPython,checkPolicyCpu,policyCpuWheel} from "../../lyapunov-product-bundle/src/policy-runtime.mjs"
 import {clearSdkImportCache,gpuRuntimeDecision,probeGpuFacts} from "./environment-readiness.ts"
 import {registerIsaacLocalRoutes} from "./isaac-local-discovery.ts"
 import type {EngineProviderStatus} from "./engine-provider-contract.ts"
@@ -70,6 +72,7 @@ import { createHash } from "node:crypto"
 import { readRecording, readRecordingResource, listRecordings, recordingSummary } from "../../robot-workflows/src/recording-files.ts"
 import { previewScaleOf, previewPixelMappingText, localCorrectionRecordOf, type CaptureRecord, type LocalCorrectionRecord } from "./workbench-api.ts"
 import { captureVideoRecordOf, videoFileExtension, videoCodecFace, type CaptureVideoRecord, type CaptureVideoSample, type CaptureVideoSource, type VideoCaptureResult } from "./capture-video.ts"
+import { captureDepthDownloadHeaders } from "./capture-download.ts"
 import { captureFeedbackContent, capturePins, requireCaptureFeedbackOwner, type FeedbackCapture } from "./capture-content.ts"
 import { currentDshHome, discoverSessions, precheckSession, restoreSession } from "./session-history.ts"
 import { OrientationChecks, importedVisualTarget, orientationPrompt, type OrientationTarget, type OrientationObservation } from "./orientation-check.ts"
@@ -170,7 +173,7 @@ export async function apply(ctx:Context,config:Config={}){
  applyProductFontsHost(ctx)
  // 会话事件的**浏览器出站**投影（上游补丁 dsh-session-outbound-projection 的钩子）：
  // 服务端模型真值与 session 持久化一字不改，只有 page/follow 发往浏览器的那一份按消费者裁剪。
- ctx.effect(()=>ctx.provide("sessionOutboundProjection",createSessionOutboundProjection(privacyMode,productPathRoots)),"lyapunov-shell: session outbound projection")
+ ctx.effect(()=>ctx.root.provide("sessionOutboundProjection",createSessionOutboundProjection(privacyMode,productPathRoots)),"lyapunov-shell: session outbound projection")
  ctx.systemPrompt.section({name:"lyapunov-product-agent",order:8200,text:productContextText})
  // 下列规则表即当前唯一的上下文注入来源（原为 Jev 的显式 rules 回退，现为默认且唯一）。
  // 域指针只提供当前意图的能力建议；正文未变不追加，意图换出时明确清除。
@@ -347,6 +350,8 @@ export async function apply(ctx:Context,config:Config={}){
  }
  // 宿主卸载/异常退出：会话没关也要把桌面设置写回去（这就是"含异常退出路径"的那一条）。
  ctx.effect(()=>async()=>{await closeComputerUseSessionNow("host-unload")},"lyapunov-shell: computer-use a11y restore")
+ // 复用原 post-execute 投影点；图片已由 MCP 适配器准备，范围拒绝和上游替换仍优先。
+ ctx.on('tools/post-execute',async(exec,result,next)=>projectNativeCuaObservation(exec.name,result,await next()))
  ctx.on("tools/execute",async(exec,next)=>{
   // W22-R3：漏斗的第一个问题**不再**是"这个名字在不在三张表里"，而是"这个名字能不能原样交回驱动"。
   // 判据的唯一 owner 是 computer-use-input.ts 的 `cuaDriverToolPassThrough`（依据是那张**全表**
@@ -1521,7 +1526,23 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
  register("robot-library",["GET","POST"],async request=>{
   const sessionKey=await bindSessionId(ctx,new URL(request.url).searchParams.get("sessionId"),"机器人库")
   const scene=sceneFor(sessionKey),policies=await (ctx.get('policyDefaults')?.prepare(request.method==="POST")??Promise.resolve([]))
-  return Response.json(request.method==="POST"?await (ctx.get("scene")?.initializeDefaults?.(sessionKey,true)??ensureDefaultRobotLibrary(PRODUCT_ROOT_FOR_ENGINE,scene,policies)):{models:await robotLibraryRows(PRODUCT_ROOT_FOR_ENGINE,scene,policies)},{headers:{"cache-control":"private, no-store"}})
+  const initialized=request.method==="POST"?await (ctx.get("scene")?.initializeDefaults?.(sessionKey,true)??ensureDefaultRobotLibrary(PRODUCT_ROOT_FOR_ENGINE,scene,policies)):undefined
+  // 源码树可以没有发行供给清单；跳过自动登记仍应展示 pack 目录及其缺项，不能把整库伪装成空库。
+  const value=initialized&&!("status" in initialized&&initialized.status==="SKIPPED")?initialized:{...initialized,models:await robotLibraryRows(PRODUCT_ROOT_FOR_ENGINE,scene,policies)}
+  return Response.json(value,{headers:{"cache-control":"private, no-store"}})
+ })
+ // 状态轮询是只读观察：访问原飞控插件的状态 owner，不经过会写入会话历史的命令或工具事件路由。
+ register("flight-status",["GET"],async request=>{
+  const query=new URL(request.url).searchParams
+  const sessionKey=await bindSessionId(ctx,query.get('sessionId'),'飞控状态')
+  const resolved=await ctx.sessionController.resolveAgent(SessionId(sessionKey));if('error' in resolved)throw resolved.error
+  const number=(name:string)=>{const value=query.get(name);if(!value||!/^\d+$/.test(value))throw Error('FLIGHT_STATUS_ARGUMENT_INVALID: '+name);return Number(value)}
+  const worldId=query.get('worldId'),entityId=query.get('entityId')
+  if(!worldId||!entityId)throw Error('FLIGHT_STATUS_ARGUMENT_INVALID: worldId/entityId')
+  const reader=ctx.get('flightStatus') as FlightStatusReader|undefined
+  if(!reader)throw Error('FLIGHT_STATUS_UNAVAILABLE: 当前 Host 未装配原飞控状态服务')
+  const result=await reader.read(resolved.agent,{worldId,entityId,expectedGeneration:number('expectedGeneration'),expectedSceneRevision:number('expectedSceneRevision')},request.signal)
+  return Response.json(result,{headers:{'cache-control':'private, no-store'}})
  })
  register("execution-graph",["GET"],async request=>{
   const sessionId=new URL(request.url).searchParams.get("sessionId")??""
@@ -1574,7 +1595,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const face=orientationChecks.get(sessionKey,url.searchParams.get("checkId")??undefined)
   return Response.json(face?{checkId:face.checkId,status:face.status,sceneId:face.sceneId,sceneRevision:face.sceneRevision,attempts:face.attempts,...face.turnStop?{turnStop:face.turnStop}:{}}:null,{headers:{"cache-control":"private, no-store"}})
  })
- register("engine-providers",["GET"],async()=>Response.json({licenses:readEngineLicenses(),runningEngine:(process.env.LYAPUNOV_SIM_ENGINE??"").trim()||null,preference:readEnginePreference()??null,choices:ENGINE_CHOICES,engineDecision:engineDecision(),providers:providerRows(),installs:[...PROVIDER_ROWS.map(row=>installer.state(row.id)),installer.state('policy-cpu')]},{headers:{"cache-control":"private, no-store"}}))
+ register("engine-providers",["GET"],async()=>Response.json({licenses:readEngineLicenses(),runningEngine:(process.env.LYAPUNOV_SIM_ENGINE??"").trim()||null,preference:readEnginePreference()??null,choices:ENGINE_CHOICES.filter(PLATFORM_SUPPORTED),engineDecision:engineDecision(),providers:providerRows(),installs:[...VISIBLE_PROVIDER_ROWS.map(row=>installer.state(row.id)),installer.state('policy-cpu')]},{headers:{"cache-control":"private, no-store"}}))
  // 记录/撤销第三方许可的接受（Isaac 的 NVIDIA Omniverse）：用户显式动作 + 留痕，安装器侧仍会硬拦。
  register("engine-license",["POST"],async request=>{const body=await request.json() as {engine?:unknown;accepted?:unknown;eulaUrl?:unknown};if(body.engine!=="isaac")throw new Error(`ENGINE_LICENSE_UNSUPPORTED: ${String(body.engine)}`);if(body.accepted===true&&body.eulaUrl!==undefined&&body.eulaUrl!==ISAAC_EULA_URL)throw new Error("ENGINE_LICENSE_URL_INVALID");const file=recordEngineLicense("isaac",body.accepted===true,ISAAC_EULA_URL)
   // 先写再读：响应必须反映**记录之后**的状态，否则界面按响应刷新会看到旧值。
@@ -1609,6 +1630,9 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   const PROVIDER_ROWS=[{id:"mujoco",label:"MuJoCo",kind:"engine",choice:"mujoco"},
   {id:"isaac",label:"Isaac Sim",kind:"engine",choice:"isaac"},
   {id:"newton",label:"Newton（Warp）",kind:"engine",choice:"newton"}] as const
+ // Isaac 在 darwin 无发行版（isaacsim 只有 linux/win 轮子）：macOS 上不列选项也不收偏好写入。
+ const PLATFORM_SUPPORTED=(id:string)=>!(process.platform==="darwin"&&id==="isaac")
+ const VISIBLE_PROVIDER_ROWS=PROVIDER_ROWS.filter(row=>PLATFORM_SUPPORTED(row.id))
  let providerCache:{at:number;rows:EngineProviderStatus[]}|undefined
  registerIsaacLocalRoutes(register,{productRoot:PRODUCT_ROOT_FOR_ENGINE,onChanged:()=>{providerCache=undefined;clearSdkImportCache()}})
  /**
@@ -1700,7 +1724,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   }
   // 显式 SDK 覆盖只决定**本次运行时解释器**；install-provider 始终管理产品根下的默认前缀。
   // 两条事实必须分别读，不能拿外置解释器当安装目标，或拿空的托管前缀否定可用的外置 SDK。
-  const rows:EngineProviderStatus[]=PROVIDER_ROWS.map(row=>{
+  const rows:EngineProviderStatus[]=VISIBLE_PROVIDER_ROWS.map(row=>{
    const selected=resolveSdkPython(PRODUCT_ROOT_FOR_ENGINE,row.id)
    const runtime=sdkRuntimeFacts(PRODUCT_ROOT_FOR_ENGINE,row.id)
    const managed=sdkRuntimeFacts(PRODUCT_ROOT_FOR_ENGINE,row.id,undefined,{managed:true})
@@ -1723,7 +1747,8 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
    return {...base,version,detail:panel(runtime.available?`当前解释器可发现 mujoco（${version??"版本未读到"}）`:runtime.importProbe.detail)}
   })
   const policyPython=resolvePolicyPython(PRODUCT_ROOT_FOR_ENGINE,process.env,{managed:true}),policy=checkPolicyCpu(PRODUCT_ROOT_FOR_ENGINE,process.env,{managed:true}),prefix=dirname(dirname(policyPython.python)),ready=policy.status==='AVAILABLE'
-  rows.push({id:'policy-cpu',label:'策略 CPU 独立环境',kind:'runtime',prefix,runtimePython:policyPython.python,runtimeSource:'package-default',managedStatus:!existsSync(prefix)?'missing':ready?'ready':'partial',installed:ready,version:ready?String((policy.versions as Record<string,unknown>|undefined)?.torch??''):null,engineChoice:null,installable:true,detail:`独立 CPU 前缀${ready?'已核模块/版本':'未就绪'}；策略加载也可按来源依赖复用已登记 SDK，不启动 Kit。单个 Torch CPU wheel ${(POLICY_CPU_WHEEL.bytes/1024/1024).toFixed(1)} MiB，另需 Python/依赖与安装空间。此行不切换物理引擎。`})
+  let wheelBytes:number|undefined;try{wheelBytes=policyCpuWheel().bytes}catch{}
+  rows.push({id:'policy-cpu',label:'策略 CPU 独立环境',kind:'runtime',prefix,runtimePython:policyPython.python,runtimeSource:'package-default',managedStatus:!existsSync(prefix)?'missing':ready?'ready':'partial',installed:ready,version:ready?String((policy.versions as Record<string,unknown>|undefined)?.torch??''):null,engineChoice:null,installable:wheelBytes!==undefined,detail:`独立 CPU 前缀${ready?'已核模块/版本':'未就绪'}；策略加载也可按来源依赖复用已登记 SDK，不启动 Kit。单个 Torch CPU wheel ${wheelBytes===undefined?'未提供':(wheelBytes/1024/1024).toFixed(1)+' MiB'}，另需 Python/依赖与安装空间。此行不切换物理引擎。`})
   providerCache={at:Date.now(),rows}
   return rows
  }
@@ -1826,6 +1851,7 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   */
  const applyEnginePreference=(requested?:unknown)=>{
   if(requested!==undefined&&(typeof requested!=="string"||!isEnginePreferenceValue(requested)))throw new Error(`ENGINE_CHOICE_INVALID: ${String(requested)}（可选 ${AUTO_ENGINE}/${ENGINE_CHOICES.join("/")}）`)
+  if(requested==="isaac"&&!PLATFORM_SUPPORTED("isaac"))throw new Error("ENGINE_UNSUPPORTED_PLATFORM: Isaac Sim 没有 macOS 发行版（NVIDIA 仅提供 linux/win 轮子），本机不提供该选项")
   if(requested!==undefined){writeEnginePreference(requested);providerCache=undefined}
   const clearing=requested===AUTO_ENGINE
   const decision=engineDecision()
@@ -2709,13 +2735,13 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
     if(!entry)throw new Error("CAMERA_NOT_IN_CAPTURE")
     const path=resolve(localPath(entry[sensor].uri))
     if(dirname(path)!==directory)throw new Error("SENSOR_MEDIA_OUTSIDE_CAPTURE")
-    return new Response(await readFile(path),{headers:{"content-type":sensor==="rgb"?"image/png":"application/x-npy","cache-control":"private, no-cache",...sensor==="depth"?{"content-disposition":`attachment; filename="${id}-${cameraName}-depth.npy"`}:{}}})
+    return new Response(await readFile(path),{headers:{"content-type":sensor==="rgb"?"image/png":"application/x-npy","cache-control":"private, no-cache",...sensor==="depth"?captureDepthDownloadHeaders(id,cameraName):{}}})
    }
    // 旧 sensor_capture 路径仍使用 captures/<id>.json；多视角路径已在上方按 camera/<id>/capture.json 校验。
    capturePath(sessionKey,id)
    const directory=join(captureDirectory(sessionKey),"sensor",id),capture=JSON.parse(await readFile(join(directory,"capture.json"),"utf8")),path=resolve(localPath(capture[sensor].uri))
    if(dirname(path)!==directory)throw new Error("SENSOR_MEDIA_OUTSIDE_CAPTURE")
-   return new Response(await readFile(path),{headers:{"content-type":sensor==="rgb"?"image/png":"application/x-npy","cache-control":"private, no-cache",...sensor==="depth"?{"content-disposition":`attachment; filename="${id}-depth.npy"`}:{}}})
+   return new Response(await readFile(path),{headers:{"content-type":sensor==="rgb"?"image/png":"application/x-npy","cache-control":"private, no-cache",...sensor==="depth"?captureDepthDownloadHeaders(id):{}}})
   }
   const capture=await readCapture(sessionKey,id),image=await ctx.attachments.readImage(capture.attachment as any)
   return new Response(image.data,{headers:{"content-type":capture.attachment.mediaType,"cache-control":"private, no-cache"}})

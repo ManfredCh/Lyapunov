@@ -45,6 +45,8 @@ SDK 解释器解析）说明的是"这个引擎能被装配"，**不是**"装配
 
 动作必须使用 `robot_describe` 返回的原生完整关节名，不能假定源短名在导入后保持。Newton 的归一化 MJCF 执行器元数据用于判定控制模式，不从非零刚度猜执行器。当前仅接通 gear=1、无激活动态、单一关节级位置 PD。源有限 forcerange / joint effort limit、混合执行器、velocity / torque、URDF 无可核验执行器元数据等明确拒绝；不改源物理来开放能力。显式 `semi` 的位置动作也保持关闭，当前动作验收对象为 XPBD。
 
+对于引擎已经导入且能唯一识别的直接位置 PD，源 keyframe 的初始 ctrl（或显式初始控制值）仍用于初始化其原生目标，即使该执行器因力限不受支持而不能接收位置动作。XPBD 不执行源 forcerange；世界告警 `SOURCE_ACTUATOR_FORCE_LIMIT_UNSUPPORTED` 会明确报告这一限制，不能把初始目标存在视为力限已生效或动作可用。多个执行器驱动同一关节时不猜测初始目标。
+
 `joint` 和 `trajectory` 在窗口内插值原生位置参考，窗口结束即返回 completed；`targetReached` 另按实测坐标与容差判断，不把 completed 当作到位或任务成功。`control` 保持参考且仅推进请求整数步。XPBD 本身的 armature、joint friction、effort limit 等限制沿用当前 pin 的原生限制，不由适配器补造。
 
 接触列表来自碰撞管线的原生流形候选；正距离表示间隙，负距离表示穿透。forceN 是原生 XPBD 求解器估计，不是独立力传感器；不据此宣称抓取成功。停止撤销动作后仍保留正常动力学惯性，manual 模式因没有活动动作才停止推进。

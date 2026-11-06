@@ -8,7 +8,7 @@
  *
  * 运行：
  *   LYAPUNOV_MUJOCO_PYTHON=<含 mujoco 的解释器> \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/frame-text.test.ts
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/frame-text.test.ts
  * 未提供解释器（且仓内默认路径不存在）时整组 skip，不静默当成通过。
  */
 import { describe, test } from 'node:test'

@@ -16,7 +16,8 @@ export function requireFullJointTargets(description:RobotDescription,targets:Rec
 }
 export function JointTargetInput({joint,value,set,tr,disabled=false}:{joint:JointDescription;value:number;set:(value:number)=>void;tr:Translate;disabled?:boolean}){
  const [text,setText]=useState(Number.isFinite(value)?String(value):'')
- useEffect(()=>{if(Number.isFinite(value)&&Number(text)!==value)setText(String(value))},[value])
+ // 空草稿的 Number('') 也是 0；外部首次读回零目标时仍必须填入，不能留下假的无效输入。
+ useEffect(()=>{if(Number.isFinite(value)&&(!text.trim()||Number(text)!==value))setText(String(value))},[value])
  const parsed=text.trim()?Number(text):Number.NaN,code=jointTargetError(joint,parsed)
  return <span><input type="text" inputMode="decimal" aria-label={tr('关节目标 ','Joint target ')+joint.name} aria-invalid={Boolean(code)} disabled={disabled} value={text} onChange={event=>{const raw=event.target.value;setText(raw);set(raw.trim()?Number(raw):Number.NaN)}}/>{code&&<small role="alert" className="lya-error">{code==='JOINT_TARGET_OUT_OF_RANGE'?tr(`超出实际限位 [${joint.range![0]}, ${joint.range![1]}] ${joint.unit}`,`Outside the declared limits [${joint.range![0]}, ${joint.range![1]}] ${joint.unit}`):tr('请输入有限数值；草稿未提交。','Enter a finite value; this draft was not submitted.')}</small>}</span>
 }

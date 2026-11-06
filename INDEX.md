@@ -22,7 +22,8 @@
 
 | 入口 | 内容 |
 | --- | --- |
-| [0.2.2 发布说明](docs/releases/0.2.2.md) | 当前完整 Linux x64 发行版的变化、能力范围与安装说明 |
+| [0.2.3 发布说明](docs/releases/0.2.3.md) | 本版首次提供 macOS arm64（与 Linux 同一提交）、macOS 平台差异与已知问题 |
+| [0.2.2 发布说明](docs/releases/0.2.2.md) | 完整 Linux x64 发行版的变化、能力范围与安装说明 |
 | [0.2.1 发布说明](docs/releases/0.2.1.md) | 上一完整 Linux x64 发行版 |
 | [发布说明目录](docs/releases) | 各历史版本的发布说明；旧版本记录只描述对应版本 |
 | [README](README.md) / [简体中文](README.zh-CN.md) | 产品介绍、安装、首次运行、工作流和开发入口 |

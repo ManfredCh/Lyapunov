@@ -27,7 +27,7 @@
  *
  * 运行（产品 Host 是 Node）：
  *   LYAPUNOV_MUJOCO_PYTHON=<含 mujoco 的解释器> \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/collision-affine-frames.test.ts
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/collision-affine-frames.test.ts
  * `LYAPUNOV_MUJOCO_TEST_WORKER=<worker.py>` 可指向另一份 worker（例如修复前的版本）以确认本文件
  * 的用例确实会因该缺陷失败。未提供解释器（且仓内默认路径不存在）时整组 skip，不静默当成通过。
  */
@@ -154,7 +154,7 @@ suite(pythonPath ? `碰撞消费完整仿射层级 TRS（真实 MuJoCo：${pytho
         ...entities,
         probe('onPlate', [inside[0], inside[1], top + 0.25]),
         probe('offPlate', [outside[0], outside[1], top + 0.25]),
-      ]), { timestepS: 0.002, clock: 'realtime' })
+      ]), { timestepS: 0.002, clock: 'realtime', ground: true })
       try {
         const frame = await settle(mujoco, handle.worldId, ['onPlate', 'offPlate'])
         const held = restPosition(frame, 'onPlate')
@@ -191,7 +191,7 @@ suite(pythonPath ? `碰撞消费完整仿射层级 TRS（真实 MuJoCo：${pytho
         ...entities,
         probe('onPlate', [inside[0], inside[1], top + 0.25]),
         probe('oldCorner', [oldCorner[0], oldCorner[1], top + 0.25]),
-      ]), { timestepS: 0.002, clock: 'realtime' })
+      ]), { timestepS: 0.002, clock: 'realtime', ground: true })
       try {
         const frame = await settle(mujoco, handle.worldId, ['onPlate', 'oldCorner'])
         const held = restPosition(frame, 'onPlate')

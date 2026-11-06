@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, test} from "bun:test"
 import {spawnSync} from "node:child_process"
-import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs"
+import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, realpathSync} from "node:fs"
 import {tmpdir} from "node:os"
 import {dirname, join, resolve} from "node:path"
 import {createIsaacLocalDiscovery, isaacCandidatePaths, registerIsaacLocalRoutes} from "../src/isaac-local-discovery.ts"
@@ -13,8 +13,10 @@ import {clearIsaacSdkProbeCache, inspectIsaacPython} from "../../lyapunov-produc
 
 const PRODUCT_ROOT = resolve(import.meta.dirname, "../../..")
 const roots: string[] = []
+// 离线夹具需要与 Isaac 合同一致的 Python 3.12；优先复用测试指定或已托管的解释器。
+const fixturePython = process.env.TESTCI_PYTHON || (existsSync(join(PRODUCT_ROOT,'.runtime/sim-python/bin/python')) ? join(PRODUCT_ROOT,'.runtime/sim-python/bin/python') : Bun.which('python3')!)
 afterEach(() => {clearIsaacSdkProbeCache();for (const root of roots.splice(0)) rmSync(root, {recursive: true, force: true})})
-function scratch() {const root=mkdtempSync(join(tmpdir(),"lyapunov-isaac-local-"));roots.push(root);return root}
+function scratch() {const root=realpathSync(mkdtempSync(join(tmpdir(),"lyapunov-isaac-local-")));roots.push(root);return root}
 /** 只把被测发现的“产品根”指到临时根；check.py 通过只读链接提供，托管 SDK 前缀仍是不存在的空形状。 */
 function isolatedProductRoot() {const root=scratch(),check=join(root,"packages/sim-isaac/python/check.py");mkdirSync(dirname(check),{recursive:true});symlinkSync(join(PRODUCT_ROOT,"packages/sim-isaac/python/check.py"),check);return root}
 const shQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
@@ -27,7 +29,7 @@ function pipSdk(root: string, version="6.0.1.0") {
   mkdirSync(join(site,`isaacsim-${version}.dist-info`),{recursive:true})
   writeFileSync(join(site,`isaacsim-${version}.dist-info/METADATA`),`Metadata-Version: 2.1\nName: isaacsim\nVersion: ${version}\n`)
   const python=join(root,"bin/python")
-  executable(python,`#!/bin/sh\nexport PYTHONPATH=${shQuote(site)}\nexec /usr/bin/python3 "$@"\n`)
+  executable(python,`#!/bin/sh\nexport PYTHONPATH=${shQuote(site)}\nexec ${shQuote(fixturePython)} "$@"\n`)
   return {python,site}
 }
 function standaloneSdk(root: string, options: {version?: string; module?: boolean; outside?: string}={}) {
@@ -36,7 +38,7 @@ function standaloneSdk(root: string, options: {version?: string; module?: boolea
   const site=options.outside??join(root,"exts/isaacsim.simulation_app")
   if(options.module!==false){mkdirSync(join(site,"isaacsim"),{recursive:true});writeFileSync(join(site,"isaacsim/__init__.py"),'raise RuntimeError("must never import Isaac during discovery")\n')}
   const python=join(root,"python.sh")
-  executable(python,`#!/bin/sh\nexport ISAAC_PATH=${shQuote(root)}\nexport PYTHONPATH=${shQuote(site)}\nexec /usr/bin/python3 "$@"\n`)
+  executable(python,`#!/bin/sh\nexport ISAAC_PATH=${shQuote(root)}\nexport PYTHONPATH=${shQuote(site)}\nexec ${shQuote(fixturePython)} "$@"\n`)
   return {python,site}
 }
 // installer会合并父进程env；显式清空两套SDK覆盖，才能测试“此临时偏好”的选择而非真人配置。
@@ -144,9 +146,9 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     executable(wrong,`#!/bin/sh\nprintf '%s\\n' '{"moduleFound":true,"sdkVersion":"6.0.1.0","sdkRoot":"/fixture","pythonVersion":"3.10.1"}'\n`)
     expect((await inspectIsaacPython(wrong,{fresh:true})).detail).toContain("Python 3.12")
     const slow=join(root,"slow/bin/python")
-    executable(slow,"#!/bin/sh\nexec /usr/bin/python3 -c 'import time;time.sleep(10)'\n")
+    executable(slow,`#!/bin/sh\nexec ${shQuote(fixturePython)} -c 'import time;time.sleep(10)'\n`)
     const started=Date.now(), result=await inspectIsaacPython(slow,{timeoutMs:50,fresh:true})
-    expect(result.state).toBe("timeout");expect(Date.now()-started).toBeLessThan(1500)
+    expect(result).toMatchObject({state:"timeout"});expect(Date.now()-started).toBeLessThan(1500)
   })
 
   test("有限目录扫描不会递归孙目录，超过候选上限会提示手动路径",()=>{
@@ -195,13 +197,13 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     mkdirSync(join(product,"script"),{recursive:true});writeFileSync(join(product,"script/package-linux.ts"),"// source fixture\n")
     mkdirSync(join(product,"packages/asset-bake"),{recursive:true});for(const file of ["requirements.txt","requirements-common.txt","requirements-isaac.txt"])copyFileSync(join(PRODUCT_ROOT,"packages/asset-bake",file),join(product,"packages/asset-bake",file))
     const prefix=join(product,".runtime/conda/envs/isaac"),python=join(prefix,"bin/python"),pipArgs=join(root,"pip-install.args"),readyMarker=join(root,"managed-isaac-ready")
-    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;*importlib.metadata*) printf '%s\\n' '6.0.1.0';exit 0;;esac;fi\ncase "$1" in *check.py) if [ -f ${shQuote(readyMarker)} ]; then printf '%s\\n' '{"provider":"isaac","status":"AVAILABLE","version":"6.0.1.0"}';exit 0;fi;;esac\nexec /usr/bin/python3 "$@"\n`)
+    executable(python,`#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then if [ "$3" = "--isolated" ] && [ "$4" = "install" ]; then printf '%s\\n' "$@" > ${shQuote(pipArgs)};fi;printf 'offline pip fixture\\n';exit 0;fi\nif [ "$1" = "-c" ];then case "$2" in *sys.prefix*) printf '%s\\n' ${shQuote(prefix)};exit 0;;*EULA_ACCEPTED*|*coacd*) exit 0;;*importlib.metadata*) printf '%s\\n' '6.0.1.0';exit 0;;esac;fi\ncase "$1" in *check.py) if [ -f ${shQuote(readyMarker)} ]; then printf '%s\\n' '{"provider":"isaac","status":"AVAILABLE","version":"6.0.1.0"}';exit 0;fi;;esac\nexec ${shQuote(fixturePython)} "$@"\n`)
     const micromamba=join(root,"micromamba");executable(micromamba,"#!/bin/sh\nexit 0\n")
-    const ordinary=spawnSync("/usr/local/bin/node",[join(product,"distribution/linux/doctor.mjs"),"isaac"],{encoding:"utf8",timeout:5000,env:{...env,PYTHONDONTWRITEBYTECODE:"1"}})
+    const ordinary=spawnSync(Bun.which("node")!,[join(product,"distribution/linux/doctor.mjs"),"isaac"],{encoding:"utf8",timeout:5000,env:{...env,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(ordinary.status).toBe(0)
     const ordinaryReport=JSON.parse(ordinary.stdout)
     expect(ordinaryReport.providers.isaac).toMatchObject({python:outside.python,pythonSource:"saved-preference",status:"AVAILABLE"})
-    const run=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...env,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    const run=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...env,LYAPUNOV_NODE_BIN:Bun.which("node")!,LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(run.error).toBeUndefined();expect(run.status).toBe(2)
     const text=run.stdout.slice(run.stdout.indexOf('{'))
     const report=JSON.parse(text)
@@ -231,7 +233,7 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     const successFile=join(root,"success-engine.json")
     writeFileSync(successFile,JSON.stringify({engine:"mujoco",licenses:{isaac:{acceptedAt:"2026-10-01T00:00:00Z",eulaUrl:"https://example.invalid/eula"}}}))
     const successEnv={...envFor(root),LYAPUNOV_ENGINE_PREFERENCE_FILE:successFile}
-    const success=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    const success=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_NODE_BIN:Bun.which("node")!,LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(success.status).toBe(0)
     const successReport=JSON.parse(success.stdout.slice(success.stdout.indexOf('{'),success.stdout.lastIndexOf('}')+1))
     expect(successReport.providers.isaac.status).toBe("AVAILABLE")
@@ -244,21 +246,21 @@ describe("本地 Isaac SDK 发现与同一配置持久选择",()=>{
     // 显式 ENV 覆盖优先：managed doctor 同样成功，但不写 engine.json、不覆盖用户的 ENV 选择。
     const overrideFile=join(root,"override-engine.json")
     const overrideEnv={...envFor(root),LYAPUNOV_ENGINE_PREFERENCE_FILE:overrideFile,LYAPUNOV_ISAAC_PYTHON:outside.python}
-    const override=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...overrideEnv,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    const override=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...overrideEnv,LYAPUNOV_NODE_BIN:Bun.which("node")!,LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(override.status).toBe(0)
     expect(existsSync(overrideFile)).toBe(false)
     expect(resolveSdkPython(product,"isaac",overrideEnv)).toEqual({python:outside.python,source:"env-override"})
     // 配置损坏时不覆盖原字节，也不把“SDK已装但选择未保存”冒充完整成功。
     const corruptFile=join(root,"corrupt-engine.json"),corruptBytes='{"engine":"mujoco",broken'
     writeFileSync(corruptFile,corruptBytes)
-    const corrupt=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+    const corrupt=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:Bun.which("node")!,LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
     expect(corrupt.status).toBe(2)
     expect(corrupt.stdout).toContain('SDK_SELECTION_SAVE_FAILED')
     expect(readFileSync(corruptFile,'utf8')).toBe(corruptBytes)
     // 有效 JSON 的 null/array 也不是有效配置：同样不能当成首次安装覆盖原字节。
     for(const malformed of ['[]','null']){
       writeFileSync(corruptFile,malformed)
-      const invalidShape=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:"/usr/local/bin/node",LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
+      const invalidShape=spawnSync("/bin/sh",[join(product,"distribution/linux/install-provider"),"isaac","--accept-omniverse-eula"],{encoding:"utf8",timeout:5000,env:{...successEnv,LYAPUNOV_ENGINE_PREFERENCE_FILE:corruptFile,LYAPUNOV_NODE_BIN:Bun.which("node")!,LYAPUNOV_MICROMAMBA:micromamba,PYTHONDONTWRITEBYTECODE:"1"}})
       expect(invalidShape.status).toBe(2)
       expect(invalidShape.stdout).toContain('SDK_SELECTION_SAVE_FAILED')
       expect(readFileSync(corruptFile,'utf8')).toBe(malformed)

@@ -384,7 +384,7 @@ export interface SimWorlds {
   execute(worldId: string, action: SimAction, signal?: AbortSignal): Promise<ActionReceipt>
   receipt(worldId: string, actionId: string): Promise<ActionReceipt>
   /** 立即撤销选中动作的控制目标；affectedEntityIds 是本次停止真实撤销过的实体（MuJoCo/Isaac worker 都按 entityIds 过滤后返回该字段）。 */
-  stop(worldId: string, selection?: StopSelection): Promise<{ stopped: true; stepIndex: number; receipts: ActionReceipt[]; affectedEntityIds?: string[] }>
+  stop(worldId: string, selection?: StopSelection): Promise<{ stopped: true; stepIndex: number; receipts: ActionReceipt[]; affectedEntityIds?: string[]; reason?: 'WORLD_ALREADY_UNAVAILABLE'; statusReason?: string }>
   /** 可选停止事件：仅在当前会话的真实 stop 确认后通知上层控制器，防止短窗口间继续提交。 */
   subscribeStops?(worldId:string,listener:(selection:StopSelection)=>void):()=>void
   /**
@@ -450,5 +450,7 @@ export function simWorldsFor(ctx: { get(name: string): unknown }, owner: unknown
   return sim.forSession(requireSessionId(owner, '模拟世界服务'))
 }
 export class SimError extends Error {
-  constructor(public code: string, message: string, public details?: unknown) { super(message); this.name = 'SimError' }
+  public code: string
+  public details?: unknown
+  constructor(code: string, message: string, details?: unknown) { super(message); this.code = code; this.details = details; this.name = 'SimError' }
 }

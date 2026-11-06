@@ -27,6 +27,12 @@ import { tcpArrival } from '../src/tcp-tracking.ts'
 import { moveTcp } from '../src/move-tcp.ts'
 import { SCENE_COORDINATES, identityTransform, type Frame, type SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 import type { SimAction, SimWorlds } from '../../sim-contract/src/index.ts'
+import {mkdtemp,rm} from 'node:fs/promises'
+import {join} from 'node:path'
+import {tmpdir} from 'node:os'
+import {CampaignRuntime,applyArtifactCollector} from '../../agent-graph/src/artifacts.ts'
+import {CampaignStore} from '../../agent-graph/src/campaign-store.ts'
+import {publicFacts} from '../../lyapunov-shell/src/execution-graph.ts'
 
 const WORLD_ID = 'w-1'
 let mode: 'pick' | 'place' = 'pick'
@@ -256,10 +262,34 @@ describe('末端反馈后的碰撞检查来源', () => {
       stop: async () => ({ stopped: true, stepIndex: executed.length * 10, receipts: [] }),
     } as unknown as SimWorlds
     const result = await moveTcp(sim, snapshot, { worldId: 'tcp-world', robotId: 'arm', expectedGeneration: 1, deltaM: [0, 0, .005], durationS: .1 }, async request => ({ collisionChecked: true, plan: { planId: `checked-plan-${++plans}`, entityId: 'arm', modelVersion: 'fixture.xml', collisionContextVersion: '1', expectedGeneration: 1, jointNames: ['slide'], points: [{ timeS: 0, positions: request.startPositions as number[] }, { timeS: .1, positions: [.005] }] } }))
+    const endStep=corrected?20:10
+    expect(result).toMatchObject({worldId:'tcp-world',generation:1,sceneRevision:1,startStep:0,endStep,stepIndex:endStep})
+    expect(publicFacts(result,true)).toMatchObject({worldId:'tcp-world'})
+    expect(publicFacts(result)).toMatchObject({generation:1,sceneRevision:1,stepIndex:endStep})
+    // body-local TCP 没有 site；领域结果也必须能经过原 ToolRegistry 的 lossless JSON 边界。
+    ctx.tools.register(defineTool({ name: 'tcp_result_fixture', description: '只核真实工具结果边界的接口夹具，不签原生物理', parameters: {}, output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] }, execute: async () => result as any }))
+    const rendered = await ctx.tools.execute({ callId: ToolCallId('tcp-result-boundary'), name: 'tcp_result_fixture', arguments: {}, signal: new AbortController().signal, agent })
+    expect(rendered.isError).toBe(false)
+    expect(rendered.value).toEqual(JSON.parse(JSON.stringify(result)))
     expect(result.taskAchieved).toBe(true)
     expect(result.collisionChecked).toBe(!corrected)
     expect(executed).toHaveLength(corrected ? 2 : 1)
     expect(snapshot.entities[0]!.transform).toEqual(identityTransform())
+    // 原回执进入原预算owner；run内没有先读robot_state建立步号基线。
+    const campaignDirectory=await mkdtemp(join(tmpdir(),'tcp-receipt-budget-'))
+    try{
+      const task={taskId:'tcp-task',sceneId:snapshot.sceneId,partition:'dev' as const,goal:{kind:'settled' as const}}
+      const runtime=new CampaignRuntime(new CampaignStore(()=>campaignDirectory))
+      const handle=await runtime.createCampaign(agent,{campaignId:'tcp-budget',createdAt:new Date().toISOString(),tasks:[{...task,status:'pending',workerRunIds:[]}],budget:{maxToolCalls:20,maxSimSteps:endStep-1,maxWallSeconds:60},used:{toolCalls:0,simSteps:0,startedAt:new Date().toISOString()},status:'running'})
+      await runtime.openRun(agent,handle,handle.campaign.tasks[0]!,'coordinator')
+      applyArtifactCollector(ctx,runtime)
+      const replay=await ctx.tools.execute({callId:ToolCallId('tcp-budget-first'),name:'tcp_result_fixture',arguments:{},signal:new AbortController().signal,agent})
+      expect(replay.isError).toBe(false)
+      expect(handle.campaign.used.simSteps).toBe(endStep)
+      const next=await ctx.tools.execute({callId:ToolCallId('tcp-budget-next'),name:'tcp_result_fixture',arguments:{},signal:new AbortController().signal,agent})
+      expect(next.isError).toBe(true)
+      expect(next.content.map(block=>block.type==='text'?block.text:'').join('')).toContain('CAMPAIGN_BUDGET_EXCEEDED')
+    }finally{await rm(campaignDirectory,{recursive:true,force:true})}
     if (corrected) {
       const second = executed[1]!
       expect(second.kind).toBe('trajectory')

@@ -19,6 +19,7 @@ macOS 源码树启动器（未打包、未签名）
 
   sh distribution/macos/lyapunov [参数...]   启动正式桌面（= node script/desktop.ts --mode formal）
   sh distribution/macos/lyapunov doctor     只检查前置与构建产物，不启动
+  sh distribution/macos/lyapunov install-provider <provider>  安装运行时（mujoco|newton|policy-cpu|benchmark-gymnasium|benchmark-libero）
   sh distribution/macos/lyapunov --help     显示本帮助
 
 前置与首次准备（详见 distribution/macos/README.md）：
@@ -27,7 +28,7 @@ macOS 源码树启动器（未打包、未签名）
   bun run build:desktop         生成 packages/desktop/dist/main.js 与 renderer/account.js
 
 数据目录：默认 <仓库根>/.runtime/desktop/formal，可用 LYAPUNOV_DESKTOP_DATA_DIR 覆盖。
-账户服务：默认 https://vorynel.com/lyaup-api，可用 LYAPUNOV_API_URL 覆盖。
+账户服务：默认 https://vorynel.com/lyaup-unified，可用 LYAPUNOV_API_URL 覆盖。
 环境变量清单：distribution/macos/env.example（其中的变量对从终端启动有效）。
 EOF
 }
@@ -74,13 +75,26 @@ report() {
     else printf '%s\n' "未构建：$file（运行 bun run build:desktop）"; fi
   done
   printf '%s\n' "数据目录：${LYAPUNOV_DESKTOP_DATA_DIR:-$root/.runtime/desktop/formal}（未打包运行；打包后才是 ~/Library/Application Support/...）"
-  printf '%s\n' "账户服务：${LYAPUNOV_API_URL:-https://vorynel.com/lyaup-api}"
+  printf '%s\n' "账户服务：${LYAPUNOV_API_URL:-https://vorynel.com/lyaup-unified}"
   printf '%s\n' "说明：本启动器不构建、不签名、不公证；以上只是本机现状，不代表任何发布状态。"
 }
 
 case "${1:-}" in
   --help|-h|help) usage; exit 0 ;;
   doctor) check_platform; check_node; report; exit 0 ;;
+  install-provider)
+    # 引擎运行时装配与 Linux 便携包同一份脚本（脚本本身是便携 sh；mujoco/newton/gymnasium
+    # 在 macOS arm64 实测可装；isaac 依赖 NVIDIA 驱动，macOS 无路径；libero 锁 CUDA 轮子同此）。
+    check_platform
+    micromamba="$root/.runtime/bin/micromamba"
+    if [ ! -x "$micromamba" ]; then
+      if [ -x "${LYAPUNOV_MICROMAMBA:-}" ]; then micromamba="$LYAPUNOV_MICROMAMBA"
+      else fail "找不到 micromamba：$micromamba。osx-arm64 安装：curl -sL https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xj -C $root/.runtime/bin --strip-components=1 bin/micromamba"; fi
+    fi
+    check_node
+    shift
+    LYAPUNOV_MICROMAMBA="$micromamba" exec sh "$root/distribution/linux/install-provider" "$@"
+    ;;
 esac
 # 其余参数直接透传给桌面进程（例如 --software-rendering）
 

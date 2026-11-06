@@ -776,6 +776,24 @@ def collect_unsupported(spaces, factory) -> tuple[list, int]:
     return sorted(buckets.values(), key=lambda item: (-item["count"], item["type"])), total
 
 
+def platform_font_warnings(doc) -> list[str]:
+    """macOS 缺省 TXT 使用验收基线字体；只配置 ezdxf 映射，不改几何算法。"""
+    if sys.platform != "darwin" or not any(
+        style.dxf.get("font", "").lower() == "txt" for style in doc.styles
+    ):
+        return []
+    from ezdxf.fonts import fonts
+    manager = fonts.font_manager
+    if any(manager.has_font(name) for name in ("txt", "txt.shx", "txt.shp")):
+        return []
+    directory = os.path.join(os.path.dirname(__file__), "fonts")
+    if not os.path.isfile(os.path.join(directory, "DejaVuSans.ttf")):
+        return ["CAD_TXT_FONT_PLATFORM_DEPENDENT: 缺少随包 DejaVu 字体，TXT 边界沿当前系统回退；不能宣称跨平台文字尺寸一致。"]
+    manager.build([directory], support_dirs=False)
+    manager.add_synonyms({"txt": "DejaVuSans.ttf"})
+    return ["CAD_FONT_SUBSTITUTED: 当前系统缺少默认 TXT 字体，使用随包 DejaVu Sans（本项目验收基线字体）；仅影响缺省 TXT 文字度量，不代表原 AutoCAD 字体精度。"]
+
+
 def build_report(doc, path: str, file_facts: dict, caller_unit: str | None,
                  max_items: int, exact_bounds: bool) -> tuple[dict, list[str]]:
     from ezdxf.entities import factory
@@ -783,6 +801,7 @@ def build_report(doc, path: str, file_facts: dict, caller_unit: str | None,
     msp = doc.modelspace()
     psp = doc.layout("Layout1") if "Layout1" in doc.layout_names() else None
     units, warnings = resolve_units(doc, caller_unit)
+    warnings.extend(platform_font_warnings(doc))
     blocks, blocks_truncated, user_blocks = collect_blocks(doc, msp, max_items)
     geometry, counts, geom_truncated = collect_geometry(msp, user_blocks, max_items)
     dimensions, dims_truncated = collect_dimensions(msp, max_items)

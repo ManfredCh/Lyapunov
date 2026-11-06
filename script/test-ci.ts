@@ -583,7 +583,7 @@ export async function runEntry(entry: ManifestEntry, root: string, timeoutMs: nu
     fail: counts.fail,
     skip: counts.skip,
     reason,
-    logTail: out.split('\n').slice(-12).join('\n'),
+    logTail: ok ? out.split('\n').slice(-12).join('\n') : out,
   }
 }
 
@@ -690,6 +690,7 @@ async function main(argv: string[]): Promise<number> {
     const mark =
       r.status === 'pass' ? 'PASS' : r.status === 'skip' ? 'SKIP' : r.status === 'timeout' ? 'TIMEOUT' : r.status === 'missing' ? 'MISSING' : 'FAIL'
     process.stdout.write(`${mark}\t${r.declaredRunner}\t${r.path}\t${r.reason || `exit=${r.exitCode}`}\n`)
+    if ((r.status === 'fail' || r.status === 'timeout') && r.logTail) process.stdout.write(`::group::${r.path}\n${r.logTail}\n::endgroup::\n`)
   }
 
   const ran = results.filter((r) => r.decision === 'include' && r.status !== 'skip' && r.status !== 'missing')

@@ -1016,6 +1016,7 @@ class World:
         # 随 handle 暴露；编译失败保留旧值，与保留的旧世界保持一致。
         self.warnings = []
         self.status = 'unavailable'
+        self.status_reason = None
         self.paused = options.get('startPaused', False)
         if not isinstance(self.paused, bool):
             raise SimError('INVALID_ARGUMENT', 'startPaused 必须为 boolean')
@@ -1034,11 +1035,13 @@ class World:
                 'groundGeomNames': sorted(self.ground_names),
                 # 最近一次成功编译的告警列表（[{code, entityId, message}]，无告警为空数组）；
                 # 典型项是纯视觉实体没有碰撞体被物理装配跳过，调用方据此补碰撞组件而不是无从察觉。
-                'warnings': [dict(w) for w in self.warnings]}
+                'warnings': [dict(w) for w in self.warnings],
+                **({'statusReason': self.status_reason} if self.status == 'unavailable' and self.status_reason else {})}
 
     def require_ready(self):
         if self.status not in ('ready', 'running') or self.model is None:
-            raise SimError('WORLD_UNAVAILABLE', '世界未同步或已关闭: ' + self.status)
+            reason = (': ' + self.status_reason) if self.status_reason else ''
+            raise SimError('WORLD_UNAVAILABLE', '世界未同步或已关闭: ' + self.status + reason)
 
     def prepare_human_gpu(self, compiled):
         if self.human_compute_device == 'cpu':
@@ -1593,7 +1596,9 @@ class World:
         mj.mj_forward(model, data)
         for info in maps.values():
             for name,joint in info['joints'].items():
-                if joint['actuator'] and info['actuators'][joint['actuator']]['mode']=='torque':
+                if (joint['actuator'] and info['actuators'][joint['actuator']]['mode']=='torque'
+                        and declared_joint_gain(info['controller'], 'jointKp', name, 'kp') is not None
+                        and declared_joint_gain(info['controller'], 'jointKd', name, 'kd') is not None):
                     info['heldTargets'][name]=float(data.qpos[joint['qpos']])
             if info['controller'].get('type') == 'quadruped':
                 info['gaitLegs']=gait.calibrate(model,data,info,info['controller']['legs'])
@@ -2071,6 +2076,7 @@ class World:
         except Exception as exc:
             if self.scene is None:
                 self.status = 'unavailable'
+                self.status_reason = 'COMPILE_FAILED: ' + str(exc)
                 self.scene = copy.deepcopy(scene)
                 raise
             if isinstance(exc, SimError) or str(getattr(exc, 'code', '')).startswith(('HUMAN_GPU_', 'HUMAN_CUDA_')):
@@ -2105,6 +2111,7 @@ class World:
         self.step_index = 0
         self.next_tick = time.monotonic()
         self.status = 'ready'
+        self.status_reason = None
         self.settle_fixed_bases_on_bundled_plane()
         self.initial_overlap = self.initial_overlap_diagnostic()
         if self.initial_overlap['status'] != 'CLEAR':
@@ -2928,7 +2935,13 @@ class World:
                 self.data.ctrl[a['id']] = ctrl
             else:
                 self.data.ctrl[a['id']] = 0
-                if j and a['mode']=='torque':info['heldTargets'][a['joint']]=float(self.data.qpos[j['qpos']])
+                if j and a['mode']=='torque':
+                    name=a['joint']
+                    if (declared_joint_gain(info['controller'], 'jointKp', name, 'kp') is not None
+                            and declared_joint_gain(info['controller'], 'jointKd', name, 'kd') is not None):
+                        info['heldTargets'][name]=float(self.data.qpos[j['qpos']])
+                    else:
+                        info['heldTargets'].pop(name,None)
         gripper = info['controller'].get('gripper')
         if gripper:
             width = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in gripper['jointNames'])
@@ -4820,6 +4833,7 @@ def main():
                     world.next_tick = max(world.next_tick + float(world.model.opt.timestep) / world.factor, now - .05)
                 except Exception as exc:
                     world.status = 'unavailable'
+                    world.status_reason = type(exc).__name__ + ': ' + str(exc)
                     for aid in list(world.active):
                         try:
                             world.finish(aid, 'failed', 'ENGINE_ERROR: ' + str(exc))

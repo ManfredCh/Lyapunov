@@ -1,6 +1,6 @@
 import { repathUsdCopies } from "./usd-assets.ts"
 import { existsSync } from 'node:fs'
-import { copyFile, link, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { copyFile, link, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 import type { ResourceRef } from '../../lyapunov-contracts/src/types.ts'
@@ -104,7 +104,8 @@ export class PortableArchive {
   private readonly byContent=new Map<string,string>()
   private readonly inspections=new Map<string,Promise<BlendInspection>>()
   private readonly stamps=new Map<string,FileStamp>()
-  constructor(readonly root:string){}
+  readonly root:string
+  constructor(root:string){this.root=root}
 
   /**
    * 已经在便携目录里的文件（保存回同一个包、保存到包内引用的工程）：它自己就是包内位置。
@@ -193,7 +194,8 @@ export class PortableArchive {
    if(parsed.kind==='usd')for(const target of await repathUsdCopies(copied))await this.markDerived(target)
    // 检查副本实际引用的闭包；不能把“复制过一些文件”当作脱离原路径。
    const portable=await parseAsset(copied.get(source)!,ref.source)
-   for(const stamp of portable.dependencies)if(!inside(this.root,stamp.path))throw new Error(`PORTABLE_EXTERNAL_DEPENDENCY: ${stamp.path}`)
+   const root=await realpath(this.root)
+   for(const stamp of portable.dependencies)if(!inside(root,await realpath(stamp.path).catch(()=>stamp.path)))throw new Error(`PORTABLE_EXTERNAL_DEPENDENCY: ${stamp.path}`)
    // ENV-60 闭包守卫：文档**自己引用到的每个表示**（original + representations）都必须真的落进了包。
    // 缺了这条，"复制过别的文件"就会被当成闭包完整；搬到另一个绝对路径后才在 `scene_open` 处炸。
    // 缺件必须在出包这一步就拒绝（负对照：包内少一个 visuals 文件 ⇒ 这里报错，不是静默出包）。

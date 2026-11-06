@@ -74,7 +74,7 @@ Cua等ready后选择侧面并点“行走6秒并录制当前视角”，最后�
 
 本轮执行方本地检查，主控仍须对固定commit独立验收。日志均在`.runtime/human-r3/checks/`。
 
-- `LYAPUNOV_MUJOCO_PYTHON=/已有环境 node --experimental-transform-types --test packages/human-crowd/test/native.test.ts`：退出0，3/3、0skip；原16组完整保留，新增足段从当前原生骨局部坐标求值、其他12段不变。日志`foot-native-final.log`。
+- `LYAPUNOV_MUJOCO_PYTHON=/已有环境 node --experimental-strip-types --test packages/human-crowd/test/native.test.ts`：退出0，3/3、0skip；原16组完整保留，新增足段从当前原生骨局部坐标求值、其他12段不变。日志`foot-native-final.log`。
 - `LYAPUNOV_ISAAC_PYTHON=/已有Isaac环境 LYAPUNOV_USD_PYTHON=/已有USD环境 bun run packages/human-crowd/scripts/isaac-human-usd.ts .runtime/human-r3/foot-isaac`：退出0，原同world11项全部通过、closed。日志`foot-isaac.log`。这条验证原默认14段与共享适配回归，**未把它称为最终外部鞋部校准在Isaac的新资产实测**。
 - `bun run test:ci --filter packages/human-crowd/`：退出0，含GLB显式校准与非法骨/半径负测，日志`foot-ci-final.log`。
 - `bun x tsc --noEmit --pretty false`：退出0，日志`foot-tsc-shipping-final.log`；`bun run build:plugins`：退出0，日志`foot-build.log`。

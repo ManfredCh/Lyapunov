@@ -44,7 +44,11 @@ Lyapunov supports Ubuntu 24.04 or newer with glibc 2.39 or newer. Desktop automa
 
 需要 Linux `x86_64`、glibc、图形会话、Electron 所需共享库和可用的渲染后端。安装脚本使用系统的 `curl`、`sha256sum`、`tar`、`mktemp`、`getconf` 及常规 shell 工具；应用自带 Node.js 和 Electron，默认 MuJoCo 伴随包自带 Python。无需预先安装系统 Conda、Python、Bun 或配置模型 Key。版本目录使用随包 Node、固定 DSH 及其依赖，MuJoCo 只使用该版本的独立 `.runtime/sim-python`；默认安装不改系统 Python、不依赖 PATH 中的 dsh／python，也不复用宿主开发 venv。用户会话、凭据和数据继续使用产品的稳定数据根。运行时目录与依赖的私有归属、Host 的权限与 bwrap、Chromium 的桌面沙盒各有自己的检查，目录隔离本身不代替内核沙盒验证。
 
-macOS 版本将尽快提供；Windows 用户建议通过 WSL2 + WSLg 安装和使用 Linux 包。
+运行仿真还需要可用的会话沙箱执行器：系统 `bubblewrap`（`sudo apt install bubblewrap`）或随包 landlock-run；两者皆缺时 `sim_open` 会以公开错误 P422 fail-closed，`doctor` 现在会直接报 `SANDBOX_RUNNER_UNAVAILABLE`。
+
+Windows 用户在 WSL2（Ubuntu 24.04 或更新版本，桌面由 WSLg 显示）内按本页的 Linux 步骤安装，使用同一份 Linux 包。前置条件：源码与安装目录放在 WSL 的 ext4 文件系统（不要放 `/mnt/c`）；WSL 内不装 Linux 显卡驱动（GPU 来自 Windows 侧驱动）；安装 `bubblewrap`（`sudo apt install bubblewrap`），没有沙箱执行器时 `sim_open` 会以公开错误 P422 失败、`doctor` 报 `SANDBOX_RUNNER_UNAVAILABLE`；使用桌面期间保持一个 WSL 会话，并给 `ext4.vhdx` 留足磁盘空间。实测记录与已知边界（单台 Windows 11 + RTX 5070 Laptop 机器，0.2.2-20261030 包，2026-11-01/02）见根 README 的「Windows：在 WSL2 中运行」一节。原生 Windows 移植已归档在 LyapunovWin 仓库标签 `archive/windows-native-20261030`，不属于受支持的安装路径。
+
+macOS 版本将尽快提供。
 
 默认安装落点：
 

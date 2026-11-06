@@ -1,7 +1,8 @@
-# Agent Graph 施工契约（0.2.0α1 并行代理版）
+# Agent Graph 接口契约（0.2.1）
 
-冻结时间：2026-10-22。本文件是 5 个并行施工代理的**唯一接口契约**；任何包只准按本文件实现，
-跨包分歧一律改本文件而不是改对方代码。
+初始冻结时间：2026-10-22；以下接口按当前0.2.1原实现校对。
+历史施工分工不构成新增开发代理的授权；执行入口以根AGENTS.md为准。
+跨包分歧先核对原类型、注册schema和实际owner，再同步契约，不另写替代实现。
 
 ## 0. 总规则（不可违背）
 
@@ -19,9 +20,8 @@
    新错误码前缀：`TASK_CHECK_*`、`CAMPAIGN_*`、`SKILL_*`（具名、大写蛇形）。
 5. **测试**：每个新包自带 `test/*.test.ts`（bun:test），断言真实行为不写假桩；
    测试夹具放各包 `test/fixtures/`。
-6. **持久化位置**：campaign/run artifacts 落 `scenes/<sceneId>/campaigns/<campaignId>/`
-   （经 `sceneOperationsFor` 的场景目录或 session 工作目录，二选一须与 Agent B 实现一致——
-   约定：**session 工作目录下的 `.lyapunov/campaigns/`**，不污染场景文档）。
+6. **持久化位置**：campaign/run artifacts 只落调用方真实session工作目录下
+   `.lyapunov/campaigns/<campaignId>/`，不落场景目录，不污染场景文档。
 7. **JSON 可重建**：所有持久化对象可被 JSON.stringify/parse 往返；禁 Map/Set/class 实例。
 
 ## 1. 包与所有权划分（互不重叠）
@@ -66,9 +66,10 @@ returns: TaskCheckResult（见契约类型）
 - `ctx.on('tools/execute', handler)` waterfall：每次调用前后记录
   `RunCallArtifact`（argsDigest=sha256(args JSON)），取 result.value 里的
   `generation/sceneRevision/startStep/endStep/status/taskAchieved/reason` 若有；
-- 预算：隶属 campaign 的调用（agent 上下文里有活动 campaignId——
-  用 `ctx.sessionProjections` 或父 agent 标记）计数 toolCalls；sim 步数从
-  receipt.stepIndex 增量累计；超限 → 在 waterfall 中返回具名错误
+- 预算：按调用方真实session身份查原CampaignRuntime.openRuns，取最近活动run；
+  父会话、字符串id或投影不是代替子会话owner的入口。普通工具按实际dispatch计toolCalls，
+  campaign_*编排调用不计；sim步数按同世界／代次的原回执增量累计。
+  超限 → 在waterfall中返回具名错误
   `CAMPAIGN_BUDGET_EXCEEDED`（**允许当前调用完成，拦截后续调用**，避免半写状态）。
 - 落盘：`.lyapunov/campaigns/<campaignId>/runs/<runId>/calls.jsonl`（追加写）+
   `run.json` 汇总（end 时写）。
@@ -78,12 +79,17 @@ returns: TaskCheckResult（见契约类型）
 - `campaign_init {tasks:[{taskId,sceneId,partition,goal}], budget}` → 校验分区/谓词合法 →
   建 Campaign + 每任务 `pending`；
 - `campaign_status {campaignId}` → Campaign 全量读数；
-- `campaign_record_run {campaignId, taskId, role, summary}` → 关闭 run 写 run.json；
-- `campaign_transition {campaignId, taskId, to, blockedReason?}` → 状态机校验
+- `campaign_record_run {campaignId, taskId, role, summary:{outcome,notes?}}` → 关闭本会话run写run.json；
+  outcome只允许success／failed／budget-exceeded／aborted；工具数与步数由原owner计量，不能手填；
+- `campaign_transition {campaignId, taskId, to, role?, blockedReason?}` → 状态机校验
   （pending→exploring→debugging→verifying→heldout-eval→done|blocked|rejected），
   非法迁移具名拒绝 `CAMPAIGN_ILLEGAL_TRANSITION`；
 - **分区铁律**：`partition:'heldout'` 任务只允许 `heldout-eval`→`done/blocked`；
   worker run 碰 heldout 任务 → `CAMPAIGN_PARTITION_VIOLATION`。
+- 进入活动状态在调用方自己的会话开run。Worker自行进入exploring／debugging并关闭自己的run；
+  fresh Verifier自行进入verifying并取返回runId。Coordinator不代开／代关子会话run。
+- 原subagent/end事件确认本地one-shot已结束后，原Campaign owner将漏关run按真实计量记aborted；
+  continuable的epoch、已有显式结果和父会话不受影响，不推断任务成功或自动迁移任务。
 
 ### 3.3 预算计数位置
 
@@ -98,9 +104,9 @@ returns: TaskCheckResult（见契约类型）
 - `pack_skill_get {packId, skillId}` → 单个 PackSkill；
 - `skill_propose {packId, proposal:SkillProposal}` → 写提案为 **未准入**（promotion 缺省）
   到 `packs/<id>/proposals/<skillId>.json`，不直接进 skills/ 根；；
-- `skill_verify_record {skillId, verifierRunId, reproducedTaskIds, attempts, passed}` →
+- `skill_verify_record {skillId, verifierRunId, reproducedTaskIds, attempts, passed, packId?}` →
   记录验证结果；passed=true 时才允许 promote；
-- `skill_promote {skillId}` → 校验 verify 通过 → 提案转正入 skills/ + promotions.jsonl 追加
+- `skill_promote {skillId, packId?}` → 校验 verify 通过 → 提案转正入 skills/ + promotions.jsonl 追加
   + `promotion` 字段；未过验证具名拒绝 `SKILL_NOT_VERIFIED`；
 - 读取位置：pack 根目录 = `packs/`（产品安装包内 packs 目录；测试用临时目录夹具）。
 

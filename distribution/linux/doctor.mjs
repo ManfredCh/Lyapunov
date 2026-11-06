@@ -1,7 +1,7 @@
 import {spawnSync} from 'node:child_process'
 import {readFileSync,existsSync} from 'node:fs'
 import {resolve,join} from 'node:path'
-import {inspectSandbox} from './sandbox.mjs'
+import {inspectSandbox,inspectSandboxRunner} from './sandbox.mjs'
 // SDK 解释器解析与 Host runtime-patch、physics-check 共用同一实现，避免诊断与运行不一致。
 import {resolveSdkPython} from '../../packages/lyapunov-product-bundle/src/sdk-python.mjs'
 const root=resolve(import.meta.dirname,'../..'),selection=process.argv[2],managed=process.argv[3]==='--managed-sdk'
@@ -18,12 +18,12 @@ if(selection==='version'){
   console.log(JSON.stringify({product:manifest.product,version:manifest.version,platform:manifest.platform,node:process.version,electron:manifest.electron,sourceCommit:manifest.sourceCommit??null,sourceCommitMatchesPayload:manifest.sourceCommitMatchesPayload??null,upstreamCommit:manifest.upstreamCommit}));process.exit(0)
 }
 const providers={},installHint=name=>'./lyapunov install-provider '+name+(name==='isaac'?' --accept-omniverse-eula':'')
-for(const name of selection==='desktop'?[]:selection?[selection]:['mujoco','isaac','newton']){
+for(const name of selection==='desktop'?[]:selection?[selection]:process.platform==='darwin'?['mujoco','newton']:['mujoco','isaac','newton']){
   const resolved=resolveSdkPython(root,name,process.env,{managed}),python=resolved.python
   if(!existsSync(python)){providers[name]={status:'BLOCKED',code:'PROVIDER_UNAVAILABLE',missing:[name+' 的独立 Python/SDK'],python,pythonSource:resolved.source,install:installHint(name)};continue}
   // newton：解释器是独立环境（Newton 的 pin 与产品 mujoco 冲突），探测要报告版本与 Warp 设备，
   // 因为"没有 NVIDIA GPU"是它的主要边界（provider 会退回 CPU，该降级必须是可解释的）。
-  const newtonProbe='import json;\nimport newton, warp as wp;\nfrom importlib.metadata import version as v\ntry:\n    devices=[str(d) for d in wp.get_cuda_devices()]\nexcept Exception:\n    devices=[]\nprint(json.dumps({"provider":"newton","status":"AVAILABLE","version":v("newton"),"warpVersion":wp.config.version,"cudaDevices":devices,"gpuAvailable":bool(devices),"physicalExecution":False}))'
+  const newtonProbe='import json;\nimport newton, warp as wp, PIL;\nfrom importlib.metadata import version as v\ntry:\n    devices=[str(d) for d in wp.get_cuda_devices()]\nexcept Exception:\n    devices=[]\nprint(json.dumps({"provider":"newton","status":"AVAILABLE","version":v("newton"),"warpVersion":wp.config.version,"pillowVersion":PIL.__version__,"cudaDevices":devices,"gpuAvailable":bool(devices),"physicalExecution":False}))'
   const args=name==='isaac'?[join(root,'packages/sim-isaac/python/check.py')]
     :name==='newton'?['-c',newtonProbe]
     :['-c','import mujoco,json; print(json.dumps({"provider":"mujoco","status":"AVAILABLE","version":mujoco.__version__,"physicalExecution":False}))']
@@ -45,11 +45,17 @@ for(const name of selection==='desktop'?[]:selection?[selection]:['mujoco','isaa
   providers[name].pythonSource=resolved.source
 }
 // 桌面检查必须区分“桌面二进制缺失 / ldd 不可用或失败 / 缺共享库”与确认可用；只有 ldd 确认成功才可能是 AVAILABLE。
-const desktopBinary=join(root,'runtime/electron/lyapunov-desktop')
+const desktopBinary=join(root,process.platform==='darwin'?'runtime/electron/Lyapunov.app/Contents/MacOS/Electron':'runtime/electron/lyapunov-desktop')
 let desktop
 if(devCheckout)desktop={status:'SKIPPED',code:'RELEASE_MANIFEST_MISSING',binary:desktopBinary,message:'开发检出没有发行打包产物 RELEASE.json 与桌面二进制，跳过桌面检查（只判 provider）。'}
 else if(!existsSync(desktopBinary))desktop={status:'BLOCKED',code:'DESKTOP_BINARY_MISSING',electron:manifest.electron,binary:desktopBinary,message:'缺少桌面二进制，安装包可能不完整；请重新解包并保留完整目录结构',missingSystemLibraries:[]}
-else{
+else if(process.platform==='darwin'){
+  // 实际启动随包 Electron 的 Node 模式，验证 dyld/Framework 装载；不把 Linux ldd 当 macOS 条件。
+  const probe=spawnSync(desktopBinary,['-p','JSON.stringify({electron:process.versions.electron,platform:process.platform,arch:process.arch})'],{encoding:'utf8',timeout:30000,env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}})
+  let reported;try{reported=JSON.parse(String(probe.stdout).trim())}catch{}
+  const available=!probe.error&&probe.status===0&&reported?.platform==='darwin'&&reported?.arch==='arm64'&&reported?.electron===manifest.electron
+  desktop={status:available?'AVAILABLE':'BLOCKED',...available?{}:{code:'DESKTOP_LIBRARY_CHECK_UNAVAILABLE',message:String(probe.error?.message??probe.stderr??'Electron 运行时读回不符')},electron:manifest.electron,binary:desktopBinary,runtime:reported??null,signing:manifest.macOS?.signing??'unverified',notarized:manifest.macOS?.notarized??false}
+}else{
   const desktopLibraries=spawnSync('ldd',[desktopBinary],{encoding:'utf8'})
   if(desktopLibraries.error||desktopLibraries.status!==0)desktop={status:'BLOCKED',code:'DESKTOP_LIBRARY_CHECK_UNAVAILABLE',electron:manifest.electron,binary:desktopBinary,message:String(desktopLibraries.error?.message??desktopLibraries.stderr?.trim()??('ldd 退出 '+desktopLibraries.status)),missingSystemLibraries:[]}
   else{
@@ -63,7 +69,9 @@ if(!devCheckout){
  desktop.runtimeTools={git:{status:available?'AVAILABLE':'BLOCKED',...(available?{version:String(git.stdout).trim()}:{code:'RUNTIME_GIT_UNAVAILABLE',message:'缺少可用 Git 运行工具，请重跑正常安装命令并核对 PATH。 / Git is unavailable; rerun the normal installer and check PATH.'})}}
  if(!available&&desktop.status==='AVAILABLE'){desktop.status='BLOCKED';desktop.code='RUNTIME_GIT_UNAVAILABLE';desktop.message=desktop.runtimeTools.git.message}
 }
-if(!devCheckout&&desktop.status==='AVAILABLE'){const sandbox=inspectSandbox(root);desktop.sandbox=sandbox;if(sandbox.status!=='AVAILABLE'){desktop.status='BLOCKED';desktop.code=sandbox.code;desktop.message=sandbox.message;desktop.install=sandbox.setupCommand}}
+if(!devCheckout&&desktop.status==='AVAILABLE'&&process.platform==='linux'){const sandbox=inspectSandbox(root);desktop.sandbox=sandbox;if(sandbox.status!=='AVAILABLE'){desktop.status='BLOCKED';desktop.code=sandbox.code;desktop.message=sandbox.message;desktop.install=sandbox.setupCommand}}
+// 会话沙箱执行器（bwrap/landlock）同理仅 Linux；缺失时仿真 worker fail-closed 报 P422，doctor 必须暴露。
+if(!devCheckout&&desktop.status==='AVAILABLE'&&process.platform==='linux'){const runner=inspectSandboxRunner(root);desktop.sandboxRunner=runner;if(runner.status!=='AVAILABLE'){desktop.status='BLOCKED';desktop.code=runner.code;desktop.message=runner.message;desktop.install=runner.install}}
 const providersOk=Object.values(providers).every(value=>value.status==='AVAILABLE')
 const result={status:providersOk&&(devCheckout||desktop.status==='AVAILABLE')?'AVAILABLE':'BLOCKED',node:{version:process.version,executable:process.execPath},desktop,providers,scope:'依赖检查；不代表引擎真实运动、模型推理或正式账户登录成功。'}
 console.log(JSON.stringify(result,null,2));process.exitCode=result.status==='AVAILABLE'?0:2

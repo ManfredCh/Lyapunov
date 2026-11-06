@@ -6,7 +6,8 @@
  *
  * 前置（缺任一项直接退出 2，不伪装通过）：
  *   LYAPUNOV_DEPTH_TEST_PYTHON    本包 venv 的 python（含 torch/transformers/Pillow）
- *   LYAPUNOV_DEPTH_TEST_MODEL_DIR 经 hf-mirror 下载、带 lyapunov-model-manifest.json 的权重目录
+ *   LYAPUNOV_DEPTH_TEST_MODEL_DIR 经许可来源下载、带 lyapunov-model-manifest.json 的权重目录
+ *   LYAPUNOV_DEPTH_TEST_EXPECTED_REVISION 独立指定来源的固定 revision（可选，默认原镜像版本）
  *   LYAPUNOV_DEPTH_TEST_IMAGE     真实输入照片（只读）
  *   LYAPUNOV_DEPTH_TEST_DATA_DIR  产物目录（可选，默认 mkdtemp）
  * 用法：node packages/depth-estimation/test/depth-estimate.test.ts
@@ -23,10 +24,10 @@ import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { spawn } from 'node:child_process'
+import { spawn,execFileSync } from 'node:child_process'
 import { mkdir,mkdtemp,open,readFile,stat,writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename,join } from 'node:path'
+import { basename,dirname,join } from 'node:path'
 import { apply,name as pluginName,type Config } from '../src/plugin.ts'
 import { collectArtifacts,dependencyState,depthProviderStatus,prepareRequest,startDepthEstimation } from '../src/operations.ts'
 import type { DepthEstimationResult } from '../src/types.ts'
@@ -35,7 +36,7 @@ const python=process.env.LYAPUNOV_DEPTH_TEST_PYTHON
 const modelDirectory=process.env.LYAPUNOV_DEPTH_TEST_MODEL_DIR
 const image=process.env.LYAPUNOV_DEPTH_TEST_IMAGE
 const dataDirectory=process.env.LYAPUNOV_DEPTH_TEST_DATA_DIR
-const EXPECTED_REVISION='5426e4f0f36572d16453bbda7a8389317b1bef99'
+const EXPECTED_REVISION=process.env.LYAPUNOV_DEPTH_TEST_EXPECTED_REVISION??'5426e4f0f36572d16453bbda7a8389317b1bef99'
 const failures:string[]=[]
 let passed=0
 async function check(name:string,body:()=>Promise<void>|void){
@@ -141,6 +142,13 @@ if(missing.length){
 }
 const scratch=dataDirectory??await mkdtemp(join(tmpdir(),'lyapunov-depth-test-'))
 await mkdir(scratch,{recursive:true})
+// 从原图独立解码尺寸，不把某台开发机上的照片路径或分辨率当成插件合同。
+const sourceSize=JSON.parse(execFileSync(python!,['-c','import json,sys; from PIL import Image; print(json.dumps(Image.open(sys.argv[1]).size))',image!],{encoding:'utf8'})) as [number,number]
+const [sourceWidth,sourceHeight]=sourceSize
+assert(sourceWidth>0&&sourceHeight>0,'原图尺寸不可用')
+const modelScale=518/Math.min(sourceWidth,sourceHeight)
+const expectedModelWidth=Math.round(sourceWidth*modelScale/14)*14
+const expectedModelHeight=Math.round(sourceHeight*modelScale/14)*14
 const outputRoot=join(scratch,'outputs')
 const config:Config={pythonPath:python,modelDirectory,dataDirectory:outputRoot}
 
@@ -228,11 +236,11 @@ await check('缺权重时同步入口在 spawn 前明确阻断',async()=>{
  assert(code.includes('PROVIDER_UNAVAILABLE'),'未按 PROVIDER_UNAVAILABLE 阻断: '+code)
 })
 await check('相对输入图路径按会话 cwd 解析',async()=>{
- const cwd=join(image!,'..','..')
- const prepared=await prepareRequest({requestId:'rel-path',image:{path:'refs/'+image!.split('/').pop()}},config,cwd)
+ const cwd=dirname(image!)
+ const prepared=await prepareRequest({requestId:'rel-path',image:{path:basename(image!)}},config,cwd)
  assert(prepared.image.path===image,'相对路径未按会话 cwd 解析: '+prepared.image.path)
  let code=''
- try{await prepareRequest({requestId:'rel-path',image:{path:'refs/'+image!.split('/').pop()}},config,'/nonexistent-cwd')}catch(error){code=String(error)}
+ try{await prepareRequest({requestId:'rel-path',image:{path:basename(image!)}},config,'/nonexistent-cwd')}catch(error){code=String(error)}
  assert(code.includes('INVALID_INPUT_FILE'),'错误 cwd 下应报输入不存在: '+code)
 })
 await check('source 可整体省略（网络照片没有 scene/frame）',async()=>{
@@ -258,8 +266,8 @@ await check('depth_estimate 同步返回真实 npy/PNG/尺寸/统计，并带一
  assert(value.output.model.revision===EXPECTED_REVISION,'revision 不符: '+String(value.output.model.revision))
  assert(value.output.model.maxDepthConfig!==null,'缺 max_depth 记录')
  const sizes=value.output.sizes
- assert(sizes.modelInput.height===518&&sizes.modelInput.width%14===0,'模型输入尺寸异常: '+JSON.stringify(sizes.modelInput))
- assert(sizes.input.width===3840&&sizes.input.height===2880,'输入尺寸异常: '+JSON.stringify(sizes.input))
+ assert(sizes.modelInput.height===expectedModelHeight&&sizes.modelInput.width===expectedModelWidth,'模型输入尺寸异常: '+JSON.stringify(sizes.modelInput))
+ assert(sizes.input.width===sourceWidth&&sizes.input.height===sourceHeight,'输入尺寸异常: '+JSON.stringify(sizes.input))
  assert(sizes.preview.width===1024,'预览尺寸异常: '+JSON.stringify(sizes.preview))
  assert(value.output.image.path===image,'结果未记录来源原图: '+String(value.output.image.path))
  const types=value.output.artifacts.map(artifact=>artifact.type).sort()
@@ -280,8 +288,8 @@ await check('原图尺寸 npy 的形状/数值经独立读取复核',async()=>{
  const artifact=result.output.artifacts.find(item=>item.type==='depth.image.npy')!
  const header=await readNpyHeader(artifact.path)
  assert(header.dtype.includes('f4'),'dtype 不是 float32: '+header.dtype)
- assert(header.dimensions[0]===2880&&header.dimensions[1]===3840,'npy 形状与输入尺寸不一致: '+JSON.stringify(header.dimensions))
- assert(header.bytes===10+header.headerLength+2880*3840*4,'npy 字节数与形状不符: '+header.bytes)
+ assert(header.dimensions[0]===sourceHeight&&header.dimensions[1]===sourceWidth,'npy 形状与输入尺寸不一致: '+JSON.stringify(header.dimensions))
+ assert(header.bytes===10+header.headerLength+sourceHeight*sourceWidth*4,'npy 字节数与形状不符: '+header.bytes)
  const statistics=await sampleNpyStatistics(artifact.path,header.dimensions)
  console.log('      采样 '+statistics.samples+' 点: min='+statistics.min.toFixed(3)+' max='+statistics.max.toFixed(3)+' mean='+statistics.mean.toFixed(3)+' std='+statistics.std.toFixed(3))
  assert(statistics.std>0.5,'深度图变化过小（可能不是真实推理）: std='+statistics.std)
@@ -289,7 +297,7 @@ await check('原图尺寸 npy 的形状/数值经独立读取复核',async()=>{
  assert(statistics.min<0.5,'深度最小值异常: '+statistics.min)
  const modelArtifact=result.output.artifacts.find(item=>item.type==='depth.model.npy')!
  const modelHeader=await readNpyHeader(modelArtifact.path)
- assert(modelHeader.dimensions[0]===518&&modelHeader.dimensions[1]===686,'模型尺寸 npy 形状异常: '+JSON.stringify(modelHeader.dimensions))
+ assert(modelHeader.dimensions[0]===expectedModelHeight&&modelHeader.dimensions[1]===expectedModelWidth,'模型尺寸 npy 形状异常: '+JSON.stringify(modelHeader.dimensions))
 })
 await check('PNG 实际尺寸与 metadata 一致且带说明文本',async()=>{
  assert(result,'上一用例未产出结果')
@@ -413,10 +421,10 @@ await check('取消真实进程后作业状态为 killed 且没有 completed 结
 })
 await check('后台作业完成后 owner 收到带真实图像的通知，且相对路径按会话 cwd 解析',async()=>{
  const inbox:unknown[]=[]
- const sessionCwd='/home/s18/WS/Lyapunov/SceneGene/assets'
+ const sessionCwd=dirname(image!)
  const {agent,dispose}=await registerFakeOwner('sess-depth-owner',sessionCwd,inbox)
  try{
-  const relativePath='refs/'+basename(image!)
+  const relativePath=basename(image!)
   const started=await ctx.tools.execute({callId:'test-depth-owner-job' as never,name:'depth_estimate',arguments:{request_json:JSON.stringify({requestId:'ts-owner-job',image:{path:relativePath},params:{previewMaxSide:384}}),background:true},agent,signal:new AbortController().signal})
   const payload=await jsonFromToolResult(started as {content?:unknown[]})
   const jobId=String((payload.value as {jobId?:string}).jobId)
@@ -444,7 +452,8 @@ await check('后台作业完成后 owner 收到带真实图像的通知，且相
   assert(captionText.includes(image!),'通知文本未注明来源原图: '+captionText)
   assert(captionText.includes('相对深度')&&captionText.includes('不是米制'),'通知文本未写明相对语义: '+captionText)
   assert(attached&&String(attached.mediaType).startsWith('image/'),'通知没有携带真实图像: '+JSON.stringify(attached))
-  assert(attached.width===384&&attached.height===288,'通知里的预览尺寸不对: '+JSON.stringify(attached))
+  const previewScale=Math.min(1,384/Math.max(sourceWidth,sourceHeight))
+  assert(attached.width===Math.round(sourceWidth*previewScale)&&attached.height===Math.round(sourceHeight*previewScale),'通知里的预览尺寸不对: '+JSON.stringify(attached))
   const read=ctx.jobs.read(jobId as never,agent?.id)
   const parsed=JSON.parse((read.result ?? '')) as DepthEstimationResult
   assert(parsed.output.image.path===image,'相对路径未按会话 cwd 解析成真实原图: '+parsed.output.image.path)

@@ -16,9 +16,9 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { SANDBOX_UNAVAILABLE, createSimSessionLauncher, resolveSessionPrivateRoot, type SimLaunchContext } from '../src/session-launch.ts'
 import { apply as applyMuJoCo } from '../../sim-mujoco/src/plugin.ts'
 import type { SessionSimFactory } from '../src/session-provider.ts'
@@ -29,7 +29,8 @@ const SESSION = 'launch-session-a'
 const OTHER = 'launch-session-b'
 
 let workspace: string
-beforeEach(async () => { workspace = await mkdtemp(join(tmpdir(), 'lyapunov-session-launch-')) })
+// macOS 的 /var 是 /private/var 的符号链接：启动侧把内部目录 realpath 后再进挂载 argv，夹具要用真实路径对齐。
+beforeEach(async () => { workspace = await realpath(await mkdtemp(join(tmpdir(), 'lyapunov-session-launch-'))) })
 afterEach(async () => { await rm(workspace, { recursive: true, force: true }) })
 
 type Mode = 'read-only' | 'workspace-write' | 'danger-full-access'
@@ -476,19 +477,72 @@ describe('引擎设备（GPU 物理/RTX 要的 /dev/nvidia*）：设备挂载暴
   })
 })
 
+describe('引擎只读挂载（WSL2 CUDA 库目录这类独立挂载的 ro-bind 补挂）', () => {
+  const launchWithMounts = (h: Harness, roots: () => string[]) =>
+    createSimSessionLauncher(h.ctx, { engineName: '测试引擎', engineReadOnlyMounts: roots })(SESSION)
+
+  test('声明的目录以 --ro-bind 挂进沙箱（插在 -- 之前），事实照实记录', async () => {
+    const h = harness({ mode: 'read-only' })
+    const spec = await launchWithMounts(h, () => [workspace])(input)
+    const separator = spec.argv.lastIndexOf('--')
+    expect(spec.argv.slice(0, separator).join(' ')).toContain(`--ro-bind ${workspace} ${workspace}`)
+    expect(spec.facts.engineReadOnlyMounts).toEqual([workspace])
+    expect(spec.facts.engineReadOnlyBoundary).toBe('os-bind')
+  })
+
+  test('目录不存在：失败关闭（不让 worker 拿不到库还静默跑）', async () => {
+    const h = harness({ mode: 'read-only' })
+    await expect(launchWithMounts(h, () => [join(workspace, 'missing-dir-139')])(input)).rejects.toThrow(/SESSION_ENGINE_MOUNT_UNAVAILABLE/)
+  })
+
+  test('非目录/非绝对路径：失败关闭', async () => {
+    const h = harness({ mode: 'read-only' })
+    await expect(launchWithMounts(h, () => ['relative/path'])(input)).rejects.toThrow(/SESSION_ENGINE_MOUNT_INVALID/)
+    const file = join(workspace, 'a-file')
+    await writeFile(file, 'x')
+    await expect(launchWithMounts(h, () => [file])(input)).rejects.toThrow(/SESSION_ENGINE_MOUNT_INVALID/)
+  })
+
+  test('workspace-write：ro-bind 与设备挂载、私有目录收窄并存', async () => {
+    const h = harness()
+    const spec = await createSimSessionLauncher(h.ctx, { engineName: '测试引擎', engineDevices: () => ['/dev/null'], engineReadOnlyMounts: () => [workspace] })(SESSION)(input)
+    const mounts = spec.argv.slice(0, spec.argv.lastIndexOf('--')).join(' ')
+    expect(mounts).toContain('--dev-bind /dev/null /dev/null')
+    expect(mounts).toContain(`--ro-bind ${workspace} ${workspace}`)
+    expect(spec.facts.engineReadOnlyBoundary).toBe('os-bind')
+  })
+
+  test('原生后端表达不了（非 bwrap）：如实标 none', async () => {
+    const h = harness({ mode: 'read-only', sandbox: 'other' })
+    const spec = await launchWithMounts(h, () => [workspace])(input)
+    expect(spec.facts.engineReadOnlyBoundary).toBe('none')
+    expect(spec.argv.join(' ')).not.toContain('--ro-bind '+workspace)
+  })
+
+  test('没声明的引擎：argv 与事实都不出现这层', async () => {
+    const spec = await launch(harness({ mode: 'read-only' }))(input)
+    expect(spec.facts.engineReadOnlyMounts).toBeUndefined()
+    expect(spec.facts.engineReadOnlyBoundary).toBeUndefined()
+  })
+})
+
 describe('临时安装下的运行依赖可见性',()=>{
   test('仅恢复声明的运行根，并保留工作区及本会话写入挂载的优先级',async()=>{
-    const code=join(workspace,'..','installed-code')
+    // 判据是字面 /tmp 前缀（bwrap --tmpfs /tmp 的遮蔽口径）：macOS 上 tmpdir() 落在 /var/folders，
+    // 从 workspace 派生会被判据正确跳过；夹具用字面带 /tmp 前缀的路径模拟"被 tmpfs 遮住的安装根"。
+    const code=join('/tmp','installed-code-'+basename(workspace))
     await mkdir(code,{recursive:true})
-    const spec=await createSimSessionLauncher(harness().ctx,{engineName:'临时安装',readOnlyRoots:[code,workspace]})(SESSION)(input)
-    expect(spec.facts.runtimeReadRoots).toEqual([code])
-    const mask=spec.argv.indexOf('--tmpfs')
-    const codeBind=spec.argv.findIndex((v,i)=>v==='--ro-bind'&&spec.argv[i+1]===code)
-    const workspaceBind=spec.argv.findIndex((v,i)=>v==='--bind'&&spec.argv[i+1]===workspace)
-    expect(codeBind).toBeGreaterThan(mask)
-    expect(workspaceBind).toBeGreaterThan(codeBind)
-    expect(spec.facts.privateRootBoundary).toBe('os-bind')
-    expect(spec.argv.slice(-3)).toEqual(['/usr/bin/python3','-u','/tmp/worker.py'])
+    try {
+      const spec=await createSimSessionLauncher(harness().ctx,{engineName:'临时安装',readOnlyRoots:[code,workspace]})(SESSION)(input)
+      expect(spec.facts.runtimeReadRoots).toEqual([code])
+      const mask=spec.argv.indexOf('--tmpfs')
+      const codeBind=spec.argv.findIndex((v,i)=>v==='--ro-bind'&&spec.argv[i+1]===code)
+      const workspaceBind=spec.argv.findIndex((v,i)=>v==='--bind'&&spec.argv[i+1]===workspace)
+      expect(codeBind).toBeGreaterThan(mask)
+      expect(workspaceBind).toBeGreaterThan(codeBind)
+      expect(spec.facts.privateRootBoundary).toBe('os-bind')
+      expect(spec.argv.slice(-3)).toEqual(['/usr/bin/python3','-u','/tmp/worker.py'])
+    } finally { await rm(code,{recursive:true,force:true}) }
   })
   test('不能通过运行依赖根暴露整个tmp；未被tmpfs遮蔽的安装无需额外挂载',async()=>{
     await expect(createSimSessionLauncher(harness().ctx,{engineName:'临时安装',readOnlyRoots:['/tmp']})(SESSION)(input)).rejects.toThrow('不允许重新暴露整个临时目录')

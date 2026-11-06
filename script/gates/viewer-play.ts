@@ -19,17 +19,21 @@
  * 用法：`PATH="$HOME/.bun/bin:$PATH" bun run script/gates/viewer-play.ts <animated.glb>`
  * 输出末行：`VIEWER_PLAY=<json>`
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import {spawn} from 'node:child_process'
 import { existsSync } from "node:fs"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {fileURLToPath} from 'node:url'
 
 import { startWebHost } from "../host.ts"
 
 const GLB = process.argv[2] ?? ""
+const IMPORTED_SCENE=process.argv[3]
 const CHROME = process.env.CHROME_EXECUTABLE ?? process.env.CHROME_BIN ?? "google-chrome"
 const RUNNER_PORT = Number(process.env.G19_VIEWER_CDP_PORT ?? 0)
+let targetOrigin=''
 
 interface Verdict {
   ok: boolean
@@ -56,9 +60,11 @@ function sleep(ms: number): Promise<void> { return new Promise(resolve => { setT
 
 /** 只跑一次的 CDP 调用：每次新建 WS，取到结果即关。 */
 async function cdp(port: number, method: string, params: unknown, timeoutMs = 180_000): Promise<Record<string, unknown>> {
-  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>
-  const page = list.find(target => target.type === "page")
-  if (!page) throw new Error("CDP_NO_PAGE_TARGET")
+  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; url:string;webSocketDebuggerUrl: string }>
+  // Edge 可同时保留 about:blank 与实际产品页，不能把列表第一项当作目标。
+  const pages=list.filter(target=>{try{return target.type==='page'&&new URL(target.url).origin===targetOrigin}catch{return false}})
+  const page=pages.length===1?pages[0]:undefined
+  if (!page) throw new Error(`CDP_PRODUCT_PAGE_NOT_UNIQUE: ${pages.length}`)
   return await new Promise((resolveCall, rejectCall) => {
     const ws = new WebSocket(page.webSocketDebuggerUrl)
     const timer = setTimeout(() => { try { ws.close() } catch { /* 已关 */ } rejectCall(new Error("CDP_TIMEOUT_" + method)) }, timeoutMs)
@@ -102,11 +108,25 @@ async function main(): Promise<Verdict> {
   const cdpPort = await freePort()
   let host: Awaited<ReturnType<typeof startWebHost>> | undefined
   let chrome: ReturnType<typeof Bun.spawn> | undefined
+  let hostHttpStatus:number|undefined
   try {
     try {
       host = await startWebHost({ mode: "developer", runtimeRoot: join(temp, "runtime"), port: hostPort })
+      targetOrigin=host.origin
     } catch (error) {
       return { ok: false, environment: "真实产品 host 未能在本机启动", detail: String((error as Error)?.message ?? error).slice(-1200) }
+    }
+    if(process.platform==='darwin'){
+      // macOS 沿产品原 MCP 页面 owner 取明确 pageId；避免 Edge 保留的空白页被临时 CDP 连接误选。
+      const file=join(temp,'probe.json')
+      await writeFile(file,JSON.stringify({url:host.url,executable:CHROME,expression:await loadProbeSource()}),{mode:0o600})
+      const child=spawn('node',[join(import.meta.dirname,'../..','script/gates/mcp-viewer-probe.mts'),file],{cwd:process.cwd(),env:process.env,stdio:['ignore','pipe','pipe']})
+      let stdout='',stderr='';child.stdout.on('data',chunk=>{stdout+=String(chunk)});child.stderr.on('data',chunk=>{stderr=(stderr+String(chunk)).slice(-3000)})
+      await new Promise<void>((done,reject)=>{child.once('error',reject);child.once('close',()=>done())})
+      const line=stdout.split('\n').find(row=>row.startsWith('MCP_VIEWER_FACTS='))
+      if(!line)return {ok:false,detail:'原 browser-use 门禁没有返回结果',error:stderr.replaceAll(host.url,'[local entry]')}
+      const facts=JSON.parse(line.slice('MCP_VIEWER_FACTS='.length)) as ProbeFacts&{webgl?:string}
+      return verdict(facts,facts.webgl??'原 browser-use，WebGL未返回')
     }
 
     try {
@@ -114,7 +134,7 @@ async function main(): Promise<Verdict> {
         CHROME, "--headless=new", "--no-sandbox", "--disable-gpu-sandbox",
         "--use-gl=angle", "--use-angle=swiftshader",
         "--remote-debugging-port=" + String(cdpPort), "--user-data-dir=" + join(temp, "chrome"),
-        "--no-first-run", "--no-default-browser-check", "--window-size=900,700", "about:blank",
+        "--no-first-run", "--no-default-browser-check", "--window-size=900,700", host.url,
       ], { stdout: "ignore", stderr: "ignore", stdin: "ignore", env: { ...process.env, HOME: temp } })
     } catch (error) {
       return { ok: false, environment: `找不到可执行的 Chrome：${CHROME}`, detail: String((error as Error)?.message ?? error) }
@@ -123,6 +143,9 @@ async function main(): Promise<Verdict> {
       chrome.kill()
       return { ok: false, environment: `Chrome 启动了但调试端口未就绪：${CHROME}`, detail: "CDP 端口未就绪" }
     }
+    // 直接用原启动 URL 打开隔离浏览器，与原 browser-use launch 一致。
+    // 额外的空白页由上面的 origin 选择排除；仍按实际 boot graph 验证载入。
+    await sleep(6000)
 
     const webgl = await evaluate(cdpPort, `(()=>{const c=document.createElement("canvas");const gl=c.getContext("webgl2")||c.getContext("webgl");if(!gl)return null;const d=gl.getExtension("WEBGL_debug_renderer_info");return d?String(gl.getParameter(d.UNMASKED_RENDERER_WEBGL)):String(gl.getParameter(gl.RENDERER))})()`)
     if (typeof webgl !== "string") {
@@ -131,21 +154,37 @@ async function main(): Promise<Verdict> {
     }
 
     await cdp(cdpPort, "Page.enable", {})
-    await cdp(cdpPort, "Page.navigate", { url: host.url })
-    await sleep(6000)
+    // 未带能力令牌的只读请求只检验 HTTP 活性，不消耗交给浏览器的登录令牌。
+    hostHttpStatus=(await fetch(host.origin,{signal:AbortSignal.timeout(10000)})).status
     const page = await evaluate(cdpPort, `location.origin`)
     if (page !== host.origin) return { ok: false, detail: `页面没落在产品 origin：${String(page)} != ${host.origin}` }
 
-    const glbBase64 = (await readFile(GLB)).toString("base64")
-    const raw = await evaluate(cdpPort, probeSource(glbBase64)) as ProbeFacts
+    const raw = await evaluate(cdpPort, await loadProbeSource()) as ProbeFacts
     return verdict(raw, webgl)
   } catch (error) {
-    return { ok: false, detail: "探针自身出错", error: String((error as Error)?.stack ?? error).slice(-2000) }
+    return { ok: false, detail: "探针自身出错", error: String((error as Error)?.stack ?? error).slice(-2000),facts:{hostHttpStatus,host:host?.diagnostics()} }
   } finally {
     try { chrome?.kill() } catch { /* 已退出 */ }
     try { await host?.stop() } catch { /* 已退出 */ }
     if (process.env.G19_KEEP !== "1") await rm(temp, { recursive: true, force: true }).catch(() => undefined)
   }
+}
+
+async function loadProbeSource():Promise<string>{
+    const glbBytes=await readFile(GLB),glbBase64=glbBytes.toString("base64")
+    const imported=IMPORTED_SCENE?JSON.parse(await readFile(IMPORTED_SCENE,'utf8')):undefined
+    const uris:string[]=[]
+    if(imported){
+      // 只换取件传输，不改导入后的实体／组件／资源身份；每个可视引用须确为同一原件字节。
+      for(const entity of imported.entities??[])for(const ref of entity.resources??[])for(const rep of ref.representations??[]){
+        if(rep.role!=='visual'||rep.mimeType!=='model/gltf-binary')continue
+        const bytes=await readFile(fileURLToPath(rep.uri))
+        if(!bytes.equals(glbBytes))throw Error('IMPORTED_RESOURCE_BYTES_DIFFER')
+        uris.push(rep.uri)
+      }
+      if(!uris.length)throw Error('IMPORTED_VISUAL_RESOURCE_MISSING')
+    }
+    return probeSource(glbBase64,imported,uris)
 }
 
 interface ProbeSample { t: number; degY: number; frame: number; pixels: number; tris: number }
@@ -198,10 +237,12 @@ function verdict(raw: ProbeFacts | undefined, webgl: string): Verdict {
 }
 
 /** 页面侧探针：只做"取包、建 Viewer、载 GLB、采样"，判定不写在页面里。 */
-function probeSource(glbBase64: string): string {
+function probeSource(glbBase64: string,imported?:unknown,uris:string[]=[]): string {
   return `(async()=>{
   const out={}
   try{
+    if(location.origin!==${JSON.stringify(targetOrigin)})throw new Error('PRODUCT_ORIGIN_MISMATCH')
+    for(let attempt=0;attempt<80&&!window.__DSH_BOOT__;attempt++)await new Promise(resolve=>setTimeout(resolve,250))
     const boot=window.__DSH_BOOT__
     if(!boot||!Array.isArray(boot.entries))throw new Error("NO_BOOT_GRAPH")
     const entry=boot.entries.find(e=>e.id==="@lyapunov/viewer")
@@ -221,9 +262,12 @@ function probeSource(glbBase64: string): string {
     const container=document.createElement("div")
     container.style.cssText="position:fixed;left:0;top:0;width:640px;height:480px"
     document.body.appendChild(container)
-    const v=viewer.createViewer({container,resolveResource:uri=>uri})
     const dataUrl="data:model/gltf-binary;base64,${glbBase64}"
-    const snapshot={sceneId:"g19-viewer-play",revision:1,
+    const imported=${JSON.stringify(imported??null)},resourceUris=${JSON.stringify(uris)}
+    const v=viewer.createViewer({container,resolveResource:uri=>resourceUris.includes(uri)?dataUrl:uri})
+    const gl=v.renderer.getContext(),debug=gl.getExtension('WEBGL_debug_renderer_info')
+    out.webgl=debug?String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)):String(gl.getParameter(gl.RENDERER))
+    const snapshot=imported??{sceneId:"g19-viewer-play",revision:1,
       coordinates:{units:"m",upAxis:"Z",handedness:"right",quaternion:"xyzw"},
       entities:[{entityId:"animated",name:"g19_animated_leaf",
         transform:{position:[0,0,0],quaternion:[0,0,0,1],scale:[1,1,1]},
@@ -233,7 +277,8 @@ function probeSource(glbBase64: string): string {
     // 关键：**只 setScene 一次**。首次载入就该进播放表，否则产品里新开场景永远不动。
     await v.setScene(snapshot)
     out.summary=v.animationSummary()
-    const entryM=v.mixers.get("animated")
+    const animatedId=imported?imported.entities.find(e=>e.components?.visual?.animatedAssembly===true)?.entityId:"animated"
+    const entryM=v.mixers.get(animatedId)
     if(!entryM){out.samples=[];return out}
     const trackRoot=entryM.clips[0].tracks[0].name.split(".")[0]
     out.trackRoot=trackRoot

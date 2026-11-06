@@ -46,20 +46,20 @@ export interface CanonicalTriangleMesh {
   readonly stats: CanonicalTriangleMeshStats
 }
 
+export type GlbMeshErrorCode =
+  | "invalid_glb"
+  | "unsupported_feature"
+  | "unsupported_primitive_mode"
+  | "invalid_accessor"
+  | "invalid_node_hierarchy"
+  | "invalid_source_to_target"
+  | "invalid_min_triangle_area"
+  | "triangle_id_overflow"
 export class GlbMeshError extends Error {
-  constructor(
-    readonly code:
-      | "invalid_glb"
-      | "unsupported_feature"
-      | "unsupported_primitive_mode"
-      | "invalid_accessor"
-      | "invalid_node_hierarchy"
-      | "invalid_source_to_target"
-      | "invalid_min_triangle_area"
-      | "triangle_id_overflow",
-    message: string,
-  ) {
+  readonly code: GlbMeshErrorCode
+  constructor(code: GlbMeshErrorCode, message: string) {
     super(message)
+    this.code = code
     this.name = "GlbMeshError"
   }
 }

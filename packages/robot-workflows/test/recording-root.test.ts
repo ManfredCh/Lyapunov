@@ -28,11 +28,14 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import * as workflows from '../src/plugin.ts'
+import { sessionNamespace } from '../../lyapunov-contracts/src/session-scope.ts'
+import { writeRecordingManifest } from '../src/recording-files.ts'
+import { SceneOperations } from '../../scene-kit/src/operations.ts'
 
 const INJECTED_SERVICES = ['tools', 'commands', 'jobs', 'scene'] as const
 
 /** 装真正的产品插件；`recordingRoot` 就是 runtime-patch 传的那一项配置。 */
-async function bootProductPlugin(recordingRoot: string | undefined) {
+async function bootProductPlugin(recordingRoot: string | undefined, worlds?: unknown) {
   const ctx = new Context()
   await ctx.plugin(Timer)
   await mountAgentLoopTestDependencies(ctx)
@@ -40,6 +43,7 @@ async function bootProductPlugin(recordingRoot: string | undefined) {
   await ctx.plugin(LocalJobRegistry)
   // 场景服务只满足 inject 契约：本文件的判据发生在任何场景访问之前。
   ctx.reflect.provide('scene', { snapshot: async () => { throw new Error('SCENE_NOT_USED_IN_THIS_TEST') } } as never)
+  if (worlds) ctx.reflect.provide('sim', { forSession: () => worlds } as never)
   const missing = INJECTED_SERVICES.filter(name => ctx.get(name) === undefined)
   assert.deepEqual(missing, [], `测试装配自己就缺服务：${missing.join(', ')}`)
   const fiber = await ctx.plugin(workflows, recordingRoot === undefined ? {} : { recordingRoot })
@@ -48,6 +52,7 @@ async function bootProductPlugin(recordingRoot: string | undefined) {
   // CommandRuntime 要真实会话（命令要往会话里追加生命周期事件），所以用生产的真 Agent，不是替身。
   const agent = await loop.create(SessionId('recording-root-test'), {})
   return {
+    ctx, agent,
     async call(name: string, args: Record<string, unknown>) {
       const executed = await ctx.tools.execute({ callId: ToolCallId(`recording-root-test:${name}`), name, arguments: args, agent, signal: new AbortController().signal })
       return { isError: executed.isError === true, text: (executed.content ?? []).map((block: any) => block.text ?? '').join('\n') }
@@ -99,4 +104,71 @@ describe('录制根的越界判据（相对根明确拒绝）', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+})
+
+test('人工导出由原生 Jobs 等待者收取完成，不唤醒模型读取不存在的工具调用身份', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recording-manual-job-'))
+  const plugin = await bootProductPlugin(root)
+  const detach = plugin.ctx.jobs.attachController('manual-export-fixture')
+  try {
+    await writeRecordingManifest(sessionNamespace(root, String(plugin.agent.id)), {
+      recordingId: 'recording-manual', sessionRef: String(plugin.agent.id), runId: 'test', sceneId: 'scene',
+      status: 'completed', createdAt: new Date().toISOString(), maxDurationS: 1,
+      frameCount: 0, eventCount: 0, segments: [], resources: [], missing: [],
+    })
+    const settled = new Promise<boolean>(resolveDone => {
+      const off = plugin.ctx.jobs.events.subscribe({ owner: plugin.agent.id }, event => {
+        if (event.type === 'settled' && event.job.kind === 'dataset') { off(); resolveDone(event.awaited) }
+      })
+    })
+    const result = await plugin.command('/recording_export {"recordingId":"recording-manual"}')
+    assert.equal(result.kind, 'success', result.text)
+    assert.equal(await settled, true, '人工作业完成时应已有原生等待者，界面仍可读取真实产物')
+  } finally {
+    detach()
+    await plugin.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('突发订阅帧排队后仍执行原600次采集上限，停止只结束录制', {timeout: 20000}, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recording-capture-limit-'))
+  const scene = await new SceneOperations(join(root, 'scenes')).create({sceneId: 'capture-limit'})
+  const world = {worldId: 'limit-world', sceneId: scene.sceneId, worldGeneration: 1, appliedSceneRevision: scene.revision, status: 'running'}
+  const frame = (stepIndex: number) => ({worldId: world.worldId, generation: 1, sceneRevision: scene.revision, stepIndex, simTime: stepIndex / 1000, frameId: `limit:1:${stepIndex}`, entities: []})
+  let listener: ((value: ReturnType<typeof frame>) => void) | undefined
+  let captures = 0, physicalStops = 0
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  const worlds = {
+    listWorlds: async () => [world], scene: async () => scene, observe: async () => frame(0),
+    subscribeFrames: (_id: string, next: typeof listener) => {listener = next; return () => {listener = undefined}},
+    stop: async () => {physicalStops++},
+    captureMulti: async () => {
+      const index = ++captures
+      if (index === 1) {entered.resolve(); await release.promise}
+      return {worldId: world.worldId, generation: 1, sceneRevision: scene.revision, stepIndex: index, simTime: index / 1000, frameId: `limit:1:${index}`, captureId: `cap-${index}`, cameras: []}
+    },
+  }
+  // 本例只验请求上限和Jobs终态；Provider回执为显式替身，不宣称相机渲染通过。
+  const plugin = await bootProductPlugin(root, worlds)
+  const detach = plugin.ctx.jobs.attachController('capture-limit-fixture')
+  try {
+    const start = await plugin.call('recording_start', {input: {sceneId: scene.sceneId, worldId: world.worldId, expectedGeneration: 1, maxDurationS: 300, cameraNames: ['cam'], width: 1, height: 1}})
+    assert.equal(start.isError, false, start.text)
+    const recording = JSON.parse(start.text)
+    await entered.promise
+    assert.ok(listener)
+    for (let step = 1; step <= 602; step++) listener!(frame(step))
+    release.resolve()
+    const stop = await plugin.call('recording_stop', {input: {recordingId: recording.recordingId}})
+    assert.equal(stop.isError, false, stop.text)
+    const completed = JSON.parse(stop.text)
+    assert.equal(completed.status, 'completed')
+    assert.equal(captures, 600)
+    assert.equal(completed.cameraCapture.captures, 600)
+    assert.equal(completed.cameraCapture.stopped, 'capture-limit')
+    assert.equal(physicalStops, 0)
+  } finally {
+    release.resolve(); detach(); await plugin.close(); await rm(root, {recursive: true, force: true})
+  }
 })

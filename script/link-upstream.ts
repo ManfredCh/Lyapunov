@@ -2,6 +2,7 @@ import { readdir, readFile, mkdir, symlink, readlink, rename, rm, lstat, realpat
 import { existsSync } from "node:fs"
 import { join, resolve, relative, dirname, isAbsolute, basename, sep } from "node:path"
 import { randomUUID } from "node:crypto"
+import { canonicalTargetPath } from "../packages/lyapunov-contracts/src/writable-boundary.ts"
 
 type Manifest = {
   name?: string
@@ -143,7 +144,7 @@ export async function linkUpstream(root = resolve(import.meta.dirname, ".."), op
         const info = await lstat(destination)
         const previous = info.isSymbolicLink() ? await readlink(destination) : undefined
         if (scope === "@deepseek-ai" && previous !== undefined && !existsSync(destination)
-          && contains(upstream, resolve(dirname(destination), previous))) {
+          && contains(upstream, canonicalTargetPath(resolve(dirname(destination), previous)))) {
           changes.push({ kind: "prune", destination, previous })
           continue
         }
@@ -159,7 +160,7 @@ export async function linkUpstream(root = resolve(import.meta.dirname, ".."), op
         changes.push({ kind: "create", destination, target: target.directory }); continue
       }
       if (!info.isSymbolicLink()) throw new Error(`UPSTREAM_LINK_CONFLICT: 保留非链接目录 ${destination}`)
-      const previous = await readlink(destination), previousDirectory = resolve(dirname(destination), previous)
+      const previous = await readlink(destination), previousDirectory = canonicalTargetPath(resolve(dirname(destination), previous))
       if (previousDirectory === target.directory) continue
       if (existsSync(destination) && await realpath(destination) === await realpath(target.directory)) continue
       if (!options.replaceOwned) throw new Error(`UPSTREAM_LINK_CONFLICT: ${name} 已有不同安装；关闭活动 Host 后通过 bootstrap 更新链接`)

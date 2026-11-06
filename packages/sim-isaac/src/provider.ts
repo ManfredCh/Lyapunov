@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path'
 import { existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { probeWslGpuDevices } from '../../sim-contract/src/gpu-facts.ts'
 import { randomUUID } from 'node:crypto'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
 import { SimError, type SimWorlds, type SimAction, type WorldOptions, type ObservationSelection, type StopSelection, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions, type LidarScanOptions, type FreezeSelection, type FreezeReceipt } from '../../sim-contract/src/index.ts'
@@ -33,7 +34,7 @@ export interface IsaacConfig {
  * 在 macOS/Windows 上注入指向 Linux 的路径只会误导排障，因此只对 Linux 注入；
  * 缺少 SDK 时仍由解释器存在性检查 fail-closed，不改变任何物理语义。
  */
-export function isaacLoaderEnvironment(pythonPath:string,platform:NodeJS.Platform=process.platform,inherited:NodeJS.ProcessEnv=process.env):Record<string,string>{
+export function isaacLoaderEnvironment(pythonPath:string,platform:NodeJS.Platform=process.platform,inherited:NodeJS.ProcessEnv=process.env,wslLibraryDir:string|null=probeWslGpuDevices().libraryDir):Record<string,string>{
   if(platform!=='linux')return {}
   const libraryPath=resolve(dirname(pythonPath),'../lib')
   /**
@@ -53,7 +54,9 @@ export function isaacLoaderEnvironment(pythonPath:string,platform:NodeJS.Platfor
   ].filter((value):value is string=>Boolean(value&&value.length>0))
   const preload=candidates.find(candidate=>existsSync(candidate))
   return {
-    LD_LIBRARY_PATH:[libraryPath,inherited.LD_LIBRARY_PATH].filter(Boolean).join(':'),
+    // WSL2 的 CUDA 用户态库由 Windows 宿主投影到 `/usr/lib/wsl/lib`（`/dev/dxg` 配对判据见
+    // `probeWslGpuDevices`）：存在才进 LD_LIBRARY_PATH，不塞一个必然缺失的路径误导排障。
+    LD_LIBRARY_PATH:[libraryPath,wslLibraryDir??undefined,inherited.LD_LIBRARY_PATH].filter(Boolean).join(':'),
     ...(preload===undefined?{}:{LD_PRELOAD:[preload,inherited.LD_PRELOAD].filter(Boolean).join(':')}),
     // Vulkan ICD：仅在文件真的存在时注入，否则同样会把排障引向一个假路径。
     ...(existsSync('/usr/share/vulkan/icd.d/nvidia_icd.json')?{VK_ICD_FILENAMES:'/usr/share/vulkan/icd.d/nvidia_icd.json',__NV_PRIME_RENDER_OFFLOAD:'1'}:{}),
@@ -112,7 +115,8 @@ export class IsaacProvider implements SimWorlds {
    */
   private orphans = new Map<string, OrphanedWorker>()
   private cacheWarningShown = false
-  constructor(readonly config: IsaacConfig = {}) {}
+  readonly config: IsaacConfig
+  constructor(config: IsaacConfig = {}) { this.config = config }
   /**
    * 只读回执：当前所有"没能确认结束"的自有 worker。空数组表示每条收尾路径都拿到了确认。
    * 每条记录含 worldId、pid、路径、dispose 原文、最后阶段轨迹与时间——不需要调用方去猜。

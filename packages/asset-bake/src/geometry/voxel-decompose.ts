@@ -82,13 +82,17 @@ export interface VoxelDiagnostics {
 }
 export interface LatticeBox { min:[number,number,number];max:[number,number,number] }
 export class VoxelDecomposeError extends Error {
- constructor(readonly reason:string,readonly diagnostics:VoxelDiagnostics){super(`VOXEL_${reason}: ${JSON.stringify(diagnostics)}`)}
+ readonly reason:string
+ readonly diagnostics:VoxelDiagnostics
+ constructor(reason:string,diagnostics:VoxelDiagnostics){super(`VOXEL_${reason}: ${JSON.stringify(diagnostics)}`);this.reason=reason;this.diagnostics=diagnostics}
 }
 const WORK_DEFAULTS={maxTiles:4096,maxSamples:128_000_000,maxFaceVisits:100_000_000,maxWorkingBytes:256*1024*1024,maxWorkingBoxes:40000} as const
 class VoxelWork {
  readonly facts:VoxelDiagnostics
+ private progress?:(facts:VoxelDiagnostics)=>void
  boxCollector?: (box:LatticeBox)=>void
- constructor(vertices:Float64Array,faces:Uint32Array,options:VoxelDecomposeOptions,private progress?:(facts:VoxelDiagnostics)=>void){
+ constructor(vertices:Float64Array,faces:Uint32Array,options:VoxelDecomposeOptions,progress?:(facts:VoxelDiagnostics)=>void){
+  this.progress=progress
   const cap=(name:keyof typeof WORK_DEFAULTS,upper:number)=>{
    const value=options[name]??WORK_DEFAULTS[name]
    if(!Number.isSafeInteger(value)||value<1||value>upper)throw new Error(`INVALID_VOXEL_WORK_BUDGET: ${name} 必须是1..${upper}整数`)

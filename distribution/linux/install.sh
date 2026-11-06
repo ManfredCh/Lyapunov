@@ -69,13 +69,15 @@ write_failed() {
 }
 usage() {
   printf '%s\n' 'Usage: sh install.sh [--prefix PATH] [--bin-dir PATH] [--version RELEASE_ID] [--without-mujoco] [--no-desktop]' \
-    'Default: Linux x64, per-user version directories, MuJoCo prepared and verified before activation.' \
+    'Default: Linux x64 or macOS arm64, per-user version directories, MuJoCo prepared and verified before activation.' \
     'LYAPUNOV_INSTALL_BASE_URL may explicitly select another HTTPS release mirror (HTTP is allowed only for localhost fixtures).'
 }
 : "${HOME:?HOME is required for a per-user installation}"
 prefix=${LYAPUNOV_INSTALL_ROOT:-"$HOME/.local/share/lyapunov"}
 bin_dir=${LYAPUNOV_INSTALL_BIN_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+host_system=$(uname -s)
+if [ "$host_system" = Darwin ]; then data_home=${LYAPUNOV_INSTALL_APPLICATIONS_DIR:-"$HOME/Applications"}; fi
 base_url=${LYAPUNOV_INSTALL_BASE_URL:-https://vorynel.com/lyapunov}
 release_selector=latest
 with_mujoco=true
@@ -107,14 +109,33 @@ if [ "$with_mujoco" = true ]; then
   case "$prefix" in *"'"*) fail 'CONDA_PREFIX_UNSUPPORTED: MuJoCo relocation requires --prefix without a single quote; spaces are supported.' ;; esac
 fi
 stage=platform
-[ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || fail 'This release supports Linux x86_64 only.'
-for tool in curl sha256sum tar mktemp getconf tee; do command -v "$tool" >/dev/null 2>&1 || fail "Required system command is missing: $tool"; done
+case "$host_system/$(uname -m)" in
+  Linux/x86_64) release_platform=linux-x64; entry_platform=linux ;;
+  Darwin/arm64) release_platform=darwin-arm64; entry_platform=darwin ;;
+  *) fail 'This release supports Linux x86_64 or macOS arm64 only.' ;;
+esac
+for tool in curl tar mktemp tee; do command -v "$tool" >/dev/null 2>&1 || fail "Required system command is missing: $tool"; done
+if command -v sha256sum >/dev/null 2>&1; then hash_file() { sha256sum "$1"; }
+elif [ "$entry_platform" = darwin ] && command -v shasum >/dev/null 2>&1; then hash_file() { shasum -a 256 "$1"; }
+else fail 'Required system SHA256 command is missing.'; fi
+if [ "$entry_platform" = linux ]; then command -v getconf >/dev/null 2>&1 || fail 'Required system command is missing: getconf';
+else command -v sw_vers >/dev/null 2>&1 || fail 'Required system command is missing: sw_vers'; fi
 case "$base_url" in
   https://*) protocols='=https' ;;
   http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*) protocols='=http,https' ;;
   *) fail 'The release mirror must use HTTPS (localhost HTTP fixtures only).' ;;
 esac
 base_url=${base_url%/}
+# WSL2 的会话沙箱依赖 bubblewrap；缺失时 doctor 会报 SANDBOX_RUNNER_UNAVAILABLE。
+# 发行包自带 landlock-run 兜底可能可用，所以这里只警告、不中断安装。
+if [ "$entry_platform" = linux ]; then
+  wsl=false
+  case "$(uname -r)" in *microsoft*|*Microsoft*|*WSL*) wsl=true ;; esac
+  [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] && wsl=true
+  if [ "$wsl" = true ] && ! command -v bwrap >/dev/null 2>&1; then
+    printf '%s\n' "Lyapunov [$stage] WARNING: WSL detected but bubblewrap (bwrap) is missing; the session sandbox requires it — install with: sudo apt install bubblewrap. Otherwise doctor reports SANDBOX_RUNNER_UNAVAILABLE unless the shipped landlock runner applies." >&2
+  fi
+fi
 stage=prepare
 mkdir -p -- "$prefix" "$bin_dir"
 prefix=$(CDPATH= cd -- "$prefix" && pwd -P)
@@ -125,9 +146,9 @@ lock="$prefix/.install-lock"
 mkdir -p -- "$prefix/versions" "$prefix/downloads"
 incoming=$(mktemp -d "$prefix/.incoming.XXXXXX")
 stage=manifest
-log "Fetching $base_url/releases/$release_selector/linux-x64.tsv"
+log "Fetching $base_url/releases/$release_selector/$release_platform.tsv"
 if curl --fail --location --silent --show-error --proto "$protocols" --proto-redir "$protocols" --connect-timeout 30 --max-time 60 --retry 3 --retry-delay 2 \
-  --output "$incoming/manifest.tsv" "$base_url/releases/$release_selector/linux-x64.tsv"; then :; else
+  --output "$incoming/manifest.tsv" "$base_url/releases/$release_selector/$release_platform.tsv"; then :; else
   curl_exit=$?
   [ "$curl_exit" -ne 23 ] || write_failed "$incoming/manifest.tsv" 'Remaining archive download size is unknown until the release manifest is read.' "$incoming"
   fail "Release manifest download failed (curl exit $curl_exit)."
@@ -139,13 +160,16 @@ while IFS="$(printf '\t')" read -r key value extra; do
   seen="$seen$key|"
   case "$key" in
     schema) schema=$value ;; release_id) release_id=$value ;; version) version=$value ;; platform) platform=$value ;;
-    minimum_glibc) minimum_glibc=$value ;; source_commit) source_commit=$value ;;
+    minimum_glibc) minimum_glibc=$value ;; minimum_macos) minimum_macos=$value ;; source_commit) source_commit=$value ;;
     archive_path) archive_path=$value ;; archive_root) archive_root=$value ;; archive_sha256) archive_sha256=$value ;; archive_bytes) archive_bytes=$value ;;
     mujoco_mode) mujoco_mode=$value ;; mujoco_path) mujoco_path=$value ;; mujoco_sha256) mujoco_sha256=$value ;; mujoco_bytes) mujoco_bytes=$value ;; mujoco_minimum_glibc) mujoco_minimum_glibc=$value ;;
     *) fail "Unknown manifest field: $key" ;;
   esac
 done < "$incoming/manifest.tsv"
-[ "${schema:-}" = 1 ] && [ "${platform:-}" = linux-x64 ] || fail 'Unsupported or incomplete release manifest.'
+[ "${schema:-}" = 1 ] && [ "${platform:-}" = "$release_platform" ] || fail 'Unsupported or incomplete release manifest.'
+if [ "$entry_platform" = darwin ]; then
+  [ "${mujoco_mode:-}" = install-provider ] && [ -z "${minimum_glibc:-}${mujoco_minimum_glibc:-}" ] || fail 'macOS requires on-target SDK preparation and a macOS release manifest.'
+else [ -z "${minimum_macos:-}" ] || fail 'Linux requires a glibc release manifest.'; fi
 for value in "${release_id:-}" "${version:-}" "${archive_root:-}"; do safe_token "$value" || fail 'Invalid release/package identity.'; done
 [ "$release_selector" = latest ] || [ "$release_selector" = "$release_id" ] || fail 'Requested release ID differs from manifest.'
 case "${source_commit:-}" in *[!0-9a-f]*|'') fail 'Missing source commit.' ;; esac
@@ -174,8 +198,18 @@ check_glibc() {
   case "$actual_major.$actual_minor" in *[!0-9.]*) fail 'Could not read glibc version.' ;; esac
   [ "$actual_major" -gt "$required_major" ] || { [ "$actual_major" -eq "$required_major" ] && [ "$actual_minor" -ge "$required_minor" ]; } || fail "glibc $1 or later is required; found $actual."
 }
-check_glibc "${minimum_glibc:-}"
-if [ "$with_mujoco" = true ]; then check_glibc "${mujoco_minimum_glibc:-}"; fi
+if [ "$entry_platform" = linux ]; then
+  check_glibc "${minimum_glibc:-}"
+  if [ "$with_mujoco" = true ]; then check_glibc "${mujoco_minimum_glibc:-}"; fi
+else
+  case "${minimum_macos:-}" in *[!0-9.]*|''|.*|*.) fail 'Invalid minimum macOS version.' ;; esac
+  required_major=${minimum_macos%%.*}; required_minor=${minimum_macos#*.}
+  case "$required_minor" in *.*|'') fail 'Invalid minimum macOS version.' ;; esac
+  actual=$(sw_vers -productVersion) || fail 'Could not read macOS version.'
+  actual_major=${actual%%.*}; actual_minor=${actual#*.}; actual_minor=${actual_minor%%.*}
+  case "$actual_major.$actual_minor" in *[!0-9.]*) fail 'Could not read macOS version.' ;; esac
+  [ "$actual_major" -gt "$required_major" ] || { [ "$actual_major" -eq "$required_major" ] && [ "$actual_minor" -ge "$required_minor" ]; } || fail "macOS $minimum_macos or later is required; found $actual."
+fi
 remaining_download_bytes() {
   partial_bytes=0
   if [ -f "$partial" ]; then partial_bytes=$(wc -c < "$partial" 2>/dev/null | tr -d ' '); fi
@@ -201,7 +235,7 @@ download() {
   url_path=$1; expected_hash=$2; expected_bytes=$3
   downloaded="$prefix/downloads/$expected_hash.tar.gz"
   if [ -f "$downloaded" ]; then
-    actual_hash=$(sha256sum "$downloaded"); actual_hash=${actual_hash%% *}
+    actual_hash=$(hash_file "$downloaded"); actual_hash=${actual_hash%% *}
     if [ "$actual_hash" = "$expected_hash" ] && [ "$(wc -c < "$downloaded" | tr -d ' ')" = "$expected_bytes" ]; then log 'Reusing verified download.'; return; fi
     fail "Cached download failed verification: $downloaded"
   fi
@@ -218,7 +252,7 @@ download() {
     fi
   fi
   [ "$(wc -c < "$partial" | tr -d ' ')" = "$expected_bytes" ] || fail "Archive byte count mismatch: $partial"
-  actual_hash=$(sha256sum "$partial"); actual_hash=${actual_hash%% *}
+  actual_hash=$(hash_file "$partial"); actual_hash=${actual_hash%% *}
   [ "$actual_hash" = "$expected_hash" ] || fail "Archive SHA256 mismatch: $partial"
   mv -- "$partial" "$downloaded"
 }
@@ -231,7 +265,7 @@ safe_archive() {
 }
 package_identity() {
   [ -x "$1/runtime/node/bin/node" ] && [ -x "$1/lyapunov" ] && [ -f "$1/RELEASE.json" ] || fail 'Package entry, bundled Node or RELEASE.json is missing.'
-  "$1/runtime/node/bin/node" -e 'const fs=require("node:fs"),p=require("node:path");const [root,version,commit,id]=process.argv.slice(1);const row=JSON.parse(fs.readFileSync(p.join(root,"RELEASE.json"),"utf8"));if(row.releaseId!==id||row.version!==version||row.platform!=="linux-x64"||row.sourceCommit!==commit||row.sourceCommitMatchesPayload!==true||row.userDataBundled!==false)throw Error("Package/source identity differs from release manifest");' "$1" "$version" "$source_commit" "$release_id" || fail 'Verified archive has an inconsistent package identity.'
+  "$1/runtime/node/bin/node" -e 'const fs=require("node:fs"),p=require("node:path");const [root,version,commit,id,platform]=process.argv.slice(1);const row=JSON.parse(fs.readFileSync(p.join(root,"RELEASE.json"),"utf8"));if(row.releaseId!==id||row.version!==version||row.platform!==platform||row.sourceCommit!==commit||row.sourceCommitMatchesPayload!==true||row.userDataBundled!==false)throw Error("Package/source identity differs from release manifest");' "$1" "$version" "$source_commit" "$release_id" "$release_platform" || fail 'Verified archive has an inconsistent package identity.'
 }
 product="$prefix/versions/$release_id"
 stage=package
@@ -402,6 +436,7 @@ require_runtime_git() {
     "$product/runtime/node/bin/node" -e 'const cp=require("node:child_process"),r=cp.spawnSync("git",["--version"],{encoding:"utf8",timeout:10000});process.exit(!r.error&&r.status===0&&/^git version \d/.test(String(r.stdout).trim())?0:2)' >/dev/null 2>&1
   }
   if git_ready; then return 0; fi
+  if [ "$entry_platform" = darwin ]; then fail 'RUNTIME_GIT_UNAVAILABLE: prepare Git through Xcode Command Line Tools, then rerun. / 请先准备 Xcode Command Line Tools 中的 Git，再运行同一安装器；当前版本和用户数据已保留。'; fi
   stage=runtime-git
   log 'Preparing the required Git runtime tool. / 准备必需的 Git 运行工具。'
   "$product/runtime/node/bin/node" -e 'const f=require("node:fs"),os=f.readFileSync("/etc/os-release","utf8"),id=/^ID=(?:"([a-z0-9_-]+)"|([a-z0-9_-]+))\s*$/m.exec(os);process.exit(["ubuntu","debian"].includes(id?.[1]??id?.[2])?0:2)' || fail 'RUNTIME_GIT_OS_UNSUPPORTED: install Git through your OS package manager and rerun the installer. / 请通过系统包管理器安装 Git 后重跑安装命令。'
@@ -421,6 +456,7 @@ require_runtime_git() {
 }
 require_runtime_git
 if run_doctor; then :; else
+  if [ "$entry_platform" = darwin ]; then cat "$doctor_log" >&2; fail "MACOS_RUNTIME_UNAVAILABLE: the normal doctor blocks activation. Details: $doctor_log"; fi
   prepare_desktop_libraries
   if [ "$desktop_doctor_ready" = true ]; then :; else
   # Only this package's real helper and an otherwise ready doctor may request
@@ -496,7 +532,9 @@ entry_transaction="$product/.install/legacy-desktop-pending"
 export LYAPUNOV_ENTRY_MARKER=$("$product/runtime/node/bin/node" -e 'console.log("X-Lyapunov-Install-Root="+process.argv[1].replaceAll("\\","\\\\"))' "$prefix")
 if "$product/runtime/node/bin/node" --input-type=module -e '
   import fs from "node:fs";import p from "node:path";import {pathToFileURL} from "node:url";
-  const [root,bin,data,desktop,product]=process.argv.slice(1),entry=p.join(data,"applications/lyapunov-desktop.desktop"),pending=entry+".lyapunov-upgrade-pending",transaction=p.join(product,".install/legacy-desktop-pending");
+  const [root,bin,data,desktop,product,platform]=process.argv.slice(1);
+  if(platform==="darwin"){const {installEntries}=await import(pathToFileURL(p.join(product,"distribution/linux/install-entry.mjs")).href);console.log(JSON.stringify(installEntries(root,bin,data,desktop==="true","darwin")));process.exit(0)}
+  const entry=p.join(data,"applications/lyapunov-desktop.desktop"),pending=entry+".lyapunov-upgrade-pending",transaction=p.join(product,".install/legacy-desktop-pending");
   const marker=process.env.LYAPUNOV_ENTRY_MARKER,launcher=p.join(bin,"lyapunov"),launcherMarker="# Lyapunov managed launcher root: "+root;
   const present=file=>{try{return fs.lstatSync(file)}catch(e){if(e.code==="ENOENT")return null;throw e}};
   const read=file=>fs.readFileSync(file,"utf8"),regular=file=>present(file)?.isFile()===true;
@@ -536,16 +574,21 @@ if "$product/runtime/node/bin/node" --input-type=module -e '
   try{console.log(JSON.stringify(installEntries(root,bin,data,desktop==="true")))}catch(error){
     if(migrated){if(present(entry)&&!read(entry).split("\n").includes(marker))throw Error("Original entry preserved at "+pending+"; destination changed");fs.renameSync(pending,entry);fs.unlinkSync(transaction)}throw error;
   }
-' "$prefix" "$bin_dir" "$data_home" "$with_desktop" "$product"; then :; else
+' "$prefix" "$bin_dir" "$data_home" "$with_desktop" "$product" "$entry_platform"; then :; else
   entry_exit=$?
   printf '%s\n' 'Could not prepare the per-user launcher or desktop entry; the previous entry is preserved.' >&2
   exit "$entry_exit"
 fi
+# GNU mv -T 与 BSD mv 的目标目录语义不同；Mac 用随包 Node 的同一原子 rename 替换已校验的链接。
+replace_link() {
+  if [ "$entry_platform" = darwin ]; then "$product/runtime/node/bin/node" -e 'require("node:fs").renameSync(process.argv[1],process.argv[2])' "$1" "$2";
+  else mv -Tf -- "$1" "$2"; fi
+}
 stage=activate
 if [ -n "$previous" ] && [ "$previous" != "versions/$release_id" ]; then
-  link_pending="$prefix/.previous.$$"; ln -s -- "$previous" "$link_pending"; mv -Tf -- "$link_pending" "$prefix/previous"; link_pending=
+  link_pending="$prefix/.previous.$$"; ln -s -- "$previous" "$link_pending"; replace_link "$link_pending" "$prefix/previous"; link_pending=
 fi
-link_pending="$prefix/.current.$$"; ln -s -- "versions/$release_id" "$link_pending"; mv -Tf -- "$link_pending" "$prefix/current"; link_pending=
+link_pending="$prefix/.current.$$"; ln -s -- "versions/$release_id" "$link_pending"; replace_link "$link_pending" "$prefix/current"; link_pending=
 stage=complete
 if [ "$with_mujoco" = true ]; then log "READY: $release_id; managed MuJoCo doctor and native physics passed."; else log "INSTALLED_WITHOUT_MUJOCO: $release_id (explicit --without-mujoco)."; fi
 log "Start with: $bin_dir/lyapunov"

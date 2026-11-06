@@ -96,6 +96,14 @@ const baseState=(over:Record<string,unknown>={}):PolicyLoadState=>({category:'di
 const receiptFixture=(state:any,over:Record<string,unknown>={})=>({filePath:'/cache/model.pt',face:{state,identity:identityFixture},context:{kind:'policy',sceneId:'s',entityId:'r',worldId:'w',expectedGeneration:2,expectedRevision:3,identity:identityFixture,...over}})
 const primaryButton=(html:string)=>html.match(/data-testid="policy-next"[^>]*>([^<]*)</)?.[1]
 
+test('来源文件缺失或未验证时给出登记入口，不误判机器人不兼容',()=>{
+ const state=baseState({category:'missing_files_or_runtime',policyPrepared:false,missing:[{code:'WORLD_NOT_EXECUTABLE',field:'world.status',detail:'paused',nextAction:'match'},{code:'POLICY_ADAPTER_SOURCE_MISMATCH',field:'weights',detail:'missing or mismatched',nextAction:'local_load'},{code:'POLICY_DEPENDENCY_MISSING',field:'dependency',detail:'missing',nextAction:'local_load'},{code:'POLICY_FILES_NOT_VERIFIED',field:'manifest',detail:'unverified',nextAction:'local_load'}]})
+ const html=renderToStaticMarkup(<PolicyLibraryPanel available canLoad sceneId="s" entityId="r" worldId="w" worldStatus="paused" expectedGeneration={2} expectedRevision={3} importReceipt={receiptFixture(state) as never} command={async()=>{throw Error('SSR不得请求')}} chooseFile={async()=>undefined} tr={cn=>cn}/>)
+ expect(primaryButton(html)).toBe('导入策略文件')
+ expect(html).not.toContain('>当前实例不兼容<')
+ expect(html.match(/data-testid="policy-next"[^>]*>/)?.[0]).not.toContain('disabled')
+})
+
 test('A 真实产品HTTP投影保留applyEligible/preApplyDifferences并驱动Apply主按钮',()=>{
  const raw=baseState({ready:false,applyEligible:true,preApplyDifferences:[{path:'controller.robot',reason:'ROBOT_MODEL_MISMATCH',detail:'Apply rebuilds this field from the prepared adapter'}],robotWalkingVerified:false,internalSecret:'internal-do-not-send',password:'sk-'+'LEAK_TOKEN'})
  const response:any=commandRouteResponse('policy_load_state',{kind:'success',text:JSON.stringify(raw)},'formal')
@@ -152,6 +160,67 @@ function installDom(){
  return dom
 }
 afterEach(()=>{for(const [key,value] of savedDom){if(value)Object.defineProperty(globalThis,key,value);else delete (globalThis as never as Record<string,unknown>)[key]}savedDom.clear()})
+
+test('取消系统文件选择不报无响应，也不丢失已有兼容检查',async()=>{
+ const dom=installDom(),root=createRoot(document.getElementById('root')!)
+ const state=baseState({category:'missing_files_or_runtime',policyPrepared:false,missing:[{code:'POLICY_FILES_NOT_VERIFIED',field:'manifest',detail:'unverified',nextAction:'local_load'}]})
+ const calls:string[]=[]
+ try{
+  await act(async()=>root.render(<PolicyLibraryPanel available canLoad sceneId="s" entityId="r" worldId="w" worldStatus="paused" expectedGeneration={2} expectedRevision={3} importReceipt={receiptFixture(state) as never} command={async name=>{calls.push(name);return {}}} chooseFile={async()=>undefined} tr={cn=>cn}/>))
+  await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="policy-next"]')!.click())
+  expect(document.querySelector('[data-testid="policy-next"]')!.textContent).toBe('导入策略文件')
+  expect(document.body.textContent).not.toContain('选择器没有响应')
+  expect(document.querySelector('[data-testid="policy-main-path-input"]')).toBeNull()
+  expect(calls).not.toContain('policy_load_local')
+ }finally{await act(async()=>root.unmount());dom.window.close()}
+})
+
+test('选择器等待超时后仍接收当前目标的晚到文件',async()=>{
+ const dom=installDom(),root=createRoot(document.getElementById('root')!),timer=globalThis.setTimeout
+ let resolvePicker:(path:string|undefined)=>void=()=>{}
+ const picker=new Promise<string|undefined>(resolve=>{resolvePicker=resolve}),calls:Array<{name:string;input:any}>=[]
+ globalThis.setTimeout=((callback:any,ms?:number,...args:any[])=>timer(callback,ms===12_000?1:ms,...args)) as typeof setTimeout
+ try{
+  await act(async()=>root.render(<PolicyLibraryPanel available canLoad command={async(name,input)=>{calls.push({name,input});return name==='policy_load_local'?{status:'BLOCKED',code:'TEST_BLOCKED'}:{}}} chooseFile={()=>picker} tr={cn=>cn}/>))
+  await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="policy-next"]')!.click();await new Promise(resolve=>timer(resolve,20))})
+  expect(document.querySelector('[data-testid="policy-main-path-input"]')).not.toBeNull()
+  expect(document.body.textContent).toContain('文件选择尚未返回')
+  await act(async()=>resolvePicker('/fixture/bundle.json'))
+  expect(calls.filter(call=>call.name==='policy_load_local').map(call=>call.input.manifestPath)).toEqual(['/fixture/bundle.json'])
+ }finally{globalThis.setTimeout=timer;await act(async()=>root.unmount());dom.window.close()}
+})
+
+test('选择器超时后切换实例，旧选择不能登记到新实例',async()=>{
+ const dom=installDom(),root=createRoot(document.getElementById('root')!),timer=globalThis.setTimeout
+ let resolvePicker:(path:string|undefined)=>void=()=>{}
+ const picker=new Promise<string|undefined>(resolve=>{resolvePicker=resolve}),calls:string[]=[]
+ const props=(entityId:string)=>({available:true,canLoad:true,sceneId:'s',entityId,command:async(name:string)=>{calls.push(name);return {}},chooseFile:()=>picker,tr:(cn:string)=>cn})
+ globalThis.setTimeout=((callback:any,ms?:number,...args:any[])=>timer(callback,ms===12_000?1:ms,...args)) as typeof setTimeout
+ try{
+  await act(async()=>root.render(createElement(PolicyLibraryPanel,props('old'))))
+  await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="policy-next"]')!.click();await new Promise(resolve=>timer(resolve,20))})
+  await act(async()=>root.render(createElement(PolicyLibraryPanel,props('new'))))
+  await act(async()=>resolvePicker('/fixture/bundle.json'))
+  expect(calls).not.toContain('policy_load_local')
+ }finally{globalThis.setTimeout=timer;await act(async()=>root.unmount());dom.window.close()}
+})
+
+test('缺策略文件的主按钮调用现有文件选择和登记命令',async()=>{
+ const dom=installDom(),root=createRoot(document.getElementById('root')!)
+ const state=baseState({category:'missing_files_or_runtime',policyPrepared:false,missing:[{code:'POLICY_ADAPTER_SOURCE_MISMATCH',field:'weights',detail:'missing or mismatched',nextAction:'local_load'},{code:'POLICY_FILES_NOT_VERIFIED',field:'manifest',detail:'unverified',nextAction:'local_load'}]})
+ const calls:Array<{name:string;input:any}>=[]
+ let selections=0
+ const command=async(name:string,input:any)=>{calls.push({name,input});return name==='policy_load_local'?{status:'BLOCKED',code:'TEST_BLOCKED'}:{}}
+ try{
+  await act(async()=>root.render(<PolicyLibraryPanel available canLoad sceneId="s" entityId="r" worldId="w" worldStatus="paused" expectedGeneration={2} expectedRevision={3} importReceipt={receiptFixture(state) as never} command={command} chooseFile={async()=>{selections++;return '/fixture/bundle.json'}} tr={cn=>cn}/>))
+  const button=document.querySelector<HTMLButtonElement>('[data-testid="policy-next"]')!
+  expect(button.textContent).toBe('导入策略文件')
+  await act(async()=>button.click())
+  expect(selections).toBe(1)
+  expect(calls.filter(call=>call.name==='policy_load_local').map(call=>call.input.manifestPath)).toEqual(['/fixture/bundle.json'])
+  expect(calls.some(call=>call.name==='policy_activate')).toBe(false)
+ }finally{await act(async()=>root.unmount());dom.window.close()}
+})
 
 test('真实HTTP投影缺state.world时仍以activate绑定显示Applied；旧回执重发不覆盖，外部world作废',async()=>{
  const dom=installDom(),root=createRoot(document.getElementById('root')!)

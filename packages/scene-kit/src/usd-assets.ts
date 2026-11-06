@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { resolve, join } from 'node:path'
+import { resolve, join, dirname, relative, sep } from 'node:path'
 import type { Entity, ResourceRef, SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 import type { UsdAssetFacts, UsdInstanceOverrides, UsdSourceFacts } from '../../lyapunov-contracts/src/usd.ts'
 import type { SceneOperations } from './operations.ts'
@@ -22,9 +22,23 @@ function usdExecutionError(error:Error,stderr:string,prefix:string):Error {
 /** 只读USD原件；错误不降格成“没有依赖”。 */
 export async function inspectUsd(path: string, overrides: UsdInstanceOverrides = {}, options:{signal?:AbortSignal} = {}): Promise<UsdInspection> {
   const script = usdWorker()
-  return new Promise((settle, fail) => execFile(usdPython(), [script, path, JSON.stringify(overrides)], { signal:options.signal, timeout: 120_000, maxBuffer: 96 * 1024 * 1024, env: {...process.env, HF_ENDPOINT:'https://hf-mirror.com'} }, (error, stdout, stderr) => {
+  return new Promise((settle, fail) => execFile(usdPython(), [script, path, JSON.stringify(overrides)], { signal:options.signal, timeout: 120_000, maxBuffer: 96 * 1024 * 1024, env: {...process.env, HF_ENDPOINT:'https://hf-mirror.com'} }, async (error, stdout, stderr) => {
     if(error){fail(usdExecutionError(error,String(stderr),'USD_INSPECTION_FAILED'));return}
-    try { settle(JSON.parse(stdout)) } catch { fail(new Error('USD_INSPECTION_INVALID_OUTPUT')) }
+    let parsed:UsdInspection
+    try { parsed=JSON.parse(stdout) } catch { fail(new Error('USD_INSPECTION_INVALID_OUTPUT'));return }
+    if(Array.isArray(parsed.files)){
+      const ancestors:{alias:string,real:string}[]=[]
+      for(let a=dirname(resolve(path));;a=dirname(a)){
+        const real=await realpath(a).catch(()=>null)
+        if(real&&real!==a)ancestors.push({alias:a,real})
+        if(dirname(a)===a)break
+      }
+      if(ancestors.length)parsed.files=parsed.files.map(file=>{
+        for(const{alias,real}of ancestors){if(file===real||file.startsWith(real+sep))return join(alias,relative(real,file))}
+        return file
+      })
+    }
+    settle(parsed)
   }))
 }
 export async function usdVisual(resources: ResourceLibrary, source: ResourceRecord, overrides: UsdInstanceOverrides = {}): Promise<{visual:Entity['components']['visual'];ref:ResourceRef;sourceFacts:UsdSourceFacts}> {

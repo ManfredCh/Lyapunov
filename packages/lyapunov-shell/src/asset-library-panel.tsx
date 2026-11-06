@@ -233,6 +233,8 @@ export function AssetLibraryPanel(p: Props) {
 
 /** 三个域面板各自的素材归属：机器人 / 小物件 / 世界环境。 */
 export type AssetDomain = "robot" | "object" | "environment" | "scene"
+/** OBJ/FBX/Blend 源文件需要现有转换链生成 GLB 才能作为可视模型放置；原生 USD 不归此类。 */
+const requiresDisplayConversion=(asset:AssetRecord):boolean=>asset.parsed?.kind==='source'&&['model/obj','application/x-fbx','application/x-blender'].includes(asset.ref.original.mimeType)
 
 /**
  * 素材的域归属：内置条目按 category 分组（DOMAIN_BUILTIN_CATEGORY），已导入素材按解析 kind
@@ -243,6 +245,8 @@ export function inAssetDomain(domain: AssetDomain, asset: AssetRecord): boolean 
   const kind = asset.parsed?.kind
   if(asset.ref.original.mimeType==='application/vnd.lyapunov.usd-preview+json')return false
   if(kind==='usd'){const purpose=asset.category??'object';return purpose==='robot'?domain==='robot':purpose==='scene'?domain==='scene'||domain==='environment':domain==='object'}
+  // 明确不派生碰撞的可视网格没有物理用途；环境和物件入口均应能找到同一资源。
+  if (kind === "mesh" && asset.physicalizationRequest === false && (domain === "scene" || domain === "environment")) return true
   const usage=(asset.physicalizationRequest&&asset.physicalizationRequest.usage)||asset.physicalization?.usage
   if(kind!=='robot'&&usage){
     if(domain==='robot')return false
@@ -311,10 +315,10 @@ function DomainAssetRows({ domain, assets, builtin, busy, available, canMount, t
   return <div className="lya-domain" aria-label={label} data-selection-mode={selectionMode||undefined}>
     <div className="lya-section"><span>{label}</span>{!(selectionMode && domain === "object") && <span className="lya-section-side">{builtinItems.length + imported.length}</span>}</div>
     {builtinItems.map(item => <BuiltinAssetRow key={item.assetId} item={item} imported={builtinImported(item, assets)} busy={busy} available={available} tr={tr} importBuiltin={importBuiltin}/>)}
-    {imported.map(asset => {const key=`${asset.ref.resourceId}:${asset.ref.version}`,selected=selectionMode&&selectedKey===key;return <div key={key} className="lya-domain-asset" data-selected={selected||undefined}>{selectionMode?<button type="button" className="lya-object-asset-row" aria-label={tr("选择资源 ", "Select asset ")+asset.name} aria-pressed={selected} disabled={!canMount} title={`${asset.name} · ${formatOf(asset)} · ${tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}`} onClick={()=>onSelect?.(asset)}><AssetMark robot={asset.parsed?.kind === "robot"}/><span className="lya-object-asset-name">{asset.name}</span><span className="lya-object-asset-choice">{selected?tr("已选中","Selected"):tr("选择","Select")}</span></button>:<div className="lya-env-card">
+    {imported.map(asset => {const key=`${asset.ref.resourceId}:${asset.ref.version}`,selected=selectionMode&&selectedKey===key,needsConversion=requiresDisplayConversion(asset),conversionHint=tr('源文件不可直接放置，请选择转换后的 GLB。','Source files cannot be placed directly; select the converted GLB.');return <div key={key} className="lya-domain-asset" data-selected={selected||undefined}>{selectionMode?<button type="button" className="lya-object-asset-row" aria-label={tr("选择资源 ", "Select asset ")+asset.name} aria-pressed={selected} disabled={!canMount||needsConversion} title={needsConversion?conversionHint:`${asset.name} · ${formatOf(asset)} · ${tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}`} onClick={()=>onSelect?.(asset)}><AssetMark robot={asset.parsed?.kind === "robot"}/><span className="lya-object-asset-name">{asset.name}</span><span className="lya-object-asset-choice">{needsConversion?tr('源文件','Source'):selected?tr("已选中","Selected"):tr("选择","Select")}</span></button>:<div className="lya-env-card">
       <span className="lya-env-thumb" aria-hidden="true"><AssetMark robot={asset.parsed?.kind === "robot"}/></span>
       <div className="lya-env-main" title={asset.name}><strong>{asset.name}</strong><span title={tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}>{formatOf(asset)}{asset.sizeBytes ? ` · ${formatAssetSize(asset.sizeBytes)}` : ""}</span></div>
-      <div className="lya-env-actions"><button className="lya-chip lya-chip-accent" disabled={!canMount} title={tr("点击后在 3D 场景中点选位置", "Click, then pick a spot in the 3D scene")} onClick={() => mount(asset)}>{tr("加入场景", "Add to scene")}</button></div>
+      <div className="lya-env-actions"><button className="lya-chip lya-chip-accent" disabled={!canMount||needsConversion} title={needsConversion?conversionHint:tr("点击后在 3D 场景中点选位置", "Click, then pick a spot in the 3D scene")} onClick={() => mount(asset)}>{tr("加入场景", "Add to scene")}</button></div>
     </div>}<details className="lya-advanced" data-testid="domain-asset-details"><summary>{asset.physicalization?.status==="pending"?tr("详情 · 碰撞待准备","Details · Colliders pending"):asset.physicalization?.status==="failed"?tr("详情 · 碰撞失败","Details · Collider failed"):tr("详情","Details")}</summary>{selectionMode&&<p className="lya-help">{formatOf(asset)} · {tr(`库版本 ${asset.ref.version}`,`Library version ${asset.ref.version}`)}{asset.sizeBytes?` · ${formatAssetSize(asset.sizeBytes)}`:""}</p>}<AssetPhysicsStatus asset={asset} controls={instanceControls??{}} available={available} busy={busy} tr={tr}/>{instanceControls&&<AssetSceneInstances asset={asset} controls={instanceControls} available={available} busy={busy} tr={tr}/>}</details></div>})}
     {imported.length > 0 && !canMount && <p className="lya-help">{tr("选择可编辑场景后即可加入。", "Choose an editable scene to add these.")}</p>}
     {builtinItems.length === 0 && imported.length === 0 && <p className="lya-help" role="status">{needle?tr("没有匹配的资源", "No matching assets"):empty}</p>}

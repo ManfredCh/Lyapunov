@@ -20,7 +20,9 @@ describe('authoritative documented T0 roster', () => {
   test('registry points to the roster and every current pack identity/metadata agrees with pack.json', () => {
     expect(registry.tierRoster).toBe(T0_ROSTER_FILE)
     expect(validateT0Roster(roster, registry)).toEqual([])
-    const dirs = readdirSync(PACKS, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('_') && entry.name !== 'node_modules').map(entry => entry.name).sort()
+    // 0.2.1 原 stager 的 default-policies 是固定策略供给缓存，不是 robot pack。
+    // 其余未知目录仍须被 registry 对账发现，不能通过“只扫已登记包”掩盖未登记包。
+    const dirs = readdirSync(PACKS, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('_') && entry.name !== 'node_modules' && entry.name !== 'default-policies').map(entry => entry.name).sort()
     expect(registry.packs.map((entry: any) => entry.packId).sort()).toEqual(dirs)
     for (const row of registry.packs) {
       const pack = JSON.parse(readFileSync(join(PACKS, row.packId, 'pack.json'), 'utf8'))

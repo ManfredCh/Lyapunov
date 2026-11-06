@@ -1,7 +1,7 @@
 /** 真实 trimesh/资源队列/MuJoCo 验收。显式 SDK 前提，缺解释器即失败；不把跳过当通过。
  * 夹具都是合法 XYZ 点云，不是网格；不代表用户约 2 GB 原件已通过。 */
 import { test, expect } from 'bun:test'
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, link, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, link, stat, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -66,7 +66,7 @@ function ply(points: V3[], format = 'binary_little_endian', attributes = 3): Buf
 async function fixture<T>(bytes: Buffer, body: (input: PhysicalizeInput, directory: string) => Promise<T>) {
   const evidence = process.env.LYAPUNOV_POINTCLOUD_EVIDENCE
   if (evidence) await mkdir(evidence, { recursive: true })
-  const directory = await mkdtemp(join(evidence ?? tmpdir(), 'lya-pointcloud-'))
+  const directory = await realpath(await mkdtemp(join(evidence ?? tmpdir(), 'lya-pointcloud-')))
   const sourcePath = join(directory, '实际 点云.ply')
   await writeFile(sourcePath, bytes)
   try { return await body({ sourcePath, outputDirectory: join(directory, 'out'), usage: 'environment', strategy: 'auto', sourceUpAxis: 'Z', metersPerUnit: 1, voxelSizeM: .1 }, directory) }

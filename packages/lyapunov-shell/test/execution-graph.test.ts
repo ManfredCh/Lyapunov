@@ -10,6 +10,22 @@ const empty=()=>emptyExecutionGraph({id:SessionId('session-a')})
 const obs=(callId:string,extra:Partial<ToolObservation>={}):ToolObservation=>({callId,rootCallId:callId,name:'operation',turn:1,step:1,argumentsHash:'a'.repeat(64),target:{sceneId:'scene-a'},facts:{},diagnostic:{code:'PROVIDER_UNAVAILABLE',stage:'prepare',fieldPath:null,retryable:false,effect:'none',requestId:null},images:[],job:null,isError:true,late:false,waited:false,...extra})
 
 describe('原生执行图折叠',()=>{
+ test('相同目标在两个真实世界先后达到时保持世界身份；重复同一帧仍交接',()=>{
+  let graph=empty(),seq=0
+  const observe=(name:string,value:Record<string,unknown>)=>{
+   const facts={...publicFacts(value,true),...publicFacts(value)}
+   graph=foldExecutionGraph(graph,event(seq++,'lyapunov/tool-observation',obs(`world-${seq}`,{name,isError:false,diagnostic:null,facts})))
+  }
+  for(const worldId of ['world-dev','world-heldout']){
+   observe('sim_open',{worldId,worldGeneration:1,status:'ready'})
+   observe('sim_task_check',{worldId,generation:1,sceneRevision:2,stepIndex:0,taskAchieved:false})
+   observe('robot_move_tcp',{worldId,generation:1,sceneRevision:2,stepIndex:750,status:'completed',taskAchieved:true})
+   observe('sim_task_check',{worldId,generation:1,sceneRevision:2,stepIndex:750,taskAchieved:true})
+  }
+  expect(recoveryDecision(graph,3)).toBe('continue')
+  for(let i=0;i<3;i++)observe('sim_task_check',{worldId:'world-heldout',generation:1,sceneRevision:2,stepIndex:750,taskAchieved:true})
+  expect(recoveryDecision(graph,3)).toBe('handoff')
+ })
  test('turn/step/tool结果按原身份更新，可重建且同seq不重复',()=>{
   const events=[event(0,'turn/start',{turn:1}),event(1,'step/start',{turn:1,step:1}),event(2,'tool/call',{turn:1,step:1,callId:'call-a',name:'scene_inspect',arguments:'{}'}),event(3,'tool/result',{turn:1,step:1,message:createToolResultMessage({callId:ToolCallId('call-a'),isError:false,content:[{type:'text',text:'PRIVATE_RESULT_BODY'}]})})]
   const graph=events.reduce((state,row)=>foldExecutionGraph(state,row),empty())

@@ -7,7 +7,7 @@
  * Every filesystem lookup uses a fresh temporary cwd; no Host/config/env is loaded.
  */
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -200,7 +200,8 @@ function installFixture(ctx: Context, cwd: string) {
 type Fixture = ReturnType<typeof installFixture>
 
 async function withFixture(run: (fixture: Fixture) => Promise<void>): Promise<void> {
-  const cwd = await mkdtemp('/tmp/lyapunov-startup-model-')
+  // macOS 的 /tmp 是 /private/tmp 的符号链接：startup 经 realpath 规范化路径，夹具也要用真实路径比较。
+  const cwd = await realpath(await mkdtemp('/tmp/lyapunov-startup-model-'))
   const ctx = new Context()
   try {
     await run(installFixture(ctx, cwd))

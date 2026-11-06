@@ -10,11 +10,11 @@ import type {LocalImportPathResolution} from '../../scene-kit/src/local-import-e
 
 /** 用户打开模型默认保留几何与现有材质；工具/API 自身的 strict 缺省不由此改变。 */
 export const DEFAULT_LOCAL_SOURCE_TEXTURE_POLICY = 'available' as const
-export type LocalImportPhysicsUsage='environment'|'static'|'dynamic'
+export type LocalImportPhysicsUsage='environment'|'static'|'dynamic'|'visual'
 export const localImportUsageDefault=(entry:'scene'|'environment'|'object'|'library'):LocalImportPhysicsUsage=>entry==='object'||entry==='library'?'dynamic':'environment'
 /** 仅网格及可转换几何带用途；本体按原生文档，点云保视觉导入，不能拖入时隐式烘焙2GB。 */
-export function localImportPhysicsInput(path:string,usage:LocalImportPhysicsUsage):{physicalizeUsage:LocalImportPhysicsUsage}|Record<string,never>{
- return /\.(?:glb|gltf|obj|fbx|blend|usd|usda|usdc)$/i.test(path)?{physicalizeUsage:usage}:{}
+export function localImportPhysicsInput(path:string,usage:LocalImportPhysicsUsage):{physicalizeUsage:Exclude<LocalImportPhysicsUsage,'visual'>}|{physicalize:false}|Record<string,never>{
+ return /\.(?:glb|gltf|obj|fbx|blend|usd|usda|usdc)$/i.test(path)?usage==='visual'?{physicalize:false}:{physicalizeUsage:usage}:{}
 }
 
 const VISUAL_EXTENSIONS=["glb","gltf","ply","spz","splat","ksplat","sog","rad","urdf","mjcf","xml"] as const

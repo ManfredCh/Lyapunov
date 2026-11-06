@@ -95,7 +95,8 @@ class StubEnv:
 class Harness:
     def __init__(self, horizon: int, terminate_at: int | None = None, render_ok: bool = True):
         self.worker = load_worker()
-        self.root = Path(tempfile.mkdtemp(prefix="lyapunov-gym-worker-test-"))
+        # macOS 的 /var 是 /private/var 的符号链接：worker 会把 outputDir resolve 成真实路径，根目录要先同步。
+        self.root = Path(tempfile.mkdtemp(prefix="lyapunov-gym-worker-test-")).resolve()
         self.env = StubEnv(horizon, terminate_at, render_ok)
         self.world = self.worker.World(
             {"sceneId": "stub/Ant-v5", "revision": 0},

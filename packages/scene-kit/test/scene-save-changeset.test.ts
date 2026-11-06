@@ -9,7 +9,7 @@
  * 夹具是测试自己写的最小 GLB，只用于证明"引用替换/变更集口径"，不代表真实模型几何。
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -196,5 +196,34 @@ describe("原生源与材料经原physics操作保存重开", () => {
       const native = (entity.components.mujoco ?? entity.components.isaac) as {sourcePath?: string} | undefined
       if (native?.sourcePath) expect(resolve(dirname(join(moved, "scene.json")), native.sourcePath)).toBe(path)
     }
+  }, 15000)
+
+  test("经软链别名的保存目录：USD依赖按真实路径解析后仍判为包内", async () => {
+    const sceneId = "alias-portable"
+    await operations.create({ sceneId })
+    const usd = '#usda 1.0\n(\n defaultPrim="Root"\n metersPerUnit=1\n upAxis="Z"\n)\ndef Xform "Root"\n{\n def Points "Fluid"\n {\n  point3f[] points = [(0,0,1),(.1,0,1)]\n }\n}\n'
+    const path = join(base, "fixtures-alias", "fluid.usda"); await mkdir(dirname(path), { recursive: true }); await writeFile(path, usd)
+    await operations.import({ sceneId, entityId: "fluid", resourceId: "res_fluid", path, components: { isaac: { sourcePath: path } }, alignBottomToSurface: false })
+    const real = join(base, "real-target"), alias = join(base, "alias-target")
+    await mkdir(real, { recursive: true }); await symlink(real, alias, "dir")
+    await operations.save(sceneId, join(alias, "package", "scene.json"), { portable: true })
+    const doc = JSON.parse(await readFile(join(real, "package", "scene.json"), "utf8"))
+    expect(doc.entities.some((row: { entityId: string }) => row.entityId === "fluid")).toBe(true)
+    const usdaFiles = (await readdir(join(real, "package", "resources"), { recursive: true })).filter((f) => String(f).endsWith(".usda"))
+    expect(usdaFiles.length).toBeGreaterThan(0)
+  }, 15000)
+  test("经软链别名导入的USD：依赖闭包按调用方路径记录两个文件", async () => {
+    const sceneId = "alias-import"
+    await operations.create({ sceneId })
+    const real = join(base, "real-import"), alias = join(base, "alias-import")
+    await mkdir(real, { recursive: true }); await symlink(real, alias, "dir")
+    const child = '#usda 1.0\n(\n defaultPrim="Child"\n)\ndef "Child"\n{\n}\n'
+    const root = '#usda 1.0\n(\n defaultPrim="Root"\n)\ndef "Root"\n{\n}\n\ndef "Ref" (\n prepend references = @./child.usda@\n)\n{\n}\n'
+    await writeFile(join(real, "child.usda"), child); await writeFile(join(real, "root.usda"), root)
+    const imported = await operations.import({ sceneId, entityId: "alias-usd", resourceId: "res_alias_usd", path: join(alias, "root.usda"), alignBottomToSurface: false })
+    const record = imported.resource ?? await operations.resources.get("res_alias_usd", 1)
+    const files = (record.parsed?.dependencies ?? []).map((row) => row.path ?? "")
+    expect(files.some((f) => f.endsWith("root.usda"))).toBe(true)
+    expect(files.some((f) => f.endsWith("child.usda"))).toBe(true)
   }, 15000)
 })

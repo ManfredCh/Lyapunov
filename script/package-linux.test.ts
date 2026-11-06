@@ -12,21 +12,35 @@
  * （R3 预修产物 → 冲突；R4 修复产物 → 启动成功且链接切到新安装；用户自定义链接仍被拒）。
  */
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { prepareLinuxNativeSystem, verifyLinuxNativeLoaders } from './native-system.ts'
 import { DESKTOP_APP_MANIFEST_PATH, desktopAppManifestWithVersion, desktopAppVersionViolations, readDesktopAppVersion, stampDesktopAppVersion } from '../distribution/linux/payload-contract.ts'
+import {buildReleaseClientVersions} from './client-release-version.ts'
 
 const root = join(import.meta.dirname, '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
 const productLink = readFileSync(join(root, 'script/product-link.ts'), 'utf8')
 
 describe('发行原生构建与归档接线', () => {
+  test('原SDK三个版本消费者在发行暂存区用产品版本重建，源码产物不变', async () => {
+    const lock=JSON.parse(readFileSync(join(root,'UPSTREAM_LOCK.json'),'utf8'))
+    const upstream=join(root,lock.directory),stage=mkdtempSync(join(realpathSync(tmpdir()),'lyapunov-client-version-'))
+    const names=['ui-settings-general','ui-settings-account','ui-sidebar']
+    const originals=names.map(name=>join(upstream,'packages/client',name,'lib/client.js'))
+    const before=originals.map(file=>readFileSync(file))
+    try{
+      for(const name of names){const file=join(stage,lock.directory,'packages/client',name,'lib/client.js');mkdirSync(dirname(file),{recursive:true});writeFileSync(file,'old fixture')}
+      await buildReleaseClientVersions(upstream,stage,lock.directory,'0.2.1')
+      for(const name of names){const text=readFileSync(join(stage,lock.directory,'packages/client',name,'lib/client.js'),'utf8');expect(text).toContain('0.2.1');expect(text).not.toContain('"0.2.0-rc.2"')}
+      originals.forEach((file,index)=>expect(readFileSync(file)).toEqual(before[index]!))
+    }finally{rmSync(stage,{recursive:true,force:true})}
+  },30000)
   test('共享加载器不能借入口包的局部平台链接；发行根链接恢复正常realpath解析', () => {
-    const stage=mkdtempSync(join(tmpdir(),'lyapunov-native-loader-'))
+    const stage=mkdtempSync(join(realpathSync(tmpdir()),'lyapunov-native-loader-'))
     const platform='node-addon-require-builtin-linux-x64-gnu'
     const put=(path:string,text:string)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,text)}
     const base=join(stage,'.modules/base/node_modules/node-addon-require-builtin')
@@ -54,9 +68,9 @@ describe('发行原生构建与归档接线', () => {
     }finally{rmSync(stage,{recursive:true,force:true})}
   })
   test('原生构建在依赖收闭前执行，真实载荷缺件检查紧邻tar之前', () => {
-    const prepareAt = packager.indexOf('const nodeRuntime=prepareLinuxNativeSystem(upstream,values.node!)')
+    const prepareAt = packager.indexOf('const nodeRuntime=macOS?prepareMacOSNativeSystem(upstream,values.node!):prepareLinuxNativeSystem(upstream,values.node!)')
     const closureAt = packager.indexOf('const nodes=new Map<string,PackageNode>()')
-    const checkAt = packager.indexOf('const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory)')
+    const checkAt = packager.indexOf('const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory,runtimePlatform)')
     const tarAt = packager.indexOf("const tar=spawnSync('tar'")
     expect(prepareAt).toBeGreaterThan(-1)
     expect(prepareAt).toBeLessThan(closureAt)
@@ -66,12 +80,12 @@ describe('发行原生构建与归档接线', () => {
   })
 
   test('固定SDK构建命令漂移会在执行或写产物之前阻断', () => {
-    const sdk = mkdtempSync(join(tmpdir(), 'lyapunov-native-command-'))
+    const sdk = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-native-command-'))
     try {
       writeFileSync(join(sdk, 'package.json'), JSON.stringify({ scripts: { 'build:native-system': 'tsx unexpected.ts' } }))
       const probe = spawnSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' })
       expect(probe.status).toBe(0)
-      expect(() => prepareLinuxNativeSystem(sdk, probe.stdout.trim())).toThrow('build:native-system 命令发生变化')
+      expect(() => prepareLinuxNativeSystem(sdk, probe.stdout.trim())).toThrow(process.platform==='linux'&&process.arch==='x64'?'build:native-system 命令发生变化':'原生构建要求所选发行 Node 运行在 Linux x64 glibc 上')
       expect(existsSync(join(sdk, 'native'))).toBe(false)
     } finally { rmSync(sdk, { recursive: true, force: true }) }
   })
@@ -94,10 +108,10 @@ describe('发行根清单名与产品链接归属判定同一身份', () => {
 
 describe('发行安装器的几何依赖与包内前缀复用', () => {
   const quote = (value:string) => "'"+value.replaceAll("'", "'\\''")+"'"
-  const fixture = (provider:'mujoco'|'isaac',geometryFails=false,pipFails=false,gpuBaseFails=false,gpuCheckFails=false) => {
-    const directory=mkdtempSync(join(tmpdir(),'lyapunov-geometry-install-')),product=join(directory,'product')
+  const fixture = (provider:'mujoco'|'isaac'|'newton',geometryFails=false,pipFails=false,gpuBaseFails=false,gpuCheckFails=false) => {
+    const directory=mkdtempSync(join(realpathSync(tmpdir()),'lyapunov-geometry-install-')),product=join(directory,'product')
     const put=(file:string,text:string,executable=false)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,text);if(executable)chmodSync(file,0o755)}
-    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt','packages/sim-mujoco/python/human_gpu.py','packages/sim-mujoco/python/check_human_cuda.py','packages/sim-mujoco/requirements-human-cuda.txt','packages/sim-mujoco/warp-source.json','packages/sim-mujoco/WARP-LICENSE.md']){
+    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt','packages/sim-newton/requirements.txt','packages/sim-mujoco/python/human_gpu.py','packages/sim-mujoco/python/check_human_cuda.py','packages/sim-mujoco/requirements-human-cuda.txt','packages/sim-mujoco/warp-source.json','packages/sim-mujoco/WARP-LICENSE.md']){
       mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(root,file),join(product,file))
     }
     // 通用 Kit 大 wheel 的固定 pin 在测试里替换为本地夹具：预置一个长度/SHA 已匹配的 wheel，
@@ -112,7 +126,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
     put(join(product,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),readFileSync(join(root,'packages/lyapunov-product-bundle/src/sdk-python.mjs'),'utf8'))
     const doctor=join(directory,'doctor.json'),log=join(directory,'pip.jsonl'),imports=join(directory,'imports.log')
     put(join(product,'distribution/linux/doctor.mjs'),`import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(doctor)},JSON.stringify(process.argv.slice(2)));console.log(JSON.stringify({status:'AVAILABLE',scope:'离线安装路由夹具'}))\n`)
-    const prefix=join(product,provider==='isaac'?'.runtime/conda/envs/isaac':'.runtime/sim-python')
+    const prefix=join(product,provider==='isaac'?'.runtime/conda/envs/isaac':provider==='newton'?'.runtime/newton-env':'.runtime/sim-python')
     const logger=join(directory,'pip-log.mjs')
     put(logger,`import{appendFileSync}from'node:fs';appendFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2))+'\\n');if(${pipFails}){console.error('ERROR: Connection broken: BrokenPipeError');process.exit(19)}\n`)
     const nodeProbe=spawnSync('node',['-p','process.execPath'],{encoding:'utf8'})
@@ -127,6 +141,33 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
     const run=(extra:string[]=[])=>spawnSync('/bin/sh',[join(product,'distribution/linux/install-provider'),provider,...(provider==='isaac'?['--accept-omniverse-eula']:[]),...extra],{encoding:'utf8',timeout:5000,env:{...process.env,LYAPUNOV_ENGINE_PREFERENCE_FILE:preference,LYAPUNOV_NODE_BIN:node,LYAPUNOV_MICROMAMBA:micromamba,LYAPUNOV_MUJOCO_PYTHON:'/outside/mujoco/python',LYAPUNOV_ISAAC_PYTHON:'/outside/isaac/python'}})
     return {directory,product,prefix,doctor,log,imports,preference,run,wheel}
   }
+
+  const darwinRejectsHumanCuda=(f:ReturnType<typeof fixture>)=>{
+    if(process.platform!=='darwin')return false
+    const result=f.run(['--human-cuda'])
+    expect(result.status,result.stderr).toBe(2)
+    expect(result.stderr).toContain('--human-cuda仅支持Linux NVIDIA主机')
+    expect(existsSync(f.log)).toBe(false)
+    expect(existsSync(f.doctor)).toBe(false)
+    return true
+  }
+
+  test('Newton原安装入口同时消费插件固定依赖清单，缺清单时在pip前阻断',()=>{
+    const f=fixture('newton')
+    try{
+      const result=f.run();expect(result.status,result.stderr).toBe(0)
+      const argv=JSON.parse(readFileSync(f.log,'utf8').trim()) as string[]
+      const requirement=join(f.product,'packages/sim-newton/requirements.txt')
+      expect(argv).toContain('newton[sim,importers]==1.6.0')
+      expect(argv[argv.indexOf('-r')+1]).toBe(requirement)
+      expect(readFileSync(requirement,'utf8').trim().split('\n')).toContain('warp-lang==1.17.0')
+      expect(readFileSync(requirement,'utf8').trim().split('\n')).toContain('Pillow==11.3.0')
+      expect(JSON.parse(readFileSync(f.doctor,'utf8'))).toEqual(['newton','--managed-sdk'])
+      rmSync(requirement);const before=readFileSync(f.log,'utf8'),failed=f.run()
+      expect(failed.status).toBe(2);expect(failed.stdout).toContain('RELEASE_PAYLOAD_MISSING')
+      expect(readFileSync(f.log,'utf8')).toBe(before)
+    }finally{rmSync(f.directory,{recursive:true,force:true})}
+  })
 
   test('MuJoCo与Isaac真实shell安装入口复用自己的前缀、递归依赖声明与pip缓存',()=>{
     for(const provider of ['mujoco','isaac'] as const){
@@ -176,6 +217,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
   test('仅显式Mu CUDA扩展给自己的稳定前缀补固定Warp，禁依赖升级且重复安装幂等',()=>{
     const f=fixture('mujoco')
     try{
+      if(darwinRejectsHumanCuda(f))return
       for(let i=0;i<2;i++){
         const result=f.run(['--human-cuda']);expect(result.status,result.stderr).toBe(0)
       }
@@ -193,6 +235,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
       const f=fixture(kind==='provider'?'isaac':'mujoco',false,false,kind==='base')
       try{
         if(kind==='payload')rmSync(join(f.product,'packages/sim-mujoco/python/human_gpu.py'))
+        if(kind!=='provider'&&darwinRejectsHumanCuda(f))continue
         const result=f.run(['--human-cuda']);expect(result.status,result.stderr).toBe(2);expect(existsSync(f.log)).toBe(false)
         expect(result.stdout+result.stderr).toContain(kind==='base'?'HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED':kind==='payload'?'RELEASE_PAYLOAD_MISSING':'--human-cuda只适用于MuJoCo')
       }finally{rmSync(f.directory,{recursive:true,force:true})}
@@ -202,6 +245,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
   test('CUDA设备或真实kernel自检失败必须非零，保留前缀且不进入CPU doctor成功分支',()=>{
     const f=fixture('mujoco',false,false,false,true)
     try{
+      if(darwinRejectsHumanCuda(f))return
       const result=f.run(['--human-cuda'])
       expect(result.status,result.stderr).toBe(2)
       expect(result.stdout).toContain('HUMAN_CUDA_CHECK_FAILED')
@@ -220,6 +264,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         const target=outside?join(f.directory,'external-sdk'):f.prefix
         mkdirSync(target,{recursive:true});writeFileSync(join(target,'keep.txt'),'原SDK不得修改')
         if(outside)symlinkSync(target,f.prefix,'dir')
+        if(darwinRejectsHumanCuda(f)){expect(readFileSync(join(target,'keep.txt'),'utf8')).toBe('原SDK不得修改');continue}
         const result=f.run(['--human-cuda'])
         expect(result.status,result.stderr).toBe(2)
         expect(result.stdout).toContain(outside?'PROVIDER_PREFIX_OUTSIDE_ROOT':'PROVIDER_PREFIX_CONFLICT')
@@ -292,7 +337,7 @@ describe('出处守卫：载荷相关的脏拒绝、载荷无关的脏放行', (
   }
   /** 合成检出：`packages/demo/src/plugin.ts` 进载荷、`packages/demo/test/case.ts` 与 `docs/note.md` 不进。 */
   const makeRepo = (): string => {
-    const dir = mkdtempSync(join(tmpdir(), 'lyapunov-provenance-'))
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-provenance-'))
     repos.push(dir)
     gitIn(dir, ['init', '-q'])
     gitIn(dir, ['config', 'user.email', 'guard@example.invalid'])
@@ -373,7 +418,7 @@ describe('出处守卫：载荷相关的脏拒绝、载荷无关的脏放行', (
   })
 
   test('非 Git 目录无法确认来源，退出 UNKNOWN 而不是当作干净树', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lyapunov-provenance-unknown-'))
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-provenance-unknown-'))
     repos.push(dir)
     const { status, report } = checkSource(dir)
     expect(status).toBe(4)
@@ -434,7 +479,7 @@ describe('desktop app version stamp: welcome page and RELEASE share one source (
   }
 
   test('stamps only version on the copied staging manifest and keeps every other source field/dependency', () => {
-    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    const stage = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-app-version-'))
     try {
       const sourceBefore = readFileSync(desktopSource, 'utf8')
       const original = JSON.parse(sourceBefore) as Record<string, unknown>
@@ -457,7 +502,7 @@ describe('desktop app version stamp: welcome page and RELEASE share one source (
   })
 
   test('different root product.version values enter the real app manifest through the same stamp rule', () => {
-    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    const stage = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-app-version-'))
     try {
       const file = stageDesktop(stage)
       const original = readStaged(file)
@@ -473,7 +518,7 @@ describe('desktop app version stamp: welcome page and RELEASE share one source (
   })
 
   test('pre-archive gate fails closed when the staging manifest is stale, missing or malformed (no fake version)', () => {
-    const stage = mkdtempSync(join(tmpdir(), 'lyapunov-app-version-'))
+    const stage = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-app-version-'))
     try {
       const file = stageDesktop(stage)
       // 模拟真实的旧 alpha4 残留：staging 里还是源版本

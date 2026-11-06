@@ -2,7 +2,7 @@
  * 原生 MJCF「只有 worldbody 级 geom/相机」的装配验收（122 现场 sim_open IndexError 的真实修复）。
  *
  * 运行：
- *   node --experimental-transform-types --test packages/sim-mujoco/test/native-worldbody-only.test.ts
+ *   node --experimental-strip-types --test packages/sim-mujoco/test/native-worldbody-only.test.ts
  *   （必须开 transform-types：sim-contract/src/python-transport.ts 用了 TypeScript 参数属性。）
  *   解释器：LYAPUNOV_MUJOCO_PYTHON（未设时用仓库内 .runtime/sim-python/bin/python）；没有解释器时
  *   整份测试显式 skip 并说明原因，不假装通过。

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -16,7 +16,7 @@ async function pkg(directory: string, name: string, version: string, extra: obje
   await writeFile(join(directory, "index.ts"), "export const identity = {}; export class Context {}\n")
 }
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "lyapunov-sdk-link-")); temporaryRoots.push(root)
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-sdk-link-")); temporaryRoots.push(root)
   const sdk = join(root, ".upstream", "sdk"), consumer = join(root, "packages", "consumer"), viewer = join(root, "packages", "viewer")
   await json(join(root, "UPSTREAM_LOCK.json"), { directory: ".upstream/sdk", commit: "fixture" })
   await json(join(root, "package.json"), { name: "lyapunov", private: true, workspaces: ["packages/*"] })
@@ -87,7 +87,7 @@ test("Bun cache未登记或包名不同即拒绝，所有原alias保持且没有
 
 test("同名外部包及用户自定义node_modules父链接均拒绝且不写外部目录", async () => {
   const { root, consumer } = await fixture()
-  const outside = await mkdtemp(join(tmpdir(), "lyapunov-user-dependency-")); temporaryRoots.push(outside)
+  const outside = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-user-dependency-")); temporaryRoots.push(outside)
   await pkg(join(outside, "cordis"), "@deepseek-ai/cordis", "4.0.4")
   const link = await alias(consumer, "@deepseek-ai/cordis", join(outside, "cordis"))
   await expect(linkUpstream(root, { replaceOwned: true })).rejects.toThrow("保留非本安装包管理")
@@ -100,7 +100,7 @@ test("同名外部包及用户自定义node_modules父链接均拒绝且不写�
 
 test("经.upstream中用户自定义软链指向外部同名包仍拒绝接管", async () => {
   const { root, consumer } = await fixture()
-  const outside = await mkdtemp(join(tmpdir(), "lyapunov-user-sdk-")); temporaryRoots.push(outside)
+  const outside = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-user-sdk-")); temporaryRoots.push(outside)
   await pkg(outside, "@deepseek-ai/cordis", "4.0.4")
   const indirect = join(root, ".upstream/user-custom"); await symlink(outside, indirect, "dir")
   const link = await alias(consumer, "@deepseek-ai/cordis", indirect)

@@ -1472,3 +1472,40 @@ describe("W22-R3 驱动工具全表审计：表外不再等于放行", () => {
     expect(outsideTouched.filter(entry => entry.why.length < 30).map(entry => entry.tool)).toEqual([])
   })
 })
+
+// 只验证原 SDK MCP 结构化观测的投影，驱动数据为明确夹具，不签真实桌面输入。
+test('原生窗口编号进入模型投影，保留原图片／规范值，拒绝及替换不被覆盖',async()=>{
+ const {projectNativeCuaObservation}=await import('../src/native-cua-result.ts')
+ const value={content:[{type:'text',text:'Found 1 window(s).'}],structuredContent:{windows:[{pid:17,window_id:23,title:'fixture'}]}}
+ const image:any={type:'image',source:{kind:'base64',mimeType:'image/png',data:'fixture'}}
+ const result:any={isError:false,value,content:[{type:'text',text:'Found 1 window(s).'},image]}
+ const projected=projectNativeCuaObservation('cua_driver_native__list_windows',result,{kind:'accept'})
+ expect(projected.kind).toBe('accept');if(projected.kind!=='accept'||!projected.content)throw Error('projection missing')
+ expect(projected.content[1]).toBe(image);expect(JSON.stringify(projected.content.at(-1))).toContain('window_id');expect(JSON.stringify(projected.content.at(-1))).toContain('23');expect(result.value).toBe(value);expect(result.content).toHaveLength(2)
+ for(const decision of [{kind:'block',feedback:[{type:'text',text:'denied'}]},{kind:'accept',content:[{type:'text',text:'redacted'}]},{kind:'accept',value:{replacement:true}}]as const){expect(projectNativeCuaObservation('cua_driver_native__list_windows',result,decision as any)).toBe(decision as any)}
+ expect(projectNativeCuaObservation('other_tool',result,{kind:'accept'})).toEqual({kind:'accept'})
+ expect(projectNativeCuaObservation('cua_driver_native__list_windows',{...result,isError:true},{kind:'accept'})).toEqual({kind:'accept'})
+})
+
+test('原ToolRuntime和MCP适配器真实串联：结构化窗口编号进入最终content且value保留',async()=>{
+ const {createMcpToolDefinition}=await import('@deepseek-ai/dsh-mcp-client')
+ const {projectNativeCuaObservation}=await import('../src/native-cua-result.ts')
+ const ctx=new Context();await ctx.plugin(SystemPrompt);await ctx.plugin(ToolRuntime)
+ ctx.on('tools/post-execute',async(exec,result,next)=>projectNativeCuaObservation(exec.name,result,await next()))
+ const payload={content:[{type:'text',text:'Found 1 window(s).'}],structuredContent:{windows:[{pid:17,window_id:23,title:'fixture'}]}}
+ ctx.tools.register(createMcpToolDefinition(ctx,{name:'cua_driver_native__list_windows',rawName:'list_windows',description:'明确的驱动结果夹具',inputSchema:{type:'object',properties:{pid:{type:'integer'}},required:['pid']},async call(){return payload}}))
+ try{const result=await ctx.tools.execute({callId:ToolCallId('native-window-projection-fixture'),name:'cua_driver_native__list_windows',arguments:{pid:17},signal:new AbortController().signal});expect(result.isError).toBe(false);if(result.isError)throw Error('failed');expect(JSON.stringify(result.content)).toContain('window_id');expect(JSON.stringify(result.value)).toContain('23')}
+ finally{await ctx.fiber.dispose()}
+})
+
+test('Mac 窗口观测投影排除附带的应用全局菜单，窗口身份和动作 token 保留',async()=>{
+ const {projectNativeCuaObservation}=await import('../src/native-cua-result.ts')
+ const tree='window_id=23\n\n- [0] AXWindow "fixture"\n  - [1] AXTextField "input"\n- [2] AXMenuBar\n  - [3] AXMenuItem "private-recent-item-fixture"'
+ const value={structuredContent:{window_id:23,snapshot_id:'s00000001',tree_markdown:tree,elements:[{element_index:0,role:'AXWindow'},{element_index:1,parent_index:0,role:'AXTextField',element_token:'s00000001:1'},{element_index:2,role:'AXMenuBar'},{element_index:3,parent_index:2,role:'AXMenuItem',label:'private-recent-item-fixture'}]}}
+ const image:any={type:'image',source:{kind:'base64',mimeType:'image/png',data:'fixture'}}
+ const result:any={isError:false,value,content:[{type:'text',text:tree},image]}
+ const projected=projectNativeCuaObservation('cua_driver_native__get_window_state',result,{kind:'accept'})
+ if(projected.kind!=='accept'||!projected.content)throw Error('projection missing')
+ const visible=JSON.stringify(projected.content)
+ expect(visible).not.toContain('private-recent-item-fixture');expect(visible).not.toContain('AXMenuBar');expect(visible).toContain('s00000001:1');expect(visible).toContain('window_id');expect(projected.content[1]).toBe(image);expect(result.value).toBe(value);expect(result.content[0].text).toBe(tree)
+})

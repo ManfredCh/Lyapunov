@@ -17,7 +17,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -199,7 +199,8 @@ function multiNodeDocument(): Record<string, unknown> {
 }
 
 suite('GLB 动画/skin 导入回执（ISAAC-19）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'lyapunov-glb-report-'))
+  // macOS 的 /var 是 /private/var 的符号链接：导入回执里的 source 是规范化后的真实路径，夹具根先对齐。
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'lyapunov-glb-report-')))
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
   test('带 animations 的 GLB：交付前给出结构化“已丢弃动画”事实', () => {

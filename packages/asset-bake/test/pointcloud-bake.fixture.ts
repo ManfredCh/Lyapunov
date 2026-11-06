@@ -1,5 +1,5 @@
 /** Node 真实公开工具/Jobs 验收；Bun 1.3 的 node:util 缺 getSystemErrorMessage，不能拿 mock 补成通过。
- * 命令：node --experimental-transform-types 本文件 <独立输出目录> <实际算法 Python>。 */
+ * 命令：node --experimental-strip-types 本文件 <独立输出目录> <实际算法 Python>。 */
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'

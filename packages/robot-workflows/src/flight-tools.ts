@@ -11,12 +11,15 @@ const parameters:ParameterSchemaSpec={input:{type:'object',required:true,additio
   positionM:{type:'array',items:{type:'number'}},yawRad:{type:'number'},maxDurationS:{type:'number'},landingSurfaceZ:{type:'number'},background:{type:'boolean'},
 }}}
 type FlightCommandInput=Omit<FlightInput,'operation'>&{operation:FlightInput['operation']|'stop'|'reset'|'status';background?:boolean}
+export type FlightStatusInput=Pick<FlightInput,'worldId'|'entityId'|'expectedGeneration'|'expectedSceneRevision'>
+export interface FlightStatusReader {read(agent:ToolExecution['agent'],input:FlightStatusInput,signal:AbortSignal):Promise<unknown>}
+declare module '@deepseek-ai/cordis' {interface Context {flightStatus:FlightStatusReader}}
 /** 只规范可选缺省字段与有符号零；非finite和数组缺项仍拒绝，不放宽工具无损 JSON 闸。 */
 function publicValue(value:unknown){return JSON.parse(JSON.stringify(value,function(_key,item){if(typeof item==='number'){if(!Number.isFinite(item))throw new Error('FLIGHT_NONFINITE_RECEIPT');return item===0?0:item}if(item===undefined&&Array.isArray(this))throw new Error('FLIGHT_MISSING_ARRAY_ITEM');return item}))}
 export function flightSummary(value:any){return {status:value.status,taskAchieved:value.taskAchieved,reason:value.reason,operation:value.operation,worldId:value.worldId,generation:value.generation,sceneRevision:value.sceneRevision,target:value.target,actions:value.actions,maxTiltRad:value.maxTiltRad,source:value.source,stopped:value.stopped,controllerStatus:value.controllerStatus,jobId:value.jobId,world:value.world,after:value.after?{frameId:value.after.frameId,step:value.after.stepIndex,position:value.after.entities?.[0]?.transform?.position}:undefined,stop:value.stop}}
 export function applyFlight(ctx:Context){
  const description="Local native flight control using the fixed Crazyflie2 physical thrust/torque PID: MuJoCo hover, world-frame XYZ in meters/yaw, and small controlled landings. input contains worldId/entityId/expectedGeneration/expectedSceneRevision and operation. This is not scene_edit translation, a learned policy, or a four-motor RPM/PX4 bridge. hover/goto are limited to 30 seconds and remove thrust on completion; continuous hovering requires maintaining flight-control windows. land requires an explicit landingSurfaceZ, the current world ground height in meters. stop cancels the controller and future output; reset resets the entire same-session physics world without editing the Scene or model. Reject missing real mappings/free roots/verified provenance. Generic and Isaac flight control remain separately unverified."
- const perform=async(input:FlightCommandInput,parent:Partial<ToolExecution>,signal:AbortSignal)=>{
+ const perform=async(input:FlightCommandInput,parent:Partial<ToolExecution>,signal:AbortSignal,manual=false)=>{
   const errors=validateArgs(parameters,{input});if(errors.length)throw new ToolArgsError(errors)
   const sim=simWorldsFor(ctx,parent.agent)
   const world=(await sim.listWorlds()).find(w=>w.worldId===input.worldId)
@@ -37,11 +40,16 @@ export function applyFlight(ctx:Context){
   if(signal.aborted)throw signal.reason??new Error('Cancelled before background Job registration')
   const controller=new AbortController()
   const jobId=ctx.jobs.start({kind:'lyapunov-provider' as never,label:'Crazyflie 本地飞控',owner:parent.agent?.id,outputLimitBytes:2000000,run:()=>({cancel:()=>controller.abort(),done:runFlight(sim,request,controller.signal).then(value=>({status:value.status==='cancelled'?'killed' as const:value.status==='completed'?'completed' as const:'failed' as const,result:JSON.stringify(flightSummary(value))}),error=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:String(error)}))})})
+  // 与原录制命令一致：人工操作由原 Jobs 等待者接收完成通知，不唤醒模型；工具调用仍保留通知。
+  if(manual&&parent.agent)void ctx.jobs.wait(jobId,2_147_483_647,parent.agent.id).catch(error=>ctx.logger.warn('飞控作业等待结束：'+String(error)))
   return {operation:input.operation,status:'running',jobId,worldId:input.worldId,generation:input.expectedGeneration,sceneRevision:input.expectedSceneRevision}
  }
+ // 供工作台只读轮询；仍由同一个 perform 和飞控 owner 判定会话、世界与代次。
+ const statusReader:FlightStatusReader={read:async(agent,input,signal)=>publicValue(await perform({...input,operation:'status'},{agent},signal))}
+ ctx.reflect.provide('flightStatus',statusReader)
  ctx.tools.register(defineTool({name:'robot_flight',description,parameters,output:{schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(args,exec)=>publicValue(await perform(args.input as unknown as FlightCommandInput,exec,exec.signal))}))
  ctx.commands.register({name:'robot_flight',description,input:{hint:"JSON containing the current world/instance/generation/revision/operation; this is not visual translation."},handler:async invocation=>{
-  try{return {kind:'success',text:JSON.stringify(publicValue(await perform(JSON.parse(invocation.rawInput),{agent:invocation.agent},invocation.signal)))}}
+  try{return {kind:'success',text:JSON.stringify(publicValue(await perform(JSON.parse(invocation.rawInput),{agent:invocation.agent},invocation.signal,true)))}}
   catch(error){return {kind:'error',text:String(error)}}
  }})
 }

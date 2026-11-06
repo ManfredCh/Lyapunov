@@ -525,7 +525,8 @@ describe("camera_fit（任务 40）的输出可以直接喂进来", () => {
     const again = normalizeCameraRequest({ worldFromCamera: measured.worldFromCamera, intrinsics: measured.intrinsics, near: measured.near, far: measured.far, cameraUp: measured.up }, { fovYDeg: 50 })
     expect(writeViewToCamera(app.camera, app.controls, again, app.size).errors).toEqual([])
     const second = describeCameraView(app.camera, app.size, again.up)
-    expect(quaternionAngleDeg(second.quaternion, measured.quaternion)).toBeLessThan(1e-6)
+    // 1e-6° 是在 x64 上钉住的实测噪声；acos 在 dot≈1 处导数发散，arm64 的舍入路径会多一两个 ulp（实测 2.4e-6°），放一档仍远小于任何真实失败分支（≥1e-3°）。
+    expect(quaternionAngleDeg(second.quaternion, measured.quaternion)).toBeLessThan(1e-5)
     expectIntrinsicsClose(second.intrinsics, measured.intrinsics, 1e-9)
   })
 

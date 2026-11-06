@@ -9,7 +9,7 @@ export interface FlightInput {
   worldId:string;entityId:string;expectedGeneration:number;expectedSceneRevision:number
   operation:'hover'|'goto'|'land';positionM?:FlightVec3;yawRad?:number;maxDurationS?:number;landingSurfaceZ?:number
 }
-export interface FlightSample { step:number;timeS:number;positionM:FlightVec3;yawRad:number;errorM:number;yawErrorRad:number;tiltRad:number;thrustN:number;torqueNm:FlightVec3;measuredActuatorForce?:unknown;contacts:number }
+export interface FlightSample { step:number;timeS:number;positionM:FlightVec3;yawRad:number;errorM:number;yawErrorRad:number;tiltRad:number;thrustN:number;torqueNm:FlightVec3;measuredActuatorForce?:unknown;measuredAtStep?:unknown;contacts:number }
 export interface FlightResult { status:'completed'|'failed'|'cancelled';taskAchieved:boolean;reason?:string;worldId:string;generation:number;sceneRevision:number;operation:string;target:FlightTarget;before:Frame;after:Frame;stop:Awaited<ReturnType<typeof confirmStop>>;samples:FlightSample[];actions:number;clock:string;maxTiltRad:number;source:'native-body-wrench-pid' }
 const running=new WeakMap<SimWorlds,Map<string,{controller:AbortController;done:Promise<FlightResult>;generation:number}>>()
 const recent=new WeakMap<SimWorlds,Map<string,ReturnType<typeof summarizeFlight>>>()
@@ -94,7 +94,8 @@ async function performFlight(sim:SimWorlds,input:FlightInput,signal:AbortSignal,
       options.onAction?.(action.actionId)
       const receipt=await sim.execute(input.worldId,action,signal);actions++
       assertIdentity('飞控动作回执',receipt,{worldId:input.worldId,generation:input.expectedGeneration})
-      sample.measuredActuatorForce=receipt.effect?.measuredActuatorForce;samples.push(sample);options.sample?.(sample)
+      const motion=Array.isArray(receipt.effect?.motions)?receipt.effect.motions.find((item:unknown)=>item&&typeof item==='object'&&(item as Record<string,unknown>).entityId===input.entityId&&(item as Record<string,unknown>).kind==='thrust') as Record<string,unknown>|undefined:undefined
+      sample.measuredActuatorForce=motion?.measuredActuatorForce;sample.measuredAtStep=motion?.measuredAtStep;samples.push(sample);options.sample?.(sample)
       if(receipt.status!=='completed')throw new Error('FLIGHT_ACTION_'+receipt.status.toUpperCase()+': '+(receipt.reason??''))
       if(world.clock==='manual'&&options.paceManual!==false)await delay(period*1000,undefined,{signal})
     }

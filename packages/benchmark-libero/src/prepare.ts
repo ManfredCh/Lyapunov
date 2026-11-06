@@ -58,7 +58,7 @@ export function sdkProcessEnv(isolatedRoot: string, env: NodeJS.ProcessEnv = pro
     // 只修正本次子进程的查找路径，不改共享 Python 环境或用户全局配置。
     PYTHONPATH: [resolve(isolatedRoot, 'libero-source'), process.env.PYTHONPATH].filter(Boolean).join(delimiter),
     PYTHONUNBUFFERED: '1',
-    MUJOCO_GL: resolveMuJoCoGlBackend(),
+    MUJOCO_GL: resolveMuJoCoGlBackend(undefined,process.platform,process.env.MUJOCO_GL,'benchmark'),
   }
 }
 

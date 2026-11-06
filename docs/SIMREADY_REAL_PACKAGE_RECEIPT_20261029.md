@@ -72,7 +72,7 @@ cd /home/s18/WS/Lyapunov/.worktrees/simready-usd-20261028
 HF_ENDPOINT=https://hf-mirror.com \
 LYAPUNOV_PRODUCT_ROOT="$PWD" \
 LYAPUNOV_USD_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/usd-python/bin/python \
-node --experimental-transform-types .runtime/cdn-exception-20261029/verify-box.ts \
+node --experimental-strip-types .runtime/cdn-exception-20261029/verify-box.ts \
   --out .runtime/cdn-exception-20261029/新的离线复跑目录
 ```
 
@@ -82,15 +82,15 @@ node --experimental-transform-types .runtime/cdn-exception-20261029/verify-box.t
 
 | 实施方实际入口 | 退出与结果 | 任务根内报告 |
 |---|---|---|
-| `node --experimental-transform-types .../acquire-box.ts` | 最终 0；真实产品导入、30/30 | `acquire-box.log`、`acquire-receipt.json` |
-| `node --experimental-transform-types .../verify-box.ts --out .../replay-proof` | 0；独立新目录完整离线复跑 | `replay-proof.log`、`replay-proof/verify-receipt.json` |
-| `node --experimental-transform-types .../isaac-box.ts` | 最终 0；真实双体物理与共享 Viewer 函数 | `isaac-box.log`、`isaac-native/receipt.json` |
+| `node --experimental-strip-types .../acquire-box.ts` | 最终 0；真实产品导入、30/30 | `acquire-box.log`、`acquire-receipt.json` |
+| `node --experimental-strip-types .../verify-box.ts --out .../replay-proof` | 0；独立新目录完整离线复跑 | `replay-proof.log`、`replay-proof/verify-receipt.json` |
+| `node --experimental-strip-types .../isaac-box.ts` | 最终 0；真实双体物理与共享 Viewer 函数 | `isaac-box.log`、`isaac-native/receipt.json` |
 | `bun run script/gates/run-usd-assets.ts --out .../native-alias-gate` | 0；8 个用例 | `native-alias-gate/report.json` |
 | `bun run test:ci --filter packages/scene-kit/test/simready-assets.test.ts` | 0；5 个用例 | `ci-simready.json` |
 | `bun run test:ci --filter packages/scene-kit/test/warehouse-catalog.test.ts` | 0；6 个用例 | `ci-warehouse.json` |
 | `bun run test:ci --filter packages/scene-kit/test/portable-` | 0；本线默认清单实际执行 relocation 文件的 3 个用例 | `ci-portable.json` |
 | 根 `tsc --noEmit -p tsconfig.json`、`bun run script/build-plugins.ts scene-kit`、`git diff --check` | 均 0 | `tsc.log`、`build-scene-kit.log` |
-| `node --experimental-transform-types .../acquire-pallet.ts` | 2；缺源身份的 MDL 依赖，停止 | `pallet-acquire-receipt.json` |
+| `node --experimental-strip-types .../acquire-pallet.ts` | 2；缺源身份的 MDL 依赖，停止 | `pallet-acquire-receipt.json` |
 
 初次任务脚本的过严镜像 resolve-cache 路径判断、对 PhysX Disabled 的错误物理假设、真实便携缺件反例及原生回执脚本字段修正，均保留在本轮日志；最终通过不抹去先前失败。主控已对 `aeca5889` 独立运行上述相关门、根类型检查与全插件构建，全部退出 0；完整命令和时长见其 `candidate-checks/receipt.json`。未为本次数据/窄修再跑全仓 CI，既有 marketplace 5 秒基线超时结论未更改。未运行 RTX、性能容量或生产发布；最终完整工作台外观仍由主控独立记录。
 

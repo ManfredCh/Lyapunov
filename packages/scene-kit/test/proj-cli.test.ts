@@ -9,11 +9,17 @@
  *   · 子进程是异步的（等待期间事件循环不被占住），取消会真的终止本次子进程；
  *   · 另外钉住 UTM 带边比例因子 1.00098、EPSG:4490↔4326 只有 ballpark/noop（unknown accuracy）。
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import {
   datumOperation, enuToWgs84, geodesicDistancesM, parseProjRows, projStatus, projVersion, runProjCommand, spawnProjProcess, transformCoordinates, wgs84ToEnu,
 } from "../src/proj-cli.ts"
+import { installMissingOstn15Grid } from "./proj-missing-grid.fixture.ts"
+
+// 判据作者的环境（Debian/Ubuntu proj-bin、云 CI）不带 OSTN15 格网；Homebrew proj 自带 ⇒ macOS 上
+// 「缺格网」前提不成立。这里真实复现缺失（影子数据目录），不是跳测——见 fixture 文件头注释。
+const restoreMissingGrid = installMissingOstn15Grid()
+afterAll(restoreMissingGrid)
 
 const anchor = { lon: 8.5417, lat: 47.3769, h: 0 }
 const signal = new AbortController().signal
@@ -24,7 +30,10 @@ function cs2cs(from: string, to: string, point: [number, number]): { numbers: [n
   const plain = spawnSync("cs2cs", args, { input: `${point[0]}\t${point[1]}\n`, encoding: "utf8" })
   const debugRun = spawnSync("cs2cs", args, { input: `${point[0]}\t${point[1]}\n`, encoding: "utf8", env: { ...process.env, PROJ_DEBUG: "3" } })
   const used = (debugRun.stderr ?? "").split("\n").map(line => line.trim()).find(line => /^Using coordinate operation /.test(line))
-  return { numbers: (plain.stdout ?? "").trim().split(/\s+/).slice(0, 2).map(Number) as [number, number], used: used?.replace(/^Using coordinate operation /, "") ?? "" }
+  // epsg: 权威语法遵守 EPSG 轴序（4326 输出 lat,lon）；换回 GIS 惯用的 lon,lat 再供对照。
+  const raw = (plain.stdout ?? "").trim().split(/\s+/).slice(0, 2).map(Number)
+  const numbers: [number, number] = /^epsg:/.test(to) ? [raw[1]!, raw[0]!] : [raw[0]!, raw[1]!]
+  return { numbers, used: used?.replace(/^Using coordinate operation /, "") ?? "" }
 }
 
 describe("PROJ 命令行适配层", () => {
@@ -186,7 +195,9 @@ describe("projinfo 事实解析：这对 CRS 之间 PROJ 实际用什么运算",
     expect(osgb.candidateCount).toBeGreaterThan(1)       // 这对 CRS 候选不止一条（不是只有 ballpark 兜底）
 
     // 数值路线与 cs2cs 独立换算逐点相同，且 cs2cs 自报的运算名就在报告的描述里
-    const independent = cs2cs("+init=epsg:27700", "+init=epsg:4326", [530000, 180000])
+    // epsg: 权威语法走 CRS→CRS 运算选择（PROJ_DEBUG=3 会自报 "Using coordinate operation"）；
+    // +init=epsg: 在 PROJ ≥ 8 只是 init 文件查表，不做运算选择、也不产那条诊断行。
+    const independent = cs2cs("epsg:27700", "epsg:4326", [530000, 180000])
     const mine = (await transformCoordinates(osgb, [[530000, 180000]], { signal }))[0]!
     expect(Math.max(Math.abs(mine[0] - independent.numbers[0]), Math.abs(mine[1] - independent.numbers[1]))).toBeLessThan(1e-9)
     expect(independent.used).toContain("British National Grid")
@@ -244,8 +255,8 @@ describe("projinfo 事实解析：这对 CRS 之间 PROJ 实际用什么运算",
     const row = parseProjRows(stdout, 1, 2, "27700→4326（缺格网）")
     expect(row[0]![0]).toBeCloseTo(-0.128, 2)     // 伦敦附近的经度：数值看起来完全合理
     expect(row[0]![1]).toBeCloseTo(51.504, 2)
-    // cs2cs 成功 ≠ 用的是带精度的运算：PROJ 自己说它用的是哪条（PROJ_DEBUG=3）
-    const independent = cs2cs("+init=epsg:27700", "+init=epsg:4326", [530000, 180000])
+    // cs2cs 成功 ≠ 用的是带精度的运算：PROJ 自己说它用的是哪条（PROJ_DEBUG=3 + epsg: 权威语法）
+    const independent = cs2cs("epsg:27700", "epsg:4326", [530000, 180000])
     expect(independent.used.length).toBeGreaterThan(0)
     // 而报告层给出的 27700 运算不需要格网（2 m 七参数）——两条路线因此必须指向同一条运算（上面已逐点钉住）
   })

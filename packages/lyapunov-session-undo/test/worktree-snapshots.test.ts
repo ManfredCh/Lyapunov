@@ -18,7 +18,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { runtimePluginInsert } from '../../../script/runtime-patch.ts'
@@ -31,7 +31,7 @@ const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, en
 
 /** 每个用例一套隔离的真实 Git 工作树 + 工作树之外的私有快照库。 */
 async function fixture(): Promise<{ root: string; store: WorktreeSnapshots; storageRoot: string }> {
-  const base = await mkdtemp(join(tmpdir(), 'undo-worktree-'))
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'undo-worktree-')))
   scratch.push(base)
   const root = join(base, 'repo'), storageRoot = join(base, 'store')
   mkdirSync(root)

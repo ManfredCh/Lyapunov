@@ -11,8 +11,8 @@
  *     Rough→Roughness、nor_gl→Normal、AO→乘进底色），并核对导出的 GLB 里**真的带 images**。
  *  3. **渲染图回喂**：`world.py` 唯一给出的 preview 路径必须存在（模型"看到自己产出"的来源）。
  *  4. **烘焙动画**：带关键帧的世界导出 GLB，用 Three.js 真读——有动画的实体读出 clip 且
- *     **mixer 推进后对象真的转了**；静止实体没有 clip；**作为资源导入产品场景后仍存在 glTF 节点实体**
- *     （Viewer 挂 mixer 的载体，否则动画永远播不出来）。
+ *     **mixer 推进后对象真的转了**；静止实体没有 clip；**原 operation 导入后保留 animatedAssembly、资源与 clip**
+ *     （复用 0.2.1 完整动画树及其 mixer，不要求拆成单独 glTF 节点实体）。
  *  5. **真实浏览器播放**：起真产品 host + 真 Chrome（WebGL），从产品自身 HTTP 路由取 viewer 发行包，
  *     单次 `setScene` 后读播放表，并在真实 rAF 循环里采样被驱动节点的转角与画布像素，附**暂停负对照**。
  *     这一条实测抓到过产品真缺陷（首发场景不进播放表），详见下方注释。
@@ -62,6 +62,7 @@ function importScript(sceneKitPath: string): string {
     "const ops = new SceneOperations(process.env.SCENE_ROOT!, process.env.PRODUCT_ROOT!)",
     'const scene = await ops.create({ sceneId: "g19-import", name: "g19 import" })',
     'await ops.import({ path: process.env.GLB_PATH!, sceneId: scene.sceneId, entityId: "animated-import" })',
+    'await Bun.write(process.env.SNAPSHOT_FILE!, JSON.stringify(await ops.inspect(scene.sceneId)))',
     'console.log("IMPORTED=" + scene.sceneId)',
     "",
   ].join("\n")
@@ -235,13 +236,13 @@ export async function gateG19(): Promise<GateResult> {
     // 通过），只有解析到路径才进入真实导入与真实浏览器探针。
     const noPanelReason = `door_panel 的可视 GLB 无法按实体身份从 scene.json 解析（scene.json 存在=${existsSync(sceneFile)}，解析结果=${String(panelPath)}）`
     const imported = panelPath === null
-      ? { summary: `无法导入：${noPanelReason}`, nodeEntities: 0, clips: 0, clipNames: "" }
+      ? { summary: `无法导入：${noPanelReason}`, carriers: 0, clips: 0, clipNames: "", sceneFile: undefined }
       : await importSceneAndImportGlb(root, panelPath)
     checks.push({
-      name: "imported_glb_yields_gltf_node_entity",
-      ok: imported.nodeEntities > 0 && imported.clips > 0,
-      detail: `把带动画的 GLB 作为资源导入产品场景：实体=${imported.summary}；其中 **glTF 节点实体（Viewer 挂 mixer 的载体）=${imported.nodeEntities}**；`
-        + `该 GLB 的 clips=${imported.clips}（${imported.clipNames}）——导入后动画仍有载体，不会只剩一个无动画的 group 根`,
+      name: "imported_glb_preserves_animation_assembly",
+      ok: imported.carriers > 0 && imported.clips > 0,
+      detail: `把带动画的 GLB 经原 SceneOperations 导入：实体=${imported.summary}；**原动画装配载体=${imported.carriers}**；`
+        + `该 GLB 的 clips=${imported.clips}（${imported.clipNames}）。0.2.1 的 animatedAssembly 保留整棵动画／骨骼树；下条以这份真实导入快照验证浏览器播放。`,
     })
 
     // ── 6) 真实浏览器里真的播放（此前是本门如实声明的未覆盖项）──────────────
@@ -250,9 +251,9 @@ export async function gateG19(): Promise<GateResult> {
     // mixer 在首次 setScene 的异步载入里才建出来，而登记发生在载入之前 ⇒ 新开场景永远不进播放表
     // （`animationSummary` 报 0 clip、`advanceAnimations` 空转），要等下一次场景版本变更才突然动。
     const BUN = process.env.BUN_EXECUTABLE ?? "bun"
-    const playRun = panelPath === null
+    const playRun = panelPath === null || !imported.sceneFile
       ? { code: 1, stdout: "", stderr: `${noPanelReason}——没有可播放的对象，探针未运行` }
-      : await runCommand([BUN, "run", join(PRODUCT_ROOT, "script/gates/viewer-play.ts"), panelPath])
+      : await runCommand([BUN, "run", join(PRODUCT_ROOT, "script/gates/viewer-play.ts"), panelPath, imported.sceneFile])
     const playLine = playRun.stdout.split("\n").reverse().find(line => line.startsWith("VIEWER_PLAY="))
     const play = playLine ? safeJson(playLine.slice("VIEWER_PLAY=".length)) as {
       ok?: boolean; environment?: string; detail?: string; error?: string
@@ -302,30 +303,29 @@ export async function gateG19(): Promise<GateResult> {
  * TypeScript 参数属性（`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`），而本门必须在 node 下跑（Cordis 树约束）。
  * 读 scene.json 同样是**产品真实产物**，且不把门的可运行性绑在运行器特性上；导入动作本身用 bun 执行。
  */
-async function importSceneAndImportGlb(root: string, glbPath: string): Promise<{ summary: string; nodeEntities: number; clips: number; clipNames: string }> {
+async function importSceneAndImportGlb(root: string, glbPath: string): Promise<{ summary: string; carriers: number; clips: number; clipNames: string; sceneFile?:string }> {
   try {
     const sceneRoot = join(root, "imported-scenes")
     const script = join(root, "import-glb.ts")
     await writeFile(script, importScript(join(PRODUCT_ROOT, "packages/scene-kit/src/operations.ts")))
-    const run = await runCommand(["bun", "run", script], { SCENE_ROOT: sceneRoot, PRODUCT_ROOT, GLB_PATH: glbPath })
-    if (run.code !== 0) return { summary: `导入失败：${run.stderr.slice(-200)}`, nodeEntities: 0, clips: 0, clipNames: "" }
-    // 产品布局：Scene 文档落在 <sceneRoot>/scenes/<sceneId>.json（不是 sceneRoot 根下）。
-    const sceneFile = join(sceneRoot, "scenes", "g19-import.json")
-    if (!existsSync(sceneFile)) return { summary: `导入产物缺失：${sceneFile}`, nodeEntities: 0, clips: 0, clipNames: "" }
-    const snapshot = JSON.parse(await readFile(sceneFile, "utf8")) as { entities?: Array<{ components?: Record<string, { kind?: string; gltfNode?: number }> }> }
+    const sceneFile=join(root,'imported-snapshot.json')
+    const run = await runCommand(["bun", "run", script], { SCENE_ROOT: sceneRoot, PRODUCT_ROOT, GLB_PATH: glbPath, SNAPSHOT_FILE:sceneFile })
+    if (run.code !== 0) return { summary: `导入失败：${run.stderr.slice(-200)}`, carriers: 0, clips: 0, clipNames: "" }
+    if (!existsSync(sceneFile)) return { summary: `导入产物缺失：${sceneFile}`, carriers: 0, clips: 0, clipNames: "" }
+    const snapshot = JSON.parse(await readFile(sceneFile, "utf8")) as { entities?: Array<{ resources?:unknown[];components?: Record<string, { kind?: string; animatedAssembly?: boolean }> }> }
     const entities = snapshot.entities ?? []
     const kinds = entities.map(entity => String(entity.components?.visual?.kind))
-    const nodeEntities = entities.filter(entity => entity.components?.visual?.kind === "mesh" && typeof entity.components?.visual?.gltfNode === "number").length
+    const carriers = entities.filter(entity => entity.components?.visual?.kind === "mesh" && entity.components.visual.animatedAssembly===true&&(entity.resources?.length??0)>0).length
     const reader = await runCommand(["node", READER, glbPath])
     const facts = safeJson(reader.stdout) as { clips?: Array<{ name: string }> } | undefined
     return {
       summary: `${entities.length} 个（kind=[${kinds.join(",")}]）`,
-      nodeEntities,
+      carriers,sceneFile,
       clips: facts?.clips?.length ?? 0,
       clipNames: (facts?.clips ?? []).map(clip => clip.name).join(","),
     }
   } catch (error) {
-    return { summary: `导入失败：${String((error as Error)?.message ?? error)}`, nodeEntities: 0, clips: 0, clipNames: "" }
+    return { summary: `导入失败：${String((error as Error)?.message ?? error)}`, carriers: 0, clips: 0, clipNames: "" }
   }
 }
 

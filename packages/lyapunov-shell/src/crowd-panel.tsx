@@ -48,3 +48,5 @@ export function CrowdPanel({scene,world,frame,disabled,command,onSaved,sync,choo
   {message&&<p className="lya-help" role="status">{message}</p>}
  </div>
 }
+
+export function countCrowdStarts(command:(name:string,input:unknown)=>Promise<unknown>,running:{current:number}){return (name:string,input:unknown)=>{if(name!=='crowd_start')return command(name,input);running.current++;return command(name,input).finally(()=>{running.current--})}}

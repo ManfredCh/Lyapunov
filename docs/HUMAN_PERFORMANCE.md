@@ -59,7 +59,7 @@ LYAPUNOV_MUJOCO_PYTHON=/已有解释器/sim-python/bin/python \
 
 ## 回归与本地CI
 
-- `LYAPUNOV_MUJOCO_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/sim-python/bin/python MUJOCO_GL=osmesa node --experimental-transform-types --test packages/human-crowd/test/native.test.ts`：2/2、0skip、exit 0，内部15组，日志`/tmp/human-performance-native-final.log`。新增20人合批与原标量逐tick site/geom/body/动态状态严格对照、真实推动方块、选择停止、详细20人与运动Panda同步batch默认停障/零人体机器人接触。
+- `LYAPUNOV_MUJOCO_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/sim-python/bin/python MUJOCO_GL=osmesa node --experimental-strip-types --test packages/human-crowd/test/native.test.ts`：2/2、0skip、exit 0，内部15组，日志`/tmp/human-performance-native-final.log`。新增20人合批与原标量逐tick site/geom/body/动态状态严格对照、真实推动方块、选择停止、详细20人与运动Panda同步batch默认停障/零人体机器人接触。
 - `TESTCI_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/python bun run test:ci --filter packages/human-crowd/`：所选文件通过、exit 0，`/tmp/human-performance-ci-final.log`。
 - 同解释器 `bun run test:ci --filter packages/sim-mujoco/`：本次CI分类选择3文件、全部通过、exit 0，`/tmp/human-performance-mujoco-ci.log`；其他需要原生环境的分类未冒称自动通过。
 - `bun x tsc --noEmit`与`bun run script/build-plugins.ts human-crowd sim-mujoco`：exit 0，`/tmp/human-batch-tsc-final.log`、`/tmp/human-performance-build.log`。新增Python依赖是`packages/sim-mujoco/python/human_batch.py`，随原有worker源码目录交付。
@@ -120,8 +120,8 @@ LYAPUNOV_MUJOCO_PYTHON=/已有解释器/sim-python/bin/python \
 
 | 命令/检查 | 本轮结果 |
 | --- | --- |
-| `LYAPUNOV_MUJOCO_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/sim-python/bin/python MUJOCO_GL=osmesa node --experimental-transform-types --test packages/human-crowd/test/native.test.ts` | 2/2、0skip，内部16组，严格默认loop/停止/窗口/接触/当前步读回通过 |
-| `LYAPUNOV_ISAAC_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/python LYAPUNOV_USD_PYTHON=/home/s18/WS/Lyapunov/.worktrees/simready-usd-20261028/.runtime/usd-python/bin/python node --experimental-transform-types --test packages/human-crowd/test/isaac-native.test.ts` | 1/1、0skip，同世界11组通过、closed=true |
+| `LYAPUNOV_MUJOCO_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/sim-python/bin/python MUJOCO_GL=osmesa node --experimental-strip-types --test packages/human-crowd/test/native.test.ts` | 2/2、0skip，内部16组，严格默认loop/停止/窗口/接触/当前步读回通过 |
+| `LYAPUNOV_ISAAC_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/python LYAPUNOV_USD_PYTHON=/home/s18/WS/Lyapunov/.worktrees/simready-usd-20261028/.runtime/usd-python/bin/python node --experimental-strip-types --test packages/human-crowd/test/isaac-native.test.ts` | 1/1、0skip，同世界11组通过、closed=true |
 | `TESTCI_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/python bun run test:ci --filter packages/human-crowd/` | CI所选1文件通过 |
 | 同环境 `bun run test:ci --filter packages/sim-mujoco/` | CI所选3文件通过 |
 | `bun x tsc --noEmit` | 根配置覆盖的产品源码/测试通过；不冒称实验脚本全部单独类型检查 |

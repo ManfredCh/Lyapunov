@@ -1,7 +1,7 @@
 import {app,BrowserWindow,WebContentsView,ipcMain,safeStorage,shell,dialog,Menu} from "electron"
 import type {WebContents} from "electron"
 import {randomUUID} from "node:crypto"
-import {ExitCoordinator,type ExitOrigin,type ExitSummary} from "./exit-coordinator.ts"
+import {ExitCoordinator,registerDesktopTerminationSignals,type ExitOrigin,type ExitSummary} from "./exit-coordinator.ts"
 import Store from "electron-store"
 import windowState from "electron-window-state"
 import updater from "electron-updater"
@@ -19,6 +19,7 @@ import {resolveAccountApiUrl} from '../../lyapunov-product-bundle/src/account/ur
 import {applySoftwareGlSwitches} from "./software-rendering.ts"
 import {applyNvidiaGlSwitches,nvidiaRenderingEnvironment,assertNvidiaRendering} from "./nvidia-rendering.ts"
 import {resolveDesktopDataRoot} from "./data-root.ts"
+import {needsWslGpuBlocklistBypass,openOnWslHost,shouldOpenOnWslHost} from "./wsl-open.ts"
 import {classifyStartupFailure,planRestartRecovery,readWorkspaceRecords,resolveWorkspaceHostMode} from "./restart-recovery.ts"
 import {LOCAL_IMPORT_FILE_FILTERS} from "../../lyapunov-shell/src/local-file-import.ts"
 import {desktopExitDialog,desktopExitFailureDialog,desktopShortcut,desktopWindowTitle} from "./window-chrome.ts"
@@ -26,6 +27,14 @@ import {accountLocale,DesktopLocaleMirror,desktopLocales,SUPPORT_MAILTO} from ".
 
 const mode=process.argv.includes("--developer")?"developer":"formal"
 if(mode==="developer"&&(app.isPackaged||process.env.NODE_ENV==="production"))throw new Error("发行构建不允许开发模式")
+// Finder 直接打开便携包 .app 时不会经过 shell launcher；仍选同包 Node，保留同一个 Host/插件入口。
+if(app.isPackaged&&process.platform==='darwin'){
+ const nodeBin=join(PRODUCT_ROOT,'runtime/node/bin')
+ process.env.PATH=nodeBin+':'+(process.env.PATH??'/usr/bin:/bin:/usr/sbin:/sbin')
+ process.env.HF_ENDPOINT='https://hf-mirror.com'
+ process.env.PYTHONNOUSERSITE='1'
+ for(const name of ['NODE_PATH','NODE_OPTIONS','ELECTRON_RUN_AS_NODE','PYTHONPATH','PYTHONHOME','PYTHONUSERBASE','PYTHONSTARTUP'])delete process.env[name]
+}
 app.setName("LyapunovDSH")
 // 与发行.desktop及既有X11 class对齐；不改app名称或用户数据路径。
 if(process.platform==="linux")app.setDesktopName("lyapunov-desktop.desktop")
@@ -38,6 +47,7 @@ const nvidiaRendering=process.argv.includes("--nvidia-rendering"),softwareRender
 if(nvidiaRendering&&softwareRendering)throw new Error("DESKTOP_RENDERING_CONFLICT: --nvidia-rendering 与 --software-rendering 不可同时使用")
 if(nvidiaRendering){Object.assign(process.env,nvidiaRenderingEnvironment(process.env,process.platform));applyNvidiaGlSwitches(app.commandLine)}
 if(softwareRendering)applySoftwareGlSwitches()
+if(needsWslGpuBlocklistBypass())app.commandLine.appendSwitch("ignore-gpu-blocklist")
 const diagnosticsArg=process.argv.find(value=>value.startsWith("--acceptance-output="))
 const diagnostics=!app.isPackaged&&diagnosticsArg?resolve(diagnosticsArg.slice("--acceptance-output=".length)):undefined
 let nvidiaRendererFacts:unknown
@@ -56,7 +66,7 @@ const incidentFile=join(dataRoot,"desktop-incidents.jsonl")
 const safeIncidentUrl=(raw:string)=>{try{const parsed=new URL(raw);return `${parsed.origin}${parsed.pathname}`}catch{return "unparseable"}}
 const recordIncident=(kind:string,details:Record<string,unknown>={})=>{void appendFile(incidentFile,JSON.stringify({kind,...details,time:new Date().toISOString()})+"\n").catch(error=>console.error("桌面事件回执写入失败：",error instanceof Error?error.message:String(error)))}
 // 唯一支持邮箱例外：只放行精确的 mailto:voryneltech@gmail.com；其他收件人、query 或 body 一律拒绝，其余协议限制不变。
-const openExternal=async(raw:string)=>{if(raw===SUPPORT_MAILTO){await shell.openExternal(SUPPORT_MAILTO);return}const url=new URL(raw);if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1"].includes(url.hostname)))throw new Error("不支持的外部地址");await shell.openExternal(url.href)}
+const openExternal=async(raw:string)=>{if(raw===SUPPORT_MAILTO){await shell.openExternal(SUPPORT_MAILTO);return}const url=new URL(raw);if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1"].includes(url.hostname)))throw new Error("不支持的外部地址");if(shouldOpenOnWslHost()){await openOnWslHost(url.href);return}await shell.openExternal(url.href)}
 // 正式账户仍登录先行；游客仅由可信显式按钮或 --guest 进入独立无模型身份。
 // 未登录/已退出/会话失效不自动回落到游客 Host。
 const allowed=(url:string)=>url===accountURL||(host!==undefined&&new URL(url).origin===host.origin)
@@ -67,7 +77,7 @@ function syncWindowTitle(){
 }
 function syncApplicationMenu(){
  const t=desktopLocales[localeMirror.getSnapshot().active]
- Menu.setApplicationMenu(process.platform==="darwin"?Menu.buildFromTemplate([{label:"Lyapunov",submenu:[{label:t.account,enabled:mode==="formal",click:()=>void showAccount()},{label:t.quit,click:()=>void exits.request("menu")}]},{label:t.edit,submenu:[{role:"undo",label:t.undo},{role:"redo",label:t.redo},{type:"separator"},{role:"cut",label:t.cut},{role:"copy",label:t.copy},{role:"paste",label:t.paste},{role:"selectAll",label:t.selectAll}]},{label:t.view,submenu:[{role:"reload",label:t.reload},{role:"togglefullscreen",label:t.fullscreen},...(mode==="developer"&&!app.isPackaged?[{role:"toggleDevTools" as const,label:t.devtools}]:[])]}]):null)
+ Menu.setApplicationMenu(process.platform==="darwin"?Menu.buildFromTemplate([{label:"Lyapunov",submenu:[{label:t.account,enabled:mode==="formal",click:()=>void showAccount()},{label:t.quit,accelerator:"Command+Q",click:()=>void exits.request("menu")}]},{label:t.edit,submenu:[{role:"undo",label:t.undo},{role:"redo",label:t.redo},{type:"separator"},{role:"cut",label:t.cut},{role:"copy",label:t.copy},{role:"paste",label:t.paste},{role:"selectAll",label:t.selectAll}]},{label:t.view,submenu:[{role:"reload",label:t.reload},{role:"togglefullscreen",label:t.fullscreen},...(mode==="developer"&&!app.isPackaged?[{role:"toggleDevTools" as const,label:t.devtools}]:[])]}]):null)
 }
 function configure(target:BrowserWindow,contents:WebContents=target.webContents){
   contents.on("page-title-updated",(event,title)=>{event.preventDefault();if(contents!==(viewAttached?workspaceView?.webContents:target.webContents))return;target.setTitle(desktopWindowTitle(title,localeMirror.getSnapshot().active,viewAttached&&workspaceMode==="guest"))})
@@ -140,6 +150,7 @@ const exits=new ExitCoordinator({
     return response===2?"force":response===1?"retry":"return"
   },
 })
+registerDesktopTerminationSignals(exits)
 function detachWorkspaceView(){if(workspaceView&&viewAttached&&win&&!win.isDestroyed()){win.contentView.removeChildView(workspaceView);viewAttached=false;syncWindowTitle()}}
 function disposeWorkspaceView(){detachWorkspaceView();workspaceView?.webContents.close({waitForBeforeUnload:false});workspaceView=undefined;workspaceMode=undefined}
 function fitWorkspaceView(){if(workspaceView&&win&&!win.isDestroyed()){const {width,height}=win.getContentBounds();workspaceView.setBounds({x:0,y:0,width,height})}}
@@ -283,7 +294,6 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
   app.on("activate",()=>{if(!win){if(mode==="formal")void (async()=>{await showAccount();await controller!.restore()})();else void openWorkspace()}})
   app.on("window-all-closed",()=>{if(process.platform!=="darwin"&&!recovering)app.quit()})
   app.on("before-quit",event=>{if(exits.approved)return;event.preventDefault();void exits.request("app")})
-  process.once("SIGTERM",()=>void exits.request("system"));process.once("SIGINT",()=>void exits.request("system"))
   // 登录先行：先把登录页装进同一窗口，再做会话恢复；恢复成功由控制器在同一窗口加载工作台，
   // 未授权/过期/失败则保留登录页，绝不启动匿名 Host。
   if(mode==="developer")await openWorkspace();else if(process.argv.includes("--guest")){await showAccount();await controller!.enterGuest()}else{await showAccount();await controller!.restore()}

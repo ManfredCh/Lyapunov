@@ -33,7 +33,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.13
+          bun-version: 1.4.2
 
       # 子进程测试使用绝对 Bun 路径，避免 runner 的 PATH 与 harness 看到的 PATH 漂移。
       - name: Export test runtime paths

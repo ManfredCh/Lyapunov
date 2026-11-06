@@ -1,5 +1,5 @@
 import {expect,test} from 'bun:test'
-import {mkdtemp,writeFile,readFile,mkdir,rm,symlink} from 'node:fs/promises'
+import {mkdtemp,writeFile,readFile,mkdir,rm,symlink,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {inspectLocalPolicyFile} from '../src/local-policy-file.ts'
@@ -35,7 +35,7 @@ test('entryId仅解析本账户既有缓存；缺id与越界符号链接不授�
  const root=await mkdtemp(join(tmpdir(),'policy-entry-capability-'));try{
   const original=join(root,'own.safetensors');await writeFile(original,safetensorsFixture())
   const entry=await registerLocalPolicyWeights(root,original,new AbortController().signal)
-  expect((await resolveLocalPolicyEntry(root,entry.id)).filePath).toBe(entry.filePath)
+  expect((await resolveLocalPolicyEntry(root,entry.id)).filePath).toBe(await realpath(entry.filePath))
   await expect(resolveLocalPolicyEntry(join(root,'another-account'),entry.id)).rejects.toThrow('POLICY_LOCAL_ENTRY_NOT_FOUND')
   await expect(resolveLocalPolicyEntry(root,'../../outside.pt')).rejects.toThrow('POLICY_LOCAL_ENTRY_NOT_FOUND')
   await rm(entry.filePath);await symlink(original,entry.filePath)

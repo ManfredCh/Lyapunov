@@ -109,7 +109,8 @@ def workdir() -> Path:
     root = os.environ.get("LYAPUNOV_BLENDER_TEST_WORKDIR") or tempfile.mkdtemp(prefix="lyapunov-blender-test-")
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
-    return path
+    # Blender 回执会解析符号链接；macOS 的 /var 指向 /private/var，期望路径需使用同一身份。
+    return path.resolve()
 
 
 def fresh_dir(name: str) -> Path:

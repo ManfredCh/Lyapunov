@@ -12,11 +12,41 @@
 import { describe, expect, test } from 'bun:test'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
-import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, NATIVE_SYSTEM_GLIBC_ADDON, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, nativeSystemRuntimeViolations, workspacePayloadDestination, type PayloadTopLevelRow } from './payload-contract.ts'
+import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, NATIVE_SYSTEM_GLIBC_ADDON, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, nativeSystemRuntimeViolations, workspacePayloadDestination, macOSDesktopBootstrap, type PayloadTopLevelRow } from './payload-contract.ts'
 
 const root = join(import.meta.dirname, '..', '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
+
+test('macOS普通资源入口加载同一产品桌面并解析完整产品根',()=>{
+ const product=realpathSync(mkdtempSync(join(tmpdir(),'lyapunov-app-entry-'))),entry=join(product,'runtime/electron/Lyapunov.app/Contents/Resources/app'),desktop=join(product,'packages/desktop/dist')
+ try{
+  mkdirSync(entry,{recursive:true});mkdirSync(desktop,{recursive:true})
+  writeFileSync(join(product,'package.json'),JSON.stringify({type:'module'}))
+  writeFileSync(join(desktop,'main.js'),"console.log(JSON.stringify({root:process.env.LYAPUNOV_PRODUCT_ROOT,entry:'original-desktop'}))")
+  const generated=macOSDesktopBootstrap('0.2.1')
+  writeFileSync(join(entry,'package.json'),generated.manifest);writeFileSync(join(entry,'main.mjs'),generated.source)
+  const run=spawnSync(process.execPath,[join(entry,'main.mjs')],{encoding:'utf8',env:{...process.env,LYAPUNOV_PRODUCT_ROOT:'/stale/product'}})
+  expect(run.status).toBe(0)
+  expect(JSON.parse(run.stdout)).toEqual({root:product+'/',entry:'original-desktop'})
+  expect(JSON.parse(generated.manifest)).toMatchObject({version:'0.2.1',main:'main.mjs'})
+ }finally{rmSync(product,{recursive:true,force:true})}
+})
+
+test('macOS原生载荷只接受本平台Mach-O/Node-API，不能借Linux或错误架构通过',()=>{
+ const stage=mkdtempSync(join(tmpdir(),'lyapunov-native-mac-')),upstream='.upstream/fixture-sdk',file=join(stage,upstream,'native/system/packages/darwin-arm64/bin/system.node')
+ const header=Buffer.alloc(32);header.writeUInt32LE(0xfeedfacf,0);header.writeUInt32LE(0x100000c,4);header.writeUInt32LE(8,12)
+ const bytes=()=>Buffer.concat([header,Buffer.from('napi_register_module_v1\0node_api_module_get_api_version_v1\0')])
+ try{
+  mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes())
+  expect(nativeSystemRuntimeViolations(stage,upstream,'darwin')).toEqual([])
+  expect(nativeSystemRuntimeViolations(stage,upstream)).toHaveLength(1)
+  for(const offset of [0,4,12]){const changed=bytes();changed[offset]=0;writeFileSync(file,changed);expect(nativeSystemRuntimeViolations(stage,upstream,'darwin')[0]).toContain('Mach-O')}
+  writeFileSync(file,header);expect(nativeSystemRuntimeViolations(stage,upstream,'darwin')[0]).toContain('Node-API')
+  rmSync(file);expect(nativeSystemRuntimeViolations(stage,upstream,'darwin')[0]).toContain('缺少 macOS')
+ }finally{rmSync(stage,{recursive:true,force:true})}
+})
 
 describe('Linux x64 glibc 文件锁原生载荷', () => {
   const fixture = () => {
@@ -197,7 +227,7 @@ describe('沙箱运行时载荷', () => {
 
 describe('打包脚本接线（漂移守卫）', () => {
   test('沙箱模块进入发行载荷，打包前调用同一份真实 staging 判据', () => {
-    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json']")
+    expect(packager).toContain("['README.md','doctor.mjs','sandbox.mjs','desktop-launcher.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json']")
     // 通用大 Kit 缓存的分段续传 helper 与固定 pin 必须被 payload-contract 视为运行文件（缺件即失败关闭）。
     for(const file of ['distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','distribution/linux/install-usd-parser','packages/scene-kit/dist/usd_asset.py','packages/scene-kit/dist/usd_materials.py','packages/scene-kit/source-catalogs/warehouse-01/catalog.csv','packages/scene-kit/source-catalogs/warehouse-01/files.json.gz','packages/scene-kit/source-catalogs/warehouse-01/README.upstream.md','packages/scene-kit/source-catalogs/warehouse-01/pins.json','packages/sim-isaac/python/usd_observation.py'])expect(PRODUCT_RUNTIME_FILES).toContain(file)
     expect(packager).toContain('const sandboxProblems=sandboxRuntimeViolations(stage)')
@@ -393,7 +423,7 @@ describe('物理、材质、转换器和品牌真实载荷',()=>{
   })
 
   test('productRuntimeViolations在真实staging写RELEASE与归档之前运行',()=>{
-    const check=packager.indexOf('const productProblems=productRuntimeViolations(stage,lock.directory)')
+    const check=packager.indexOf('const productProblems=productRuntimeViolations(stage,lock.directory,runtimePlatform)')
     expect(check).toBeGreaterThan(packager.indexOf('const buildEntries=['))
     expect(check).toBeLessThan(packager.indexOf("join(stage,'RELEASE.json')"))
     expect(packager).toContain("if(productProblems.length)throw new Error(productProblems.join('；'))")

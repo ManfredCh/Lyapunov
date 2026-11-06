@@ -190,7 +190,7 @@ class NewtonCamera:
                               'intrinsicsSource': 'engine-intrinsics'}
                 else:
                     optics = self._optics({'fovyDeg': float(metadata.cam_fovy[index])}, 'fovyDeg')
-                return {**optics, 'parentBodyName': parent_name, '_parent': parent,
+                return {**optics, 'parentBodyName': parent_name, **({'parentEntityId': eid} if parent is not None else {}), '_parent': parent,
                         '_position': position, '_rotation': matrix}
 
             self._put(record, build)
@@ -200,7 +200,7 @@ class NewtonCamera:
         components = entity.get('components') or {}
         declarations = []
         if isinstance(components.get('camera'), dict) and components['camera']:
-            declarations.append(('camera', entity.get('name') or 'camera', components['camera']))
+            declarations.append(('camera', components['camera'].get('name') or entity.get('name') or 'camera', components['camera']))
         viewer = components.get('viewerCamera')
         if isinstance(viewer, dict) and isinstance(viewer.get('cameras'), list):
             for item in viewer['cameras']:
@@ -214,6 +214,38 @@ class NewtonCamera:
                 if not isinstance(pose, dict):
                     raise ValueError('相机声明必须是对象 / Camera declaration must be an object')
                 optics = self._optics(pose, 'fovYDeg' if component == 'camera' else 'fovDeg')
+                if 'mount' in pose:
+                    mount = pose['mount']
+                    if not isinstance(mount, dict):
+                        raise ValueError('相机 mount 必须是对象 / Camera mount must be an object')
+                    owner, body_name = mount.get('entityId'), mount.get('bodyName')
+                    if not isinstance(owner, str) or not owner.strip() or not isinstance(body_name, str) or not body_name.strip():
+                        raise ValueError('相机 mount 需要实体与 body 名称 / Camera mount requires entity and body names')
+                    owner, body_name = owner.strip(), body_name.strip()
+                    info = self.world.entities.get(owner)
+                    if not info:
+                        raise ValueError('相机目标实体没有 Newton body / Camera target entity has no Newton body: ' + owner)
+                    local_name = body_name[len(owner)+1:] if body_name.startswith(owner + '/') else body_name
+                    start, end = info.get('bodyStart', 0), info.get('bodyEnd', 0)
+                    matches = [i for i in range(start, end) if self.model.body_label[i] in (body_name, local_name)]
+                    if not matches:
+                        matches = [i for i in range(start, end) if self.model.body_label[i].endswith('/' + local_name)]
+                    if len(matches) != 1:
+                        raise ValueError('相机目标 body 不存在或不唯一 / Camera target body not found or ambiguous: ' + body_name)
+                    raw_position, raw_quaternion = mount.get('positionM'), mount.get('quaternionXyzw')
+                    if (not isinstance(raw_position, (list, tuple)) or len(raw_position) != 3
+                            or not isinstance(raw_quaternion, (list, tuple)) or len(raw_quaternion) != 4
+                            or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                                   for v in (*raw_position, *raw_quaternion))):
+                        raise ValueError('相机 mount 需要有限局部 positionM 与 quaternionXyzw / Camera mount requires finite local pose')
+                    position = np.asarray(raw_position, dtype=float)
+                    matrix = rotation(raw_quaternion)
+                    normalized = np.asarray(raw_quaternion, dtype=float)
+                    normalized /= np.linalg.norm(normalized)
+                    return {**optics, 'parentEntityId': owner, 'parentBodyName': self.model.body_label[matches[0]],
+                            'mount': {'entityId': owner, 'bodyName': self.model.body_label[matches[0]],
+                                      'positionM': position.tolist(), 'quaternionXyzw': normalized.tolist()},
+                            '_parent': matches[0], '_position': position, '_rotation': matrix}
                 p, q, _ = poses[eid]
                 position, matrix = np.asarray(p, dtype=float), rotation(q)
                 if component == 'viewerCamera':
@@ -238,7 +270,7 @@ class NewtonCamera:
                     initial_rotation = rotation(initial[3:7])
                     position, matrix = initial_rotation.T @ (position-initial[:3]), initial_rotation.T @ matrix
                     parent_name = self.model.body_label[parent]
-                return {**optics, 'parentBodyName': parent_name, '_parent': parent,
+                return {**optics, 'parentBodyName': parent_name, **({'parentEntityId': owner} if parent is not None else {}), '_parent': parent,
                         '_position': position, '_rotation': matrix}
 
             self._put(record, build)
@@ -288,11 +320,20 @@ class NewtonCamera:
         width, height = self._resolution(options or {})
         body_q = self.world.state_a.body_q
         body_q = body_q.numpy() if body_q is not None else np.empty((0, 7))
+        bodies = []
+        for eid, info in self.world.entities.items():
+            for index in range(info.get('bodyStart', 0), info.get('bodyEnd', 0)):
+                pose = body_q[index]
+                bodies.append({'entityId': eid, 'bodyName': self.model.body_label[index],
+                               'frameId': f'{self.world.id}:{self.world.generation}:{self.world.step_index}',
+                               'stepIndex': self.world.step_index,
+                               'worldFromBody': {'positionM': [float(v) for v in pose[:3]],
+                                                 'quaternionXyzw': [float(v) for v in pose[3:7]]}})
         return {'worldId': self.world.id, 'generation': self.world.generation,
                 'sceneRevision': self.world.applied_revision, 'stepIndex': self.world.step_index,
                 'simTime': float(self.world.sim_time), 'referenceResolution': [width, height],
                 'source': 'newton-sensor-tiled-camera',
-                'cameras': [self._effective(c, width, height, body_q) for c in self.cameras.values()],
+                'cameras': [self._effective(c, width, height, body_q) for c in self.cameras.values()], 'bodies': bodies,
                 'warnings': copy.deepcopy(self.warnings)}
 
     def _resolve(self, name):
@@ -366,11 +407,14 @@ class NewtonCamera:
             calibration = {'model': 'pinhole', 'intrinsicsSource': camera['intrinsicsSource'],
                            'intrinsics': camera['intrinsics'], 'worldFromCamera': camera['worldFromCamera'],
                            'parentBodyName': camera['parentBodyName'], 'referenceFrame': None,
+                           **{key: copy.deepcopy(camera[key]) for key in ('parentEntityId', 'mount') if key in camera},
                            'coordinateSystem': 'right-handed-z-up; camera looks along -Z, +Y up',
                            'depthSemantics': 'axial-meters-along-camera-axis; p_cam=[(u-cx)*d/fx, -(v-cy)*d/fy, -d]; world=R*p_cam+t',
                            'backgroundDepthM': 0.0, 'invalidDepthRule': 'depth <= 0 is no hit'}
             entries.append({'cameraName': names[index], 'resolvedCameraName': camera['cameraName'],
                             'worldGeneration': self.world.generation, 'override': False,
+                            'parentBodyName': camera['parentBodyName'],
+                            **{key: copy.deepcopy(camera[key]) for key in ('parentEntityId', 'mount') if key in camera},
                             'rgb': {'uri': rgb_path.as_uri(), 'mimeType': 'image/png'},
                             'depth': {'uri': depth_path.as_uri(), 'mimeType': 'application/x-npy', 'units': 'm'},
                             'depthRangeM': [float(depth.min()), float(depth.max())], 'calibration': calibration})

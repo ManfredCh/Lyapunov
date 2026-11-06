@@ -634,7 +634,11 @@ export class ResourceLibrary {
   readonly downloadRoot: string
   /** 生成来源判定根：旧行为 <dataRoot>/provider-jobs；域模式下即 <cache>/provider-jobs。 */
   readonly providerJobsRoot: string
-  constructor(readonly directory: string, readonly options: ResourceAuthorityOptions = {}) {
+  readonly directory: string
+  readonly options: ResourceAuthorityOptions
+  constructor(directory: string, options: ResourceAuthorityOptions = {}) {
+    this.directory = directory
+    this.options = options
     const layout = resolveSceneLayout(directory, options.layout)
     this.layout = layout
     this.catalogRoot = layout.split ? layout.catalog : join(directory, "resources")

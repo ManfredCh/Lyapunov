@@ -54,3 +54,13 @@ bun --no-env-file script/prepare-viewer-test-assets.ts --root /tmp/some-empty-di
 - 这是**测试依赖准备**：模型字节继续不入 Git、不进软件发行包。
 - 不改 `packs/ASSET_STAGING_MANIFEST.json` 里 Go1 的整体 license/readiness（只这 6 件已核，URDF 不在本次范围）。
 - CI 入口：`.github/workflows/ci.yml` 的 `Prepare Go1 viewer test assets` 步骤，在 `Behavior tests` **之前**执行。
+
+## Newton 的 Go1 URDF 依赖
+
+Newton 的原生 URDF 回归使用 Unitree 官方 `unitreerobotics/unitree_ros`，固定提交 `15ebe53f4cd77e7d745ae83b9d7ff90e685e8998`。模型名为 `go1`，包含 12 个受控关节；固定清单共 10 件：URDF、7 个 DAE、package.xml 与 BSD-3-Clause LICENSE。
+
+```bash
+bun --no-env-file script/prepare-viewer-test-assets.ts --urdf
+```
+
+落点为 `materials/robots/unitree_go1/go1_description/`，逐件大小与 SHA-256 在 `script/prepare-go1-urdf-test-assets.manifest.json`。这条显式入口复用相同的缓存、校验、原子写入和拒绝覆盖行为，不改变默认 Viewer 清单，也不登记为随发行包提供的机器人或策略。

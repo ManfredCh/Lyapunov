@@ -186,7 +186,7 @@ const BUILD_VERB =
 const MODIFY_VERB =
   /(改|调整|修改|修正|修订|纠正|移动|挪|旋转|缩放|放大|缩小|加高|降低|抬高|压低|加宽|收窄|换成|替换|删|去掉|移除|补上|加上|对齐|摆正|颜色|材质|贴图|位置|朝向|再高|再低|再大|再小|不对|错了|有问题|不符|move|rotate|resize|scale|adjust|modify|fix|recolor|replace|align)/i
 const STOP_INTENT =
-  /(停止|停下|停掉|别做|不要做|不用做|不做了|别继续|不要继续|先停|中断|中止|取消|算了|不弄了|stop|cancel|abort|halt|never\s*mind|forget it)/i
+  /(停止|停下|停掉|别做|不要做|不用做|不做了|别继续|不要继续|先停|中断|中止|取消|算了|不弄了|\b(?:stop|cancel|abort|halt)\b|never\s*mind|forget it)/i
 /** 否定词：出现在意图词前 4 个字符内即视为"否定式意图"（"不要停止"不是停止）。 */
 const NEGATION_BEFORE = /[不别勿非无]/
 const PLAN_ONLY_INTENT =
@@ -498,6 +498,12 @@ function findStopIntent(text: string): { word: string; negated: boolean } | unde
       || /(?:达到|超过|耗尽|用完|预算|上限)[^。！？!?;；\n]*?(?:后|时|应(?:当|该)?|再|则|就)(?:立即|马上)?\s*$/i.test(before)
       || /\b(?:after|following)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i.test(before)
     const budgetAlreadyMet = /已经|已(?:连续|达到|超过|耗尽|用完|超时|失败)|\balready\b/i.test(before)
+    // 执行链的末尾清理不是当前Stop；并列清理只认同一次动作，不能吞掉停止另一场景的请求。
+    const earlierWork = /运行|执行|采集|求值|检查|验收|验证|拍摄|构建|搭建|\b(?:run|execute|capture|check|evaluate|verify|build)\b/i.test(before)
+    const orderedCleanup = earlierWork && /(?:最后|最终|然后|再|\bthen|\bfinally)\s*(?:(?:立即|马上|立刻|immediately)\s*)?$/i.test(before)
+    const sameActionCleanup = earlierWork && /(?:并|并且|\band)\s*$/i.test(before) && /^\s*(?:(?:本次|本轮|该)(?:动作|运行|执行|仿真)|(?:this|the)\s+(?:action|run)\b)/i.test(after)
+    const workAlreadyFinished = /(?:已经|已|刚刚|刚)(?:完成|结束|跑完|执行完|运行完|检查完|验收完)|\balready\s+(?:finished|completed)\b/i.test(before)
+    if ((orderedCleanup || sameActionCleanup) && !workAlreadyFinished) continue
     // 检查当前进行状态并明确现在停止，不是未来预算；条件谓语须直接接立即Stop。
     const currentWorkNow = (
       /(?:如果|假如|倘若|若(?!干))\s*(?:这个|该|当前|本次)?\s*(?:场景|任务|作业)\s*(?:仍(?:然)?|还)?\s*(?:正在|在)\s*(?:生成|制作|构建|运行|执行)\s*[，,]\s*(?:(?:现在|此刻|立即|马上|立刻)\s*)*$/i.test(before)

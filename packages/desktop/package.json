@@ -1,6 +1,6 @@
 {
   "name": "@lyapunov/desktop",
-  "version": "0.1.0-rc",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "main": "./dist/main.js",

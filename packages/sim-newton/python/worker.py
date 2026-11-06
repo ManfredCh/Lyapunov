@@ -745,7 +745,10 @@ class World:
                 'entityId': e.get('entityId'),
                 'parentId': e.get('parentId'),
                 'transform': e.get('transform'),
-                'source': None if cfg is None else {'sourcePath': cfg.get('sourcePath'), 'xml': cfg.get('xml')},
+                'source': None if cfg is None else {'sourcePath': cfg.get('sourcePath'), 'xml': cfg.get('xml'),
+                                                    'keyframe': cfg.get('keyframe'),
+                                                    'initialJointPositions': cfg.get('initialJointPositions'),
+                                                    'initialActuatorControls': cfg.get('initialActuatorControls')},
                 'mpm': e.get('components', {}).get('newton', {}).get('mpm'),
                 'collision': e.get('components', {}).get('collision'),
                 'rigidBody': e.get('components', {}).get('rigidBody'),
@@ -783,11 +786,11 @@ class World:
         except ModuleNotFoundError as exc:
             # Newton 的 importers extra（trimesh/scipy/meshio/…）不在最小依赖里：带 mesh 资产的
             # MJCF/URDF 会在这里失败。明确归因到缺失的包与安装方式，不冒充「场景非法」。
+            missing = exc.name or str(exc)
             raise SimError('PROVIDER_DEPENDENCY_MISSING',
-                           '实体 ' + eid + ' 的 MJCF/URDF 导入缺少 Newton 的可选依赖 ' + str(exc.name)
+                           '实体 ' + eid + ' 的 MJCF/URDF 导入缺少 Newton 的可选依赖 ' + str(missing)
                            + '（含 mesh 资产的模型需要 Newton 的 importers extra）。'
-                           + '安装（部署方执行）：uv pip install --python ' + sys.executable + ' "newton[importers]"'
-                           + ' 或最小集 "trimesh>=4.6.8"') from exc
+                           + '请运行原安装器：lyapunov install-provider newton，补齐项目固定依赖。') from exc
         return body_start, builder.body_count, joint_start, builder.joint_count, shape_start, builder.shape_count
 
     def build_scene(self, builder, scene, excluded=()):
@@ -834,16 +837,98 @@ class World:
             builder.add_ground_plane(label='__ground');ground_names.append('__ground')
         return poses, maps, ground_names, skipped, native_planes, replaced
 
+    def apply_source_initial_joints(self, model, maps, warnings):
+        """复用 MuJoCo 源模型的 home/指定 keyframe 与显式关节初值，不更改求解器或控制器。"""
+        import mujoco as mj
+        values = model.joint_q.numpy()
+        labels = list(model.joint_label)
+        starts = model.joint_q_start.numpy().tolist()
+        dof_starts = model.joint_qd_start.numpy().tolist()
+        types = model.joint_type.numpy().tolist()
+        drives = self.source_drives(model)
+        targets = {}
+        changed = False
+        for eid, mapping in maps.items():
+            cfg = native_source(mapping['entity'])
+            if not cfg:
+                continue
+            try:
+                if cfg.get('sourcePath'):
+                    spec = mj.MjSpec.from_file(path_from_uri(cfg['sourcePath']))
+                else:
+                    assets = {}
+                    for name, path in cfg.get('assets', {}).items():
+                        with open(path_from_uri(path), 'rb') as asset:
+                            assets[name] = asset.read()
+                    spec = mj.MjSpec.from_string(cfg['xml'], assets=assets)
+                source = spec.compile()
+            except Exception as exc:
+                if 'keyframe' in cfg or 'initialJointPositions' in cfg or 'initialActuatorControls' in cfg:
+                    raise SimError('INITIAL_STATE_UNAVAILABLE', '实体 ' + eid + ' 的源初值无法解析: ' + str(exc)) from exc
+                warnings.append({'code': 'INITIAL_STATE_UNAVAILABLE', 'entityId': eid,
+                                 'message': '实体 ' + eid + ' 的源初值无法解析，保留 Newton 导入状态: ' + str(exc)})
+                continue
+            key = mj.mj_name2id(source, mj.mjtObj.mjOBJ_KEY, cfg.get('keyframe', 'home'))
+            source_q = source.key_qpos[key] if key >= 0 else source.qpos0
+            scalar = (int(mj.mjtJoint.mjJNT_HINGE), int(mj.mjtJoint.mjJNT_SLIDE))
+            initial = {source.joint(i).name: float(source_q[source.jnt_qposadr[i]])
+                       for i in range(source.njnt) if int(source.jnt_type[i]) in scalar and source.joint(i).name}
+            initial.update(cfg.get('initialJointPositions', {}))
+            controls = {source.actuator(i).name: float(source.key_ctrl[key][i])
+                        for i in range(source.nu) if key >= 0 and source.actuator(i).name}
+            controls.update(cfg.get('initialActuatorControls', {}))
+            for j in range(mapping['jointStart'], mapping['jointEnd']):
+                if int(types[j]) not in (int(newton.JointType.REVOLUTE), int(newton.JointType.PRISMATIC)):
+                    continue
+                matches = [name for name in initial if isinstance(name, str) and (labels[j] == name or labels[j].endswith('/' + name))]
+                if not matches:
+                    continue
+                name = max(matches, key=len)
+                position = finite(initial[name], 'initialJointPositions.' + name)
+                coord = int(starts[j])
+                if float(values[coord]) != position:
+                    values[coord] = position
+                    changed = True
+                # 直接位置 PD 的源 ctrl 仍是引擎已导入驱动的初始目标；动作可用性另由力限守卫决定。
+                dof = int(dof_starts[j])
+                drive = drives.get(dof, {})
+                actuator = drive.get('actuator')
+                if drive.get('_initialTargetCompatible') and isinstance(actuator, str):
+                    control_names = [n for n in controls if isinstance(n, str) and (actuator == n or actuator.endswith('/' + n))]
+                    if control_names:
+                        control_name = max(control_names, key=len)
+                        target_index = coord if newton.use_coord_layout_targets else dof
+                        targets[target_index] = finite(controls[control_name], 'initialActuatorControls.' + control_name)
+        if changed:
+            model.joint_q.assign(values)
+        return changed, targets
+
     def compile(self, scene):
         """把 Scene 编译成真实的 Newton 模型；失败即抛结构化错误，不产出半成品世界。"""
         if any(e.get('components', {}).get('newton', {}).get('mpm') is not None for e in scene['entities']):
             return self.compile_mpm(scene)
         builder = newton.ModelBuilder(gravity=wp.vec3(*scene_gravity(scene,SimError)))
         poses, maps, ground_names, skipped, native_planes, replaced = self.build_scene(builder, scene)
+        # 源固定关节到 world 的完整链没有自由度；复用引擎原生 KINEMATIC 表达，
+        # 避免 XPBD 将质量为零的固定连杆作为动态约束迭代。可动关节链不受影响。
+        for body in range(builder.body_count):
+            if world_fixed_body(builder, body):
+                builder.body_flags[body] = int(newton.BodyFlags.KINEMATIC)
         model = builder.finalize(device=self.device)
         model.request_contact_attributes('force')
+        _, initial_targets = self.apply_source_initial_joints(model, maps, skipped)
         states = (model.state(), model.state())
+        if model.joint_count:
+            # URDF 导入的 body_q 也可能尚未应用根安装变换，即使关节初值没有变化。
+            # 两份状态均从源关节与装配坐标执行原生 FK，不从零位开始做约束纠正。
+            for state in states:
+                newton.eval_fk(model, model.joint_q, model.joint_qd, state)
         control = model.control()
+        if initial_targets:
+            targets = control.joint_target_q.numpy()
+            for target_index, target in initial_targets.items():
+                targets[target_index] = target
+            control.joint_target_q.assign(targets)
         solver_name = os.environ.get('LYAPUNOV_NEWTON_SOLVER', 'xpbd').strip().lower()
         if solver_name == 'semi':
             # SolverSemiImplicit 在实测的三关节臂上会发散成 NaN（见 bugfixHistory 回执），
@@ -924,6 +1009,9 @@ class World:
                 'shapeStart':m['shapeStart'],'shapeEnd':m['shapeEnd'],
                 'source': m['source'],
             }
+            if solver_name == 'xpbd' and any(j['drive'].get('_sourceForceLimitUnsupported') for j in joints):
+                skipped.append({'code': 'SOURCE_ACTUATOR_FORCE_LIMIT_UNSUPPORTED', 'entityId': eid,
+                                'message': '实体 ' + eid + ' 的源执行器有力限，但 Newton XPBD 不执行该力限；位置动作仍不可用 / Source actuator force limits are not enforced by Newton XPBD; position actions remain unavailable'})
             for label in shape_labels[m['shapeStart']:m['shapeEnd']]:
                 if is_ground_shape_name(label):
                     ground_names.append(label)
@@ -1058,6 +1146,11 @@ class World:
                 sensors = {'bodyLinearVelocityMps': [float(v) for v in body_qd[b][0:3]],
                            'bodyAngularVelocityRadps': [float(v) for v in body_qd[b][3:6]],
                            'velocityConvention': 'newton-body-twist (v_com_world, omega_world)'}
+                sensors['bodyWorldPoses'] = {
+                    self._body_label(index): {'positionM': [float(v) for v in body_q[index][:3]],
+                                              'quaternionXyzw': [float(v) for v in body_q[index][3:7]]}
+                    for index in range(info['bodyStart'], info['bodyEnd'])
+                }
                 if info['freeJoints']:
                     sensors['freeBases'] = {j['label']: self._free_base(j, body_q, body_qd) for j in info['freeJoints']}
                 item['sensors'] = sensors
@@ -1204,9 +1297,11 @@ class World:
                          and gain[0] > 0 and math.isclose(gain[0], -bias[1], rel_tol=1e-6)
                          and bias[0] == 0 and bias[2] <= 0
                          and np.allclose(gain[1:], 0) and np.allclose(bias[3:], 0))
+            drive['_initialTargetCompatible'] = bool(supported)
             limited_force = (int(values['actuator_forcelimited'][a]) != 0
                              and bool(values['actuator_has_forcerange'][a]))
             if supported and limited_force:
+                drive['_sourceForceLimitUnsupported'] = True
                 reason = 'XPBD 不执行源 forcerange，未接通该执行器 / XPBD does not enforce source force limits'
                 supported = False
             if supported:
@@ -1217,6 +1312,8 @@ class World:
                 drive['reason'] = 'UNSUPPORTED_CAPABILITY: ' + reason
             if dof in result:
                 drive['available'] = False
+                drive['_initialTargetCompatible'] = False
+                drive['_sourceForceLimitUnsupported'] = bool(drive.get('_sourceForceLimitUnsupported') or result[dof].get('_sourceForceLimitUnsupported'))
                 drive['reason'] = 'UNSUPPORTED_CAPABILITY: 同一关节有多个源执行器 / Multiple source actuators drive this joint'
             result[dof] = drive
         return result
@@ -1590,6 +1687,14 @@ class World:
         selection = selection or {}
         if selection.get('expectedGeneration') is not None and (type(selection['expectedGeneration']) is not int or selection['expectedGeneration'] != self.generation):
             raise SimError('STALE_GENERATION', '停止请求属于旧代次 / Stop request has a stale generation')
+        # fault() 已把所有活动动作标为失败并释放原生模型；此时没有剩余动作可停止。
+        # 明确交出故障缘由，使原传输层的 stop→close 能回收世界，不把故障说成正常仿真。
+        if self.status == 'unavailable' and self.model is None and not self.active and not self.commanded and self.status_reason:
+            aid = selection.get('actionId')
+            if aid and aid not in self.receipts:
+                raise SimError('ACTION_NOT_FOUND', 'actionId 未知 / Unknown actionId: ' + str(aid))
+            return {'stopped': True, 'stepIndex': self.step_index, 'receipts': [], 'affectedEntityIds': [],
+                    'reason': 'WORLD_ALREADY_UNAVAILABLE', 'statusReason': self.status_reason}
         self.require_ready()
         aid = selection.get('actionId')
         if aid and aid not in self.receipts:

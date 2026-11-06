@@ -18,11 +18,13 @@ import type { Entity, SceneGeometryBinding, SceneSnapshot } from "../../../lyapu
 import { identityMat4, isFiniteMat4, mat4FromTrs, multiplyMat4, type Mat4, type TrsTransform } from "./mat4.ts"
 
 export class AlignedMeshWorldMatrixError extends Error {
+  readonly code: "invalid_transform" | "parent_cycle" | "parent_missing" | "unsupported_source"
   constructor(
-    readonly code: "invalid_transform" | "parent_cycle" | "parent_missing" | "unsupported_source",
+    code: "invalid_transform" | "parent_cycle" | "parent_missing" | "unsupported_source",
     message: string,
   ) {
     super(message)
+    this.code = code
     this.name = "AlignedMeshWorldMatrixError"
   }
 }

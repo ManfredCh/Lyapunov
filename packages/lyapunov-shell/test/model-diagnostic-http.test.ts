@@ -79,12 +79,15 @@ describe('模型公开diagnostic实际消费',()=>{
   expect(h.read(h.agent).model).toMatchObject({finishCode:'CENTRAL_DIAGNOSTIC_INVALID',diagnostic:{effect:'unknown',retryable:false}})
  })
  test('已收到typed未知结果再真实断流，保部分输出与原身份且不得重发',async()=>{
+  let disconnect:(()=>void)|undefined
   const h=await harness(response=>{
    response.writeHead(200,{'content-type':'text/event-stream'})
-   sse(response,{choices:[{index:0,delta:{content:'可保留的片段'},finish_reason:null}]})
-   sse(response,{choices:[],diagnostic:diagnostic()})
-   setTimeout(()=>response.destroy(),20)
-  });await h.send();expect(h.requests()).toBe(1);expect(h.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')).toHaveLength(0)
+   disconnect=()=>response.destroy()
+   // 同一帧携带诊断；等客户端实际消费片段后再断流，不把网络调度的 20ms 当作已接收证据。
+   sse(response,{choices:[{index:0,delta:{content:'可保留的片段'},finish_reason:null}],diagnostic:diagnostic()})
+  })
+  h.ctx.on('agent/assistant-stream',({agent,frame})=>{if(agent===h.agent&&frame.type==='chunk'&&frame.chunk.type==='text-delta')disconnect?.()})
+  await h.send();expect(h.requests(),JSON.stringify({model:h.read(h.agent).model,retries:h.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')})).toBe(1);expect(h.agent.session.snapshotEvents().filter(x=>x.type==='llm/retry')).toHaveLength(0)
   expect(h.read(h.agent).model?.diagnostic).toMatchObject({requestId:'fixture-model-request',effect:'unknown'})
   // 失败片段归原生assistant/attempt流记录，不能冒充已提交assistant/message成功。
   expect(h.agent.session.snapshotEvents().some(x=>x.type==='assistant/attempt'&&expandAssistantStream(x.data.stream).some(row=>row.chunk.type==='text-delta'&&row.chunk.text==='可保留的片段'))).toBe(true)

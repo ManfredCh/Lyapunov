@@ -458,6 +458,13 @@
       "reason": "纯退出生命周期：取消/并发单次flush-stop-close、保存失败、update/system和有界错误回执；仅注入回调，不启动Electron或Host"
     },
     {
+      "path": "packages/desktop/test/wsl-open.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "WSL 识别与授权地址交给 Windows 宿主打开的纯函数合同，无网络、无进程启动"
+    },
+    {
       "path": "packages/desktop/test/guest-controller.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -808,6 +815,13 @@
       "reason": "GATE-C-20260927 真实检查后改判 include：行为测试用**注入的 hasTool** 与本地技能目录事实，只钉环境路由提示文本；不启动 Blender/Unity、不联网、无需凭据（原标记 blender,unity 是词法误标）。本机实跑：6 pass / 0 fail / 16 expect。"
     },
     {
+      "path": "packages/lyapunov-shell/test/capture-download.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "相机 RGB-D 媒体下载响应头回归：中文、空格、斜杠等合法相机名走 RFC 5987 UTF-8 filename*，ASCII fallback 不含未转义相机名；直接构造真实 Response，避免非 ASCII 名称让整次深度读取变成 HTTP 400。离线，不改采集字节、相机身份或目录归属。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/capture-route.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -981,6 +995,20 @@
       "markers": [],
       "decision": "include",
       "reason": "A08 F5：原生历史只读投影、图像ContentBlock、真实归属与unknown进展门，纯离线。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/agent-graph-skills-native.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原技能Provider与工具在独立工作区加载三个随包角色，并验证源码入口与插件文件同源。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/external-acquisition-notification.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "原生Jobs验证人工供给完成不唤醒模型，模型入口保留通知并维持会话归属。"
     },
     {
       "path": "packages/lyapunov-shell/test/external-install-session.test.ts",
@@ -1384,6 +1412,27 @@
       "reason": "A06 R005：生命周期单次初始化、首帧/代次、取消、失败不loop、状态渲染；固定隔离port夹具，不冒真实SDK。"
     },
     {
+      "path": "packages/lyapunov-shell/test/flight-status-poll.dom.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实飞控面板 DOM：状态轮询使用只读入口，实际用户动作仍调用原飞控命令；不启动真实引擎。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/world-fault-projection.dom.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实 Workbench React DOM 与受控后端夹具：Provider不可用后不再显示旧运行状态或旧物理步，不启动真实引擎。"
+    },
+    {
+      "path": "packages/lyapunov-shell/test/camera-capture-workbench.dom.test.tsx",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "真实 Workbench 和工具栏 DOM：点击拍摄面板时读取当前物理世界的原生相机清单；使用受控后端，不启动真实引擎。"
+    },
+    {
       "path": "packages/lyapunov-shell/test/session-context-cross.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -1586,6 +1635,13 @@
       "reason": "无外部标记：离线纯逻辑。调用该包已有导出并检查返回值，不触碰供应商、网络、GPU。"
     },
     {
+      "path": "packages/motion-ompl/test/real-provider.test.ts",
+      "declaredRunner": "node:test",
+      "markers": ["envgate"],
+      "decision": "exclude",
+      "reason": "真实 SDK 工具、MuJoCo 与 OMPL 的通路、阻断及绕行测试；需现有 Python 环境，单独运行并核对未跳过。"
+    },
+    {
       "path": "packages/policy-registry/test/adapter-contract.test.ts",
       "declaredRunner": "bun:test",
       "markers": [
@@ -1629,6 +1685,13 @@
       "markers": [],
       "decision": "exclude",
       "reason": "普通脚本需固定299424B真实权重fixture，缺少时明确失败；主控独立运行并核实际六项幂等读回，默认六条纯契约仍include。"
+    },
+    {
+      "path": "packages/policy-registry/test/native-cpu-execution.test.ts",
+      "declaredRunner": "node:test",
+      "markers": ["envgate", "realmodel"],
+      "decision": "exclude",
+      "reason": "真实发行策略权重、独立CPU解释器和MuJoCo，验证原工具/作业执行与停止重启；仅在显式准备后单独运行。"
     },
     {
       "path": "packages/policy-registry/test/guest-services.test.ts",
@@ -2735,6 +2798,15 @@
       "reason": "2026-09-27 逐项回执复核：本文件使用本地夹具、标准 Python 或配置/协议替身，不启动外部引擎、不访问公网、不计费。主控在独立候选中实际执行 exit 0；从原外部排除项纳入默认离线 CI。对应逐文件证据与仍需真机验证的边界见 docs/EXTERNAL_ACCEPTANCE.md。"
     },
     {
+      "path": "packages/sim-mujoco/test/fault-status.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "envgate"
+      ],
+      "decision": "exclude",
+      "reason": "真实 MuJoCo worker 与受控故障注入，需要独立 Python，显式单独执行。"
+    },
+    {
       "path": "packages/sim-mujoco/test/action-window.test.ts",
       "declaredRunner": "node:test",
       "markers": [
@@ -2795,7 +2867,7 @@
         "envgate"
       ],
       "decision": "exclude",
-      "reason": "not-run：P1 帧输出快路径单元核对，需真 sim-python 解释器（LYAPUNOV_MUJOCO_PYTHON，含 mujoco）；默认离线CI不冒充已验。独立命令 LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-transform-types --test packages/sim-mujoco/test/frame-text.test.ts，整帧 byte-for-byte 端到端等价由真 worker 等价门覆盖。"
+      "reason": "not-run：P1 帧输出快路径单元核对，需真 sim-python 解释器（LYAPUNOV_MUJOCO_PYTHON，含 mujoco）；默认离线CI不冒充已验。独立命令 LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-strip-types --test packages/sim-mujoco/test/frame-text.test.ts，整帧 byte-for-byte 端到端等价由真 worker 等价门覆盖。"
     },
     {
       "path": "packages/sim-mujoco/test/lidar-scan.test.ts",
@@ -2804,7 +2876,7 @@
         "envgate"
       ],
       "decision": "exclude",
-      "reason": "外部未运行：P7A 模拟LiDAR真实原生射线（MuJoCo mj_multiRay）逐射线几何/单位/量程/有效性/命中geom/预览复算、相机Depth与LiDAR range分源比较、挂载相机运动与旧代次拒绝；node:test声明，需已有MuJoCo Python及OSMesa离屏渲染（相机Depth比较用），不依赖Isaac。独立命令 MUJOCO_GL=osmesa LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-transform-types --test packages/sim-mujoco/test/lidar-scan.test.ts，实测3/3、0skip。"
+      "reason": "外部未运行：P7A 模拟LiDAR真实原生射线（MuJoCo mj_multiRay）逐射线几何/单位/量程/有效性/命中geom/预览复算、相机Depth与LiDAR range分源比较、挂载相机运动与旧代次拒绝；node:test声明，需已有MuJoCo Python及OSMesa离屏渲染（相机Depth比较用），不依赖Isaac。独立命令 MUJOCO_GL=osmesa LYAPUNOV_MUJOCO_PYTHON=<sim-python> node --experimental-strip-types --test packages/sim-mujoco/test/lidar-scan.test.ts，实测3/3、0skip。"
     },
     {
       "path": "packages/sim-mujoco/test/mirrored-collision.test.ts",
@@ -2874,6 +2946,20 @@
       "reason": "Newton 原生 CPU 相机模块回归：射线 RGB、米制轴向深度、挂载外参与同一步读取；沿既有 Newton 无外部标记分类纳入。所选解释器（LYAPUNOV_NEWTON_PYTHON，未设置则候选 .runtime/newton-env/bin/python）不存在时明确跳过，跳过不记为原生运行通过；最终 worker 消费链另行验收。"
     },
     {
+      "path": "packages/sim-newton/test/initial-state.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "Newton CPU 初始关节和控制目标真实夹具；解释器缺失明确跳过，跳过不计为真实运行。"
+    },
+    {
+      "path": "packages/sim-newton/test/textured-model.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "使用已有本地发行模型和 Newton CPU 验证纹理模型导入及短时步进；解释器或模型缺失明确跳过，不下载或计为真实运行。"
+    },
+    {
       "path": "packages/sim-newton/test/capability-truth.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -2886,6 +2972,13 @@
       "markers": [],
       "decision": "include",
       "reason": "系统 Python -B -S 导入真实 worker，使用 inert numpy/newton/warp 模块与假原生句柄验证故障清理、恢复、回滚及主协议循环；不运行 Newton SDK/GPU。"
+    },
+    {
+      "path": "packages/sim-newton/test/fault-cleanup-real.test.ts",
+      "declaredRunner": "node:test",
+      "markers": ["envgate"],
+      "decision": "exclude",
+      "reason": "真实 Newton CPU World 与原生动作，受控注入故障验证收尾；需要独立 Newton Python，单独运行。"
     },
     {
       "path": "packages/sim-newton/test/supported-surface-truth.test.ts",
@@ -3518,7 +3611,7 @@
         "envgate"
       ],
       "decision": "exclude",
-      "reason": "not-run：需要已安装MuJoCo Python与原生模型/OSMesa条件。显式LYAPUNOV_MUJOCO_PYTHON后运行 node --experimental-transform-types --test packages/human-crowd/test/native.test.ts。真实World逐tick路径连续/暂停停止/墙与Panda默认停障/ragdoll/批量隔离，以及资源库导入GLB动作在产品Provider内采样。缺解释器明确skip，不算原生通过。"
+      "reason": "not-run：需要已安装MuJoCo Python与原生模型/OSMesa条件。显式LYAPUNOV_MUJOCO_PYTHON后运行 node --experimental-strip-types --test packages/human-crowd/test/native.test.ts。真实World逐tick路径连续/暂停停止/墙与Panda默认停障/ragdoll/批量隔离，以及资源库导入GLB动作在产品Provider内采样。缺解释器明确skip，不算原生通过。"
     },
     {
       "path": "packages/viewer/test/usd-visual.test.ts",
@@ -3534,7 +3627,7 @@
         "envgate"
       ],
       "decision": "exclude",
-      "reason": "not-run：需要显式已有Isaac6.0.1及既有EULA确认、usd-core解释器；CPU/rendering:none真实同world原生USD静态/关节/自由刚体+人体，原生PhysX kinematic targets、默认停障/接触、暂停/选择性停止/同帧Viewer和高级能力具名拒绝。运行LYAPUNOV_ISAAC_PYTHON=<SDK> LYAPUNOV_USD_PYTHON=<usd-core> node --experimental-transform-types --test packages/human-crowd/test/isaac-native.test.ts；缺条件明确skip，不算原生通过。"
+      "reason": "not-run：需要显式已有Isaac6.0.1及既有EULA确认、usd-core解释器；CPU/rendering:none真实同world原生USD静态/关节/自由刚体+人体，原生PhysX kinematic targets、默认停障/接触、暂停/选择性停止/同帧Viewer和高级能力具名拒绝。运行LYAPUNOV_ISAAC_PYTHON=<SDK> LYAPUNOV_USD_PYTHON=<usd-core> node --experimental-strip-types --test packages/human-crowd/test/isaac-native.test.ts；缺条件明确skip，不算原生通过。"
     },
     {
       "path": "packages/human-crowd/test/external-native.test.ts",
@@ -3543,7 +3636,7 @@
         "envgate"
       ],
       "decision": "exclude",
-      "reason": "not-run：需要已验证固定字节的Khronos官方CesiumMan外部GLB/许可文件与既有MuJoCo解释器；不在默认CI联网。显式LYAPUNOV_EXTERNAL_HUMAN_ASSETS=<缓存目录> LYAPUNOV_MUJOCO_PYTHON=<已有解释器> node --experimental-transform-types --test packages/human-crowd/test/external-native.test.ts。真实57条通道、矩阵/单位、水平根轨迹和髋部Z起伏、保存重开与原生动作；缺条件明确skip，不冒充外部通用性通过。"
+      "reason": "not-run：需要已验证固定字节的Khronos官方CesiumMan外部GLB/许可文件与既有MuJoCo解释器；不在默认CI联网。显式LYAPUNOV_EXTERNAL_HUMAN_ASSETS=<缓存目录> LYAPUNOV_MUJOCO_PYTHON=<已有解释器> node --experimental-strip-types --test packages/human-crowd/test/external-native.test.ts。真实57条通道、矩阵/单位、水平根轨迹和髋部Z起伏、保存重开与原生动作；缺条件明确skip，不冒充外部通用性通过。"
     },
     {
       "path": "packages/scene-kit/test/warehouse-catalog.test.ts",

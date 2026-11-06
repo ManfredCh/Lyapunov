@@ -1102,3 +1102,25 @@ export function probeGpuFacts(options: GpuProbeOptions = {}): GpuFacts {
   }
 }
 
+
+/**
+ * WSL2 的 GPU 暴露形态：不是 `/dev/nvidia*`，而是单一字符设备 `/dev/dxg`，CUDA 用户态库
+ * 由 Windows 宿主投影在 `/usr/lib/wsl/lib`（`libcuda.so.1`）。**只读**判定，不写 `/dev`。
+ * 语义与 `probeGpuDeviceVisibility` 刻意分开：面板/doctor 仍按 NVIDIA 节点如实报"看不见"，
+ * 这里只回答"引擎在 WSL2 里要暴露什么"，不冒充"这台机器有 NVIDIA 设备节点"。
+ */
+export function probeWslGpuDevices(options: {
+  devDir?: string
+  libDir?: string
+  statDevice?: (path: string) => { isCharacterDevice(): boolean } | null
+  libExists?: (path: string) => boolean
+} = {}): { devices: readonly string[]; libraryDir: string | null } {
+  const devDir = options.devDir ?? "/dev"
+  const libDir = options.libDir ?? "/usr/lib/wsl/lib"
+  const statDevice = options.statDevice ?? ((path: string) => { try { return lstatSync(path) } catch { return null } })
+  const libExists = options.libExists ?? existsSync
+  const dxg = `${devDir}/dxg`
+  if (!statDevice(dxg)?.isCharacterDevice()) return { devices: [], libraryDir: null }
+  if (!libExists(`${libDir}/libcuda.so.1`)) return { devices: [], libraryDir: null }
+  return { devices: [dxg], libraryDir: libDir }
+}

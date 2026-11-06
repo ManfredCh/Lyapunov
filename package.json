@@ -1,9 +1,9 @@
 {
   "name": "lyapunov",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.13",
+  "packageManager": "bun@1.4.2",
   "engines": {
     "node": ">=24"
   },
@@ -23,6 +23,7 @@
     "dev:architecture": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/architecture.ts",
     "build:desktop": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/build-desktop.ts",
     "build:linux": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/package-linux.ts",
+    "build:macos": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/package-linux.ts",
     "dev:desktop": "node script/desktop.ts --mode formal",
     "dev:desktop:developer": "node script/desktop.ts --mode developer",
     "start": "[ -x \"$npm_execpath\" ] && PATH=\"$(dirname \"$npm_execpath\"):$PATH\"; bun run script/launch.ts --mode formal",

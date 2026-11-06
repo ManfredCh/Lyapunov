@@ -72,6 +72,19 @@ test('Guest与local真实Host窄环境转发合法人体计算设备，非法值
  }}finally{await rm(root,{recursive:true,force:true})}
 })
 
+test('formal与guest同样转发LYAPUNOV_HUMAN_AVATAR_ROOT，未设置不落、无关变量不转发',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'avatar-root-env-'))
+ try{const account={apiUrl:'https://models.example.invalid',token:'fixture-token'} as never
+ for(const mode of ['formal','guest'] as const){
+  const paths=mode==='formal'?runtimePaths({root,mode,accountId:'fixture'}):runtimePaths({root,mode})
+  const forwarded=await backendEnvironment(mode,paths,{account,parent:{PATH:process.env.PATH,LYAPUNOV_HUMAN_AVATAR_ROOT:'/opt/custom-avatars',UNRELATED_LOCAL_OVERRIDE:'must-not-cross'},isolated:true})
+  expect(forwarded.LYAPUNOV_HUMAN_AVATAR_ROOT).toBe('/opt/custom-avatars')
+  expect('UNRELATED_LOCAL_OVERRIDE' in forwarded).toBe(false)
+  const unset=await backendEnvironment(mode,paths,{account,parent:{PATH:process.env.PATH},isolated:true})
+  expect('LYAPUNOV_HUMAN_AVATAR_ROOT' in unset).toBe(false)
+ }}finally{await rm(root,{recursive:true,force:true})}
+})
+
 test('Guest与local真实Host窄环境保留显式USD解释器，子进程不回落且未知秘密仍隔离',async()=>{
  const root=await mkdtemp(join(tmpdir(),'usd-host-env-'))
  try{for(const mode of ['guest','local'] as const){

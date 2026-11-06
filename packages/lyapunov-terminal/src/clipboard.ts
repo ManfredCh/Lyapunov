@@ -4,7 +4,7 @@ import { access } from 'node:fs/promises'
 import { delimiter, join } from 'node:path'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 
-export type TerminalClipboardBackend = 'wl-paste' | 'xclip' | 'xsel'
+export type TerminalClipboardBackend = 'wl-paste' | 'xclip' | 'xsel' | 'pbpaste' | 'osascript'
 export type TerminalClipboardContent =
   | { readonly kind: 'text'; readonly text: string; readonly backend: TerminalClipboardBackend }
   | { readonly kind: 'image'; readonly data: Uint8Array; readonly mediaType: ImageMediaType; readonly name: string; readonly backend: TerminalClipboardBackend }
@@ -24,6 +24,9 @@ export interface TerminalClipboardOptions {
 const imageTypes: readonly ImageMediaType[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const imageExtension: Readonly<Record<ImageMediaType, string>> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
 const textTypes = ['text/plain;charset=utf-8', 'text/plain;charset=UTF-8', 'UTF8_STRING', 'text/plain', 'TEXT', 'STRING']
+/** macOS 剪贴板类（osascript «class X»）到媒体类型的映射；WebP 不是标准 pasteboard 类，不声明支持。 */
+const darwinImageClasses: Readonly<Partial<Record<ImageMediaType, string>>> = { 'image/png': 'PNGf', 'image/jpeg': 'JPEG', 'image/gif': 'GIFf' }
+const darwinTextMarkers = ['«class utf8»', '«class ut16»', 'Unicode text', 'string']
 
 async function executable(name: TerminalClipboardBackend, options: TerminalClipboardOptions, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   const configured = options.tools?.[name]
@@ -36,10 +39,51 @@ async function executable(name: TerminalClipboardBackend, options: TerminalClipb
   return undefined
 }
 
+function runProgram(options: TerminalClipboardOptions, env: NodeJS.ProcessEnv, program: string, backend: TerminalClipboardBackend, args: readonly string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    options.signal.throwIfAborted()
+    execFile(program, [...args], { env, encoding: 'buffer', signal: options.signal, timeout: 15000, maxBuffer: options.maxBytes ?? 64 * 1024 * 1024 }, (error, stdout) => {
+      if (options.signal.aborted) reject(options.signal.reason ?? new Error('CLIPBOARD_CANCELLED: 剪贴板读取已取消。'))
+      else if (error) reject(new Error(`CLIPBOARD_READ_FAILED: ${backend} 读取失败（${error.code ?? error.message}）。`))
+      else resolve(stdout)
+    })
+  })
+}
+
+/** macOS NSPasteboard：文本走 pbpaste，图片与类型枚举走 osascript（均为系统自带，不安装任何东西）。 */
+async function readPasteboardClipboard(options: TerminalClipboardOptions, env: NodeJS.ProcessEnv, kind: 'auto' | 'text' | 'image'): Promise<TerminalClipboardContent> {
+  const pbpaste = await executable('pbpaste', options, env)
+  const osascript = await executable('osascript', options, env)
+  if (!pbpaste && !osascript) throw new Error('CLIPBOARD_UNAVAILABLE: macOS 剪贴板需要 pbpaste（文本）或 osascript（图片）工具。')
+  if (kind !== 'text' && osascript) {
+    const info = (await runProgram(options, env, osascript, 'osascript', ['-e', 'clipboard info'])).toString('utf8')
+    const imageType = imageTypes.find(type => {
+      const darwinClass = darwinImageClasses[type]
+      return darwinClass !== undefined && info.includes(`«class ${darwinClass}»`)
+    })
+    if (imageType) {
+      const darwinClass = darwinImageClasses[imageType] as string
+      const output = (await runProgram(options, env, osascript, 'osascript', ['-e', `the clipboard as «class ${darwinClass}»`])).toString('utf8')
+      const match = output.match(/«data [A-Za-z0-9]{4}([0-9A-Fa-f\s]+)»/)
+      if (!match) throw new Error('CLIPBOARD_READ_FAILED: osascript 返回的剪贴板数据不可解析。')
+      const data = Buffer.from(match[1].replace(/[^0-9A-Fa-f]/g, ''), 'hex')
+      options.signal.throwIfAborted()
+      return { kind: 'image', data, mediaType: imageType, name: `clipboard.${imageExtension[imageType]}`, backend: 'osascript' }
+    }
+  }
+  if (kind !== 'image' && pbpaste) {
+    const data = await runProgram(options, env, pbpaste, 'pbpaste', ['-Prefer', 'txt'])
+    options.signal.throwIfAborted()
+    if (data.length > 0) return { kind: 'text', text: data.toString('utf8'), backend: 'pbpaste' }
+  }
+  throw new Error(`CLIPBOARD_CONTENT_UNAVAILABLE: 剪贴板没有${kind === 'image' ? '受支持的图片' : kind === 'text' ? '文本' : '受支持的文本或图片'}。`)
+}
+
 /** 只有用户显式请求时才调用；结果仍由现有UI草稿/原生附件服务接收。 */
 export async function readTerminalClipboard(options: TerminalClipboardOptions): Promise<TerminalClipboardContent> {
   options.signal.throwIfAborted()
   const env = options.env ?? process.env, kind = options.kind ?? 'auto'
+  if (process.platform === 'darwin' && !env.WAYLAND_DISPLAY && !env.DISPLAY) return readPasteboardClipboard(options, env, kind)
   let backend: TerminalClipboardBackend | undefined, path: string | undefined
   if (env.WAYLAND_DISPLAY) {
     path = await executable('wl-paste', options, env)
@@ -53,16 +97,9 @@ export async function readTerminalClipboard(options: TerminalClipboardOptions): 
       if (path) backend = 'xsel'
     }
   }
-  if (!backend || !path) throw new Error('CLIPBOARD_UNAVAILABLE: 当前显示会话缺少可用剪贴板工具；Wayland需要wl-paste，X11图片需要xclip，文本也可使用xsel。')
+  if (!backend || !path) throw new Error('CLIPBOARD_UNAVAILABLE: 当前显示会话缺少可用剪贴板工具；Wayland需要wl-paste，X11图片需要xclip，文本也可使用xsel，macOS使用pbpaste与osascript。')
   const program = path, selected = backend
-  const run = (args: readonly string[]): Promise<Buffer> => new Promise((resolve, reject) => {
-    options.signal.throwIfAborted()
-    execFile(program, [...args], { env, encoding: 'buffer', signal: options.signal, timeout: 15000, maxBuffer: options.maxBytes ?? 64 * 1024 * 1024 }, (error, stdout) => {
-      if (options.signal.aborted) reject(options.signal.reason ?? new Error('CLIPBOARD_CANCELLED: 剪贴板读取已取消。'))
-      else if (error) reject(new Error(`CLIPBOARD_READ_FAILED: ${selected} 读取失败（${error.code ?? error.message}）。`))
-      else resolve(stdout)
-    })
-  })
+  const run = (args: readonly string[]): Promise<Buffer> => runProgram(options, env, program, selected, args)
   if (backend === 'xsel') return { kind: 'text', text: (await run(['--clipboard', '--output'])).toString('utf8'), backend }
   const advertised = (await run(backend === 'wl-paste' ? ['--list-types'] : ['-selection', 'clipboard', '-out', '-target', 'TARGETS'])).toString('utf8').split(/\r?\n/).map(value => value.trim()).filter(Boolean)
   const imageType = kind !== 'text' ? imageTypes.find(type => advertised.includes(type)) : undefined

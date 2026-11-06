@@ -1,5 +1,5 @@
 import { HumanCrowdPanel, humanGroupMember } from './human-crowd-panel.tsx'
-import { CrowdPanel } from './crowd-panel.tsx'
+import { CrowdPanel,countCrowdStarts } from './crowd-panel.tsx'
 import {isNativeUsdEntity,usdSourceFacts} from '../../lyapunov-contracts/src/usd.ts'
 import {ViewerContextMenu,writeViewerReference,type ViewerContextRequest,type InsertViewerReference} from './viewer-context-menu.tsx'
 import {requireFullJointTargets,jointTargetError} from "./joint-target-input.tsx"
@@ -12,7 +12,7 @@ import {ImportPurposeChoice} from './import-purpose-choice.tsx'
 import type {ResourcePhysicsProgress} from './physics-binding-settings.ts'
 import {importLocalPolicy,type LocalPolicyImportReceipt} from './local-policy-import.ts'
 import {physicalTestSpaceOf,physicalTestWorldInput,physicalTestMissingCapabilities} from "./physics-test-space.ts"
-import {SceneWorldLifecycle,sceneHostRecoveryNotice,sceneWorldWithoutProvider,worldLifecycleState,measuredJointTargets,type SceneWorldState} from './scene-world-lifecycle.ts'
+import {SceneWorldLifecycle,sceneHostRecoveryNotice,sceneWorldWithoutProvider,worldLifecycleState,faultedWorldLifecycle,closedWorldLifecycle,measuredJointTargets,type SceneWorldState} from './scene-world-lifecycle.ts'
 import {sceneEditTarget,sceneNodeRole} from '../../lyapunov-contracts/src/scene-edit-target.ts'
 import {SceneWorldStatus,sceneWorldPhaseLabel} from './scene-world-status.tsx'
 import {WorldPhysicsPanel} from './world-physics-panel.tsx'
@@ -543,7 +543,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 用户显式关闭过的 world：`worldRef.current` 为空既可能是后台轮询的瞬时缺口，也可能是用户关闭/
  // 重置。这里只记录显式关闭这一事实，供迟到回执核对，不把"句柄为空"当成"仍是同一次操作"。
  const closedWorldsRef=useRef(new Set<string>())
- const manualDrafts=useRef(new Set<string>()),manualActions=useRef<RecentAction[]>([])
+ const manualDrafts=useRef(new Set<string>()),manualActions=useRef<RecentAction[]>([]),crowdStarts=useRef(0)
+ const crowdCommand=countCrowdStarts((name:string,input:unknown)=>api.command(name,input),crowdStarts)
  const [manualControlBlocked,setManualControlBlocked]=useState(false)
  const [administrator,setAdministrator]=useState<WorkbenchState["administrator"]>()
  const [officialCamera,setOfficialCamera]=useState(false)
@@ -1087,7 +1088,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(value.scene){if(selectedRef.current&&!value.scene.entities.some(e=>e.entityId===selectedRef.current)){selectedRef.current=undefined;setSelected(undefined)}const official=value.worlds.some(item=>item.engineId==='official-suite'&&item.status!=='closed'&&item.sceneId===value.scene!.sceneId);setScene(old=>official&&old?.sceneId===value.scene!.sceneId&&old.revision===value.scene!.revision?old:value.scene);sceneRef.current=value.scene}
   const currentScene=value.scene??sceneRef.current
   if(changed){setWorld(undefined);worldRef.current=undefined;setFrame(undefined);setDescriptions({});setTargets({});projectedScene.current=undefined;viewer.current?.setWorld(undefined);setNotice(tr(sceneHostRecoveryNotice(value.scene).zh,sceneHostRecoveryNotice(value.scene).en));persist(value.scene,undefined)}
-  else{const desired=worldRef.current?.worldId??readCache(cacheKey).worldId,same=value.worlds.filter(item=>item.sceneId===(currentScene?.sceneId??target)&&item.status!=="closed"),current=adoptWorldHandle(same.find(item=>item.worldId===desired)??(same.length===1?same[0]:undefined),worldRef.current);setWorld(current);worldRef.current=current;if(!current)setFrame(undefined);persist(currentScene,current)}
+  else{const desired=worldRef.current?.worldId??readCache(cacheKey).worldId,same=value.worlds.filter(item=>item.sceneId===(currentScene?.sceneId??target)&&item.status!=="closed"),current=adoptWorldHandle(same.find(item=>item.worldId===desired)??(same.length===1?same[0]:undefined),worldRef.current);setWorld(current);worldRef.current=current;if(!current||current.status==='unavailable')setFrame(undefined);if(current?.status==='unavailable')setWorldLifecycle(previous=>faultedWorldLifecycle(previous,current,sceneRef.current?.sceneId));persist(currentScene,current)}
   setReconnecting(false);return value
  }
  const loadScene=async(id:string)=>{nativeControlCancel.current?.();sceneIntent.current=id;const seq=++sceneLoadSeq.current;pendingFocus.current=undefined;++loadVersion.current;viewState.current=undefined;projectedScene.current=undefined;selectedRef.current=undefined;setSelected(undefined);setBatchIds([]);setDescriptions({});setTargets({});setFrame(undefined);setWorld(undefined);worldRef.current=undefined;closedWorldsRef.current.clear();const value=await refreshState(id,seq);if(value.worlds.some(item=>item.engineId==="official-suite"&&item.sceneId===id))setVersions([]);else await refreshHistory(id);return value}
@@ -1384,10 +1385,14 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   if(apiRef.current===requestAPI&&sceneRef.current?.sceneId===current.sceneId)applySceneIfCurrent(sceneWritePort,current.sceneId,snapshot)
  }
  const closePhysicsWorld=async()=>{
-  const closing=worldRef.current;if(!closing)return;automaticWorld.markClosed()
+  const closing=worldRef.current;if(!closing)return;automaticWorld.markClosed(false)
   closedWorldsRef.current.add(closing.worldId)
-  await api.command('sim_close',{worldId:closing.worldId},{sceneId:sceneRef.current?.sceneId,worldId:closing.worldId})
-  if(worldRef.current?.worldId===closing.worldId){setWorld(undefined);worldRef.current=undefined;setFrame(undefined)}
+  try{await api.command('sim_close',{worldId:closing.worldId},{sceneId:sceneRef.current?.sceneId,worldId:closing.worldId})}
+  catch(error){if(sameWorldBinding(closing,worldRef.current)&&sceneRef.current?.sceneId===closing.sceneId)setWorldLifecycle({...worldLifecycleState(closing),phase:'failed',code:'WORLD_CLOSE_FAILED',detail:String(error)});throw error}
+  if(currentAPI()&&sceneRef.current?.sceneId===closing.sceneId&&(!sceneIntent.current||sceneIntent.current===closing.sceneId)){
+   if(sameWorldBinding(closing,worldRef.current)){automaticWorld.markClosed();setWorld(undefined);worldRef.current=undefined;setFrame(undefined)}
+   else if(!worldRef.current)setWorldLifecycle(previous=>closedWorldLifecycle(previous,closing))
+  }
   await refreshState(sceneRef.current?.sceneId);setError('')
  }
 
@@ -1748,7 +1753,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const facts=await api.request<EngineProvidersPayload>("engine-providers"),running=facts.runningEngine
   if(apiRef.current!==requestAPI||sceneRef.current?.sceneId!==expectedSceneId)return
   if(facts.preference&&facts.preference!==running)throw new Error(`CAMERA_ENGINE_RESTART_REQUIRED: 已指定 ${facts.preference}，当前 Host 为 ${running??"未装配"}；按设置提示重启工作台后再准备相机。`)
-  if(running!=="isaac"&&running!=="mujoco")throw new Error(`CAMERA_ENGINE_UNAVAILABLE: 当前 Host 为 ${running??"未装配"}，机器人相机需要已装配的 Isaac 或 MuJoCo。`)
+  if(running!=="isaac"&&running!=="mujoco"&&running!=="newton")throw new Error(`CAMERA_ENGINE_UNAVAILABLE: 当前 Host 为 ${running??"未装配"}，机器人相机需要已装配的 Isaac、MuJoCo 或 Newton。`)
   const existing=worldRef.current?.sceneId===expectedSceneId?worldRef.current:undefined
   const provider=facts.providers.find(row=>row.id===running)
   if(!provider?.installed&&(!existing||!["ready","running","paused"].includes(existing.status)))throw new Error(`CAMERA_SDK_NOT_READY: ${provider?.label??running} · ${provider?.detail??"当前 Host 未提供该 SDK 的就绪事实"}`)
@@ -1844,7 +1849,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   const bridge=window.lyapunovDesktop as (DesktopBridge&{registerExitParticipant?:(id:string,participant:{summary:()=>{dirtyDrafts:number;runningActions:number};flush:()=>Promise<void>;stop?:()=>Promise<void>})=>()=>void;onExitStateChanged?:(listener:(committing:boolean)=>void)=>()=>void})|undefined
   const removeState=bindControlExitState(bridge,api,setManualControlBlocked)
   const removeParticipant=bridge?.registerExitParticipant?.('manual-controls.'+api.clientId,{
-   summary:()=>({dirtyDrafts:manualDrafts.current.size,runningActions:manualActions.current.filter(row=>row.waiting).length}),
+   summary:()=>({dirtyDrafts:manualDrafts.current.size,runningActions:manualActions.current.filter(row=>row.waiting).length+crowdStarts.current}),
    flush:async()=>{if(manualDrafts.current.size)throw Error('MANUAL_TARGET_DRAFT_PENDING: 控制参数尚未提交或清除；退出不会自动执行这些目标。')},
    stop:async()=>{const bound=worldRef.current;if(!bound)return;nativeControlCancel.current?.();const requestAPI=apiRef.current,result=await requestAPI.command<{stopped:boolean}>('sim_stop',{worldId:bound.worldId,expectedGeneration:bound.worldGeneration},{sceneId:bound.sceneId,worldId:bound.worldId});if(apiRef.current!==requestAPI||!sameWorldBinding(bound,worldRef.current)||result.stopped!==true)throw Error('MANUAL_STOP_NOT_CONFIRMED: 未确认原世界动作已停止。')}
   })
@@ -2473,7 +2478,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   </dl><div className="lya-row"><button type="button" onClick={()=>ui.openTool('scene')}>{tr('查看场景层级','Show scene hierarchy')}</button>{editableEntity&&editableEntity.entityId!==entity.entityId&&<button type="button" onClick={()=>chooseSceneEntity(editableEntity.entityId)}>{tr('编辑实例：','Editing instance: ')}{editableEntity.name}</button>}</div></details>
  const objectEditor=entity&&scene&&!readOnly?<div className="lya-panel-seat" data-testid="object-inspector-header"><PanelPage title={sceneNodeName(entity,tr)} back={tr('‹ 物件','‹ Objects')} onBack={backToObjectList} actions={<details className="lya-advanced" data-testid="object-header-more"><summary className="lya-chip" aria-label={tr('更多操作','More actions')} title={tr('更多操作','More actions')}>⋯</summary><div className="lya-row"><button type="button" className="lya-chip" data-testid="open-components" disabled={!viewerVisible} onClick={()=>openComponents(entity.entityId)}>{tr('部件','Components')}</button></div></details>}>
   <EntityEditor sceneId={scene.sceneId} revision={scene.revision} entity={editableEntity??entity} entities={scene.entities} tr={tr} commit={updateScene} exitBridge={cameraExitBridge} exitId={'entity-editor:'+api.clientId}/>
-  {(entity.components.human||Boolean(entity.components.humanDefinition)||humanGroupMember(scene,entity))&&<HumanCrowdPanel key={`${sessionId}:${scene.sceneId}:${entity.entityId}`} scene={scene} entity={entity} world={world} frame={frame} disabled={readOnly||replayActive} command={(name,input)=>api.command(name,input)} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} tr={tr}/> }
+  {(entity.components.human||Boolean(entity.components.humanDefinition)||humanGroupMember(scene,entity))&&<HumanCrowdPanel key={`${sessionId}:${scene.sceneId}:${entity.entityId}`} scene={scene} entity={entity} world={world} frame={frame} disabled={readOnly||replayActive} command={crowdCommand} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} tr={tr}/> }
   {Boolean(entity.components.humanGroup)&&!entity.components.human&&!entity.components.humanDefinition&&!humanGroupMember(scene,entity)&&<p className="lya-help">{tr('该群组没有可控制的人物。','This group has no controllable people.')}</p>}
   <details className="lya-advanced" data-testid="object-material"><summary>{tr('材质与灯光','Material and light')} · {entity.components.material?tr('已设置','Set'):tr('默认','Default')}</summary>
    <MaterialPanel key={scene.sceneId+':'+entity.entityId} status={materialStatus?.entityId===entity.entityId?materialStatus:undefined} readOnly={readOnly||replayActive} busy={materialBusy||!viewerVisible} apply={patch=>perform(()=>applyMaterialPatch(patch))} reset={()=>perform(()=>applyMaterialPatch(null))} tr={tr}/>
@@ -2531,7 +2536,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
     ? <PanelPage title={tr("物件","Objects")}>
       {/* 设计稿 objects-list：搜索框与「＋」同一行；计数不摆首屏，标题行只留关闭。 */}
       <div className="lya-row" data-testid="object-search-row" style={{flexWrap:"nowrap",alignItems:"center"}}><input type="search" style={{flex:1,minWidth:0}} data-testid="object-search" aria-label={tr("搜索物件","Search objects")} placeholder={tr("搜索物件","Search objects")} value={objectQuery} onChange={event=>setObjectQuery(event.target.value)}/><button type="button" className="lya-chip" data-testid="object-add-primary" aria-label={tr("添加对象","Add object")} title={tr("添加对象","Add object")} disabled={!scene||readOnly} onClick={openObjectAdd}>＋</button></div>
-      {scene&&<HumanCrowdPanel key={`${sessionId}:${scene.sceneId}`} scene={scene} world={world} frame={frame} disabled={readOnly||replayActive} command={(name,input)=>api.command(name,input)} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/>}
+      {scene&&<HumanCrowdPanel key={`${sessionId}:${scene.sceneId}`} scene={scene} world={world} frame={frame} disabled={readOnly||replayActive} command={crowdCommand} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/>}
       {scene&&<div className="lya-tree lya-list" data-testid="object-list">{objectQuery.trim()?objectMatches.map(item=><ListRow key={item.entityId} icon="object" title={sceneNodeName(item,tr)} subtitle={nodeRoleLabel(item)} selected={selected===item.entityId} onClick={()=>openObjectInspector(item.entityId)}/>):<><div className="lya-row lya-section" data-testid="object-scene-group"><span>▾ {tr("场景","Scene")} 01</span></div>{tree(undefined,0,true,sceneObjectRoots)}</>}</div>}
       {(!scene||sceneObjectRoots.length===0)&&<EmptyState icon="object" title={tr("还没有物件","No objects")} detail={!sessionId?tr("先在左侧选择工作区，再添加物件。","Choose a workspace on the left to add objects."):tr("添加或导入一个对象。","Add or import an object.")}/>}
       {scene&&sceneObjectRoots.length>0&&objectQuery.trim()&&objectMatches.length===0&&<EmptyState icon="object" title={tr("没有匹配的物件","No matching objects")} detail={tr("换一个名称再试。","Try another name.")}/>}
@@ -2668,7 +2673,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   <PanelPage title={tr('关节控制','Joint controls')} eyebrow={sceneNodeName(entity!,tr)} back={tr('‹ 实例','‹ Instance')} onBack={()=>setRobotSection('root')}>
    <div data-testid="robot-native-control">
    {entity&&world&&robotSelected
-    ?<>{entity.components.controller?.type==="drone"?<FlightControlPanel entity={entity} description={description} observation={observation} world={world} ready={ready} command={(name,input)=>api.command<any>(name,input)} tr={tr} describe={()=>perform(()=>describe(entity.entityId))} onWorldReset={next=>{setWorld(next);worldRef.current=next;setFrame(undefined);void refreshState(next.sceneId)}}/>:<RobotControlPanel key={`${scene?.sceneId}:${world.worldId}:${world.worldGeneration}:${entity.entityId}`} entity={entity} description={description} observation={observation} targets={targets[entity.entityId]??{}} controlBlocked={manualControlBlocked} setTargets={(values,draft)=>{if(api.areControlsBlocked())return;setTargets(old=>({...old,[entity.entityId]:values}));targetsRef.current={...targetsRef.current,[entity.entityId]:values};if(draft===true)manualDrafts.current.add(entity.entityId);else if(draft===false)manualDrafts.current.delete(entity.entityId)}} ready={ready} duration={duration} setDuration={setDuration} describe={()=>perform(()=>describe(entity.entityId))} move={(name,motion,label)=>perform(()=>move(name,motion,label))} fullMotion={()=>fullMotion(entity.entityId)} tr={tr} controlKey={`${world.worldId}:${world.worldGeneration}`} controlScope={{worldId:world.worldId,generation:world.worldGeneration}} liveMove={nativeJointMove} registerLiveCancel={cancel=>{nativeControlCancel.current=cancel}} cancelLive={display=>{const bound=world;void api.command("sim_stop",{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[entity.entityId]},{sceneId:bound.sceneId,worldId:bound.worldId},undefined,display).catch(value=>setError(String(value)))}}/>}
+    ?<>{entity.components.controller?.type==="drone"?<FlightControlPanel entity={entity} description={description} observation={observation} world={world} ready={ready} command={(name,input)=>api.command<any>(name,input)} readStatus={input=>api.request<any>(`flight-status?${new URLSearchParams(Object.entries(input).map(([key,value])=>[key,String(value)]))}`)} tr={tr} describe={()=>perform(()=>describe(entity.entityId))} onWorldReset={next=>{setWorld(next);worldRef.current=next;setFrame(undefined);void refreshState(next.sceneId)}}/>:<RobotControlPanel key={`${scene?.sceneId}:${world.worldId}:${world.worldGeneration}:${entity.entityId}`} entity={entity} description={description} observation={observation} targets={targets[entity.entityId]??{}} controlBlocked={manualControlBlocked} setTargets={(values,draft)=>{if(api.areControlsBlocked())return;setTargets(old=>({...old,[entity.entityId]:values}));targetsRef.current={...targetsRef.current,[entity.entityId]:values};if(draft===true)manualDrafts.current.add(entity.entityId);else if(draft===false)manualDrafts.current.delete(entity.entityId)}} ready={ready} duration={duration} setDuration={setDuration} describe={()=>perform(()=>describe(entity.entityId))} move={(name,motion,label)=>perform(()=>move(name,motion,label))} fullMotion={()=>fullMotion(entity.entityId)} tr={tr} controlKey={`${world.worldId}:${world.worldGeneration}`} controlScope={{worldId:world.worldId,generation:world.worldGeneration}} liveMove={nativeJointMove} registerLiveCancel={cancel=>{nativeControlCancel.current=cancel}} cancelLive={display=>{const bound=world;void api.command("sim_stop",{worldId:bound.worldId,expectedGeneration:bound.worldGeneration,entityIds:[entity.entityId]},{sceneId:bound.sceneId,worldId:bound.worldId},undefined,display).catch(value=>setError(String(value)))}}/>}
      <details className="lya-advanced"><summary>{tr("动作结果","Action results")} ({actions.length})</summary><ActionCards actions={actions} tr={tr}/></details></>
     :<p className="lya-help" data-testid="robot-native-control-wait">{tr(`已选中机器人「${entity?.name??''}」。启动物理世界后即可调整关节与执行动作；原生控制不需要训练策略。`,`${entity?.name??''} selected. Start physics to adjust joints and run actions; native control needs no trained policy.`)}</p>}
    </div>
@@ -2723,7 +2728,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  // 或者用 scene_edit 直接改文档的，界面里立刻就是同一个列表；模型侧按名字应用它们走同一个读函数。
  const [rigSpec,setRigSpec]=useState<any>(),[rigVisible,setRigVisible]=useState(false),[lensFocal,setLensFocal]=useState("24"),[lensSensor,setLensSensor]=useState("36"),[recordCameraKey,setRecordCameraKey]=useState<string|undefined>()
  const rigSpecRef=useRef<any>()
- const nativeCameras=useNativeCameraList({api,scene,world,active:open&&!replayActive&&(uiState.tool==="camera"||uiState.tool==="recording")})
+ const nativeCameras=useNativeCameraList({api,scene,world,active:open&&!replayActive&&(uiState.tool==="camera"||uiState.tool==="capture"||uiState.tool==="recording")})
  const unavailableCameraNames:string[]=(nativeCameras.receipt?.cameras??[]).filter((row:any)=>row.available===false).map((row:any)=>row.cameraName)
  const cameraSpecs=projectSceneCameraRigs(scene,world,frame,cameraRigSpecs(nativeCameras.receipt?.cameras),unavailableCameraNames)
  useEffect(()=>{setRigSpec(undefined);rigSpecRef.current=undefined},[nativeCameras.key,api])
@@ -3005,7 +3010,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   </>
  const annotationBar=<AnnotationPanel annotations={annotations} activeId={activeAnnotation} annotating={annotating} readOnly={readOnly} replayActive={replayActive} viewerVisible={viewerVisible} sceneReady={Boolean(scene)} hasEntities={Boolean(scene?.entities.length)} entityName={entityId=>scene?.entities.find(item=>item.entityId===entityId)?.name} sceneId={annotationSceneId} focusRequest={annotationFocusRequest} onToggleMode={annotationActions.toggleMode} onSelect={annotationActions.select} onText={annotationActions.text} onRemove={annotationActions.remove} onCapture={captureAnnotations} inject={injectAnnotations} onInject={setInjectAnnotations} prompt={annotationPrompt} captures={annotationCaptures} tr={tr}/>
  const campaignPanel=<CampaignsPanel campaigns={campaigns??[]} tr={tr}/>
- const crowdPanel=scene?<PanelPage title={tr("人群","Crowd")}><CrowdPanel key={`${sessionId}:${scene.sceneId}`} scene={scene} world={world} frame={frame} disabled={readOnly||replayActive} command={(name,input)=>api.command(name,input)} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/></PanelPage>:<PanelPage title={tr("人群","Crowd")}><EmptyState icon="scene" title={tr("还没有场景","No scene yet")} detail={tr("新建一个场景，或在对话中描述你要构建的世界。","Create a scene, or describe the world you want in the conversation.")}/></PanelPage>
+ const crowdPanel=scene?<PanelPage title={tr("人群","Crowd")}><CrowdPanel key={`${sessionId}:${scene.sceneId}`} scene={scene} world={world} frame={frame} disabled={readOnly||replayActive} command={crowdCommand} onSaved={snapshot=>applySceneIfCurrent(sceneWritePort,snapshot.sceneId,snapshot)} sync={()=>worldRef.current?sync():startWorld()} chooseFile={window.lyapunovDesktop?async()=>{const files=await window.lyapunovDesktop!.selectFiles();return files[0]}:undefined} tr={tr}/></PanelPage>:<PanelPage title={tr("人群","Crowd")}><EmptyState icon="scene" title={tr("还没有场景","No scene yet")} detail={tr("新建一个场景，或在对话中描述你要构建的世界。","Create a scene, or describe the world you want in the conversation.")}/></PanelPage>
  const panels:Record<ToolId,ReactNode>={scene:scenePanel,environment:environmentPanel,robot:robotPanel,crowd:crowdPanel,object:objectPanel,camera:cameraPanel,capture:capturePanel,recording:recordingPanel,annotation:null,physics:physicsPanel,campaign:campaignPanel}
  const addViewerToChat=async()=>{
   const menu=viewerMenu,snapshot=sceneRef.current,currentSession=sessionId,requestAPI=apiRef.current

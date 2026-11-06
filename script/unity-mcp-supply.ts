@@ -1,6 +1,6 @@
 /** 固定的Unity stdio桥供给；编辑器及其addon仍由原Unity Package Manager管理。 */
 import {existsSync,readFileSync,realpathSync,accessSync,constants,readdirSync} from 'node:fs'
-import {mkdir,writeFile,copyFile,readFile} from 'node:fs/promises'
+import {mkdir,writeFile,copyFile,readFile,rename} from 'node:fs/promises'
 import {join,dirname,delimiter} from 'node:path'
 import {createHash} from 'node:crypto'
 import {PRODUCT_ROOT} from './profile.ts'
@@ -46,11 +46,32 @@ export async function prepareUnityMcpSupply(root=PRODUCT_ROOT){
  return metadata
 }
 export async function ensureUnityMcp(options:{root?:string;env?:NodeJS.ProcessEnv;offline?:boolean;forceProduct?:boolean;signal?:AbortSignal}={}){
- if(process.platform!=='linux')throw Error('UNITY_MCP_SUPPLY_PLATFORM_UNSUPPORTED: 此产品供给入口仅Linux；其它平台保留显式原生配置。')
+ if(!['linux','darwin'].includes(process.platform))throw Error('UNITY_MCP_SUPPLY_PLATFORM_UNSUPPORTED: 此产品供给支持Linux与macOS；其它平台保留显式原生配置。')
  const root=options.root??PRODUCT_ROOT,env=options.env??process.env,paths=unityMcpSupplyPaths(root),metadata=await prepareUnityMcpSupply(root),existing=options.forceProduct?(unityMcpSupplyReady(root)?paths.command:undefined):installedUnityMcpCommand(env,root)
  if(existing)return {...metadata,ready:true,command:existing,owner:existing===paths.command?'product':'existing'}
  if(options.offline)throw Error('UNITY_MCP_RUNTIME_MISSING: '+paths.venv+'；固定wheel已准备，尚需本机Python与依赖正常安装。')
- const bundledPython=join(root,'.runtime/sim-python/bin/python'),python=existsSync(bundledPython)?bundledPython:'python3'
+ const bundledPython=join(root,'.runtime/sim-python/bin/python')
+ let python=existsSync(bundledPython)?bundledPython:'python3'
+ if(process.platform==='darwin'){
+  // macOS/Xcode 自带 python3 可能仍是 3.9；沿原 venv 安装路径选择已有的兼容解释器，
+  // 不降级固定 bridge，不改系统 Python，也不安装另一个业务运行器。
+  const candidates=[bundledPython,join(root,'.runtime/policy-python/bin/python'),join(root,'.runtime/newton-env/bin/python'),
+   ...(env.PATH??'').split(delimiter).filter(Boolean).flatMap(dir=>['python3.12','python3.11','python3.13','python3.14','python3.10'].map(name=>join(dir,name))),
+   '/opt/homebrew/bin/python3.12','/usr/local/bin/python3.12','python3']
+  let compatible:string|undefined
+  for(const command of new Set(candidates)){
+   if(command!=='python3'&&!existsSync(command))continue
+   const check=await runBlenderMcpSupplyCommand(command,['-c','import sys;sys.exit(0 if sys.version_info >= (3,10) else 2)'],{signal:options.signal})
+   if(check.code===0){compatible=command;break}
+  }
+  if(!compatible)throw Error('UNITY_MCP_PYTHON_VERSION_UNSUPPORTED: 固定 Unity bridge 需要 Python >=3.10；请通过原 install-provider 准备 MuJoCo/CPU Python，或配置已有 stdio command。')
+  python=compatible
+  if(existsSync(paths.venv)){
+   const actual=await runBlenderMcpSupplyCommand(join(paths.venv,'bin/python'),['-c','import sys;sys.exit(0 if sys.version_info >= (3,10) else 2)'],{signal:options.signal})
+   // venv 在已有目录换 Python 时可能保留旧 python 链接；只迁出本产品未就绪的前缀，原目录完整保留。
+   if(actual.code!==0)await rename(paths.venv,paths.venv+'.python-incompatible-'+Date.now())
+  }
+ }
  const made=await runBlenderMcpSupplyCommand(python,['-m','venv',paths.venv],{signal:options.signal});if(made.code!==0)throw Error('UNITY_MCP_PYTHON_VENV_FAILED: '+made.stderr.slice(-800))
  const installed=await runBlenderMcpSupplyCommand(join(paths.venv,'bin/python'),['-m','pip','install','--disable-pip-version-check','--no-input','--timeout','30','--retries','0',paths.wheel],{signal:options.signal});if(installed.code!==0)throw Error('UNITY_MCP_INSTALL_FAILED: '+installed.stderr.slice(-1000))
  await mkdir(dirname(paths.command),{recursive:true})

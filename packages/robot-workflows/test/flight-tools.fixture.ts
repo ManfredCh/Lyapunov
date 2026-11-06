@@ -1,6 +1,6 @@
 /** 真实 Model/Resource/Session/ToolRegistry/Command/Jobs/worker 夹具；需要已有 Python，不使用模型或收费 API。 */
 import assert from 'node:assert/strict'
-import {mkdir,readFile,writeFile} from 'node:fs/promises'
+import {mkdir,writeFile} from 'node:fs/promises'
 import {resolve,join} from 'node:path'
 import {Context} from '@deepseek-ai/cordis'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
@@ -14,25 +14,34 @@ import {SessionSimFactory} from '../../sim-contract/src/session-provider.ts'
 import {MuJoCoProvider} from '../../sim-mujoco/src/provider.ts'
 import * as scenePlugin from '../../scene-kit/src/plugin.ts'
 import {identityTransform,type SceneSnapshot} from '../../lyapunov-contracts/src/types.ts'
+import {CRAZYFLIE_SOURCE_SHA256} from '../src/flight-controller.ts'
 const root=resolve(import.meta.dirname,'../../..'),output=resolve(process.argv[2]??'.runtime/flight-tools-fixture'),python=process.argv[3]
 const workflowPlugin=await import(process.argv[4]??resolve(root,'packages/robot-workflows/dist/plugin.js'))
+const productRoot=resolve(process.argv[5]??root)
 assert(python,'必须提供真实 SDK Python，不缺依赖就跳过')
 await mkdir(output,{recursive:true})
 const ctx=new Context();await ctx.plugin(Timer);await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Commands);await ctx.plugin(Jobs);ctx.jobs.attachController('flight-tools-fixture')
 const factory=new SessionSimFactory({create:()=>new MuJoCoProvider({pythonPath:python,workerPath:resolve(root,'packages/sim-mujoco/python/worker.py')})})
 ctx.reflect.provide('sim',factory as never)
-await ctx.plugin(scenePlugin,{dataRoot:join(output,'scene-runtime'),productRoot:root})
+await ctx.plugin(scenePlugin,{dataRoot:join(output,'scene-runtime'),productRoot})
 await ctx.plugin(workflowPlugin,{recordingRoot:join(output,'recordings')})
 const harness=await mountAgentLoopTestHarness(ctx),agent=await harness.create(SessionId('isolated-flight-a'),{},{cwd:output}),other=await harness.create(SessionId('isolated-flight-b'),{},{cwd:output})
 let count=0
 async function tool(name:string,input:any,caller=agent){const value=await ctx.tools.execute({callId:ToolCallId('flight-fixture-'+ ++count),name,arguments:{input},agent:caller,signal:new AbortController().signal});if(value.isError)throw new Error(JSON.stringify(value.content));return value.value as any}
 async function command(input:any){const value=await ctx.commands.execute(agent,'/robot_flight '+JSON.stringify(input),[],new AbortController().signal);assert(value);const result=value.result as {kind:string;text:string};if(result.kind!=='success')throw new Error(result.text);return JSON.parse(result.text)}
 try{
- const library=JSON.parse(await readFile(join(root,'materials/library.json'),'utf8')).resources.find((r:any)=>r.assetId==='crazyflie_2')
- assert(library&&library.components?.controller?.type==='drone')
- await tool('scene_create',{sceneId:'flight-product'})
- const imported=await tool('scene_import',{path:join(root,'materials',library.path),resourceId:library.assetId,name:library.displayName,components:library.components})
- const mounted=await tool('scene_mount',{sceneId:'flight-product',resourceId:library.assetId,entityId:'quad',transform:identityTransform(),alignBottomToSurface:false})
+ // 与发行界面走同一 Scene 初始化器与 ResourceLibrary，不复制模型或另造控制映射。
+ const sceneService=ctx.get('scene')
+ assert(sceneService?.initializeDefaults)
+ const initialized=await sceneService.initializeDefaults(agent.id)
+ assert.equal(initialized.status,'READY',JSON.stringify(initialized.blocked))
+ const library=initialized.models.find(row=>row.packId==='crazyflie_2')
+ assert(library?.installed&&library.resourceId)
+ assert.equal(library.modelSha256,CRAZYFLIE_SOURCE_SHA256)
+ const imported=await sceneService.forSession(agent.id).resources.get(library.resourceId)
+ assert.equal(imported.componentDefaults?.controller?.type,'drone')
+ await tool('scene_create',{sceneId:'flight-product',template:'blank'})
+ const mounted=await tool('scene_mount',{sceneId:'flight-product',resourceId:library.resourceId,entityId:'quad',transform:identityTransform(),alignBottomToSurface:false})
  const snapshot=mounted.snapshot as SceneSnapshot;assert.equal(snapshot.entities.length,1);assert.equal(snapshot.entities[0]!.components.controller!.type,'drone')
  const sim=factory.forSession(agent.id),world=await sim.open(snapshot,{clock:'manual',timestepS:.002})
  const input={worldId:world.worldId,entityId:'quad',expectedGeneration:world.worldGeneration,expectedSceneRevision:snapshot.revision}

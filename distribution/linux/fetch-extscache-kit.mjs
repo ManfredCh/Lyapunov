@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 固定版本 `isaacsim-extscache-kit` 官方大 wheel 的分段续传下载器（零额外依赖 Node ESM）。
+ * 固定版本官方大 wheel（CPU策略轮子复用本工具） 的分段续传下载器（零额外依赖 Node ESM）。
  *
  * 背景（真实 VM）：Isaac 6.0.1.0 的 CPU worker 首次加载扩展时会向 Kit 索要
  * `omni.assets.plugins` 等通用缓存；缺少 `isaacsim-extscache-kit` 就无法完成离线闭包，
@@ -31,7 +31,7 @@ import {argv,exit,stderr,stdout} from 'node:process'
 const DEFAULT_SEGMENT_BYTES=64*1024*1024
 const DEFAULT_ATTEMPTS=4
 const DEFAULT_TIMEOUT_MS=120_000
-const FILENAME=/^[A-Za-z0-9][A-Za-z0-9._-]*\.whl$/
+const FILENAME=/^[A-Za-z0-9][A-Za-z0-9._+-]*\.whl$/
 const SHA256=/^[0-9a-f]{64}$/
 const CONTENT_RANGE=/^bytes (\d+)-(\d+)\/(\d+)$/
 

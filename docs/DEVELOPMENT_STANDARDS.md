@@ -68,7 +68,7 @@
 
 ### 2.1 安装与版本来源
 
-根项目声明 Node.js `>=24`、Bun `1.3.13`；上游 pnpm 版本在 `UPSTREAM_LOCK.json` 中为 `11.7.0`。Git 用于固定上游与工作树操作。
+根项目声明 Node.js `>=24`、Bun `1.4.2`；上游 pnpm 版本在 `UPSTREAM_LOCK.json` 中为 `11.7.0`。Git 用于固定上游与工作树操作。
 
 从仓库根目录初始化：
 
@@ -406,7 +406,7 @@ Agent Graph 改动还要区分：campaign 状态机／投影、run artifacts、�
 
 Linux 发行流程为：插件／桌面源码检查与构建 → `bun run build:linux` → 检查 `.runtime/releases/` 的归档及打包记录 → 在独立目录解包 → 运行 doctor 和相关功能 → 验证持久数据和退出行为 → 再发布。
 
-打包器生成 `BUILT_NOT_RUNTIME_VERIFIED`，收集依赖闭包并检查包内链接、禁止文件及运行数据。安装 Provider 发生在解包后的运行环境，不代表归档自带所有仿真环境、模型和许可证。**macOS 在本仓只有源码入口与说明，`Dev` 内没有打包／签名／公证产物**；当前根脚本只有 Linux 发行打包命令，不推断 Mac 仓库状态。
+打包器生成 `BUILT_NOT_RUNTIME_VERIFIED`，收集依赖闭包并检查包内链接、禁止文件及运行数据。安装 Provider 发生在解包后的运行环境，不代表归档自带所有仿真环境、模型和许可证。`bun run build:macos` 在 Darwin arm64 上调用同一打包器 `script/package-linux.ts` 生成便携候选；仓库不含签名材料，打包只做本机 ad-hoc 签名，Developer ID 签名与公证需发布环境；无 macOS CI；细节见 `distribution/macos/README.md`。
 
 ## 7. 文档维护标准
 

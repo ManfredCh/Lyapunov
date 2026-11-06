@@ -19,7 +19,7 @@ import { NewtonProvider } from '../src/provider.ts'
 import { ROBOT_CAPABILITY_KINDS } from '../../sim-contract/src/index.ts'
 import type { SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,7 +67,7 @@ const snapshot = (sceneId: string): SceneSnapshot => ({
 })
 
 let cacheRoot: string | undefined
-beforeAll(() => { cacheRoot = mkdtempSync(join(tmpdir(), 'dev008-warp-')) })
+beforeAll(() => { cacheRoot = mkdtempSync(join(realpathSync(tmpdir()), 'dev008-warp-')) })
 afterAll(() => { if (cacheRoot) rmSync(cacheRoot, { recursive: true, force: true }); cacheRoot = undefined })
 
 /** 起一个真实 worker，按序发请求，回读 (events, id→response, exitCode)。 */
@@ -317,7 +317,8 @@ describe.skipIf(!available)('Newton 源位置控制、停止与接触（真实 C
     names = (await provider.describe(worldId, 'arm-a')).controlledJointNames
     expect(names).toHaveLength(3)
   }, 600_000)
-  afterAll(async () => { if (provider) await provider.dispose() })
+  // 原生 worker 释放独立给出有界预算，不采用 Bun 默认的 5 秒钩子上限。
+  afterAll(async () => { if (provider) await provider.dispose() }, 15_000)
 
   test('manual 空闲冻结；joint、trajectory 真运动；control 精确推进整数步', async () => {
     const first = await provider.observe(worldId)

@@ -1,0 +1,19 @@
+{
+  "reason": "macOS arm64 没有原 0.12.1 预编译件；sdist 没带 Cargo.lock，2026 年重新解析会拉入 Rust 1.70 不支持的 edition2024 依赖。仅补同版官方锁，由原 pip 构建。",
+  "repository": "https://github.com/huggingface/tokenizers",
+  "tag": "python-v0.12.1",
+  "revision": "8a9bb28f4667b63f94ed96a3c3672f5db226de4d",
+  "cargoLock": {
+    "path": "bindings/python/Cargo.lock",
+    "gitBlob": "2fdcfc1ef125b7c7547ffcb3d7b288f125e0a780",
+    "sha256": "a3d0d72fae060824212a4e2503438d76ecc7b1fa536da09d72bbb9a32f16ab70"
+  },
+  "sdist": {
+    "filename": "tokenizers-0.12.1.tar.gz",
+    "bytes": 220679,
+    "sha256": "070746f86efa6c873db341e55cf17bb5e7bdd5450330ca8eca542f5c3dab2c66",
+    "url": "https://files.pythonhosted.org/packages/12/57/da0cb8e40437f88630769164a66afec8af294ff686661497b6c88bc08556/tokenizers-0.12.1.tar.gz"
+  },
+  "rustSourceChanges": [],
+  "note": "原锁将路径依赖 tokenizers 记作 0.11.3；Cargo 按 sdist 的 0.12.1 Cargo.toml 更新该路径包版本。外部 crate 版本与校验和保留。此 GitHub 库源码和 PyPI 包不属于 Hugging Face Hub 请求。"
+}

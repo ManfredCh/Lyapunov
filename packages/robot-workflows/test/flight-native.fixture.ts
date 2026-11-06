@@ -21,6 +21,7 @@ try{
  let n=0
  const sample=(s:unknown)=>{if(++n%150===0)console.log(JSON.stringify({phase:'native-control',sample:n,state:s}))}
  const hover=await runFlight(provider,{...identity,operation:'hover',positionM:[0,0,.35],maxDurationS:10},undefined,{paceManual:false,sample})
+ assert(hover.samples.some(row=>typeof row.measuredAtStep==='number'&&typeof (row.measuredActuatorForce as Record<string,unknown>|undefined)?.body_thrust==='number'),'悬停样本应带原动作回执的实测执行器力和对应物理步')
  await writeFile(join(output,'hover.json'),JSON.stringify(hover,null,2));assert.equal(hover.taskAchieved,true,hover.reason);assert(hover.maxTiltRad<=.25)
  const goto=await runFlight(provider,{...identity,operation:'goto',positionM:[.25,0,.35],yawRad:.25,maxDurationS:20},undefined,{paceManual:false,sample})
  await writeFile(join(output,'goto.json'),JSON.stringify(goto,null,2));assert.equal(goto.taskAchieved,true,goto.reason)

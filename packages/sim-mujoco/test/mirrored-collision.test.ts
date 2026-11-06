@@ -14,8 +14,8 @@
  *
  * 运行（产品 Host 是 Node；`@deepseek-ai/dsh-subprocess-local` 在 Bun 下加载即失败）：
  *   LYAPUNOV_MUJOCO_PYTHON=<含 mujoco 的解释器> \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/mirrored-collision.test.ts
- * `--experimental-transform-types` 是必需的：依赖链上的 `sim-contract/src/python-transport.ts`
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/mirrored-collision.test.ts
+ * `--experimental-strip-types` 是必需的：依赖链上的 `sim-contract/src/python-transport.ts`
  * 用了构造函数参数属性，Node 的 strip-only 模式（默认）会以 ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX 拒绝加载。
  * 未提供解释器（且仓内默认路径不存在）时整组 skip，不静默当成通过。
  * 可用 `LYAPUNOV_MUJOCO_TEST_WORKER=<worker.py>` 指向另一份 worker（例如修复前的版本），

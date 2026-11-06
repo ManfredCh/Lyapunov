@@ -14,6 +14,10 @@ const require=createRequire(join(root,"packages/desktop/package.json"))
 const electron=readRuntimeEnv(process.env,"electronBinary")??require("electron") as string
 if(values["nvidia-rendering"]&&values["software-rendering"])throw new Error("DESKTOP_RENDERING_CONFLICT: --nvidia-rendering 与 --software-rendering 不可同时使用")
 const env:NodeJS.ProcessEnv={...(values["nvidia-rendering"]?nvidiaRenderingEnvironment(process.env,process.platform):process.env),[RUNTIME_ENV.productRoot]:root,...(values.engine===undefined?{}:{[RUNTIME_ENV.simEngine]:values.engine})};delete env.ELECTRON_RUN_AS_NODE
-const child=spawn(electron,[join(root,"packages/desktop"),...(values.mode==="developer"?["--developer"]:[]),...(values['software-rendering']?["--software-rendering"]:[]),...(values['nvidia-rendering']?["--nvidia-rendering"]:[]),...positionals],{cwd:root,env,stdio:"inherit"})
-process.on("SIGINT",()=>child.kill("SIGINT"));process.on("SIGTERM",()=>child.kill("SIGTERM"))
+const child=spawn(electron,[join(root,"packages/desktop"),...(values.mode==="developer"?["--developer"]:[]),...(values['software-rendering']?["--software-rendering"]:[]),...(values['nvidia-rendering']?["--nvidia-rendering"]:[]),...positionals],{cwd:root,env,stdio:["inherit","inherit","inherit","ipc"]})
+const terminate=(signal:"SIGINT"|"SIGTERM")=>{
+  if(child.connected&&child.send)child.send({type:"lyapunov:terminate",signal},error=>{if(error){console.error("桌面终止请求未送达，转发原信号：",error.message);child.kill(signal)}})
+  else child.kill(signal)
+}
+process.on("SIGINT",()=>terminate("SIGINT"));process.on("SIGTERM",()=>terminate("SIGTERM"))
 process.exitCode=await new Promise<number>(resolve=>{child.once("error",error=>{console.error(error);resolve(1)});child.once("exit",code=>resolve(code??1))})

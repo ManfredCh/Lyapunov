@@ -10,18 +10,20 @@ import {spawnSync} from 'node:child_process'
 import {parseArgs} from 'node:util'
 // 发行载荷结构契约（顶层单一可执行入口 + 随包 Provider 定义）：纯函数在 distribution/linux/payload-contract.ts，
 // 这里只做取数与 fail-closed；守卫/负对照见 distribution/linux/payload-contract.test.ts。
-import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,frontendRuntimeViolations,nativeSystemRuntimeViolations,workspacePayloadDestination,stampDesktopAppVersion,desktopAppVersionViolations,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
+import {entryViolations,bundledProviderViolations,payloadLinkTarget,sandboxRuntimeViolations,productRuntimeViolations,frontendRuntimeViolations,nativeSystemRuntimeViolations,workspacePayloadDestination,stampDesktopAppVersion,desktopAppVersionViolations,macOSDesktopBootstrap,PRODUCT_ENTRY,type PayloadTopLevelRow} from '../distribution/linux/payload-contract.ts'
 // micromamba 许可证的**取件顺序与身份校验**（env 覆盖 → 入库件 → 缓存 → 网络兜底）：
 // 纯逻辑在 distribution/licenses/mamba-license.ts，这里只注入有界取件器并 fail-closed。
 import {MAMBA_LICENSE_ENV,mambaLicenseFileName,mambaLicenseIdentityVerdict,mambaLicenseUrl,resolveMambaLicense} from '../distribution/licenses/mamba-license.ts'
 import {checkedRuntimeManifest,checkedReleaseManifest,releaseManifestTsv,type LinuxReleaseManifest} from '../distribution/linux/release-manifest.ts'
-import {prepareLinuxNativeSystem,LINUX_NATIVE_LOADER_PACKAGES,verifyLinuxNativeLoaders} from './native-system.ts'
+import {prepareLinuxNativeSystem,prepareMacOSNativeSystem,LINUX_NATIVE_LOADER_PACKAGES,MACOS_NATIVE_LOADER_PACKAGES,verifyLinuxNativeLoaders} from './native-system.ts'
 import {ensureComputerUseLinux,computerUseLinuxPaths,computerUseLinuxReady,computerUseLinuxAssets} from './computer-use-linux.ts'
 import {prepareUnityMcpSupply,unityMcpSupplyPaths,UNITY_MCP_WHEEL} from './unity-mcp-supply.ts'
+import {buildReleaseClientVersions} from './client-release-version.ts'
 
 const root=resolve(import.meta.dirname,'..')
 const {values}=parseArgs({options:{output:{type:'string',default:join(root,'.runtime/releases')},node:{type:'string',default:process.env.LYAPUNOV_PACKAGE_NODE??'node'},micromamba:{type:'string',default:join(root,'.runtime/bin/micromamba')},'check-source':{type:'boolean',default:false},root:{type:'string'},'release-id':{type:'string'},'mujoco-runtime-archive':{type:'string'},'mujoco-runtime-manifest':{type:'string'}}})
-if(process.platform!=='linux'||process.arch!=='x64')throw new Error('当前交付入口仅支持 Linux x64')
+// 平台闸门只拦真正的打包路径：--check-source 是纯 git 读数自检（门禁/CI 用），平台无关，
+// 放在下面的早退分支之前不生效；真正进入打包流程（产出 tar.gz 那一路）仍只支持 Linux x64。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 出处守卫（ARCHIVE-SOURCECOMMIT-HONESTY，2026-09-27）：**包里装的东西**与**RELEASE.json 声明的
@@ -97,6 +99,11 @@ if(values['check-source']){
   writeSync(1,JSON.stringify({phase:'release-provenance',mode:'check-source',root:provenanceRoot,scope:[...PAYLOAD_SCOPE],head:provenanceAtStart.head,changed:provenanceAtStart.changed?.length??null,payloadScoped:provenanceAtStart.payloadRaw?.length??null,payloadChanged:provenanceAtStart.payloadChanged?.length??null,payloadSkipped:(provenanceAtStart.payloadRaw?.length??0)-(provenanceAtStart.payloadChanged?.length??0),worktree:provenanceAtStart.worktree,payloadWorktree:provenanceAtStart.payloadWorktree,verdict:provenanceAtStart.verdict,sample:(provenanceAtStart.payloadChanged??[]).slice(0,10)},null,2)+'\n')
   process.exit(PROVENANCE_EXIT[provenanceAtStart.verdict])
 }
+// 同一收闭、stager、插件构建、出处守卫与归档流程；仅原生载荷布局按宿主平台分支。
+const macOS=process.platform==='darwin'&&process.arch==='arm64'
+if(!macOS&&(process.platform!=='linux'||process.arch!=='x64'))throw new Error('当前交付入口仅支持 Linux x64 或 macOS arm64')
+const platform=macOS?'darwin-arm64':'linux-x64'
+const runtimePlatform=macOS?'darwin':'linux'
 const allowDirty=process.env[ALLOW_DIRTY_ENV]==='1'
 if(provenanceAtStart.verdict==='UNKNOWN')throw new Error(`无法核实源码提交，拒绝打包：${provenanceLine}`)
 if(provenanceAtStart.verdict==='DIRTY'&&!allowDirty)throw new Error(
@@ -115,16 +122,17 @@ const product=JSON.parse(await readFile(join(root,'package.json'),'utf8')),lock=
 const upstream=resolve(root,lock.directory)
 const upstreamReal=await realpath(upstream)
 // 固定桌面MCP修复变体归产品运行根；新安装不依赖Codex缓存。
-const computerUseLinuxSupply=await ensureComputerUseLinux({root})
+const computerUseLinuxSupply=macOS?null:await ensureComputerUseLinux({root})
 const unityMcpSupply=await prepareUnityMcpSupply(root)
-const minimumGlibc=String(computerUseLinuxSupply.minimumGlibc)
-if(!/^\d+\.\d+$/.test(minimumGlibc))throw new Error('COMPUTER_USE_LINUX_MINIMUM_GLIBC_INVALID')
+const minimumGlibc=String(computerUseLinuxSupply?.minimumGlibc??'')
+if(!macOS&&!/^\d+\.\d+$/.test(minimumGlibc))throw new Error('COMPUTER_USE_LINUX_MINIMUM_GLIBC_INVALID')
 async function fileSha256(path:string){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex')}
 if(Boolean(values['mujoco-runtime-archive'])!==Boolean(values['mujoco-runtime-manifest']))throw Error('MuJoCo runtime archive 与 manifest 必须同时指定')
+if(macOS&&values['mujoco-runtime-manifest'])throw Error('macOS 不消费 Linux conda-pack；请使用原 install-provider 在目标机器准备 SDK')
 const runtimeInput=values['mujoco-runtime-manifest']?checkedRuntimeManifest(JSON.parse(await readFile(resolve(values['mujoco-runtime-manifest']),'utf8'))):null
 if(runtimeInput){const archive=resolve(values['mujoco-runtime-archive']!);if((await stat(archive)).size!==runtimeInput.archive.bytes||await fileSha256(archive)!==runtimeInput.archive.sha256)throw Error('MuJoCo runtime archive 大小/SHA256与manifest不匹配')}
 // flock 懒加载不会在首页启动时发现缺件；必须在依赖收闭前从固定 SDK 重建所选 glibc addon。
-const nodeRuntime=prepareLinuxNativeSystem(upstream,values.node!)
+const nodeRuntime=macOS?prepareMacOSNativeSystem(upstream,values.node!):prepareLinuxNativeSystem(upstream,values.node!)
 console.log(JSON.stringify({phase:'native-system-build',node:nodeRuntime.version,command:nodeRuntime.command}))
 // 发行时从同一源码重建插件，避免把上次工作树留下的 dist 当作当前候选。
 const pluginBuild=spawnSync(process.execPath,['run',join(root,'script/build-plugins.ts')],{cwd:root,stdio:'inherit'})
@@ -139,7 +147,7 @@ if(frontendProblems.length)throw new Error(frontendProblems.join('；'))
 const builtinProbe=spawnSync(values.node!,['-p','JSON.stringify(require("node:module").builtinModules)'],{encoding:'utf8'})
 if(builtinProbe.status!==0)throw new Error('无法读取发行 Node 的内置模块清单')
 const builtinModules:string[]=JSON.parse(builtinProbe.stdout)
-const name=`lyapunov-dsh-${product.version}-linux-x64`,output=resolve(values.output!),stamp=new Date().toISOString().replaceAll(':','-')
+const name=`lyapunov-dsh-${product.version}-${platform}`,output=resolve(values.output!),stamp=new Date().toISOString().replaceAll(':','-')
 const releaseId=values['release-id']??`${product.version}-${provenanceAtStart.head!.slice(0,12)}-${stamp.replace(/[^0-9TZ]/g,'')}`
 if(!/^[-A-Za-z0-9_.]+$/.test(releaseId)||releaseId==='.'||releaseId==='..')throw Error('release-id必须是安全版本标识')
 const publicOutput=join(output,'releases',releaseId)
@@ -222,7 +230,7 @@ for(const item of (await readdir(join(root,'packages'))).sort()){
 for(const name of Object.keys(product.dependencies??{}))rootLinks.set(name,await requirePackage(await locate(name,root)))
 // 原生入口委托共享加载器执行 require；预编译包须在两者共同的发行根可解析。
 // 不改第三方模块字节，不使用 --preserve-symlinks，也不依赖开发机的 pnpm hoist。
-for(const name of ['node-addon-require-builtin',...LINUX_NATIVE_LOADER_PACKAGES]){
+for(const name of ['node-addon-require-builtin',...(macOS?MACOS_NATIVE_LOADER_PACKAGES:LINUX_NATIVE_LOADER_PACKAGES)]){
   const matches=[...nodes.values()].filter(node=>node.manifest.name===name)
   if(matches.length!==1)throw new Error(`发行原生加载依赖必须唯一：${name}（${matches.length}）`)
   rootLinks.set(name,matches[0]!)
@@ -262,6 +270,8 @@ for(const node of nodes.values()){
   }
 }
 for(const [name,node] of rootLinks)await link(join(stage,'node_modules',name),join(stage,node.destination))
+// 使用原 SDK 插件构建器，将发布版本注入所有消费客户端版本的模块；只写 staging。
+await buildReleaseClientVersions(upstream,stage,lock.directory,product.version)
 // 欢迎页 `api.version` 走 Electron `app.getVersion()`，读的是**应用包** `packages/desktop/package.json`；
 // 发行清单 `RELEASE.json.version` 走根 `product.version`。两个字段不同源曾让真实安装包的欢迎页停在
 // 旧版本（源桌面包 `0.1.0-alpha.4`）而清单已写新版本。这里在**已复制的 staging** 上把应用清单
@@ -283,7 +293,7 @@ const defaultPolicyFiles=new Set(policySupply.allowedFiles)
 console.log(JSON.stringify({phase:'default-robot-policies',entries:policySupply.entries.map(row=>({packId:row.packId,bytes:row.bytes})),blocked:policySupply.blocked}))
 console.log(JSON.stringify({phase:'default-t0-models',models:robotSupply.models.length,blocked:robotSupply.blocked}))
 await cp(join(root,'UPSTREAM_LOCK.json'),join(stage,'UPSTREAM_LOCK.json'))
-await cp(computerUseLinuxPaths(root).root,computerUseLinuxPaths(stage).root,{recursive:true})
+if(!macOS)await cp(computerUseLinuxPaths(root).root,computerUseLinuxPaths(stage).root,{recursive:true})
 await mkdir(dirname(unityMcpSupplyPaths(stage).wheel),{recursive:true})
 for(const key of ['wheel','license','provenance'] as const)await cp(unityMcpSupplyPaths(root)[key],unityMcpSupplyPaths(stage)[key])
 for(const file of ['LICENSE','NOTICE','README.md','README.zh-CN.md'])await cp(join(root,file),join(stage,file))
@@ -295,7 +305,29 @@ await mkdir(join(stage,'runtime/node/bin'),{recursive:true});await cp(nodeRuntim
 const nodeLicense=join(dirname(dirname(nodeRuntime.executable)),'LICENSE');if(!existsSync(nodeLicense))throw new Error('Node 运行时缺少随附许可证')
 await cp(nodeLicense,join(stage,'runtime/node/LICENSE'))
 const require=createRequire(join(root,'packages/desktop/package.json')),electronPackage=dirname(require.resolve('electron/package.json')),electron=JSON.parse(await readFile(join(electronPackage,'package.json'),'utf8')).version
-await cp(join(electronPackage,'dist'),join(stage,'runtime/electron'),{recursive:true,dereference:false})
+await cp(join(electronPackage,'dist'),join(stage,'runtime/electron'),{recursive:true,dereference:false,verbatimSymlinks:true})
+if(macOS){
+  const app=join(stage,'runtime/electron/Lyapunov.app')
+  await rename(join(stage,'runtime/electron/Electron.app'),app)
+  const resources=join(app,'Contents/Resources'),plist=join(app,'Contents/Info.plist')
+  await rm(join(resources,'default_app.asar'),{force:true})
+  const entry=macOSDesktopBootstrap(product.version)
+  await mkdir(join(resources,'app'),{recursive:true})
+  await writeFile(join(resources,'app/package.json'),entry.manifest)
+  await writeFile(join(resources,'app/main.mjs'),entry.source)
+  // 只给本轮复制的 Electron 应用写产品身份，原 Electron 与 SDK 字节不改。
+  for(const [key,value] of Object.entries({CFBundleIdentifier:'com.vorynel.lyapunov-dsh',CFBundleName:'LyapunovDSH',CFBundleDisplayName:'Lyapunov',CFBundleShortVersionString:product.version,CFBundleVersion:product.version})){
+    const stamp=spawnSync('/usr/bin/plutil',['-replace',key,'-string',value,plist],{encoding:'utf8'})
+    if(stamp.status!==0)throw Error('macOS 应用身份写入失败：'+stamp.stderr)
+  }
+  const cleanMetadata=spawnSync('/usr/bin/xattr',['-cr',app],{encoding:'utf8'})
+  if(cleanMetadata.status!==0)throw Error('macOS 暂存应用元数据清理失败：'+cleanMetadata.stderr)
+  // 本机测试包只作 ad-hoc 签名，使修改 Info.plist 后的复制件能由系统加载；不冒充 Developer ID 或公证。
+  const sign=spawnSync('/usr/bin/codesign',['--force','--deep','--sign','-',app],{encoding:'utf8'})
+  if(sign.status!==0)throw Error('macOS 本机测试签名失败：'+sign.stderr)
+  const verifySign=spawnSync('/usr/bin/codesign',['--verify','--strict','--deep',app],{encoding:'utf8'})
+  if(verifySign.status!==0)throw Error('macOS 应用签名完整性检查失败：'+verifySign.stderr)
+}else{
 // 开发安装可能把已授权helper链接到旧安装。发行只复制helper本体，不能带走包外绝对链或旧授权。
 await rm(join(stage,'runtime/electron/chrome-sandbox'),{force:true})
 await cp(join(electronPackage,'dist/chrome-sandbox'),join(stage,'runtime/electron/chrome-sandbox'),{dereference:true})
@@ -305,6 +337,7 @@ if(electronExecutable!=='lyapunov-desktop')await rename(join(stage,'runtime/elec
 if(existsSync(join(stage,'runtime/electron/resources/default_app.asar')))await rm(join(stage,'runtime/electron/resources/default_app.asar'))
 await rm(join(stage,'runtime/electron/resources/app'),{recursive:true,force:true})
 await link(join(stage,'runtime/electron/resources/app'),join(stage,'packages/desktop'))
+}
 await mkdir(join(stage,'runtime/micromamba'),{recursive:true})
 await cp(values.micromamba!,join(stage,'runtime/micromamba/micromamba'))
 const mambaVersion=spawnSync(values.micromamba!,['--version'],{encoding:'utf8'});if(mambaVersion.status!==0)throw new Error('micromamba 无法运行')
@@ -351,7 +384,7 @@ await writeFile(join(stage,'runtime/micromamba/LICENSE'),mambaLicense.text)
 const mambaLicenseRecord={version:mambaLicense.version,spdx:mambaLicense.spdx,url:mambaLicense.url,source:mambaLicense.source,location:mambaLicense.source==='network'?mambaLicense.location:relative(root,mambaLicense.location),payloadLocation:'runtime/micromamba/LICENSE',sha256:mambaLicense.sha256,bytes:mambaLicense.bytes,pinnedSha256:mambaLicense.pinnedSha256,hashMatchesPin:mambaLicense.hashMatchesPin,cached:mambaLicense.cached,...(mambaLicense.pinProblem?{pinProblem:mambaLicense.pinProblem}:{})}
 
 await mkdir(join(stage,'distribution/linux'),{recursive:true})
-for(const file of ['README.md','doctor.mjs','sandbox.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
+for(const file of ['README.md','doctor.mjs','sandbox.mjs','desktop-launcher.mjs','install-provider','install-usd-parser','policy-cpu.mjs','lyapunov-desktop.desktop.in','install.sh','install-entry.mjs','register-managed-sdk.mjs','fetch-extscache-kit.mjs','extscache-kit-wheel.json'])await cp(join(root,'distribution/linux',file),join(stage,'distribution/linux',file))
 // 随包分发的可选 Provider 定义：`distribution/providers/graspgenx/` 是**产品的可选 Provider 定义**
 // （用户据此自建 worker，`packages/grasp-graspgenx/README.md` 与 `distribution/linux/README.md` 都指向它），
 // 不是服务端内容，必须随产品分发。缺失即 fail-closed 停止打包，拷入后在 RELEASE.json 如实登记。
@@ -394,8 +427,8 @@ if(entryProblems.length)throw new Error('发行载荷入口契约不成立：'+e
 // 在真实 staging 上逐件核验，漏复制时归档前直接失败。
 const sandboxProblems=sandboxRuntimeViolations(stage)
 if(sandboxProblems.length)throw new Error(sandboxProblems.join('；'))
-if(!computerUseLinuxReady(stage))throw new Error('COMPUTER_USE_LINUX_PAYLOAD_INVALID: 固定CLI、修复补丁、MIT许可或出处校验失败')
-const productProblems=productRuntimeViolations(stage,lock.directory)
+if(!macOS&&!computerUseLinuxReady(stage))throw new Error('COMPUTER_USE_LINUX_PAYLOAD_INVALID: 固定CLI、修复补丁、MIT许可或出处校验失败')
+const productProblems=productRuntimeViolations(stage,lock.directory,runtimePlatform)
 if(productProblems.length)throw new Error(productProblems.join('；'))
 const topLevelExecutables=topLevel.filter(row=>!row.directory&&row.executable).map(row=>row.name).sort()
 // 上游 TS/source 条件不用于发行进程，完整保留已构建 lib、原生资源和许可证。
@@ -412,7 +445,7 @@ if(provenanceMoved&&!allowDirty)throw new Error(
   +`  处置：让并发的写手停下（或先提交），再重打一次；确实要留这个包，用 ${ALLOW_DIRTY_ENV}=1 并如实登记两个快照。`,
 )
 const sourceCommit=provenanceAtWrite.head
-const release={product:'LyapunovDSH',version:product.version,license:product.license,releaseId,platform:'linux-x64',sourceCommit,sourceCommitResolution:sourceCommit?'git rev-parse HEAD':'unavailable outside a Git checkout',builtAt:new Date().toISOString(),node:nodeRuntime.version,electron,micromamba:mambaVersion.stdout.trim(),upstreamCommit:lock.commit,packages:records,missingOptional,defaultMuJoCo:runtimePublic?{mode:'conda-pack',runtime:runtimePublic}:{mode:'install-provider'},providersBundled:bundledProviders.map(provider=>({name:provider.name,path:`distribution/providers/${provider.name}`,files:bundledProviderFiles.get(provider.name)??0})),entry:PRODUCT_ENTRY,topLevelExecutables,skippedSelfLinks,skippedSelfLinksInClosure,userDataBundled:false,
+const release={product:'LyapunovDSH',version:product.version,license:product.license,releaseId,platform,sourceCommit,sourceCommitResolution:sourceCommit?'git rev-parse HEAD':'unavailable outside a Git checkout',builtAt:new Date().toISOString(),node:nodeRuntime.version,electron,micromamba:mambaVersion.stdout.trim(),upstreamCommit:lock.commit,packages:records,missingOptional,defaultMuJoCo:runtimePublic?{mode:'conda-pack',runtime:runtimePublic}:{mode:'install-provider'},providersBundled:bundledProviders.map(provider=>({name:provider.name,path:`distribution/providers/${provider.name}`,files:bundledProviderFiles.get(provider.name)??0})),entry:PRODUCT_ENTRY,topLevelExecutables,skippedSelfLinks,skippedSelfLinksInClosure,userDataBundled:false,
 // 出处守卫的读数（ARCHIVE-SOURCECOMMIT-HONESTY）——**这一格就是"声明"**：
 // `sourceCommitMatchesPayload` 明说"本包内容是不是 sourceCommit 的内容"；`false` 时**必须**能一眼看出
 // 本包不是从那条提交构建的（改前产物里没有这一格，所以 2026-09-26 那次"包内容 ← 工作树 / 声明 ← HEAD"
@@ -421,7 +454,7 @@ sourceCommitMatchesPayload:provenanceAtStart.verdict==='CLEAN'&&!provenanceMoved
 worktreeProvenance:{scope:[...PAYLOAD_SCOPE],changed:provenanceAtWrite.changed?.length??null,payloadScoped:provenanceAtWrite.payloadRaw?.length??null,payloadChanged:provenanceAtWrite.payloadChanged?.length??null,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,startWorktree:provenanceAtStart.worktree,movedDuringPackaging:provenanceMoved,sample:(provenanceAtStart.payloadChanged??[]).slice(0,10),dirtyOverride:allowDirty?ALLOW_DIRTY_ENV:null},
 // 随包法律产物的来源与身份：从入库件、缓存、环境变量覆盖还是网络取到，sha256 一并入册，
 // 让"这份许可证是谁、从哪来"在产物里可查，而不是只有一句"包里有 LICENSE"。
-humanAvatars:humanAvatarSupply,humanCuda:{mode:'optional-install-provider',install:'./lyapunov install-provider mujoco --human-cuda',requirements:'packages/sim-mujoco/requirements-human-cuda.txt',source:'packages/sim-mujoco/warp-source.json',check:'packages/sim-mujoco/python/check_human_cuda.py',runtimeBundled:false},micromambaLicense:mambaLicenseRecord,unityMcp:{...unityMcpSupply,runtimePrepared:'on-target',wheel:relative(stage,unityMcpSupplyPaths(stage).wheel),licensePath:relative(stage,unityMcpSupplyPaths(stage).license),provenancePath:relative(stage,unityMcpSupplyPaths(stage).provenance)},computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage,computerUseLinuxSupply.activeDefault).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}
+humanAvatars:humanAvatarSupply,humanCuda:{mode:'optional-install-provider',install:'./lyapunov install-provider mujoco --human-cuda',requirements:'packages/sim-mujoco/requirements-human-cuda.txt',source:'packages/sim-mujoco/warp-source.json',check:'packages/sim-mujoco/python/check_human_cuda.py',runtimeBundled:false},micromambaLicense:mambaLicenseRecord,unityMcp:{...unityMcpSupply,runtimePrepared:'on-target',wheel:relative(stage,unityMcpSupplyPaths(stage).wheel),licensePath:relative(stage,unityMcpSupplyPaths(stage).license),provenancePath:relative(stage,unityMcpSupplyPaths(stage).provenance)},...computerUseLinuxSupply?{computerUseLinux:{...computerUseLinuxSupply,command:relative(stage,computerUseLinuxPaths(stage,computerUseLinuxSupply.activeDefault).command),runtime:relative(stage,computerUseLinuxPaths(stage).root),licensePath:relative(stage,computerUseLinuxPaths(stage).license),provenancePath:relative(stage,computerUseLinuxPaths(stage).provenance)}}:{computerUseNative:{provider:'@deepseek-ai/dsh-computer-use-cua-driver-native',platform:'darwin-arm64'},macOS:{signing:'ad-hoc-local-test',notarized:false}}}
 await writeFile(join(stage,'RELEASE.json'),JSON.stringify(release,null,2)+'\n')
 const symlinks:Array<{path:string;target:string}>=[]
 // 发行包只携带代码和许可证；用户凭据、运行时状态和模型权重必须在包外。
@@ -443,8 +476,8 @@ await verify(stage)
 await writeFile(join(output,`package-${stamp}.json`),JSON.stringify({status:'BUILT_NOT_RUNTIME_VERIFIED',stage,packages:nodes.size,relativeSymlinks:symlinks.length,missingOptional,
 // 构建回执带上出处：回执/门引用这个包时，"它是从哪一版树来的"跟着一起走（§7.17 ② 的零成本锚定）。
 provenance:{head:provenanceAtWrite.head,changed:provenanceAtWrite.changed?.length??null,payloadChanged:provenanceAtWrite.payloadChanged?.length??null,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,verdict:provenanceAtWrite.verdict,sourceCommitMatchesPayload:release.sourceCommitMatchesPayload,movedDuringPackaging:provenanceMoved}},null,2))
-const archive=join(publicOutput,`lyapunov-linux-x64-${releaseId}.tar.gz`),pendingArchive=archive+'.partial-'+stamp
-const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory)
+const archive=join(publicOutput,`lyapunov-${platform}-${releaseId}.tar.gz`),pendingArchive=archive+'.partial-'+stamp
+const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory,runtimePlatform)
 if(nativeProblems.length)throw new Error(nativeProblems.join('；'))
 verifyLinuxNativeLoaders(stage,join(stage,'runtime/node/bin/node'))
 // 归档前显式核对：真实应用清单（欢迎页 `app.getVersion()` 的来源）的 version 必须与 `RELEASE.json`
@@ -452,10 +485,22 @@ verifyLinuxNativeLoaders(stage,join(stage,'runtime/node/bin/node'))
 // 欢迎页显示旧版本"的包流出去（错误无法显示假版本）。
 const appVersionProblems=desktopAppVersionViolations(stage,release.version)
 if(appVersionProblems.length)throw new Error('desktop application manifest version contract violated: '+appVersionProblems.join('; '))
-const tar=spawnSync('tar',['-czf',pendingArchive,'-C',dirname(stage),name],{stdio:'inherit'})
+const tar=spawnSync('tar',[...macOS?['--no-xattrs']:[],'-czf',pendingArchive,'-C',dirname(stage),name],{stdio:'inherit',env:{...process.env,...macOS?{COPYFILE_DISABLE:'1'}:{}}})
 if(tar.status!==0)throw new Error('tar 打包失败')
 await rename(pendingArchive,archive)
 if(runtimePublic)await cp(resolve(values['mujoco-runtime-archive']!),join(publicOutput,runtimePublic.archive.path))
+if(macOS){
+  // 归档和出处合同与 Linux 同源；当前为可验证的本机便携候选，不发布 Linux 安装脚本或冒充公证。
+  // 原固定 SDK 的 OMPL 2.0.1 arm64 官方 wheel 要求 macOS 15，不能以 NumPy 的 14 作为完整安装下限。
+  const manifest=checkedReleaseManifest({schema:1,releaseId,version:product.version,platform:'darwin-arm64',minimumMacOS:'15.0',sourceCommit:sourceCommit!,archiveRoot:name,archive:{path:basename(archive),sha256:await fileSha256(archive),bytes:(await stat(archive)).size},mujoco:{mode:'install-provider'},signing:'ad-hoc-local-test',notarized:false})
+  const file=join(publicOutput,platform+'.json')
+  await writeFile(file,JSON.stringify(manifest,null,2)+'\n')
+  await writeFile(join(publicOutput,platform+'.tsv'),releaseManifestTsv(manifest))
+  await mkdir(join(output,'releases/latest'),{recursive:true})
+  for(const extension of ['json','tsv'])await cp(join(publicOutput,platform+'.'+extension),join(output,'releases/latest',platform+'.'+extension))
+  await cp(join(root,'distribution/linux/install.sh'),join(output,'install.sh'))
+  console.log(JSON.stringify({status:'BUILT_NOT_RUNTIME_VERIFIED',stage,downloadManifest:file,packages:nodes.size,...manifest,archiveFile:archive,sourceCommitMatchesPayload:release.sourceCommitMatchesPayload}))
+}else{
 const downloadManifest:LinuxReleaseManifest=checkedReleaseManifest({schema:1,releaseId,version:product.version,platform:'linux-x64',minimumGlibc,sourceCommit:sourceCommit!,archiveRoot:name,archive:{path:basename(archive),sha256:await fileSha256(archive),bytes:(await stat(archive)).size},mujoco:runtimePublic?{mode:'conda-pack',runtime:runtimePublic}:{mode:'install-provider'}})
 for(const [extension,text] of [['json',JSON.stringify(downloadManifest,null,2)+'\n'],['tsv',releaseManifestTsv(downloadManifest)]])await writeFile(join(publicOutput,`linux-x64.${extension}`),text)
 await mkdir(join(output,'releases/latest'),{recursive:true})
@@ -463,3 +508,5 @@ for(const extension of ['json','tsv'])await cp(join(publicOutput,`linux-x64.${ex
 await cp(join(root,'distribution/linux/install.sh'),join(output,'install.sh'))
 console.log(JSON.stringify({status:'BUILT_NOT_RUNTIME_VERIFIED',archive,bytes:downloadManifest.archive.bytes,sha256:downloadManifest.archive.sha256,releaseId,downloadManifest:join(publicOutput,'linux-x64.json'),mujoco:downloadManifest.mujoco,stage,packages:nodes.size,relativeSymlinks:symlinks.length,sourceCommit:provenanceAtWrite.head,sourceCommitMatchesPayload:release.sourceCommitMatchesPayload,worktree:provenanceAtWrite.worktree,payloadWorktree:provenanceAtWrite.payloadWorktree,payloadChanged:provenanceAtWrite.payloadChanged?.length??null}))
 console.log(writeLine)
+
+}

@@ -2,7 +2,7 @@
  * Scene 声明的相机（components.camera）进 MuJoCo 命名相机族的真实行为测试。
  *
  * 运行：
- *   node --experimental-transform-types --test packages/sim-mujoco/test/scene-camera.test.ts
+ *   node --experimental-strip-types --test packages/sim-mujoco/test/scene-camera.test.ts
  *   （必须开 transform-types：sim-contract/src/python-transport.ts 用了 TypeScript 参数属性，node 24
  *     的 strip-only 模式直接 ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX；这是本仓库 node 版本的既有约束。）
  *   解释器：LYAPUNOV_MUJOCO_PYTHON（未设时用仓库内 .runtime/sim-python/bin/python）；没有解释器时

@@ -393,6 +393,20 @@ function walkPhysical(dir: string, onLink: (rel: string, abs: string, target: st
 // 为什么用 `find` 而不是自己重写一个遍历：这一格要的正是"外部工具在这棵树上看到多少条"，
 // 自己重写会换掉口径，与 P10/V15 的数字就不可比了。`find` 只读、不写盘。
 //
+// 平台补注（macOS）：BSD `find -L` 对目录环**一条诊断都不报**（静默不下降），读数恒 0 会被误读成
+// "环境基本干净"——所以这里挑的是 **GNU find**：优先 `gfind`（brew findutils 的惯用名），没有就用
+// PATH 上的 `find` 并核过它是 GNU（`find --version` 出 GNU findutils）。两边都不是 GNU find 时
+// 如实记"无读数"（-1），不拿 BSD find 的恒 0 冒充测量。
+/** 解析类 2 用的 find 可执行文件：必须是 GNU find（BSD find 不报环诊断）。 */
+function gnuFindBinary(): { binary: string | null; detail: string } {
+  const candidates = ['gfind', 'find']
+  for (const name of candidates) {
+    const probe = spawnSync(name, ['--version'], { encoding: 'utf8' })
+    if (probe.status === 0 && /GNU findutils/.test(probe.stdout ?? '')) return { binary: name, detail: `${name}：${(probe.stdout ?? '').split('\n')[0]}` }
+  }
+  return { binary: null, detail: '找不到 GNU find（Linux 自带 find 即 GNU；macOS 需 brew install findutils 后提供 gfind）' }
+}
+//
 // 同时把诊断里引用的路径**映射回本守卫扫过的链**（`distinctScannedLinksCited`），
 // 这样才能说清"这 1112 条到底是谁"：实测 1112/1112 全部落到已知链上，其中 18 条是类 1、
 // 1094 条是 pnpm scope 目录软链 —— 后者**不是** D2 退化，是"跟随软链会绕圈"的那一类。
@@ -406,11 +420,19 @@ export function measureGrid(root: string, g: LinkGraph, maxdepth = 6, gridRoot?:
   const rels = ['node_modules', '.upstream']
   const deep = deepGridRoot(root, gridRoot)
   if (deep !== null) rels.push(deep)
+  const finder = gnuFindBinary()
   return rels
     .filter((rel) => existsSync(join(root, rel)))
     .map((rel) => {
       const within = rel === 'node_modules' || rel === '.upstream'
-      const r = spawnSync('find', ['-L', rel, '-maxdepth', String(maxdepth)], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28, timeout: 300_000 })
+      if (finder.binary === null) {
+        return {
+          root: posix(rel), maxdepth, cycleDiagnosticLines: -1, distinctScannedLinksCited: -1,
+          selfReferentialCited: -1, scopeAliasCited: -1, withinScanSurface: within,
+          depthComplete: false, error: finder.detail,
+        }
+      }
+      const r = spawnSync(finder.binary, ['-L', rel, '-maxdepth', String(maxdepth)], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28, timeout: 300_000 })
       if (r.error !== undefined || r.status === null) {
         return {
           root: posix(rel),

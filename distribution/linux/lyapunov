@@ -9,6 +9,8 @@ fi
 export LYAPUNOV_PRODUCT_ROOT="$root"
 export PATH="$root/runtime/node/bin:$PATH"
 export HF_ENDPOINT=https://hf-mirror.com
+# Node 的 fetch 默认不读代理变量；用户已配置代理时让桌面、安装器与 Agent 的 Node 请求同样走代理。
+if [ -n "${HTTPS_PROXY:-}${https_proxy:-}${HTTP_PROXY:-}${http_proxy:-}${ALL_PROXY:-}${all_proxy:-}" ]; then export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"; fi
 export PYTHONNOUSERSITE=1
 unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP NODE_PATH NODE_OPTIONS
 unset ELECTRON_RUN_AS_NODE
@@ -54,6 +56,12 @@ case "${1:-desktop}" in
   desktop)
     if [ "$#" -gt 0 ]; then shift; fi
     require_executable runtime/node/bin/node
+    if [ "$(uname -s)" = Darwin ]; then
+      require_executable runtime/electron/Lyapunov.app/Contents/MacOS/Electron
+      require_file distribution/linux/desktop-launcher.mjs
+      export NODE_ENV=production
+      exec "$root/runtime/node/bin/node" "$root/distribution/linux/desktop-launcher.mjs" "$root/runtime/electron/Lyapunov.app/Contents/MacOS/Electron" "$@"
+    fi
     require_executable runtime/electron/lyapunov-desktop
     require_file distribution/linux/sandbox.mjs
     "$root/runtime/node/bin/node" "$root/distribution/linux/sandbox.mjs" check
@@ -69,8 +77,11 @@ case "${1:-desktop}" in
         fi
       fi
     done
+    require_file distribution/linux/desktop-launcher.mjs
     export NODE_ENV=production
-    exec "$root/runtime/electron/lyapunov-desktop" "$@"
+    # Linux 上 Electron 也会把系统 SIGTERM 转成 app.quit → before-quit（origin=app）并弹确认框；
+    # 与 macOS 一样经 launcher 把 SIGTERM/SIGINT 走私有 IPC 交给 ExitCoordinator 按 system 来源处理。
+    exec "$root/runtime/node/bin/node" "$root/distribution/linux/desktop-launcher.mjs" "$root/runtime/electron/lyapunov-desktop" "$@"
     ;;
   *) printf '%s\n' '未知入口，请运行 ./lyapunov --help' >&2; exit 2 ;;
 esac

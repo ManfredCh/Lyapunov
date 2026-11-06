@@ -219,6 +219,108 @@ index 35158490f2d73655c20665899048107f800eeace..12f5dd30466206ddeb30a9bf769a75fa
    it('serializes concurrent path adoption and preserves an existing title', async () => {
      const { controller, root } = await harness()
      const path = stageDir(root, 'alpha')
+diff --git a/packages/client/modules/src/index.ts b/packages/client/modules/src/index.ts
+index 9734685e708ca17c21d3d493a15ef3bfdace5fae..d14214798ab408aba549bcccfdec2157fe30452a 100644
+--- a/packages/client/modules/src/index.ts
++++ b/packages/client/modules/src/index.ts
+@@ -216,8 +216,11 @@ function framedHash(domain: string, parts: readonly string[]): string {
+   return hash.digest('hex').slice(0, HASH_REVISION_LENGTH)
+ }
+ 
+-/** Identify an entry's build from filesystem metadata without hashing its contents. */
+-function artifactRevision(baseline: ClientArtifactBaseline): string {
++/** Darwin 的系统属性可能只改 ctime；保留构建mtime及已读字节身份，忽略纯ctime维护。 */
++function artifactRevision(baseline: ClientArtifactBaseline, bundle: Buffer): string {
++  if (process.platform === 'darwin') {
++    return createHash('sha1').update('plugin-artifact-darwin\0').update(String(baseline.mtimeMs)).update('\0').update(bundle).digest('hex').slice(0, HASH_REVISION_LENGTH)
++  }
+   return framedHash('plugin-artifact', [String(baseline.mtimeMs), String(baseline.ctimeMs), String(baseline.size)])
+ }
+ 
+@@ -714,10 +717,11 @@ export class ClientModuleRegistry extends Service {
+     const record = this.table.get(id)
+     if (record === undefined) return undefined
+     const baseline = this.captureArtifactBaseline(record.meta.clientPath)
+-    const rev = artifactRevision(baseline)
+-    if (rev === record.entry.rev) return rev
++    if (baseline.mtimeMs === record.baseline.mtimeMs && baseline.ctimeMs === record.baseline.ctimeMs && baseline.size === record.baseline.size) return record.entry.rev
+     const bundle = readFileSync(record.meta.clientPath)
++    const rev = artifactRevision(baseline, bundle)
+     record.baseline = baseline
++    if (rev === record.entry.rev) return rev
+     record.entry = graphRow(id, rev, record.meta)
+     record.bundle = bundle
+     this.composed = this.compose()
+@@ -1036,7 +1040,7 @@ export class ClientModuleRegistry extends Service {
+     if (this.table.get(packageName)?.sourceKey === source.sourceKey) return false
+     // Startup and HMR share revisions so unchanged artifacts survive a server restart.
+     const snapshot = this.initialBundleSnapshot(packageName, source.meta.clientPath)
+-    const rev = artifactRevision(snapshot.baseline)
++    const rev = artifactRevision(snapshot.baseline, snapshot.bundle)
+     this.table.set(packageName, {
+       entry: graphRow(packageName, rev, source.meta),
+       loaderName: source.loaderName,
+diff --git a/packages/client/modules/tests/node-half.client.spec.ts b/packages/client/modules/tests/node-half.client.spec.ts
+index ff7daaca09347aa747040c9095613a2edaa74002..3e55cf3aea5260188fa421002915fbd8229aebb4 100644
+--- a/packages/client/modules/tests/node-half.client.spec.ts
++++ b/packages/client/modules/tests/node-half.client.spec.ts
+@@ -1,7 +1,7 @@
+ /** Node-half composition diagnostics for package metadata and built client bundles. */
+ 
+ import { Hash } from 'node:crypto'
+-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
++import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+ import type { IncomingMessage, ServerResponse } from 'node:http'
+ import { SourceMap } from 'node:module'
+ import { tmpdir } from 'node:os'
+@@ -719,7 +719,7 @@ describe('client bundle activation', () => {
+     expect(onGraphChanged).not.toHaveBeenCalled()
+   })
+ 
+-  it('hashes only metadata when publishing initial and rebuilt artifact revisions', () => {
++  it('Darwin按字节及构建mtime标识，其余平台继续仅使用元数据', () => {
+     const packageName = '@fixture/metadata-revision'
+     const clientPath = writePackage(packageName)
+     mkdirSync(dirname(clientPath), { recursive: true })
+@@ -735,7 +735,9 @@ describe('client bundle activation', () => {
+       expect(service.rebuilt(packageName)).not.toBe(first)
+       const inputBytes = update.mock.calls.map(([input]) => Buffer.byteLength(input))
+       expect(inputBytes.length).toBeGreaterThan(0)
+-      expect(inputBytes.reduce((total, bytes) => total + bytes, 0)).toBeLessThan(4 * 1024)
++      const total = inputBytes.reduce((total, bytes) => total + bytes, 0)
++      if (process.platform === 'darwin') expect(total).toBeGreaterThanOrEqual(2 * Buffer.byteLength(bundle))
++      else expect(total).toBeLessThan(4 * 1024)
+     } finally {
+       update.mockRestore()
+     }
+@@ -763,6 +765,27 @@ describe('client bundle activation', () => {
+     expect(construct([packageName]).graph()).toEqual(service.graph())
+   })
+ 
++  it.skipIf(process.platform !== 'darwin')('Darwin仅ctime变化不发布代码重建', async () => {
++    const packageName = '@fixture/darwin-metadata-only'
++    const clientPath = writePackage(packageName)
++    mkdirSync(dirname(clientPath), { recursive: true })
++    writeFileSync(clientPath, 'module.exports = {}\n')
++    const service = construct([packageName])
++    const before = service.graph()
++    const baseline = statSync(clientPath)
++    const rebuilt = vi.fn()
++    service.onRebuilt(rebuilt)
++    await expect.poll(() => {
++      chmodSync(clientPath, baseline.mode & 0o777)
++      return statSync(clientPath).ctimeMs
++    }).not.toBe(baseline.ctimeMs)
++    expect(statSync(clientPath)).toMatchObject({ mtimeMs: baseline.mtimeMs, size: baseline.size })
++    expect(service.rebuilt(packageName)).toBe(before.entries[0]!.rev)
++    expect(rebuilt).not.toHaveBeenCalled()
++    expect(service.graph()).toEqual(before)
++    expect(construct([packageName]).graph()).toEqual(before)
++  })
++
+   it('changes revisions when a same-size rewrite preserves mtime', async () => {
+     const packageName = '@fixture/restored-mtime'
+     const clientPath = writePackage(packageName)
 diff --git a/packages/client/ui-chat/README.md b/packages/client/ui-chat/README.md
 index f09b12c46138b05ba55c6905f540b03d6120d825..f3ee1cae451ddc5e31e66f4b8464c7574df89d60 100644
 --- a/packages/client/ui-chat/README.md
@@ -2053,7 +2155,7 @@ index 4abc7bfc6898cd9dae856a366973cfb043731d98..1e4d43370c9cea73e15170a44b3a8da7
 +  })
 +})
 diff --git a/packages/llm/llm-pi-ai/src/adapter.ts b/packages/llm/llm-pi-ai/src/adapter.ts
-index b8721402012a88bf71d1a37c0d38ea98306d35c2..24b879a698b90dc2b91781767931aa5df591c23f 100644
+index b8721402012a88bf71d1a37c0d38ea98306d35c2..b53bad2c0958eac005f345796c7b49f9a3e34f93 100644
 --- a/packages/llm/llm-pi-ai/src/adapter.ts
 +++ b/packages/llm/llm-pi-ai/src/adapter.ts
 @@ -26,6 +26,7 @@
@@ -2193,19 +2295,27 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..24b879a698b90dc2b91781767931aa5d
  
      const consumer = new AbortController()
      const upstream = options.signal === undefined
-@@ -381,7 +440,10 @@ export class PiAiAdapter extends LlmAdapter {
+@@ -381,10 +440,18 @@ export class PiAiAdapter extends LlmAdapter {
              maxBytes: profile.requestImageMaxBytes,
            },
          }, onReplayDegrade)
 -      const diagnostic = diagnosticFetch()
++      const managedCompletions = model.api === 'openai-completions' && sameManagedEndpoint(profile.managedBaseURL, model.baseUrl)
 +      const diagnostic = diagnosticFetch({
-+        continuation: model.api === 'openai-completions' && sameManagedEndpoint(profile.managedBaseURL, model.baseUrl),
++        continuation: managedCompletions,
 +        ...selectResume === undefined ? {} : { resume: selectResume },
 +      })
        const events = snapshot.models.streamSimple(model, context, {
          fetch: diagnostic.fetch,
          ...profileOptions(profile, reasoning, apiKey),
-@@ -404,7 +466,63 @@ export class PiAiAdapter extends LlmAdapter {
++        // 托管Peiri目前的并行批次可能仅返回工具名；在原序列化钩子声明单调用，原校验和执行链保持。
++        ...managedCompletions && model.id === 'peiri' ? {
++          onPayload: (payload: unknown) => ({ ...(payload as Record<string, unknown>), parallel_tool_calls: false }),
++        } : {},
+         ...options.temperature === undefined ? {} : { temperature: options.temperature },
+         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
+         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+@@ -404,7 +471,63 @@ export class PiAiAdapter extends LlmAdapter {
              exhausted = true
              return
            }
@@ -2270,7 +2380,7 @@ index b8721402012a88bf71d1a37c0d38ea98306d35c2..24b879a698b90dc2b91781767931aa5d
          }
        } finally {
          if (!exhausted) {
-@@ -418,11 +536,12 @@ export class PiAiAdapter extends LlmAdapter {
+@@ -418,11 +541,12 @@ export class PiAiAdapter extends LlmAdapter {
        }
      } catch (error: unknown) {
        if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
@@ -2440,10 +2550,34 @@ index b7292972d06a028d942476fd90598aff91095c16..3eca7318a66e5743dbc5814936644aa4
          }
          yield {
 diff --git a/packages/llm/llm-pi-ai/tests/adapter.spec.ts b/packages/llm/llm-pi-ai/tests/adapter.spec.ts
-index ba7bac9085598d939fab4bebda38487876fdd984..dd72ed354a4702f8c08522302f077c2b4ecc024b 100644
+index ba7bac9085598d939fab4bebda38487876fdd984..80ac5803e92f2c20de3c0c1c89caebb1986d3368 100644
 --- a/packages/llm/llm-pi-ai/tests/adapter.spec.ts
 +++ b/packages/llm/llm-pi-ai/tests/adapter.spec.ts
-@@ -1050,3 +1050,22 @@ it.each([
+@@ -73,6 +73,23 @@ beforeEach(() => {
+ })
+ 
+ describe('PiAiAdapter provider routing', () => {
++  it.each([
++    { managed: true, model: 'peiri', expected: false },
++    { managed: false, model: 'peiri', expected: undefined },
++    { managed: true, model: 'other-model', expected: undefined },
++  ])('托管Peiri单调用参数只作用于对应原请求：%j', async ({ managed, model, expected }) => {
++    const server = await mockServer([{ events: textEvents }])
++    const adapter = adapterOf({ fixture: {
++      api: 'openai-completions', baseURL: server.url,
++      ...(managed ? { managedBaseURL: server.url } : {}),
++      models: [{ id: model, contextWindow: 8192, maxTokens: 1024 }],
++    } })
++    for await (const _chunk of adapter.stream({ provider: 'fixture', model, messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })] })) { /* 原SDK完成一次真实本地HTTP序列化。 */ }
++    expect(server.requests).toHaveLength(1)
++    expect(server.requests[0]).toMatchObject({ model })
++    expect((server.requests[0] as Record<string, unknown>).parallel_tool_calls).toBe(expected)
++  })
++
+   it('resolves a catalog model dynamically and uses a private endpoint', async () => {
+     const server = await mockServer([{ events: textEvents }])
+     const ctx = await harness(server.url)
+@@ -1050,3 +1067,22 @@ it.each([
    })
    expect(await adapter.listModels('deepseek')).not.toHaveLength(0)
  })

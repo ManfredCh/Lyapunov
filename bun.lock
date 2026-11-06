@@ -27,11 +27,15 @@
       "peerDependencies": {
         "@deepseek-ai/cordis": "4.0.4",
         "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+        "@deepseek-ai/dsh-session-query": "0.2.0-rc.2",
+        "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
         "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
       },
       "optionalPeers": [
         "@deepseek-ai/cordis",
         "@deepseek-ai/dsh-commands",
+        "@deepseek-ai/dsh-session-query",
+        "@deepseek-ai/dsh-subagent",
         "@deepseek-ai/dsh-tools",
       ],
     },
@@ -139,7 +143,7 @@
     },
     "packages/desktop": {
       "name": "@lyapunov/desktop",
-      "version": "0.1.0-rc",
+      "version": "0.2.1",
       "dependencies": {
         "electron-store": "10.1.0",
         "electron-updater": "6.8.3",

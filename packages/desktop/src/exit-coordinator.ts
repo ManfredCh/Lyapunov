@@ -32,7 +32,8 @@ export class ExitCoordinator {
   private escalate?:()=>void
   approved=false
   committing=false
-  constructor(private readonly options:ExitCoordinatorOptions){}
+  private readonly options:ExitCoordinatorOptions
+  constructor(options:ExitCoordinatorOptions){this.options=options}
   request(origin:ExitOrigin):Promise<ExitResult>{
     if(this.closed)return Promise.resolve(this.closed)
     if(this.pending){
@@ -114,6 +115,21 @@ export class ExitCoordinator {
       if(!this.closed){this.committing=false;try{this.options.stateChanged?.(false)}catch(error){await report(error)}}
     }
   }
+}
+
+/** when-exit 等依赖会重发同一信号；异步清理结束前必须保留接收者。 */
+export function registerDesktopTerminationSignals(exit:Pick<ExitCoordinator,"request">):()=>void {
+  const terminate=()=>{void exit.request("system")}
+  // Electron 在部分 Linux 会话中把 OS 信号直接转成 app.quit；启动器经私有父子管道
+  // 转发同一终止意图，仍由唯一 ExitCoordinator 保存、停止和释放 Host。
+  const fromParent=(message:unknown)=>{
+    const value=message as {type?:unknown;signal?:unknown}|null
+    if(value?.type==="lyapunov:terminate"&&(value.signal==="SIGTERM"||value.signal==="SIGINT"))terminate()
+  }
+  process.on("SIGTERM",terminate)
+  process.on("SIGINT",terminate)
+  process.on("message",fromParent)
+  return ()=>{process.off("SIGTERM",terminate);process.off("SIGINT",terminate);process.off("message",fromParent)}
 }
 
 /** 只保参与者归属和计数；草稿内容及动作真值仍由原 owner 管理。 */

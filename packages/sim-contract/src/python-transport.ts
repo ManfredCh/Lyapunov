@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { pathWithin as writablePathWithin } from '../../lyapunov-contracts/src/writable-boundary.ts'
+import { canonicalTargetPath, pathWithin as writablePathWithin } from '../../lyapunov-contracts/src/writable-boundary.ts'
 import { SimError, type SimWorlds, type WorldOptions, type ObservationSelection, type StopSelection, type SimAction, type RobotDescription, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions, type LidarScanOptions, type FreezeSelection, type FreezeReceipt } from './index.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt } from '../../lyapunov-contracts/src/types.ts'
 
@@ -70,6 +70,9 @@ export interface SimWorkerLaunchFacts {
    * （原生后端表达不了，或本次不受文件效果约束——那时设备本来就可见）。不能把声明本身报成"已暴露"。
    */
   engineDeviceBoundary?: 'device-bind' | 'none'
+  /** 引擎要求的只读挂载目录（例如 WSL2 的 CUDA 库目录）及其 OS 层边界，语义同 engineDevices／engineDeviceBoundary。 */
+  engineReadOnlyMounts?: string[]
+  engineReadOnlyBoundary?: 'os-bind' | 'none'
 }
 
 /**
@@ -192,6 +195,7 @@ export class ProcessSimProvider implements SimWorlds {
    * 在途 execute 即使晚于 worker 退出，也能返回同一物理停止确认。
    */
   private terminalReceipts = new Map<string, Map<string, ActionReceipt>>()
+  private readonly terminalWaiters = new Map<string, Set<(receipt: ActionReceipt) => void>>()
   private closing = new Map<string, Promise<void>>()
   private closed = false
   private disposal?: Promise<void>
@@ -225,7 +229,9 @@ export class ProcessSimProvider implements SimWorlds {
   private workerCapabilities?: Record<string, unknown>
   private mediaSerial = 0
   private readonly stopListeners=new Map<string,Set<(selection:StopSelection)=>void>>()
-  constructor(readonly config: ProcessSimConfig) {
+  readonly config: ProcessSimConfig
+  constructor(config: ProcessSimConfig) {
+    this.config = config
     const value = config.startupBudgetMs
     if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new RangeError('startupBudgetMs 必须是正的有限毫秒数；不配置即不设该上限')
   }
@@ -703,17 +709,20 @@ export class ProcessSimProvider implements SimWorlds {
     const handle=await this.request<WorldHandle>('set_paused',{worldId,paused,expectedGeneration})
     this.adoptHandle(handle);return handle
   }
-  async receipt(worldId: string, actionId: string, expectedChild?: ChildProcessWithoutNullStreams) {
+  async receipt(worldId: string, actionId: string, expectedChild?: ChildProcessWithoutNullStreams, expectedGeneration?: number) {
     const completed = this.terminalReceipts.get(worldId)?.get(actionId)
-    if (completed) return structuredClone(completed)
+    if (completed && (expectedGeneration === undefined || completed.generation === expectedGeneration)) return structuredClone(completed)
     try {
-      const receipt = await this.request<ActionReceipt>('receipt', { worldId, actionId }, expectedChild)
+      const receipt = await this.request<ActionReceipt>('receipt', { worldId, actionId, ...(expectedGeneration === undefined ? {} : { expectedGeneration }) }, expectedChild)
+      if (expectedGeneration !== undefined && receipt.generation !== expectedGeneration) {
+        throw new SimError('STALE_GENERATION', `动作回执代次不匹配：${worldId}/${actionId} 期望 ${expectedGeneration}，实际 ${receipt.generation}`)
+      }
       this.rememberReceipt(receipt)
       return receipt
     } catch (error) {
       // close/shutdown 在回复后可能已销毁 worker；真实终态事件仍然有效。
       const cached = this.terminalReceipts.get(worldId)?.get(actionId)
-      if (cached) return structuredClone(cached)
+      if (cached && (expectedGeneration === undefined || cached.generation === expectedGeneration)) return structuredClone(cached)
       throw error
     }
   }
@@ -725,6 +734,26 @@ export class ProcessSimProvider implements SimWorlds {
     let receipts = this.terminalReceipts.get(receipt.worldId)
     if (!receipts) this.terminalReceipts.set(receipt.worldId, receipts = new Map())
     receipts.set(receipt.actionId, structuredClone(receipt))
+    for (const wake of this.terminalWaiters.get(JSON.stringify([receipt.worldId, receipt.actionId])) ?? []) wake(receipt)
+  }
+  /** 优先使用 worker 原有的终态事件；没有事件的旧 provider 仍由调用方按原间隔轮询。 */
+  private waitForTerminalReceipt(worldId: string, actionId: string, generation: number): Promise<ActionReceipt | undefined> {
+    const cached = this.terminalReceipts.get(worldId)?.get(actionId)
+    if (cached?.generation === generation) return Promise.resolve(structuredClone(cached))
+    const key = JSON.stringify([worldId, actionId])
+    return new Promise(resolve => {
+      let waiters = this.terminalWaiters.get(key)
+      if (!waiters) this.terminalWaiters.set(key, waiters = new Set())
+      const finish = (receipt?: ActionReceipt) => {
+        clearTimeout(timer)
+        waiters!.delete(wake)
+        if (!waiters!.size) this.terminalWaiters.delete(key)
+        resolve(receipt === undefined ? undefined : structuredClone(receipt))
+      }
+      const wake = (receipt: ActionReceipt) => { if (receipt.generation === generation) finish(receipt) }
+      waiters.add(wake)
+      const timer = setTimeout(() => finish(), 20)
+    })
   }
   async execute(worldId: string, action: SimAction, signal?: AbortSignal): Promise<ActionReceipt> {
     if (this.closing.has(worldId)) throw new SimError('WORLD_CLOSING', '世界正在关闭')
@@ -738,8 +767,8 @@ export class ProcessSimProvider implements SimWorlds {
       let result = await this.request<ActionReceipt>('execute', { worldId, action }, worker)
       if (signal?.aborted) abort()
       while (result.status === 'accepted' || result.status === 'running') {
-        await new Promise(resolve => setTimeout(resolve, 20))
-        result = await this.receipt(worldId, action.actionId, worker)
+        result = await this.waitForTerminalReceipt(worldId, action.actionId, action.expectedGeneration)
+          ?? await this.receipt(worldId, action.actionId, worker, action.expectedGeneration)
       }
       if (stopping) try { await stopping } catch (error) {
         // 重建已产生此动作的真实终态时，迟到的停止不得触碰新代次，
@@ -751,7 +780,7 @@ export class ProcessSimProvider implements SimWorlds {
     } finally { signal?.removeEventListener('abort', abort) }
   }
   async stop(worldId: string, selection: StopSelection = {}, expectedChild?: ChildProcessWithoutNullStreams) {
-    const result = await this.request<{ stopped: true; stepIndex: number; receipts: ActionReceipt[]; affectedEntityIds?: string[] }>('stop', { worldId, selection }, expectedChild)
+    const result = await this.request<{ stopped: true; stepIndex: number; receipts: ActionReceipt[]; affectedEntityIds?: string[]; reason?: 'WORLD_ALREADY_UNAVAILABLE'; statusReason?: string }>('stop', { worldId, selection }, expectedChild)
     for (const receipt of result.receipts) this.rememberReceipt(receipt)
     if(result.stopped)for(const listener of this.stopListeners.get(worldId)??[])try{listener(structuredClone(selection))}catch{ /* 观察方错误不能撤销已确认的原生停止 */ }
     return result
@@ -860,7 +889,8 @@ export class ProcessSimProvider implements SimWorlds {
     if (pathWithin(facts.writableRoot, outputDir) || pathWithin('/tmp', outputDir) || pathWithin(tmpdir(), outputDir)) return undefined
     if (!pathWithin(facts.writableRoot, facts.runtimeRoot)) return undefined
     if (!(facts.productRoots ?? []).some(product => pathWithin(product, outputDir))) return undefined
-    return { staged: join(facts.runtimeRoot, 'staging', `media-${++this.mediaSerial}`), publish: outputDir }
+    // Python 的 Path.resolve 会展开 macOS /var 等链接；回执改写必须使用同一实际目录身份。
+    return { staged: canonicalTargetPath(join(facts.runtimeRoot, 'staging', `media-${++this.mediaSerial}`)), publish: canonicalTargetPath(outputDir) }
   }
   /**
    * 用户产物的暂存/发布中转。派发前已由 {@link requireUserFacingWrite} 授权；**发布前再核对一次**：

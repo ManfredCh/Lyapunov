@@ -385,8 +385,10 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'app-side-panel-boundary', path: 'packages/lyapunov-shell/test/app-side.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: '应用层侧面板按工作台边界定位，保留工具轨并处理窄面与出界；仅本地几何，真实 GUI 另验', minPass: 6, minAssert: 21, minSites: 13, citedBy: 0 },
   { id: 'linux-user-installer', path: 'distribution/linux/install.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
-    purpose: '用户安装入口的校验、续传、失败保留 current、导入隔离与 Conda 不支持前缀的下载前拒绝；临时路径/loopback/替身载荷，真实 SDK 与物理另验', minPass: 41, minAssert: 63, minSites: 57, citedBy: 0 },
-  { id: 'manual-control-gesture', path: 'packages/lyapunov-shell/test/manual-events.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A08 F5真实Commands逐事件保留、gesture节点稳定/跨scope/Stop/真实false、完整目标限位与隐私', minPass: 8, minAssert: 121, minSites: 97, citedBy: 0 },
+    purpose: '用户安装入口的校验、续传、失败保留 current、导入隔离与 Conda 不支持前缀的下载前拒绝；临时路径/loopback/替身载荷，真实 SDK 与物理另验', minPass: 43, minAssert: 63, minSites: 57,
+    // 0.2.3（2026-11-02）：Linux 侧实跑 42 条；4 条 macOS 专用用例在 Linux 平台声明跳过，登记豁免不计通过。
+    waiveSkip: 4, waiveSkipReason: 'Linux 实跑 42 条；4 条 macOS 专用用例按 describe.skipIf(非 darwin) 平台声明跳过，不计作通过。macOS 冻结基线 9 不变。', citedBy: 0 },
+  { id: 'manual-control-gesture', path: 'packages/lyapunov-shell/test/manual-events.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A08 F5真实Commands逐事件保留、gesture节点稳定/跨scope/Stop/真实false、完整目标限位与隐私', minPass: 9, minAssert: 121, minSites: 97, citedBy: 0 },
   { id: 'manual-control-pointer', path: 'packages/lyapunov-shell/test/manual-gesture.dom.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A08 F5现有jsdom合成DOM的真实React pointer/final/settle/scope行为，无桌面/GPU', minPass: 1, minAssert: 26, minSites: 26, citedBy: 0 },
   // A06 2026-10-01：八条按 a4a51eb 候选逐文件实跑冻结；只有上调，无删除/下调。
   { id: 'legacy-resource-source', path: 'packages/scene-kit/test/legacy-resource-source.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 4, minAssert: 19, minSites: 18, citedBy: 0 },
@@ -396,7 +398,7 @@ export const CASES: readonly CaseSpec[] = [
   //   一起按实测值上调（rcui-v11-20261020T220730Z 门读数 10 pass / 208 expect，静态站点 117）。**上调，不是放宽。**
   { id: 'domain-instance-projection', path: 'packages/lyapunov-shell/test/domain-instance-projection.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；V10新增已解析预览位姿与确认一致性，实际GUI/SDK单独签收', minPass: 10, minAssert: 208, minSites: 117, citedBy: 0 },
   // 0.2.2（GATE-FLOOR-DRIFT）：人群面板用例接进后实测 34 pass，下限只上调。
-  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 34, minAssert: 29, minSites: 29, citedBy: 0 },
+  { id: 'scene-world-lifecycle', path: 'packages/lyapunov-shell/test/scene-world-lifecycle.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 36, minAssert: 29, minSites: 29, citedBy: 0 },
   { id: 'scene-ptc-input', path: 'packages/scene-kit/test/scene-ptc-input.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 1, minAssert: 8, minSites: 6, citedBy: 0 },
   { id: 'peiri-search-client', path: 'packages/lyapunov-api-client/test/search-client.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 10, minAssert: 93, minSites: 43, citedBy: 0 },
   { id: 'brand-welcome', path: 'packages/lyapunov-shell/test/brand-welcome.test.tsx', theme: 'other-round', runner: 'bun:test', ci: 'run', purpose: 'A06已登记定向回归；实际GUI/SDK单独签收', minPass: 6, minAssert: 27, minSites: 23, citedBy: 0 },
@@ -427,7 +429,7 @@ export const CASES: readonly CaseSpec[] = [
     // GATE-AB-20260927：宿主观测与合同测试分清——五态合同分支改用合成夹具（宿主无关），
     //   原 GPU 可见宿主上 expect 只有 16 < 下限 31 的漂移消失。实测：设备隐藏宿主 11 pass / 71 expect；
     //   设备可见宿主少 10 条（宿主观测分支），故下限取**两态都满足**的 61；sites=71。
-    purpose: 'GPU 在本会话不可见必须被说出来，不是静默降级', minPass: 11, minAssert: 61, minSites: 71, citedBy: 1 },
+    purpose: 'GPU 在本会话不可见必须被说出来，不是静默降级', minPass: 13, minAssert: 61, minSites: 71, citedBy: 1 },
   { id: 'isaac-orphan-close-failure', path: 'packages/sim-isaac/test/isaac-orphan-close-failure.test.ts', theme: 'silent-degradation', runner: 'bun:test', ci: 'run',
     purpose: '关闭失败不得冒充成功（孤儿进程路径）', minPass: 3, minAssert: 27, claimPass: 3, minSites: 28, citedBy: 1 },
   { id: 'isaac-entry-lifecycle', path: 'packages/sim-isaac/test/isaac-entry-lifecycle.test.ts', theme: 'silent-degradation', runner: 'bun:test', ci: 'run',
@@ -457,7 +459,7 @@ export const CASES: readonly CaseSpec[] = [
     //   本数字取自 01:32 整门读数；该 lane 落定后若条数变了，`floor-drift` 会立刻再点一次。）
     // 46 → 62 + minAssert 147 → 965 + minSites 92 → 400（GATE-AB-20260927，`floor-drift` 点名：
     //   实测 62 pass / 965 expect / sites 400；只上调到实测值）。
-    purpose: 'computer-use 输入作用域与拒绝清单', minPass: 62, minAssert: 965, claimPass: 22, minSites: 400, citedBy: 2 },
+    purpose: 'computer-use 输入作用域与拒绝清单', minPass: 65, minAssert: 965, claimPass: 22, minSites: 400, citedBy: 2 },
   { id: 'domain-pointer-rules-turn', path: 'packages/lyapunov-shell/test/domain-pointer-rules-turn.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
     purpose: '域指针规则按回合判定', minPass: 4, minAssert: 27, claimPass: 3, minSites: 22, citedBy: 8 },
   { id: 'session-context-cross', path: 'packages/lyapunov-shell/test/session-context-cross.test.ts', theme: 'cross-session-write', runner: 'bun:test', ci: 'run',
@@ -491,11 +493,11 @@ export const CASES: readonly CaseSpec[] = [
   //   下限不跟上 ⇒ "删掉那条顺序不变式仍然绿" ⇒ 正是 `floor-drift` 存在的意义。**不是放宽，是收紧。**
   //   （定版核对：`GATE-FINALIZATION` 单 2026-09-27 01:4x 复算 —— 本注释与值 47 一致。改前注释停在 46。）
   { id: 'environment-readiness', path: 'packages/lyapunov-shell/test/environment-readiness.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
-    purpose: '环境预检不得假警报/假通过（装不上就说装不上）', minPass: 50, minAssert: 354, claimPass: 35, minSites: 238, citedBy: 1 },
+    purpose: '环境预检不得假警报/假通过（装不上就说装不上）', minPass: 55, minAssert: 354, claimPass: 35, minSites: 238, citedBy: 1 },
   { id: 'prepare-env-guard', path: 'packages/benchmark-libero/test/prepare-env-guard.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
-    purpose: '空/空白环境值必须抛，不静默改写设备可见性', minPass: 3, minAssert: 10, claimPass: 3, minSites: 5, citedBy: 2 },
+    purpose: '空/空白环境值必须抛，不静默改写设备可见性', minPass: 4, minAssert: 10, claimPass: 3, minSites: 5, citedBy: 2 },
   { id: 'environment-routing', path: 'packages/lyapunov-shell/test/environment-routing.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
-    purpose: '环境路由选择与可见性', minPass: 96, minAssert: 273, claimPass: 81, minSites: 217, citedBy: 1 },
+    purpose: '环境路由选择与可见性', minPass: 108, minAssert: 273, claimPass: 81, minSites: 217, citedBy: 1 },
   { id: 'model-download-routing', path: 'packages/lyapunov-shell/test/model-download-routing.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
     purpose: '模型下载路由（缺资产 vs 设备不可见）', minPass: 5, minAssert: 31, claimPass: 5, minSites: 27, citedBy: 1 },
   { id: 'pack-library-actions', path: 'packages/lyapunov-shell/test/pack-library-actions.test.ts', theme: 'preflight-false-alarm', runner: 'bun:test', ci: 'run',
@@ -514,7 +516,7 @@ export const CASES: readonly CaseSpec[] = [
     purpose: '打包取件有界 + 缓存命中 0 网络（W16）', minPass: 25, minAssert: 61, claimPass: 14, minSites: 61, citedBy: 2 },
   { id: 'payload-contract', path: 'distribution/linux/payload-contract.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
     // minPass 24 → 26（0.2.2，GATE-FLOOR-DRIFT：本版新增人群载荷断言，实测 26 pass；只上调）
-    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 26, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
+    purpose: '发行载荷契约 + micromamba 取件有界（W6）', minPass: 28, minAssert: 47, claimPass: 13, minSites: 47, citedBy: 3 },
   { id: 'vla-official-scene-binding', path: 'packages/policy-registry/test/vla-official-scene-binding.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
     purpose: '官方策略取件与场景绑定', minPass: 6, minAssert: 9, claimPass: 6, minSites: 9, citedBy: 1 },
   { id: 'operations-bounded-fetch', path: 'packages/lyapunov-share/test/operations-bounded-fetch.test.ts', theme: 'fetch-five-elements', runner: 'bun:test', ci: 'run',
@@ -538,12 +540,12 @@ export const CASES: readonly CaseSpec[] = [
     purpose: '工作区布局迁移', minPass: 11, minAssert: 117, claimPass: 11, minSites: 76, citedBy: 1 },
   { id: 'runtime-patch', path: 'script/runtime-patch.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 8 → 16（2026-09-27，GATE-FLOOR-DRIFT 实测点出来的 9 条之一）
-    purpose: '运行补丁替身与源码守卫', minPass: 32, minAssert: 172, claimPass: 8, minSites: 161, citedBy: 1 },
+    purpose: '运行补丁替身与源码守卫', minPass: 34, minAssert: 172, claimPass: 8, minSites: 161, citedBy: 1 },
   { id: 'g17-legacy-residue', path: 'script/gates/g17-legacy-residue.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'g17 哑探针的失败能力单测（(?:…) 在 POSIX ERE 下无效）', minPass: 12, minAssert: 44, claimPass: 12, minSites: 34, citedBy: 1 },
   { id: 'package-linux', path: 'script/package-linux.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     // minPass 20 → 24（0.2.2，GATE-FLOOR-DRIFT：本版新增 4 条打包用例，实测 24 pass；只上调）
-    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 24, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
+    purpose: '发行根清单名与产品链接归属同一身份（W6/DEV-020）+ 出处守卫（载荷相关脏 ⇒ 拒包）', minPass: 26, minAssert: 73, claimPass: 7, minSites: 62, citedBy: 3 },
   { id: 'g19-building-robot-task', path: 'packages/scene-kit/test/g19-building-robot-task.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: 'G19 建筑-机器人任务链', minPass: 2, minAssert: 30, minSites: 31, citedBy: 2 },
   { id: 'g19-building-scale-animation', path: 'packages/scene-kit/test/g19-building-scale-animation.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
@@ -555,7 +557,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'formal-model', path: 'packages/lyapunov-product-bundle/test/formal-model.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'run',
     purpose: '正式模型面', minPass: 3, minAssert: 6, minSites: 6, citedBy: 1 },
   { id: 'session-launch', path: 'packages/sim-contract/test/session-launch.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
-    purpose: '会话启动契约', minPass: 31, minAssert: 93, minSites: 93, citedBy: 1 },
+    purpose: '会话启动契约', minPass: 37, minAssert: 93, minSites: 93, citedBy: 1 },
   { id: 'isaac-startup-budget', path: 'packages/sim-contract/test/isaac-startup-budget.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
     purpose: 'Isaac 启动预算（契约层）', minPass: 6, minAssert: 33, minSites: 34, citedBy: 2 },
   { id: 'scene-adapter-transform', path: 'packages/sim-isaac/test/scene-adapter-transform.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
@@ -563,7 +565,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'worker-robot-metadata', path: 'packages/sim-isaac/test/worker-robot-metadata.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
     purpose: 'worker 机器人元数据', minPass: 11, minAssert: 167, minSites: 50, citedBy: 1 },
   { id: 'blender-executable', path: 'script/blender-executable.test.ts', theme: 'other-round', runner: 'bun:test', ci: 'not-run',
-    purpose: 'Blender 可执行解析（同模块邻居，防回归）', minPass: 7, minAssert: 10, claimPass: 7, minSites: 10, citedBy: 1 },
+    purpose: 'Blender 可执行解析（同模块邻居，防回归）', minPass: 8, minAssert: 10, claimPass: 7, minSites: 10, citedBy: 1 },
   { id: 'unity-mcp', path: 'script/unity-mcp.test.ts', theme: 'other-round', runner: 'plain', ci: 'not-run',
     purpose: 'Unity MCP 接线（plain 脚本，合成标记不入正文）', minPass: 11, minAssert: 11, minSites: 11, citedBy: 4 },
   // ↓ 首次全量跑（2026-09-26 19:xx）由 caseset-coverage 的 DRIFT 点出来的 4 条：本轮新增/被回执引用的
@@ -1049,18 +1051,26 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   //   scene-world-lifecycle 32→34、payload-contract 24→26、package-linux 20→24、
   //   viewer-texture-and-autoframe 31→32 随 CASES.minPass 同抬；旧 id 不删不降，判据语义未改。
   //   digest 按排序后 id=pass 重算：a6b92a64bcac → d76f073ef39a（91 条，只增不删、不降）。
-  at: '2026-10-30T00:00:00Z',
-  digest: 'd76f073ef39a',
+  // 0.2.3（2026-11-02）：Linux 发布门在 f34936ab 上实测 9 条高于下限（floor-drift 点名），
+  //   随 CASES.minPass 同抬：manual-control-gesture 8→9、scene-world-lifecycle 34→36、
+  //   computer-use-input-scope 62→65、prepare-env-guard 3→4、environment-routing 96→108、
+  //   payload-contract 26→28、runtime-patch 32→34、package-linux 24→26、blender-executable 7→8；
+  //   linux-user-installer 41→42（Linux 新增实跑用例，4 条 macOS 专用跳过另行登记豁免）。
+  //   merge-wsl-0.2.3：WSL2 移植新增用例再抬 linux-user-installer 42→43、gpu-device-hidden-notice 11→13、
+  //   environment-readiness 50→55、session-launch 31→37；Darwin 在 DARWIN_CASE_FLOORS 另行冻结不变。
+  //   旧 id 不删不降，判据语义未改；digest 按排序后 id=pass 重算：8b58be7c57cb → c069a9e3a3d7。
+  at: '2026-11-02T00:00:00Z',
+  digest: 'c069a9e3a3d7',
   // A07：仅上调场景生命周期8→11、上下文2→4；87项未删除，摘要同步实测冻结表。
   pass: {
-  'app-side-panel-boundary': 6, 'linux-user-installer': 41,
+  'app-side-panel-boundary': 6, 'linux-user-installer': 43,
   // A08 F5：新增gesture8 / pointer1，并按真实路由复测仅上调双会话12→13；其他冻结行原样保留。
-  'manual-control-gesture': 8, 'manual-control-pointer': 1,
+  'manual-control-gesture': 9, 'manual-control-pointer': 1,
   'legacy-resource-source': 4,
   // P16：随 CASES.minPass 同抬 6 → 7（只上调，不删/不降）。
   // V11：随 CASES.minPass 同抬 8 → 10（floor-drift 点名，只上调）。
   'domain-instance-projection': 10,
-  'scene-world-lifecycle': 34,
+  'scene-world-lifecycle': 36,
   'scene-ptc-input': 1,
   'peiri-search-client': 10,
   'brand-welcome': 6,
@@ -1071,23 +1081,23 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   'physics-controls': 19,
   'environment-routing-selection': 22,
 
-  'behavior-evidence': 5, 'blender-executable': 7, 'capability-truth': 18,
-  'computer-use-input-scope': 62, 'conversation-history': 8, 'cua-input-single-flight': 16,
+  'behavior-evidence': 5, 'blender-executable': 8, 'capability-truth': 18,
+  'computer-use-input-scope': 65, 'conversation-history': 8, 'cua-input-single-flight': 16,
   'desktop-restart-recovery': 19, 'dev032-html-plan-wiring': 5, 'domain-pointer-rules-turn': 4,
   'engine-panel-decision': 11, 'engine-preference': 59, 'engine-selection-consistency': 6,
-  'environment-readiness': 50, 'environment-routing': 96, 'episode-record-fields': 6, 'formal-model': 3,
+  'environment-readiness': 55, 'environment-routing': 108, 'episode-record-fields': 6, 'formal-model': 3,
   'g17-legacy-residue': 12, 'g19-building-robot-task': 2, 'g19-building-scale-animation': 8,
-  'gate-drivers-mechanism': 29, 'gpu-device-hidden-notice': 11, 'gpu-misdiagnosis-guard': 23,
+  'gate-drivers-mechanism': 29, 'gpu-device-hidden-notice': 13, 'gpu-misdiagnosis-guard': 23,
   'history-boundary': 6, 'host-projection-candidate': 9, 'html-preview-entry': 50,
   'isaac-entry-lifecycle': 8, 'isaac-orphan-close-failure': 3, 'isaac-startup-budget': 6,
   'isaac-startup-budget-entry': 7, 'isaac-startup-budget-wiring': 4, 'job-record-hunyuan': 11,
   'job-record-marble': 3, 'mamba-license': 25, 'migrate-workspace-layout': 11,
   'model-download-routing': 5, 'notification-no-replay': 3, 'open-cancel': 7,
-  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 24, 'payload-contract': 26,
+  'operations-bounded-fetch': 36, 'pack-library-actions': 7, 'package-linux': 26, 'payload-contract': 28,
   'policy-source-bounded-fetch': 8, 'policy-source-github-quota': 39, 'portability': 15,
-  'prepare-env-guard': 3, 'privacy-boundary': 44, 'provider-installer': 28, 'render-failure': 13,
-  'runtime-patch': 32, 'scene-adapter-transform': 7, 'scene-kit-formats-mjcf-sections': 17,
-  'scene-projection': 8, 'session-context-cross': 5, 'session-history': 27, 'session-launch': 31,
+  'prepare-env-guard': 4, 'privacy-boundary': 44, 'provider-installer': 28, 'render-failure': 13,
+  'runtime-patch': 34, 'scene-adapter-transform': 7, 'scene-kit-formats-mjcf-sections': 17,
+  'scene-projection': 8, 'session-context-cross': 5, 'session-history': 27, 'session-launch': 37,
   'session-ownership-two-sessions': 13, 'share-export': 1, 'target-window': 7, 'terminal-options': 30,
   'test-ci-harness-cli': 34, 'unity-mcp': 11, 'viewer-projection-consumer': 20,
   'viewer-splat-support': 12, 'viewer-texture-and-autoframe': 32, 'vla-official-scene-binding': 6,
@@ -1099,7 +1109,43 @@ export const FLOOR_BASELINE_FROZEN: FloorBaseline = {
   },
 }
 
-/** 基线的集合摘要：**排序后逐行 `id=pass`** 的 sha256 前 12 位（与 `manifestGapDigest` 同一口径）。 */
+// mac-rebuild-0.2.3（2026-11-03，main@8e7aa707 macOS 26.5.1 arm64 完整门实测）：只保留真实平台差异。
+//   macOS 实测与 Linux 下限相同的 11 条（scene-world-lifecycle 36、payload-contract 28、package-linux 26、
+//   gpu-device-hidden-notice 13、environment-readiness 55、session-launch 37 等）删去覆盖、改随 Linux 冻结值，
+//   均为上调或持平；安装器平台跳过 38→39（新增 WSL 用例）；scene-adapter-transform 登记 macOS 无 Isaac 豁免。
+/** macOS 原生读数独立冻结；Linux 的既有覆盖与冻结值原样保留。
+ * 2026-10-29 完整门及安装器/运行补丁定向实测；平台跳过从不计入 pass。
+ */
+export const DARWIN_CASE_FLOORS: Readonly<Record<string, Partial<Pick<CaseSpec, 'minPass' | 'minAssert' | 'waiveSkip' | 'waiveSkipReason'>>>> = {
+  'linux-user-installer': { minPass: 9, minAssert: 57, waiveSkip: 39, waiveSkipReason: 'macOS 实跑 9 条；39 条 Linux 专用夹具（含 WSL bubblewrap 警告用例）按原平台声明跳过，不计作通过。Linux 冻结基线 43 不变。' },
+  'runtime-patch': { minPass: 33, waiveSkip: 1, waiveSkipReason: '固定产品供给的 Linux fresh HOME 用例在 macOS 跳过；33 条其他用例实际执行。' },
+  'scene-adapter-transform': { minPass: 0, minAssert: 0, waiveSkip: 1, waiveSkipReason: 'macOS 不提供 Isaac Sim/CUDA 运行时，缺 Isaac 解释器时整份显式跳过，不计作通过；Linux 冻结基线 7 不变，由 Linux 发布门实跑。' },
+}
+
+export function caseSpecsForPlatform(platform: NodeJS.Platform = process.platform): CaseSpec[] {
+  return CASES.map(spec => platform === 'darwin' ? { ...spec, ...DARWIN_CASE_FLOORS[spec.id] } : { ...spec })
+}
+
+// merge-mac-0.2.3（2026-10-31）：Dev 0.2.2 抬过 4 条冻结 pass 后，本基线经 spread
+//   FLOOR_BASELINE_FROZEN.pass 继承新值，digest 按排序后 id=pass 重算
+//   e0683a598118 → b29dfe5bcbcf（覆写条目不变、只增不删）。
+// mac-rebuild-0.2.3（2026-11-03）：与 DARWIN_CASE_FLOORS 同步，只覆写三条平台差异，其余继承 Linux 冻结值；
+//   scene-adapter-transform 7→0 是登记的平台豁免（macOS 无 Isaac），不是删用例。digest b29dfe5bcbcf → 1af40f28095a。
+export const DARWIN_FLOOR_BASELINE_FROZEN: FloorBaseline = {
+  at: '2026-11-03T00:00:00.000Z',
+  digest: '1af40f28095a',
+  pass: { ...FLOOR_BASELINE_FROZEN.pass,
+    'linux-user-installer': 9,
+    'runtime-patch': 33,
+    'scene-adapter-transform': 0,
+  },
+}
+
+export function floorBaselineForPlatform(platform: NodeJS.Platform = process.platform): FloorBaseline {
+  return platform === 'darwin' ? DARWIN_FLOOR_BASELINE_FROZEN : FLOOR_BASELINE_FROZEN
+}
+
+/** 基线的集合摘要：排序后逐行 `id=pass` 的 sha256 前 12 位。 */
 export function floorBaselineDigest(pass: Record<string, number>): string {
   return sha256Hex(
     Object.keys(pass)
@@ -1170,8 +1216,11 @@ export function parseCaseOutput(raw: string): CaseCounts {
 
   const ex = /(\d+)\s+expect\(\)/.exec(raw)
   counts.assertions = ex ? Number(ex[1]) : counts.pass + counts.fail
-  counts.markerPass = (raw.match(/^\((?:pass)\)/gm) || []).length
-  counts.markerSkip = (raw.match(/^\((?:skip|todo)\)/gm) || []).length
+  // Bun 1.4 在末尾重列 `N tests skipped:`，该清单不是第二次执行。
+  // 只从逐条执行区取记号；汇总仍从全文读取，原交叉核对继续拒绝冲突数字。
+  const markers = counts.format === 'bun-summary' ? raw.split(/^\s*\d+ tests? skipped:\s*$/m)[0]! : raw
+  counts.markerPass = (markers.match(/^\((?:pass)\)/gm) || []).length
+  counts.markerSkip = (markers.match(/^\((?:skip|todo)\)/gm) || []).length
   return counts
 }
 
@@ -2775,7 +2824,7 @@ interface Options {
 }
 
 function loadCases(path: string | undefined, root: string): CaseSpec[] {
-  if (!path) return [...CASES]
+  if (!path) return caseSpecsForPlatform()
   const raw = JSON.parse(readFileSync(resolve(root, path), 'utf8')) as Partial<CaseSpec>[] | { cases: Partial<CaseSpec>[] }
   const rows = Array.isArray(raw) ? raw : raw.cases
   return rows.map((r, i) => ({
@@ -2984,6 +3033,7 @@ function main(argv: string[]): number {
   const runStructural = !fixtureMode
 
   const specs = loadCases(opts.casesFile, root)
+  const floorBaseline = floorBaselineForPlatform()
   const t0 = Date.now()
   /** 这次跑的是哪一档（机器可读）：发布裁决 / 自检 full / 自检夹具。与 `--selftest` 的表头同一口径。 */
   const gateMode = opts.selftest ? (fixtureMode ? 'selftest-fixture' : 'selftest-full') : 'release'
@@ -3116,7 +3166,7 @@ function main(argv: string[]): number {
   // ④ 冻结下限漂移 + 冻结基线：`minPass` 低于实测 ⇒ 删掉 N 条仍然绿；实测**低于冻结基线** ⇒ 已经删过。
   // 第三个参数是"这次跑的是不是全量内建用例表"：`--only` 子集与 `--selftest --cases` 夹具跑的不是同一批
   // 用例，拿它们报"基线里的用例没了"（`gone`）是假红 ⇒ 只有全量内建跑法才判 `gone`。
-  criteria.push(evalFloorDrift(readings, FLOOR_BASELINE_FROZEN, !opts.only && !fixtureMode))
+  criteria.push(evalFloorDrift(readings, floorBaseline, !opts.only && !fixtureMode))
   criteria.push(evalSkipAccounting(readings))
   criteria.push(evalSelfCheck(criteria, readings, specsToRun.length))
 
@@ -3197,9 +3247,10 @@ function main(argv: string[]): number {
     },
     /** ④ 的冻结基线（只报告）：`at`/`digest`/条数；逐条实测值在 `cases[].pass` 里。 */
     floorBaseline: {
-      at: FLOOR_BASELINE_FROZEN.at,
-      digest: FLOOR_BASELINE_FROZEN.digest,
-      cases: Object.keys(FLOOR_BASELINE_FROZEN.pass).length,
+      platform: process.platform,
+      at: floorBaseline.at,
+      digest: floorBaseline.digest,
+      cases: Object.keys(floorBaseline.pass).length,
     },
     verdict,
     // 与**进程实际退出码**一致（自检模式下不等于 `EXIT_OF[verdict]`，见 `finalCode`）。

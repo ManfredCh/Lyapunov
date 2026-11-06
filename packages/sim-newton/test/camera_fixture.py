@@ -44,6 +44,11 @@ included = entity('included', [-2, 0, 0], {'mujoco': {'sourcePath': str(source_r
 included['transform']['quaternion'] = [0, 0, float(np.sqrt(.5)), float(np.sqrt(.5))]
 attached = entity('scene-mounted', [0, 0, 2.8], {'camera': {'fovYDeg': 60}})
 attached['parentId'] = 'first'
+explicit_mount = entity('explicit-mount', [8, 8, 8], {'camera': {'name': 'hand-camera', 'fovYDeg': 60, 'mount': {
+    'entityId': 'first', 'bodyName': 'falling-box/worldbody/box',
+    'positionM': [0, 0, 2], 'quaternionXyzw': [0, 0, 0, 1]}}})
+missing_mount = entity('missing-mount', [7, 7, 7], {'camera': {'fovYDeg': 60, 'mount': {
+    'entityId': 'first', 'bodyName': 'missing', 'positionM': [0, 0, 0], 'quaternionXyzw': [0, 0, 0, 1]}}})
 scene = {'sceneId': 'native-camera-cpu', 'revision': 1, 'entities': [
     entity('first', [1, 0, 0], {'mujoco': {'xml': xml}}),
     entity('second', [4, 0, 0], {'mujoco': {'xml': xml}}),
@@ -51,7 +56,7 @@ scene = {'sceneId': 'native-camera-cpu', 'revision': 1, 'entities': [
     entity('saved', [0, 0, 0], {'viewerCamera': {'cameras': [
         {'name': 'known-K', 'state': {'position': [1, 0, 3], 'quaternion': [0, 0, 0, 1],
          'intrinsics': {'fx': 45, 'fy': 40, 'cx': 21.25, 'cy': 19.75, 'width': 64, 'height': 48}}}]}}),
-    included, attached,
+    included, attached, explicit_mount, missing_mount,
 ]}
 world = worker.World(scene, {'worldId': 'camera-cpu', 'clock': 'realtime', 'device': 'cpu', 'timestepS': .002})
 camera = NewtonCamera(world, worker.SimError, worker.native_source, worker.world_poses)
@@ -59,7 +64,7 @@ before = camera.list({'width': 64, 'height': 48})
 (output/'mapping.json').write_text(json.dumps({'bodyLabels': list(world.model.body_label),
     'entities': {eid: {'rootBody': e.get('rootBody'), 'bodyLabels': e.get('bodyLabels')} for eid, e in world.entities.items()},
     'cameras': before['cameras']}, indent=2))
-first = camera.capture_multi({'cameraNames': ['first/mounted', 'fixed/overview', 'saved/known-K', 'first/optics'],
+first = camera.capture_multi({'cameraNames': ['first/mounted', 'fixed/overview', 'saved/known-K', 'first/optics', 'explicit-mount/hand-camera'],
                               'width': 64, 'height': 48, 'outputDir': str(output / 'before')})
 step_before_capture = world.step_index
 world_before_capture = world.state_a.body_q.numpy().copy()
@@ -67,8 +72,9 @@ world_before_capture = world.state_a.body_q.numpy().copy()
 for _ in range(100):
     world.tick()
 after = camera.list({'width': 64, 'height': 48})
+observed_after = world.observe()
 state_before = world.state_a.body_q.numpy().copy()
-second = camera.capture_multi({'cameraNames': ['first/mounted', 'fixed/overview'],
+second = camera.capture_multi({'cameraNames': ['first/mounted', 'fixed/overview', 'explicit-mount/hand-camera'],
                                'width': 64, 'height': 48, 'outputDir': str(output / 'after')})
 state_after = world.state_a.body_q.numpy().copy()
 
@@ -103,7 +109,7 @@ def rejected(options):
         return {'code': exc.code, 'message': str(exc)}
 
 
-report = {'beforeList': before, 'afterList': after, 'beforeCapture': first, 'afterCapture': second,
+report = {'beforeList': before, 'afterList': after, 'observedAfter': observed_after, 'beforeCapture': first, 'afterCapture': second,
           'beforePixels': [pixels(e) for e in first['cameras']], 'afterPixels': [pixels(e) for e in second['cameras']],
           'captureStepBeforeAdvance': step_before_capture, 'bodyBeforeAdvance': world_before_capture.tolist(),
           'bodyAfterAdvance': state_after.tolist(), 'captureStateUnchanged': bool(np.array_equal(state_before, state_after)),

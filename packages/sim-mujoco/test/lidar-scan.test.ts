@@ -3,7 +3,7 @@
  *
  * 运行：
  *   MUJOCO_GL=osmesa LYAPUNOV_MUJOCO_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/sim-python/bin/python \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/lidar-scan.test.ts
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/lidar-scan.test.ts
  *   （必须开 transform-types：sim-contract/src/python-transport.ts 用了 TypeScript 参数属性。）
  *   解释器缺失时整份显式 skip 并说明原因，不假装通过。
  *

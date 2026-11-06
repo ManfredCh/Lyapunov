@@ -70,6 +70,10 @@ packs/_staging/
 packs/_staging2/
 packs/*/asset/**
 !packs/lyaup_demo_arm/asset/Lyaup演示机械臂.mjcf
+# 发行 stager 生成的本机供给元数据与固定策略缓存；不把安装资产当作源码提交。
+/packs/default-t0-supply.json
+/packs/default-policy-supply.json
+/packs/default-policies/
 
 # 新 vendor 机器人资产投放，待逐包许可复核后再决定入库
 /materials/robots/unitree_go1/

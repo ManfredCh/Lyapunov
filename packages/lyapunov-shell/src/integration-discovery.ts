@@ -51,9 +51,12 @@ export async function discoverIntegrations(ctx:Context,env:NodeJS.ProcessEnv=pro
  for(const row of rows)if(row.kind==='blender'&&['mcp-for-blender','blender-mcp'].includes(basename(row.path))){row.addonPath=supply.readings.addonExists?paths.addon:existingAddons.length===1?existingAddons[0]:undefined;row.addonExists=supply.readings.addonExists||existingAddons.length>0}
 
  // Unity Hub 的公开标准安装根只枚举直接版本目录；不解析EditorPrefs/代理配置或登录数据。
- const roots=[join(userHome,'Unity','Hub','Editor'),'/opt/unityhub/Editor']
+ const roots=[join(userHome,'Unity','Hub','Editor'),'/opt/unityhub/Editor',...process.platform==='darwin'?['/Applications/Unity/Hub/Editor',join(userHome,'Applications/Unity/Hub/Editor')]:[]]
  for(const root of roots){let entries:string[];try{entries=await readdir(root)}catch{continue}
-  for(const version of entries.slice(0,32))if(/^\d{4}\.\d+\.\d+[abfp]\d+$/.test(version))await add('unity',join(root,version,'Editor','Unity'),'unity-hub')
+  for(const version of entries.slice(0,32))if(/^\d{4}\.\d+\.\d+[abfp]\d+$/.test(version)){
+   await add('unity',join(root,version,'Editor','Unity'),'unity-hub')
+   if(process.platform==='darwin')await add('unity',join(root,version,'Unity.app/Contents/MacOS/Unity'),'unity-hub')
+  }
  }
  return rows
 }

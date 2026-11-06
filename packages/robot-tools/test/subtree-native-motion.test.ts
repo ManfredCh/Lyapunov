@@ -119,7 +119,7 @@ function hooksFor(ops: SceneOperations, root: string): RobotSubtreeHooks {
 }
 
 function createSim() {
-  return new MuJoCoProvider({ pythonPath: python!, renderBackend: 'osmesa' })
+  return new MuJoCoProvider({ pythonPath: python!, renderBackend: process.platform==='darwin'?'cgl':'osmesa' })
 }
 
 function observedJoints(frame: any, entityId: string): { names: string[]; positions: number[] } {

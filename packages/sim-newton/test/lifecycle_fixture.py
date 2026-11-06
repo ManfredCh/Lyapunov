@@ -93,11 +93,16 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(handle['status'], 'unavailable')
         self.assertEqual(handle['statusReason'], 'RuntimeError: injected fault')
         self.assertEqual(handle['sceneId'], SCENE['sceneId'])
-        for call in (world.observe, lambda: world.describe('entity'), lambda: world.stop({})):
+        for call in (world.observe, lambda: world.describe('entity')):
             with self.assertRaises(worker.SimError) as caught:
                 call()
             self.assertEqual(caught.exception.code, 'WORLD_UNAVAILABLE')
             self.assertIn('injected fault', str(caught.exception))
+        # fault 已终结活动动作并释放原生句柄；stop 只确认没有剩余动作，并保留故障原因。
+        stopped = world.stop({})
+        self.assertTrue(stopped['stopped'])
+        self.assertEqual(stopped['reason'], 'WORLD_ALREADY_UNAVAILABLE')
+        self.assertIn('injected fault', stopped['statusReason'])
         world.tick()  # Faulted ticks do not touch any cleared native handles.
         world.close()
         world.close()

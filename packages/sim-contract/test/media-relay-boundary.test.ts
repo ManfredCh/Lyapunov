@@ -15,7 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ProcessSimProvider, pathWithin, type SimWorkerLaunchSpec } from '../src/python-transport.ts'
@@ -50,7 +50,7 @@ const RELAY_BASE = (() => {
   throw new Error('TEST_NO_WRITABLE_RELAY_BASE: 候选基目录都落在平台临时区内或不可写，构造不出"临时区之外"的夹具')
 })()
 let base: string
-beforeEach(async () => { base = await mkdtemp(join(RELAY_BASE, 'lyapunov-media-relay-')) })
+beforeEach(async () => { base = await realpath(await mkdtemp(join(RELAY_BASE, 'lyapunov-media-relay-'))) })
 afterEach(async () => { await rm(base, { recursive: true, force: true }) })
 
 /** 一次会话的运行事实：授权根（工作区）在外，会话运行根在授权根内，产品根按会话键展开在外。 */

@@ -17,7 +17,7 @@
   ——陆游《冬夜读书示子聿》
 </p>
 
-**Linux x64** · **Apache-2.0**
+**Linux x64 · macOS Apple Silicon · Windows/WSL2** · **Apache-2.0**
 
 | 出版信息 | 内容 |
 | --- | --- |
@@ -44,7 +44,8 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前默认 — [0.2.2](docs/releases/0.2.2.md)：**完整 Linux x64 发行版，新增人物与人群（随包角色、「人群」面板与自然语言控制）、USD 与 SimReady 一等资产，以及显式 NVIDIA 渲染。
+- **当前默认 — [0.2.3](docs/releases/0.2.3.md)：**Linux x64、macOS Apple Silicon 与 Windows/WSL2 安装路线，完善人群、退出恢复及平台兼容。
+- **上一版 — [0.2.2](docs/releases/0.2.2.md)：**保留人物与人群、USD 与 SimReady 一等资产及 NVIDIA 渲染的历史发行。
   - **人物与人群：**随包 12 个 Rocketbox 真人角色，默认创建 20 人、四种外观混合；支持路线、遇障停步和固定平面自动绕障。
   - **两种控制方式：**右侧工具栏新增「人群」面板（按组或全部开始/停止，来回走、绕圈、原地站立预设），也可以直接用自然语言让智能体操作。
   - **USD 与 SimReady：**USD 作为一等资产入库，保留图层、材质与物理属性；按固定版本经 Hugging Face 镜像导入 SimReady 资产包，并核对许可与文件清单。
@@ -57,13 +58,13 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 在 Linux 上安装
 
-在图形桌面会话的普通终端中运行下面的默认命令；`latest` 切换后它安装 **0.2.2**：
+在图形桌面会话的普通终端中运行下面的默认命令；当前默认安装 **0.2.3**：
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-**直接下载（Vorynel OSS/CDN）：**[Linux x64 0.2.2 安装包](https://vorynel.com/lyapunov/releases/0.2.2-20261030/lyapunov-linux-x64-0.2.2-20261030.tar.gz)（1,052,456,167 字节）· [JSON 清单](https://vorynel.com/lyapunov/releases/0.2.2-20261030/linux-x64.json) · [SHA256SUMS](https://vorynel.com/lyapunov/releases/0.2.2-20261030/SHA256SUMS)。SHA256：`545c3b584c7c75416762a4c6f383a14910927da4cdd8482c2fd447e2ded5f4cd`。同样的文件也附在 [GitHub Release](https://github.com/ManfredCh/Lyapunov/releases/tag/v0.2.2)。
+**直接下载（Vorynel OSS/CDN）：**[Linux / WSL2 0.2.3 安装包](https://vorynel.com/lyapunov/releases/0.2.3-20261102/lyapunov-linux-x64-0.2.3-20261102.tar.gz)（1,052,896,299 字节）· [Linux JSON 清单](https://vorynel.com/lyapunov/releases/latest/linux-x64.json) · [Mac Apple Silicon 安装包](https://vorynel.com/lyapunov/releases/0.2.3-macos-e17f03f259e9/lyapunov-darwin-arm64-0.2.3-macos-e17f03f259e9.tar.gz)（1,013,944,434 字节）· [Mac JSON 清单](https://vorynel.com/lyapunov/releases/latest/darwin-arm64.json)。各包 SHA-256 和实际源码提交以对应清单为准；[0.2.3 发布说明](https://vorynel.com/lyapunov/updates/0.2.3.html)。Mac 在系统终端运行同一安装命令，保留完整便携目录；当前为未公证的 arm64 版本。
 
 安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 
@@ -182,7 +183,7 @@ MuJoCo源位置伺服可以直接接受位置参考。纯力矩电机接受位�
 
 **world固定相机**使用世界位姿；**body/parent挂载相机**使用局部安装位姿并跟随真实父体。显式“保存当前画面安装”保留当前相机安装，可“恢复安装基线”。“进入相机视角／进入并跟随相机视角”和“返回主视图”控制观察；保存Viewer视角不替代native calibration。
 
-MuJoCo与Isaac有命名相机list/adjust路线；传感器采集需真实渲染后端，Isaac RGB-D需要实际RTX。Newton当前相机接口不支持。RGB-D检查相机名、分辨率、K、worldFromCamera、米制深度、captureId及frame/Scene/world来源。相机看得到环境不证明碰撞几何配准完成。
+MuJoCo与Isaac有命名相机list/adjust路线；传感器采集需真实渲染后端，Isaac RGB-D需要实际RTX。Newton 支持原生命名相机及 Scene 挂载相机的 RGB／轴向米制深度采集；临时相机调整、像素标注和相机数据集导出仍不支持。RGB-D检查相机名、分辨率、K、worldFromCamera、米制深度、captureId及frame/Scene/world来源。相机看得到环境不证明碰撞几何配准完成。
 
 在实体/当前视图或已登记采集上添加标注，修改位置和文字，保存并重开检查。像素投到三维只用真实深度与标定。可将带标注观察作为参考交给Agent，明确的几何修改经原生Scene编辑与revision核对完成；标注编辑本身不自动改几何或物理。导出实际采集、标注和数据集及其引用。
 
@@ -217,7 +218,7 @@ Isaac Sim、Newton、policy 环境和官方 benchmark 套件分别下载：
 "$HOME/.local/bin/lyapunov" install-provider isaac --accept-omniverse-eula
 ```
 
-SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 在原生 MJCF／URDF 之外消费普通 GLB 派生的受支持 Scene collision；静态 OBJ 保留三角面，动态 OBJ 使用已准备凸件，物理修改同步到当前世界。机器人动作、通用 contacts／penetrations／topology、相机采集与 collisionPatches 仍未支持。可选模型与 policy 权重在使用者选择后才获取。Hugging Face Hub 使用 `https://hf-mirror.com`；镜像缺文件、revision、权限或校验失败时会明确阻断。
+SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 在原生 MJCF／URDF 之外消费普通 GLB 派生的受支持 Scene collision；静态 OBJ 保留三角面，动态 OBJ 使用已准备凸件，物理修改同步到当前世界。Newton 的真实接触、穿透、命名相机及可核验源位置 PD 动作按 Provider 能力开放，通用 topology 和 collisionPatches 仍未支持。源固定关节链使用原生固定表示并从 FK 初始化；可动机器人的任务稳定性需要逐型号验收，源 forcerange 未被 XPBD 执行时会告警并拒绝相关位置动作。可选模型与 policy 权重在使用者选择后才获取。Hugging Face Hub 使用 `https://hf-mirror.com`；镜像缺文件、revision、权限或校验失败时会明确阻断。
 
 ## 升级与故障检查
 
@@ -240,28 +241,39 @@ SDK 已安装、世界就绪与机器人任务成功分别确认。Newton 在原
 - [ ] VR/XR 输入与坐标。
 - [ ] DSH 伴随升级（固定上游版本）。
 
-## Windows 评估路线
+## Windows：在 WSL2 中运行
 
-Windows计划评估的是 **WSL2 + WSLg下的Linux包**，不是原生Windows exe。[微软GUI应用前置条件](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps)要求Windows 10 build 19044+或Windows 11、WSL2/WSLg与适用GPU驱动。在管理员PowerShell中：
+Windows 用户在 WSL2（Ubuntu 24.04 或更新版本）中运行 Lyapunov 的 Linux 包，桌面窗口由 WSLg 显示。[微软GUI应用前置条件](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps)要求 Windows 10 build 19044+ 或 Windows 11、WSL2/WSLg 与适用 GPU 驱动。在管理员 PowerShell 中：
 
 ```powershell
 wsl --install
 wsl --update
 ```
 
-完成发行版设置后，在Ubuntu/Linux终端使用：
+完成发行版设置后，在 WSL2 的 Ubuntu 终端按上文的 Linux 安装步骤执行：
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
-```
-
-安装成功并报告就绪后，由使用者单独启动 Lyapunov：
-
-```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-安装和数据推荐放在Linux文件系统。本次未做Windows/WSLg与全GPU验收；按Linux包实际doctor和sandbox结果处理。
+源码和安装目录放在 WSL 的 ext4 文件系统（如 `~` 下），不要放在 `/mnt/c`。WSL2 的 NVIDIA GPU 来自 Windows 侧的 NVIDIA 驱动，不要在 WSL 内再装 Linux 显卡驱动。
+
+仅在一台机器上测试过（Windows 11、WSL2 内核 6.6.87.2、Ubuntu 24.04、RTX 5070 Laptop、发行版 0.2.2-20261030，2026-11-01/02），其他机器未测：
+
+- 安装器、`doctor`、WSLg 桌面、正式账号登录和 MuJoCo `sim_open` 通过。一次 Agent 任务（挂 Franka Panda、放 5 厘米方块、运行 MuJoCo 1 秒）完成，引擎回读方块静止在地面。
+- Newton 1.6.0：世界在 CPU 路径打开（`gpuAvailable:false`，未验证 CUDA 路径）。
+- Isaac Sim 6.0.1.0：能安装、通过依赖预检，并已在 WSL2 下按默认 `physicsDevice=cuda:0` 真实开世界（实测：`sim_open` 回执中仅 GPU 可用的 `deformable`/`fluid` 能力为 true；一次 Agent 任务挂 Franka Panda、放 5 厘米方块、跑 500 步×0.002 秒，引擎读回方块静止在地面，z=0.025）。从 0.2.3 起，适配层的启动前 GPU 门禁同样接受 WSL2 的 `/dev/dxg` 与 `/usr/lib/wsl/lib` CUDA 库配对，受限 worker 通过额外的只读挂载拿到该目录；此前 WSL2 没有 `/dev/nvidia*` 节点，门禁抛 `ISAAC_GPU_DEVICE_UNAVAILABLE`（公开错误 P422）。`rendering:rtx` 及依赖 RTX 的能力在 WSLg 下仍未验证。
+- 3D 视图：0.2.3 在 WSL 下通过忽略 Chromium 的 GPU blocklist 启用 WebGL；尚未在 WSL 上复验。物理和 Agent 不依赖 3D 视图。
+
+WSL2 前置条件与注意事项：
+
+- 安装 `bubblewrap`（`sudo apt install bubblewrap`）。最小化的 WSL Ubuntu 不带它；没有沙箱执行器时 `sim_open` 会以公开错误 P422 失败，`doctor` 会报 `SANDBOX_RUNNER_UNAVAILABLE`。用户目录里放在 `PATH` 上的 `bwrap` 也可用。
+- 使用 HTTP(S) 代理时，Node 的 `fetch` 默认忽略 `HTTPS_PROXY`；从 0.2.3 起，启动器检测到代理变量时自动设 `NODE_USE_ENV_PROXY=1`。
+- WSL 里没有浏览器：从 0.2.3 起，桌面通过 `powershell.exe` 在 Windows 宿主打开登录页。
+- 使用桌面期间请保持一个 WSL 会话；WSL 会停掉空闲发行版并结束后台进程。把 WSL 虚拟磁盘（`ext4.vhdx`）放在有空间的盘上（`wsl --manage <发行版> --move <目录>`）；安装中途写满 `C:` 会损坏安装。
+
+原生 Windows 移植已归档，最后状态保存在 LyapunovWin 仓库标签 `archive/windows-native-20261030`，不属于 Dev 本仓库，也不再维护。
 
 ## 基于上游生态的产品整合
 
@@ -273,7 +285,7 @@ Lyapunov负责LLM/3D优先的产品工作台与场景、工具、仿真、观察
 
 ## 从源码开发与贡献
 
-源码仓库使用固定 DSH 版本构建产品。开发需要 Git、Node.js 24+、Bun 1.3.13 和 pnpm 11.7.0；上面的消费端发行安装使用随包运行时。
+源码仓库使用固定 DSH 版本构建产品。开发需要 Git、Node.js 24+、Bun 1.4.2 和 pnpm 11.7.0；上面的消费端发行安装使用随包运行时。
 
 ```sh
 git clone https://github.com/ManfredCh/Lyapunov.git

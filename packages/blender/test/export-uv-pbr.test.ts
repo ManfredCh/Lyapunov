@@ -2,7 +2,7 @@
  * ENV-24 导出侧：**UV / PBR / 文字曲线 / 共享资产**的真实导出 + **独立解码回验**。
  *
  * 入口必须是 node（bun 1.3.13 下 `dsh-subprocess-local` 加载不了）：
- *   BLENDER_EXECUTABLE=<blender> node --experimental-transform-types --test packages/blender/test/export-uv-pbr.test.ts
+ *   BLENDER_EXECUTABLE=<blender> node --experimental-strip-types --test packages/blender/test/export-uv-pbr.test.ts
  * 没装 Blender 就整组 skip（不静默当通过）。
  *
  * 判据分两层，都用**真事实**：

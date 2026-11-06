@@ -29,6 +29,7 @@ import SystemPrompt from "@deepseek-ai/dsh-system-prompt"
 import ToolRuntime from "@deepseek-ai/dsh-tools"
 import { ENGINE_CHOICES, resolveEngine, writeEnginePreference } from "../../../script/engine-preference.ts"
 import { backendEnvironment } from "../../../script/profile.ts"
+import * as sdkPython from "../../lyapunov-product-bundle/src/sdk-python.mjs"
 import { resolveSdkPython } from "../../lyapunov-product-bundle/src/sdk-python.mjs"
 import { runtimePaths } from "../../lyapunov-product-bundle/src/runtime-paths.ts"
 import { isolateProviderInstaller } from "./fixtures/isolated-provider-installer.ts"
@@ -43,16 +44,22 @@ interface EngineChoice { engine: string; source: string; reason: string; candida
 interface EngineDecision { running: string | null; preference: string | null; runtime: EngineChoice | null; next: EngineChoice | null; gpu: { accelerator: string; state: string; headline: string } | null; restartRequired: boolean; error?: string }
 interface ProvidersPayload { runningEngine: string | null; preference: string | null; choices: readonly string[]; engineDecision: EngineDecision; providers: ProviderRow[] }
 
+const resolveRealSdkPython = sdkPython.resolveSdkPython
+let sdkResolverSpy: ReturnType<typeof spyOn> | undefined
 let root: string | undefined
 const savedEngine = process.env.LYAPUNOV_SIM_ENGINE
 const savedPreferenceFile = process.env.LYAPUNOV_ENGINE_PREFERENCE_FILE
 const savedSdkPaths = { mujoco: process.env.LYAPUNOV_MUJOCO_PYTHON, isaac: process.env.LYAPUNOV_ISAAC_PYTHON, newton: process.env.LYAPUNOV_NEWTON_PYTHON }
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "lyapunov-w4-engine-panel-"))
+  // 安装落点也隔离：不能假定开发机尚未安装托管 SDK。
+  sdkResolverSpy = spyOn(sdkPython, "resolveSdkPython").mockImplementation((_product,engine,env=process.env,options={})=>resolveRealSdkPython(root!,engine,env,options))
   // 每条用例使用临时偏好文件，不能读取真人已保存的SDK选择；显式env优先级仍由原断言核验。
   process.env.LYAPUNOV_ENGINE_PREFERENCE_FILE = join(root, "isolated-preference.json")
 })
 afterEach(() => {
+  sdkResolverSpy?.mockRestore()
+  sdkResolverSpy = undefined
   if (root !== undefined) rmSync(root, { recursive: true, force: true })
   root = undefined
   if (savedEngine === undefined) delete process.env.LYAPUNOV_SIM_ENGINE; else process.env.LYAPUNOV_SIM_ENGINE = savedEngine
@@ -96,9 +103,9 @@ async function boot() {
     return await response.json() as ProvidersPayload
   }
   /** 走真实 POST endpoint（与设置页同一个）：写偏好 / 写 `"auto"` 清除显式偏好。 */
-  const prefer = async (engine: unknown): Promise<Record<string, unknown>> => {
+  const prefer = async (engine: unknown, expectedStatus = 200): Promise<Record<string, unknown>> => {
     const response = await routes.get("/api/lyapunov/engine-preference")!(new Request("http://test/api/lyapunov/engine-preference", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ engine }) }))
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(expectedStatus)
     return await response.json() as Record<string, unknown>
   }
   const dispose = async () => { try { await ctx.fiber.dispose() } finally { await rm(workspace, { recursive: true, force: true }) } }
@@ -263,7 +270,10 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
       expect(row).toMatchObject({ installed: true, version: "3.13.0", runtimePython: external, runtimeSource: "env-override", prefix: dirname(dirname(managedPython)), managedStatus: "missing" })
       expect(row.detail).toContain("当前解释器可发现 mujoco")
       expect(row.detail).not.toContain("未安装（前缀不存在）")
-      expect((await host.prefer("isaac")).runningEngine).toBe("mujoco")
+      if(process.platform==="darwin"){
+        expect((await host.prefer("isaac",400)).error).toContain("ENGINE_UNSUPPORTED_PLATFORM")
+        await host.prefer("mujoco")
+      }else expect((await host.prefer("isaac")).runningEngine).toBe("mujoco")
       expect((await host.panel()).providers.find(item => item.id === "mujoco")?.detail).toContain("来源：用户偏好")
       expect((await host.prefer("auto")).preference).toBeNull()
       const after = await host.panel()
@@ -346,10 +356,12 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
       expect(payload.engineDecision.next!.reason).toBe("来源：用户偏好")
       expect(payload.engineDecision.restartRequired).toBe(true)
       // isaac 那一行：上游 reason 原文 + "重启后生效"（用户问"我明明设了 Isaac 怎么在跑 MuJoCo"的答案）。
-      const isaacRow = payload.providers.find(row => row.engineChoice === "isaac")!
-      expect(isaacRow.detail).toContain("来源：用户偏好")
-      expect(isaacRow.detail).toContain("重启后生效")
-      expect(isaacRow.detail).toContain("mujoco")
+      const isaacRow = payload.providers.find(row => row.engineChoice === "isaac")
+      if(process.platform==="darwin"){expect(isaacRow).toBeUndefined()}else{
+        expect(isaacRow!.detail).toContain("来源：用户偏好")
+        expect(isaacRow!.detail).toContain("重启后生效")
+        expect(isaacRow!.detail).toContain("mujoco")
+      }
     } finally { await host.dispose() }
   })
 
@@ -374,12 +386,14 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
       }
       // ③ isaac 行把"安装候选 / 解释器发现核对 / 许可留痕 / GPU 候选事实（含检测范围）"分开写。
       //    **不写"尚未打开过世界"**（复核点 1：安装器无权推断用户从未打开过），也不把文件存在当 RTX 验收。
-      const isaacRow = payload.providers.find(row => row.id === "isaac")!
-      expect(isaacRow.detail).toContain("许可")
-      expect(isaacRow.detail).toContain("GPU 候选")
-      expect(isaacRow.detail).toContain("检测范围")
-      expect(isaacRow.detail).not.toContain("尚未打开过世界")
-      expect(isaacRow.detail).not.toContain("UNVERIFIED")
+      const isaacRow = payload.providers.find(row => row.id === "isaac")
+      if(process.platform==="darwin"){expect(isaacRow).toBeUndefined()}else{
+        expect(isaacRow!.detail).toContain("许可")
+        expect(isaacRow!.detail).toContain("GPU 候选")
+        expect(isaacRow!.detail).toContain("检测范围")
+        expect(isaacRow!.detail).not.toContain("尚未打开过世界")
+        expect(isaacRow!.detail).not.toContain("UNVERIFIED")
+      }
     } finally { await host.dispose() }
   })
 
@@ -411,11 +425,13 @@ describe("引擎面板必须能解释'为什么是它'（W2 条件 D）", () => 
     process.env.LYAPUNOV_ENGINE_PREFERENCE_FILE = join(root!, "absent-engine.json")
     const host = await boot()
     try {
-      const isaacRow = (await host.panel()).providers.find(row => row.id === "isaac")!
-      // 无论本机装没装：措辞里不能出现旧的"SDK 已装入（可运行）"式断言；三态各自说清。
-      expect(isaacRow.detail).not.toContain("SDK 已装入")
-      if (!existsSync(isaacRow.runtimePython)) expect(isaacRow.detail).toContain(`解释器不存在：${isaacRow.runtimePython}`)
-      else expect(isaacRow.detail).toMatch(/安装候选|未命中/)
+      const isaacRow = (await host.panel()).providers.find(row => row.id === "isaac")
+      if(process.platform==="darwin"){expect(isaacRow).toBeUndefined()}else{
+        // 无论本机装没装：措辞里不能出现旧的"SDK 已装入（可运行）"式断言；三态各自说清。
+        expect(isaacRow!.detail).not.toContain("SDK 已装入")
+        if (!existsSync(isaacRow!.runtimePython)) expect(isaacRow!.detail).toContain(`解释器不存在：${isaacRow!.runtimePython}`)
+        else expect(isaacRow!.detail).toMatch(/安装候选|未命中/)
+      }
     } finally { await host.dispose() }
   })
 

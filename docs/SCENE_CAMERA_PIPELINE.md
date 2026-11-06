@@ -120,7 +120,7 @@ Scene 的两处相机声明如何进 MuJoCo / Isaac 的**已有**命名相机族
   `scene_camera_optics` / `scene_camera_rotation` / `_camera_engine_intrinsics` / `_camera_effective_intrinsics` /
   `camera_list` 的 `cameraSource='scene-camera'` 出处字段）。
   真实行为测试：`packages/sim-mujoco/test/scene-camera.test.ts`
-  （`node --experimental-transform-types --test packages/sim-mujoco/test/scene-camera.test.ts`）
+  （`node --experimental-strip-types --test packages/sim-mujoco/test/scene-camera.test.ts`）
   ——真实引擎出 RGB/米制深度、逐像素核对透视几何、相机移动后同一世界物体换像素、父实体跟随；
   同一个文件里也跑 66 命名相机（世界位姿/视场/K 回显/真实帧/反投影到地面 + override）这一组。
 - **K 的像素级验收**（task 99）：`packages/sim-mujoco/test/camera-intrinsics.test.ts`。方法：8 个等轴向深度 3 m 的

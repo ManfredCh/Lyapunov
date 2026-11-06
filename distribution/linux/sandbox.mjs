@@ -1,4 +1,4 @@
-import {readFileSync,lstatSync,chownSync,chmodSync,realpathSync} from 'node:fs'
+import {readFileSync,lstatSync,chownSync,chmodSync,realpathSync,accessSync,readdirSync,constants} from 'node:fs'
 import {dirname,join,resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {spawnSync} from 'node:child_process'
@@ -53,6 +53,32 @@ export function inspectSandbox(root){
   const noNewPrivileges=readNoNewPrivileges()
   return assessSandbox({helper,mountOptions,nosuid,noNewPrivileges:noNewPrivileges.value,noNewPrivilegesSource:noNewPrivileges.source,noNewPrivilegesDiagnostic:noNewPrivileges.diagnostic,userNamespaceAvailable:probe.status===0,restrictUnprivilegedUserns:restricted===null?null:Number(restricted),apparmorProfile:read('/proc/self/attr/current'),setupCommand:`sudo ${quote(join(root,'lyapunov'))} setup-sandbox`})
 }
+/** 会话沙箱执行器（bwrap→landlock 链）探测：只读检查，不安装、不改策略。
+ * bwrap 可用 = PATH 可解析且一次真实 `bwrap --unshare-all --ro-bind / / true` 通过；
+ * landlock-run 可用 = 固定路径存在且可执行。两者皆缺 → 受限执行必然 fail-closed（P422）。 */
+export function assessSandboxRunner(facts){
+  const bwrapReady=facts.bwrapAvailable===true
+  const landlockReady=facts.landlockRunExecutable===true
+  const status=bwrapReady||landlockReady?'AVAILABLE':'BLOCKED'
+  return {...facts,status,canLaunch:status==='AVAILABLE',runner:bwrapReady?'bwrap':landlockReady?'landlock':null,
+    ...(status==='AVAILABLE'?{}:{code:'SANDBOX_RUNNER_UNAVAILABLE',message:'会话沙箱执行器不可用：bwrap 未安装或探测失败，且 landlock-run 二进制缺失；仿真 worker 将按 fail-closed 拒绝启动（公开错误 P422）。 / Session confinement runner unavailable: install bubblewrap (e.g. `sudo apt install bubblewrap`) or restore the landlock-run binary.',install:'sudo apt install bubblewrap'})}
+}
+export function inspectSandboxRunner(root){
+  const which=spawnSync('which',['bwrap'],{encoding:'utf8',timeout:5000})
+  const bwrapOnPath=!which.error&&which.status===0&&(which.stdout??'').trim().length>0
+  let bwrapAvailable=false,bwrapProbe=null
+  if(bwrapOnPath){
+    const probe=spawnSync('bwrap',['--unshare-all','--ro-bind','/','/','true'],{encoding:'utf8',timeout:5000})
+    bwrapAvailable=!probe.error&&probe.status===0
+    bwrapProbe={status:probe.status,error:probe.error?String(probe.error.message):null}
+  }
+  // 随包 SDK 目录名随版本变化（发行包与开发树不同），不写死版本号。
+  let upstream=[];try{upstream=readdirSync(join(root,'.upstream'))}catch{}
+  const landlockPath=upstream.map(name=>join(root,'.upstream',name,'native/system/packages/linux-x64/bin/landlock-run')).find(path=>{try{return lstatSync(path).isFile()&&accessSyncOk(path)}catch{return false}})??join(root,'.upstream/<sdk>/native/system/packages/linux-x64/bin/landlock-run')
+  const landlockRunExecutable=upstream.length>0&&accessSyncOk(landlockPath)
+  return assessSandboxRunner({bwrapOnPath,bwrapAvailable,bwrapProbe,landlockRunPath:landlockPath,landlockRunExecutable})
+}
+function accessSyncOk(path){try{accessSync(path,constants.X_OK);return true}catch{return false}}
 export function setupSandbox(root){
   const path=join(root,'runtime/electron/chrome-sandbox')
   let st

@@ -250,3 +250,24 @@ test('宿主观测（真机只读）：真机读数自洽；出现"设备隐藏"
   expect(fallback).not.toThrow()
   expect(decision.explanation).toHaveLength(5)
 })
+
+// WSL2 GPU：预装配门 `/dev/nvidia* 0 个` 时改认 `/dev/dxg`（字符设备 + /usr/lib/wsl/lib/libcuda.so.1 配对），
+// 配对不齐仍按同一稳定码 ISAAC_GPU_DEVICE_UNAVAILABLE 抛——见 plugin.ts 的 probeWslGpuDevices 分支。
+test('plugin 设备门在 NVIDIA 节点不可见时先探 WSL /dev/dxg 再决定拒绝', () => {
+  const nonWin = isaacPluginSource.indexOf("if (!visibility.visible)")
+  const wslBranch = isaacPluginSource.indexOf('probeWslGpuDevices()', nonWin)
+  const throwSite = isaacPluginSource.indexOf('ISAAC_GPU_DEVICE_UNAVAILABLE', wslBranch)
+  expect(wslBranch).toBeGreaterThan(-1)
+  expect(throwSite).toBeGreaterThan(wslBranch)
+  expect(isaacPluginSource).toContain('wsl.devices.length > 0')
+})
+
+// 装载环境：WSL2 的 CUDA 库目录配对成立才进 LD_LIBRARY_PATH（不传就查不到 libcuda），配对不成立不塞假路径。
+test('isaacLoaderEnvironment：WSL 库目录非空才并入 LD_LIBRARY_PATH', async () => {
+  const { isaacLoaderEnvironment } = await import('../src/provider.ts')
+  const py = '/env/bin/python'
+  const withWsl = isaacLoaderEnvironment(py, 'linux', {}, '/usr/lib/wsl/lib')
+  expect(withWsl.LD_LIBRARY_PATH).toContain('/usr/lib/wsl/lib')
+  const without = isaacLoaderEnvironment(py, 'linux', {}, null)
+  expect(without.LD_LIBRARY_PATH).not.toContain('/usr/lib/wsl/lib')
+})

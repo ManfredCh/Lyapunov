@@ -24,7 +24,7 @@
  */
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile, realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { createHash } from "node:crypto"
 import { join, resolve } from "node:path"
@@ -142,7 +142,8 @@ const componentOf = <T>(entity: Entity | undefined, key: string): T | undefined 
 
 export async function gateG10(): Promise<GateResult> {
   const checks: Check[] = []
-  const directory = await mkdtemp(join(tmpdir(), "lyaup-g10-"))
+  // Blender 会回传 canonical 路径；macOS /var → /private/var，门禁用相同根核对归属。
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "lyaup-g10-")))
   const worldDir = join(directory, "blender-world")
   const scenes = new SceneOperations(join(directory, "scene-kit"), PRODUCT_ROOT)
   const provider = new MuJoCoProvider({ pythonPath: SIM_PYTHON, workerPath: MUJOCO_WORKER })

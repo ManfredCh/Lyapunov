@@ -12,11 +12,28 @@ import { lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 
+/** macOS 签名资源不能链接到 .app 外部；小入口仍加载原产品桌面实现。 */
+export function macOSDesktopBootstrap(version: string): { manifest: string; source: string } {
+  return {
+    manifest: JSON.stringify({name:'lyapunov-desktop',version,type:'module',main:'main.mjs'},null,2)+'\n',
+    source: `import {fileURLToPath,pathToFileURL} from 'node:url'\nimport {join} from 'node:path'\nconst root=fileURLToPath(new URL('../../../../../../',import.meta.url))\nprocess.env.LYAPUNOV_PRODUCT_ROOT=root\nawait import(pathToFileURL(join(root,'packages/desktop/dist/main.js')).href)\n`,
+  }
+}
+
 /** Linux x64 glibc 发行进程首次获取文件锁时加载的固定 SDK addon。 */
 export const NATIVE_SYSTEM_GLIBC_ADDON = 'native/system/packages/linux-x64/bin/glibc/system.node'
 
 /** 与上游 prepack 同口径核验必需 addon 的普通文件、ELF 架构及 Node-API 入口。 */
-export function nativeSystemRuntimeViolations(stage: string, upstreamDirectory: string): string[] {
+export function nativeSystemRuntimeViolations(stage: string, upstreamDirectory: string, platform: 'linux'|'darwin' = 'linux'): string[] {
+  if(platform==='darwin'){
+    const file=join(upstreamDirectory,'native/system/packages/darwin-arm64/bin/system.node')
+    let data:Buffer
+    try{if(!lstatSync(join(stage,file)).isFile())throw Error('不是普通文件');data=readFileSync(join(stage,file))}
+    catch{return [`发行载荷缺少 macOS arm64 文件锁原生模块：${file}`]}
+    if(data.length<32||data.readUInt32LE(0)!==0xfeedfacf||data.readUInt32LE(4)!==0x100000c||data.readUInt32LE(12)!==8)
+      return [`发行载荷文件锁原生模块不是 macOS arm64 Mach-O bundle：${file}`]
+    return data.includes(Buffer.from('napi_register_module_v1'))&&data.includes(Buffer.from('node_api_module_get_api_version_v1'))?[]:[`发行载荷文件锁原生模块缺少 Node-API 入口：${file}`]
+  }
   const file = join(upstreamDirectory, NATIVE_SYSTEM_GLIBC_ADDON)
   let data: Buffer
   try {
@@ -161,6 +178,7 @@ export const PRODUCT_RUNTIME_FILES = [
   'packages/scene-kit/source-catalogs/warehouse-01/README.upstream.md',
   'packages/scene-kit/source-catalogs/warehouse-01/pins.json',
   'packages/sim-isaac/python/usd_observation.py',
+  'distribution/linux/desktop-launcher.mjs',
   'distribution/linux/install-usd-parser',
   'packages/robot-workflows/dist/plugin.js',
   'packages/human-crowd/package.json',
@@ -191,8 +209,9 @@ export const PRODUCT_RUNTIME_FILES = [
 ] as const
 
 /** 只核真实staging载荷；存在源码不能替代缺失的运行worker或已构建SDK。 */
-export function productRuntimeViolations(stage:string,upstreamDirectory:string):string[]{
-  const files=[...PRODUCT_RUNTIME_FILES,
+export function productRuntimeViolations(stage:string,upstreamDirectory:string,platform:'linux'|'darwin'='linux'):string[]{
+  const files=[...PRODUCT_RUNTIME_FILES.filter(file=>platform!=='darwin'||!file.startsWith('.runtime/computer-use-linux/')&&file!=='runtime/electron/chrome-sandbox'),
+    ...platform==='darwin'?['runtime/electron/Lyapunov.app/Contents/Info.plist','runtime/electron/Lyapunov.app/Contents/MacOS/Electron',join(upstreamDirectory,'packages/experimental/computer-use-cua-driver-native/lib/index.js')]:[],
     join(upstreamDirectory,'packages/llm/llm-pi-ai/lib/index.js'),
     join(upstreamDirectory,'packages/client/ui-conversation/lib/client.js'),
   ]

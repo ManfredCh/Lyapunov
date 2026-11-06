@@ -162,7 +162,8 @@ def rot_z(degrees: float):
 
 
 def compile_scene(worker, snapshot):
-    world = worker.World(snapshot, {"worldId": "collision-affine-frames", "clock": "manual"})
+    # 当前引擎不隐式创建地面；本检查器中的落体基准明确需要兼容平面。
+    world = worker.World(snapshot, {"worldId": "collision-affine-frames", "clock": "manual", "ground": True})
     mujoco.mj_forward(world.model, world.data)
     return world
 

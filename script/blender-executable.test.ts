@@ -19,6 +19,14 @@ import { resolveBlenderExecutable, runtimePluginInsert } from "./runtime-patch.t
 
 const PAYLOAD = "/snap/blender/current/blender"
 
+test('macOS Finder无blender PATH时发现标准app；显式PATH和其它平台仍优先',()=>{
+ const app='/Applications/Blender.app/Contents/MacOS/Blender',user='/public-home/Applications/Blender.app/Contents/MacOS/Blender'
+ expect(resolveBlenderExecutable({PATH:'/usr/bin',HOME:'/public-home'},{platform:'darwin',exists:path=>path===app||path===user})).toBe(app)
+ expect(resolveBlenderExecutable({PATH:'/usr/bin',HOME:'/public-home'},{platform:'darwin',exists:path=>path===user})).toBe(user)
+ expect(resolveBlenderExecutable({PATH:'/usr/bin'},{platform:'linux',exists:path=>path===app})).toBe('blender')
+ expect(resolveBlenderExecutable({PATH:'/custom/bin'},{platform:'darwin',exists:path=>path==='/custom/bin/blender'||path===app,isSnapLauncher:()=>false})).toBe('blender')
+})
+
 test("显式 BLENDER_EXECUTABLE 原样使用：不探测、不替换", () => {
   const probed: string[] = []
   const value = resolveBlenderExecutable(

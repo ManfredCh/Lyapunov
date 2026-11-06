@@ -289,7 +289,7 @@ describe("失败传播与 fail-closed 分类", () => {
   test("失败用例经真实子进程跑完 ⇒ status=fail 且带真实退出码", async () => {
     const dir = await mkdtemp(join(tmpdir(), "testci-"))
     const file = join(dir, "boom.test.ts")
-    await writeFile(file, `import { expect, test } from "bun:test"\ntest("boom", () => { expect(1).toBe(2) })\n`)
+    await writeFile(file, `import { expect, test } from "bun:test"\ntest("boom", () => { for (let index = 0; index < 20; index++) console.log("diagnostic-" + index); expect(1).toBe(2) })\n`)
     const r = await runEntry(
       { path: file, declaredRunner: "bun:test", markers: [], decision: "include", reason: "sample" },
       root,
@@ -298,6 +298,8 @@ describe("失败传播与 fail-closed 分类", () => {
     expect(r.status).toBe("fail")
     expect(r.exitCode).not.toBe(0)
     expect(r.reason).toContain("真实非 0 退出码")
+    expect(r.logTail).toContain("diagnostic-0")
+    expect(r.logTail).toContain("expect(1).toBe(2)")
     await rm(dir, { recursive: true, force: true })
   })
 

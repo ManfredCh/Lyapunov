@@ -51,7 +51,9 @@ export class SimulationRecording {
  private last?: Frame
  private count = 0
  private failure?: Error
- constructor(readonly directory: string, readonly sessionRef: string) {}
+ readonly directory: string
+ readonly sessionRef: string
+ constructor(directory: string, sessionRef: string) { this.directory = directory; this.sessionRef = sessionRef }
  get progress() { return { frameCount: this.count, lastFrame: this.last } }
  async start(sim: SimWorlds, worldId: string, onFrame?: (frame: Frame) => void, observed?: Frame, gate?: RecordingFrameGate) {
   if (this.stream) throw new Error('RECORDING_ALREADY_ACTIVE')

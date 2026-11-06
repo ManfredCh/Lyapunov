@@ -3,7 +3,7 @@
  *
  * 运行：
  *   MUJOCO_GL=egl LYAPUNOV_MUJOCO_PYTHON=<root>/.runtime/sim-python/bin/python \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/camera-intrinsics.test.ts
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/camera-intrinsics.test.ts
  *   （必须开 transform-types：sim-contract/src/python-transport.ts 用了 TypeScript 参数属性。）
  *   没有解释器时整份测试显式 skip 并说明原因，不假装通过。
  *

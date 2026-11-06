@@ -2,7 +2,7 @@
   "version": 1,
   "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
   "registries": {
-    "a934cdd39ad328f1bbb3fc48a8ca2bc84a8ed2bda63ef5aa58d9b6af68df18e2": {
+    "ee13a470662718efeb7da537d86c42e41a7aa0fe5dea8eb63140414f22a7a345": {
       "affectedPaths": [
         "packages/api/session-controller/src/list.ts",
         "packages/api/session-controller/src/types.ts",
@@ -12,6 +12,8 @@
         "packages/api/workspace-controller/README.zh.md",
         "packages/api/workspace-controller/src/index.ts",
         "packages/api/workspace-controller/tests/workspace-controller.host.spec.ts",
+        "packages/client/modules/src/index.ts",
+        "packages/client/modules/tests/node-half.client.spec.ts",
         "packages/client/ui-chat/README.md",
         "packages/client/ui-chat/README.zh.md",
         "packages/client/ui-chat/package.json",
@@ -80,10 +82,10 @@
         "pnpm-lock.yaml"
       ],
       "stageHashes": [
-        "b7ebc0f4cf1a6ff8f280a176212e83c5934be02012b4b51a5cadf59a377d03bb",
-        "192d77216f5b44649c9f2fe25d7ebec602e4b65ac49a985f1f8301c7dad9c5e5"
+        "d590660ad1034418f3c92a703a73abd8008c62548ebd0a9fa68913a1975b3236",
+        "30323b983166ca0679e00628500bee827a65a4005ab0b4620ee2b75779fd0ab1"
       ],
-      "finalHash": "192d77216f5b44649c9f2fe25d7ebec602e4b65ac49a985f1f8301c7dad9c5e5",
+      "finalHash": "30323b983166ca0679e00628500bee827a65a4005ab0b4620ee2b75779fd0ab1",
       "finalPostimages": {
         "packages/api/session-controller/src/list.ts": "fe017e0c3aee7620d9b6450dacb4069ed9378724ba5c16bb9864cb0c9fc4aa29",
         "packages/api/session-controller/src/types.ts": "ffc2b9dc13f3d54db3034be966075aac6a7cfbb46ce029c9ce04f985e8b6166e",
@@ -93,6 +95,8 @@
         "packages/api/workspace-controller/README.zh.md": "c3b62ab85450c98acca242365fddfce0229f480927602a52da385fa8045a7ecc",
         "packages/api/workspace-controller/src/index.ts": "53452fc7a3b7505e2dc560334efc637fb97d4cba22ef8dbb7573bad24bfa956f",
         "packages/api/workspace-controller/tests/workspace-controller.host.spec.ts": "9a2daf114e6107f951a149967b5bfee321500aa7eeb09cd1075cadfd0f8f5001",
+        "packages/client/modules/src/index.ts": "802b243ad2edb004828a545a419643cd58d53326f5a253d82a2110cbffcecf90",
+        "packages/client/modules/tests/node-half.client.spec.ts": "b38f4fb723c51c1b411a7058b11e33895c6e26fcd94f257c85a23efd321b8732",
         "packages/client/ui-chat/README.md": "3a618f6abbbbe12fabcb1b444328378b9d8b2f9da4646527b7c6890288bfccc8",
         "packages/client/ui-chat/README.zh.md": "93e570dac7d63fc52c65cfbb54b84c37d5de92a6939158a4e620dbac5c4124ab",
         "packages/client/ui-chat/package.json": "4e38b09f51938cb7f8e8e022743b4a9d0b2b893b20ea394e8c9d8606202c3908",
@@ -148,10 +152,10 @@
         "packages/interaction/commands/src/index.ts": "2e616046179c45e904d569ed65eee2d5f457a400a3356705b194e7c047e33c87",
         "packages/interaction/commands/src/types.ts": "418e9c5524ffd62c689852ef1b43eac26aed4ec81014fb85665c826e69b50ec0",
         "packages/interaction/commands/tests/commands.spec.ts": "017aa95c81b4ca9a4d85195c61c83524cf7728a38a324c1d60c94853cdec8511",
-        "packages/llm/llm-pi-ai/src/adapter.ts": "43985883ceccd3a0dd1951544829d6a6b43acafb1fa9dd7f97f24d726d47ddad",
+        "packages/llm/llm-pi-ai/src/adapter.ts": "bff8ea62d9f94557cc133db65ab06d73636dc727f96f0d1d84f3a0e62f3c5d5a",
         "packages/llm/llm-pi-ai/src/diagnostic-fetch.ts": "947e4ceddbfbccb6b2d6fec714a0dcd4c335a6200ed81a2ef047969eeec5909c",
         "packages/llm/llm-pi-ai/src/stream.ts": "2bb99e3f28b024fa57a02f297d0773e4665efd0c267253c2ce390497c425913b",
-        "packages/llm/llm-pi-ai/tests/adapter.spec.ts": "bfa7b84300ba6b4ea1c5fb184390a5c1fe47fa929409db102c36fc7a515ce8e6",
+        "packages/llm/llm-pi-ai/tests/adapter.spec.ts": "2a1bd3a2dac9a1735e2e3d12698535f7335311263fa356fe32252e056ed6e9a7",
         "packages/llm/llm-pi-ai/tests/convert.spec.ts": "040723086023309a1b40e3176cf8d07bb714a1338bd54282a4660a35d001f9aa",
         "packages/llm/llm-retry/src/index.ts": "c171019d533945d9ebb61695b02a248814334ca4cfe96bcc756d5885468ca783",
         "packages/llm/llm-retry/tests/transport-recovery.spec.ts": "0715763359ec7fe718e38c8ca3d28e1991875d746e4848d5e42af11a45b050bd",

@@ -54,7 +54,17 @@ export function intentionalBlankScene(scene:SceneSnapshot):boolean{
 export function worldLifecycleState(world:WorldHandle,frame?:Frame):SceneWorldState {
  const same=frame?.worldId===world.worldId&&frame.generation===world.worldGeneration&&frame.sceneRevision===world.appliedSceneRevision
  const status=['ready','running','paused'].includes(world.status)&&same&&frame?.worldStatus?frame.worldStatus:world.status,phase:SceneWorldPhase=status==='unavailable'?'failed':status
- return {phase,sceneId:world.sceneId,sceneRevision:world.appliedSceneRevision,worldId:world.worldId,generation:world.worldGeneration,engine:world.engineId,clock:world.clock,worldPhysics:same&&frame?.worldPhysics?frame.worldPhysics:world.worldPhysics,...phase==='failed'?{code:'WORLD_UNAVAILABLE'}:{}}
+ return {phase,sceneId:world.sceneId,sceneRevision:world.appliedSceneRevision,worldId:world.worldId,generation:world.worldGeneration,engine:world.engineId,clock:world.clock,worldPhysics:same&&frame?.worldPhysics?frame.worldPhysics:world.worldPhysics,...phase==='failed'?{code:'WORLD_UNAVAILABLE',...(world.statusReason?{detail:world.statusReason}:{})}:{}}
+}
+/** 只把当前 Scene 的原 Provider 故障投影到原生命周期；进行中的重试/同步仍由其 owner 收尾。 */
+export function faultedWorldLifecycle(previous:SceneWorldState,world:WorldHandle|undefined,currentSceneId:string|undefined):SceneWorldState{
+ if(!world||world.status!=='unavailable'||world.sceneId!==currentSceneId||previous.phase==='initializing'||previous.phase==='syncing')return previous
+ return worldLifecycleState(world)
+}
+/** 关闭回执迟于列表轮询时，仅收敛仍属于原世界及代次的状态，不覆盖新初始化。 */
+export function closedWorldLifecycle(previous:SceneWorldState,world:WorldHandle):SceneWorldState{
+ return previous.sceneId===world.sceneId&&previous.worldId===world.worldId&&previous.generation===world.worldGeneration
+  ?{phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE}:previous
 }
 /** 目标按会话/Host/Scene隔离。每版本自动尝试一次；失败只能显式重试，关闭不自动重开。 */
 export class SceneWorldLifecycle {
@@ -172,7 +182,7 @@ export class SceneWorldLifecycle {
   this.attempt={key,attemptKey,controller,promise};return promise
  }
  cancel(){const key=this.key,syncing=this.attempt?.operation==='sync';if(key)this.closed.add(key);this.attempt?.controller.abort();this.publish(syncing?{phase:'unsynced',code:'WORLD_SYNC_WAIT_CANCELLED',detail:'已取消等待同步，已提交编辑保留；原生状态由后续读回确定，可点击同步当前场景重新核对。'}:{phase:'closed',code:'WORLD_START_CANCELLED',detail:'已取消本次初始化；不会自动重试。'})}
- markClosed(){if(this.key)this.closed.add(this.key);this.attempt?.controller.abort();this.publish({phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE})}
+ markClosed(publish=true){if(this.key)this.closed.add(this.key);this.attempt?.controller.abort();if(publish)this.publish({phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE})}
  leave(){this.attempt?.controller.abort();this.key=undefined}
 }
 /** 手调初值来自当前物理帧；缺测量不生成零关节目标。 */

@@ -27,17 +27,17 @@ const FIXED_SOURCE_OVERHEAD_BYTES = 256
 const ESTIMATED_TRIANGLE_AUX_BYTES = 80
 const ESTIMATED_BVH_NODE_BYTES = 80
 
+export type AlignedSceneMeshSourceErrorCode =
+  | "invalid_binding"
+  | "invalid_source_key"
+  | "invalid_capacity"
+  | "invalid_transform"
+  | "invalid_canonical_mesh"
 export class AlignedSceneMeshSourceError extends Error {
-  constructor(
-    readonly code:
-      | "invalid_binding"
-      | "invalid_source_key"
-      | "invalid_capacity"
-      | "invalid_transform"
-      | "invalid_canonical_mesh",
-    message: string,
-  ) {
+  readonly code: AlignedSceneMeshSourceErrorCode
+  constructor(code: AlignedSceneMeshSourceErrorCode, message: string) {
     super(message)
+    this.code = code
     this.name = "AlignedSceneMeshSourceError"
   }
 }

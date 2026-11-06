@@ -53,7 +53,7 @@ bun run packages/human-crowd/scripts/external-viewer.ts --input /上述案例目
 ```bash
 LYAPUNOV_EXTERNAL_HUMAN_ASSETS=/缓存目录 \
 LYAPUNOV_MUJOCO_PYTHON=/已有环境/bin/python \
-node --experimental-transform-types --test packages/human-crowd/test/external-native.test.ts
+node --experimental-strip-types --test packages/human-crowd/test/external-native.test.ts
 ```
 
 正式离线CI不下载模型，外部用例已登记envgate；缺条件明确skip，不能计为通过。

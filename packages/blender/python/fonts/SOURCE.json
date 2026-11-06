@@ -1,0 +1,21 @@
+{
+  "purpose": "Darwin缺失默认TXT字体时使用本项目验收基线DejaVu字体，不覆盖实际存在的TXT/SHX字体",
+  "sourceDistribution": "matplotlib==3.5.3",
+  "source": "official PyPI distribution installed for original LIBERO requirements; validated against installed wheel RECORD",
+  "upstream": "https://github.com/matplotlib/matplotlib/tree/v3.5.3/lib/matplotlib/mpl-data/fonts/ttf",
+  "files": [
+    {
+      "path": "DejaVuSans.ttf",
+      "bytes": 756072,
+      "sha256": "3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22",
+      "sourceRecordHash": "sha256=P99pyr8GBJ6nCgC1kZNA4s4ebQKwzDxLRPtoAb0eDSI"
+    },
+    {
+      "path": "LICENSE_DEJAVU",
+      "bytes": 4816,
+      "sha256": "d75938dec098f06f0ac3c00853065d94f020be1c3c62ef1dc2975ba15b4d9b0e",
+      "sourceRecordHash": "sha256=11k43sCY8G8Kw8AIUwZdlPAgvhw8Yu8dwpdboVtNmw4"
+    }
+  ],
+  "algorithmChanges": false
+}

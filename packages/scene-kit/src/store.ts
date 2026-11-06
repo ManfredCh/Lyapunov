@@ -9,8 +9,14 @@ import { atomicJSON, fileTransaction, readJSON, safeId } from "./persistence.ts"
 
 export class SceneConflict extends Error {
   readonly code = "SCENE_REVISION_CONFLICT"
-  constructor(readonly sceneId: string, readonly expectedRevision: number, readonly currentRevision: number) {
+  readonly sceneId: string
+  readonly expectedRevision: number
+  readonly currentRevision: number
+  constructor(sceneId: string, expectedRevision: number, currentRevision: number) {
     super(`场景 ${sceneId} 已是版本 ${currentRevision}，请求基于 ${expectedRevision}`)
+    this.sceneId = sceneId
+    this.expectedRevision = expectedRevision
+    this.currentRevision = currentRevision
   }
 }
 
@@ -91,7 +97,9 @@ function sceneNotFound(sceneId: string): Error {
 /** ctx.scene 仅暴露 snapshot/commit/subscribe；创建和文件传输在 operations。 */
 export class SceneStore {
   private readonly readVersions = new WeakMap<SceneSnapshot, SceneReadVersion>()
-  constructor(readonly directory: string,private readonly beforeCommit?: (draft:SceneSnapshot,current:SceneSnapshot,kind:'commit'|'restore')=>Promise<void>) {}
+  readonly directory: string
+  private readonly beforeCommit?: (draft:SceneSnapshot,current:SceneSnapshot,kind:'commit'|'restore')=>Promise<void>
+  constructor(directory: string,beforeCommit?: (draft:SceneSnapshot,current:SceneSnapshot,kind:'commit'|'restore')=>Promise<void>) {this.directory=directory;this.beforeCommit=beforeCommit}
   path(sceneId: string): string { return join(this.directory, "scenes", `${safeId(sceneId)}.json`) }
 
   private async fileIdentity(sceneId: string): Promise<string> {

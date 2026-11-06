@@ -38,7 +38,7 @@ import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { deflateSync } from 'node:zlib'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp as makeTemporaryDirectory, realpath, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -58,6 +58,8 @@ import { compareFacts, type DrawingReport } from '../src/drawing-input.ts'
 import { attachResultImages, finishBlenderRun, lastResultLine, resultImagePaths, sniffImageMediaType } from '../src/result.ts'
 import type { BlenderFinish } from '../src/result.ts'
 
+// Python/Blender 在 macOS 返回 /private/var，测试根沿同一真实路径比较。
+const mkdtemp = async (prefix: string) => realpath(await makeTemporaryDirectory(prefix))
 const BLENDER = process.env.BLENDER_EXECUTABLE ?? 'blender'
 const WORLD_SCRIPT = fileURLToPath(new URL('../src/world.py', import.meta.url))
 /** 结果行前缀：与产品源文件里的 `RESULT_PREFIX` 同一个字面量（这里独立写一次，协议漂移要失败）。 */
@@ -220,8 +222,9 @@ test('blender_run：原生Job在进程运行期间可读实际stdout/stderr，re
   assert.equal(receipt.worldRenderRequested,false);assert.equal(receipt.previewExpected,false)
   assert.match(receipt.note,/Python script may render on its own/)
   assert.match(receipt.note,/Pausing a Goal does not pause/)
-  await new Promise(r=>setTimeout(r,400))
-  const jobs=harness.ctx.jobs,view=jobs.get(receipt.jobId,harness.agent.id)
+  const jobs=harness.ctx.jobs
+  await waitFor(async()=>{const out=jobs.readAt(receipt.jobId,0,harness.agent.id);return out.chunks.some(c=>c.channel==='stdout'&&c.text.includes('modelling-started'))&&out.chunks.some(c=>c.channel==='stderr'&&c.text.includes('script-diagnostic'))},3000,'原生Job实际收到stdout/stderr')
+  const view=jobs.get(receipt.jobId,harness.agent.id)
   assert.equal(view.status,'running')
   const output=jobs.readAt(receipt.jobId,0,harness.agent.id)
   assert.ok(output.chunks.some(c=>c.channel==='stdout'&&c.text.includes('modelling-started')))
@@ -1834,6 +1837,8 @@ test('ENV-57①：pause→resume 后 jobId 逐字相同、作业记录数不变�
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
     assert.match(jobId, /^blender-\d+$/)
     assert.deepEqual(blenderJobIds(harness), [jobId])
+    // 注册作业不等于子进程已启动；本组明确验证运行中的暂停／恢复。
+    await waitFor(async () => (await argvLines(log)).length === 1, 8000, '最初子进程实际启动')
     // 起跑时的原生面读数（后面每一步都要与此对照：**只有状态文字变，id 集合不变**）。
     const listedAtStart = nativeJobListText(await harness.callTool('job_list', {}))
     assert.deepEqual(listedBlenderIds(listedAtStart), [jobId])
@@ -2008,6 +2013,7 @@ test('ENV-57⑤：pause 幂等——第二次不重复写状态文件、不重�
   try {
     const call = await harness.call({ output_directory: output, background: true })
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
+    await waitFor(async () => (await argvLines(log)).length === 1, 8000, '最初子进程实际启动')
     const first = controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'pause' }))
     assert.equal(first.state, 'paused')
     const fileAfterFirst = await readFile(stateFileOf(output), 'utf8')
@@ -2036,6 +2042,7 @@ test('ENV-57⑥：resume 时输入源与检查点不符 ⇒ INPUT_MISMATCH，且
   try {
     const call = await harness.call({ output_directory: output, background: true })
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
+    await waitFor(async () => (await argvLines(log)).length === 1, 8000, '最初子进程实际启动')
     assert.equal(controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'pause' })).state, 'paused')
 
     // ① 摘要对不上（模拟"输出目录里的暂停状态不是这套输入写的"）：如实拒绝，且**不许**恢复。
@@ -2081,6 +2088,7 @@ test('ENV-57：暂停中 job_kill 必须落定（否则 owner 释放会卡在 aw
   try {
     const call = await harness.call({ output_directory: output, background: true })
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
+    await waitFor(async () => (await argvLines(log)).length === 1, 8000, '最初子进程实际启动')
     assert.equal(controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'pause' })).state, 'paused')
     // 暂停中的作业被 kill：有界 wait 必须**返回**（卡住的话这里就超时失败，而不是"看起来通过"）。
     assert.equal(harness.ctx.jobs.kill(jobId as never, harness.agent?.id, '暂停中取消'), 'requested')
@@ -2107,6 +2115,7 @@ test('ENV-57 A5：resume 打开本作业的 output/source.blend（保住工程�
   try {
     const call = await harness.call({ output_directory: output, background: true })
     const jobId = (JSON.parse(String(call.value?.result)) as JobCall).jobId
+    await waitFor(async () => (await argvLines(log)).length === 1, 8000, '最初子进程实际启动')
     assert.equal(controlOf(await harness.callTool('blender_job_control', { job_id: jobId, action: 'pause' })).state, 'paused')
     // 本作业已写出的源工程（真机里由 world.py 在内容变化时保存）。
     const source = join(output, 'source.blend')

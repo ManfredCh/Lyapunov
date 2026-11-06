@@ -173,10 +173,12 @@ export class CanonicalTriangleSpatialIndex {
   #triangleCentroids: Float64Array
   #root: BvhNode | null
 
+  readonly mesh: CanonicalTriangleMesh
   constructor(
-    readonly mesh: CanonicalTriangleMesh,
+    mesh: CanonicalTriangleMesh,
     options: CanonicalTriangleSpatialIndexOptions = {},
   ) {
+    this.mesh = mesh
     if (mesh.indices.length % 3 !== 0) throw new Error("canonical mesh indices length must be divisible by 3")
     this.triangleCount = mesh.indices.length / 3
     if (mesh.triangleIds.length !== this.triangleCount) {

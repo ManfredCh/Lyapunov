@@ -102,6 +102,47 @@ async function rejectionWithin(run: Promise<unknown>, ms: number): Promise<SimEr
   return outcome.error
 }
 
+describe.skipIf(PYTHON === undefined)('终态事件唤醒原动作等待', () => {
+  test.each(['event-before-reply', 'event-after-reply'])('真实事件先于轮询完成：%s', async mode => {
+    const {provider} = providerFor({executeMode: mode})
+    const originalTimer = globalThis.setTimeout
+    try {
+      const world = await provider.open(scene())
+      // 把原 20ms 轮询故意拖长，证明完成来自真实终态事件，而非计时阈值碰巧通过。
+      globalThis.setTimeout = ((fn: any, ms?: number, ...args: any[]) => originalTimer(fn, ms === 20 ? 1000 : ms, ...args)) as typeof setTimeout
+      const action = {actionId: 'event-action', expectedGeneration: 1, entityId: 'robot', kind: 'joint', jointNames: ['j'], positions: [0], durationS: .1} as any
+      const result = await Promise.race([
+        provider.execute(world.worldId, action),
+        new Promise<never>((_resolve, reject) => originalTimer(() => reject(Error('事件未及时唤醒动作')), 400)),
+      ])
+      expect(result).toMatchObject({worldId: world.worldId, actionId: 'event-action', generation: 1, status: 'completed'})
+    } finally { globalThis.setTimeout = originalTimer; await provider.dispose() }
+  })
+  test('没有终态事件时仍使用原 receipt 轮询', async () => {
+    const {provider,marker} = providerFor({executeMode:'poll-only'})
+    try {
+      const world = await provider.open(scene())
+      const result = await provider.execute(world.worldId, {actionId:'poll-action', expectedGeneration:1, entityId:'robot', kind:'joint', jointNames:['j'], positions:[0], durationS:.1} as any)
+      expect(result).toMatchObject({actionId:'poll-action',status:'completed'})
+      expect(markerText(marker)).toContain('request receipt')
+    } finally { await provider.dispose() }
+  })
+  test('旧代次缓存不得绕过轮询的 generation 过滤', async () => {
+    const {provider,marker} = providerFor({executeMode:'poll-only',rebuiltGeneration:2})
+    try {
+      const world = await provider.open(scene(),{worldId:'generation-world'})
+      const action = {actionId:'reused-action',expectedGeneration:1,entityId:'robot',kind:'joint',jointNames:['j'],positions:[0],durationS:.1} as any
+      expect((await provider.execute(world.worldId,action)).generation).toBe(1)
+      const rebuilt = await provider.sync(world.worldId,scene(),{forceRebuild:true})
+      expect(rebuilt.worldGeneration).toBe(2)
+      const pollsBefore = markerText(marker).split('request receipt').length - 1
+      const result = await provider.execute(world.worldId,{...action,expectedGeneration:rebuilt.worldGeneration})
+      expect(result).toMatchObject({actionId:'reused-action',generation:2,status:'completed'})
+      expect(markerText(marker).split('request receipt').length - 1).toBe(pollsBefore + 1)
+    } finally { await provider.dispose() }
+  })
+})
+
 describe.skipIf(PYTHON === undefined)('ProcessSimProvider 启动/退出生命周期', () => {
   test('Newton初始暂停经过实际launch与共享transport，由worker确认后交付暂停世界', async () => {
     let launches = 0

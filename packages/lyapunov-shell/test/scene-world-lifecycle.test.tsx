@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SceneOperations} from '../../scene-kit/src/operations.ts'
 import {solidGlb,box} from '../../scene-kit/test/glb-geometry-fixture.ts'
-import {SceneWorldLifecycle,sceneHostRecoveryNotice,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,measuredJointTargets,SCENE_WORLD_CLOSED_PUBLIC_MESSAGE,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
+import {SceneWorldLifecycle,sceneHostRecoveryNotice,sceneRequestsPhysics,sceneWorldWithoutProvider,sceneWorldPreflight,worldLifecycleState,faultedWorldLifecycle,closedWorldLifecycle,measuredJointTargets,SCENE_WORLD_CLOSED_PUBLIC_MESSAGE,type SceneWorldPort,type SceneWorldState} from '../src/scene-world-lifecycle.ts'
 import {SceneWorldStatus,sceneWorldStatusDetail} from '../src/scene-world-status.tsx'
 import {ISAAC_SDK_UNAVAILABLE_PUBLIC_MESSAGE} from '../../lyapunov-contracts/src/command-privacy.ts'
 import type {SceneSnapshot,WorldHandle,Frame} from '../../lyapunov-contracts/src/types.ts'
@@ -15,6 +15,11 @@ const world=(id='w',s='s'):WorldHandle=>({worldId:id,sceneId:s,engineId:'mujoco'
 const frame=(w:WorldHandle):Frame=>({worldId:w.worldId,generation:w.worldGeneration,sceneRevision:w.appliedSceneRevision,frameId:'f',stepIndex:2,simTime:.004,entities:[],worldStatus:'running'})
 const port=(calls:string[],w=world()):SceneWorldPort=>({list:async()=>{calls.push('list');return []},open:async()=>{calls.push('open');return w},observe:async()=>{calls.push('observe');return frame(w)},close:async()=>{calls.push('close')}})
 const freeRootScene=()=>{const s=scene();s.entities[0]!.components.visual={robot:{format:'mjcf',document:{worldbody:{body:{name:'root',freejoint:''}}}}};return s}
+test('迟到的关闭成功只收敛原场景、原世界和原代次，保留新操作',()=>{
+ const w=world(),failed=worldLifecycleState({...w,status:'unavailable'})
+ expect(closedWorldLifecycle(failed,w)).toEqual({phase:'closed',detail:SCENE_WORLD_CLOSED_PUBLIC_MESSAGE})
+ for(const next of [{...failed,sceneId:'other'},{...failed,worldId:'other'},{...failed,generation:2},{phase:'initializing' as const,sceneId:w.sceneId}])expect(closedWorldLifecycle(next,w)).toBe(next)
+})
 test('自动导入真实自由根先原子准备，第0帧已暂停；显式被动启动仍实时推进',async()=>{
  const s=freeRootScene(),states:SceneWorldState[]=[],calls:string[]=[],prepared={...world(),status:'paused' as const,supportsPause:true},p=port(calls,prepared)
  p.open=async(snapshot,signal,options)=>{expect(snapshot).toEqual(s);expect(signal.aborted).toBe(false);expect(options).toEqual({startPaused:true});calls.push('open-paused');return prepared}
@@ -144,6 +149,17 @@ test('初始化/失败状态可见且有明确取消/重试按钮，不依赖模
  const noop=()=>{},html=renderToStaticMarkup(<SceneWorldStatus state={{phase:'initializing'}} tr={cn=>cn} retry={noop} cancel={noop}/>)
  expect(html).toContain('取消初始化');expect(html).toContain('data-world-phase="initializing"')
  expect(renderToStaticMarkup(<SceneWorldStatus state={{phase:'failed',code:'PROVIDER_START_FAILED',detail:'fixture'}} tr={cn=>cn} retry={noop} cancel={noop}/>)).toContain('重新启动物理世界')
+})
+test('原 Provider 已不可用时替换旧运行状态；跨场景及在途重试不抢占',()=>{
+ const running={...world(),status:'running' as const},previous=worldLifecycleState(running)
+ const failed={...running,status:'unavailable' as const,statusReason:'SimError: Newton 产生非有限刚体状态'}
+ const actual=faultedWorldLifecycle(previous,failed,running.sceneId)
+ expect(actual).toMatchObject({phase:'failed',worldId:running.worldId,code:'WORLD_UNAVAILABLE',detail:failed.statusReason})
+ const html=renderToStaticMarkup(<SceneWorldStatus state={actual} tr={cn=>cn} retry={()=>{}} cancel={()=>{}}/>)
+ expect(html).toContain('物理世界初始化或场景应用失败');expect(html).toContain(failed.statusReason);expect(html).not.toContain('物理世界运行中')
+ expect(faultedWorldLifecycle(previous,failed,'other-scene')).toBe(previous)
+ for(const phase of ['initializing','syncing'] as const){const pending={...previous,phase};expect(faultedWorldLifecycle(pending,failed,running.sceneId)).toBe(pending)}
+ expect(faultedWorldLifecycle(previous,{...running,status:'ready'},running.sceneId)).toBe(previous)
 })
 test('A08 blank/camera-only不冷起SDK；旧世界删除全部collider仍可清空装配',async()=>{
  const blank={...scene(),entities:[]},states:SceneWorldState[]=[],calls:string[]=[],lifecycle=new SceneWorldLifecycle(s=>states.push(s)),p=port(calls)

@@ -113,9 +113,20 @@ export async function ensureDefaultRobotLibrary(productRoot:string,scene:SceneOp
  for(const row of rows){
   const policy=policies.find(policy=>policy.packId===row.packId),prepared=policy?.prepared
   if(!row.modelPath)continue
-  if(row.installed&&!prepared)continue
+  // 仅把 pack 为精确源字节声明的原控制映射交给既有 ResourceLibrary；不同模型不推断控制器。
+  const pack=await readFile(join(productRoot,'packs',row.packId,'pack.json'),'utf8').then(JSON.parse)
+  const declared=pack.asset?.componentDefaultsModelSha256===row.modelSha256?pack.asset?.componentDefaults:undefined
+  const controller=declared?.controller
+  const defaults=controller?.type==='drone'&&typeof controller.thrustActuator==='string'&&controller.thrustActuator.trim()&&['x','y','z'].every(axis=>typeof controller.torqueActuators?.[axis]==='string'&&controller.torqueActuators[axis].trim())?{controller}:undefined
+  if(row.installed&&!prepared){
+   try{if(defaults){
+    const resource=(await scene.resources.list()).find(item=>item.ref.resourceId===row.resourceId)
+    if(resource&&!resource.componentDefaults?.controller)await scene.resources.registerReferences([{ref:resource.ref,name:resource.name,components:defaults}])
+   }}catch(error){blocked.push({packId:row.packId,detail:error instanceof Error?error.message:String(error)})}
+   continue
+  }
   if(prepared&&(await scene.resources.list()).some(resource=>resource.folder==='T0 机器人示例'&&resource.tags?.includes('pack:'+row.packId)&&matchesPreparedIdentity(resource,prepared)))continue
-  try{await scene.resources.import({path:row.modelPath,name:row.packId+(prepared?' · '+policy!.variant:''),...prepared?{components:prepared.components}:{},folder:'T0 机器人示例',tags:['T0','pack:'+row.packId,'产品示例'],license:{id:row.license,source:'file',attribution:row.source},physicalizationRequest:false});registered.push(row.packId)}
+  try{await scene.resources.import({path:row.modelPath,name:row.packId+(prepared?' · '+policy!.variant:''),...prepared?{components:prepared.components}:defaults?{components:defaults}:{},folder:'T0 机器人示例',tags:['T0','pack:'+row.packId,'产品示例'],license:{id:row.license,source:'file',attribution:row.source},physicalizationRequest:false});registered.push(row.packId)}
   catch(error){blocked.push({packId:row.packId,detail:error instanceof Error?error.message:String(error)})}
  }
  return {registered,blocked,models:await robotLibraryRows(productRoot,scene,policies)}

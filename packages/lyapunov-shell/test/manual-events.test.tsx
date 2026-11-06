@@ -1,5 +1,7 @@
 import {test,expect} from 'bun:test'
 import {renderToStaticMarkup} from 'react-dom/server'
+import {createElement,act} from 'react'
+import {createRequire} from 'node:module'
 import {jointTargetError,requireFullJointTargets,JointTargetInput} from '../src/joint-target-input.tsx'
 import {RobotControlPanel,ActionCards} from '../src/robot-control-panel.tsx'
 import {validateControlDisplay,validateRegisteredControlDisplay,projectControlActionRows,upsertControlActionRow} from '../src/control-gesture.ts'
@@ -156,4 +158,22 @@ test('桌面committing真实订阅锁住晚到控制，flush失败解锁；Stop/
   expect(commands).toEqual(['sim_stop','scene_list','joint_move']);expect(changed.at(-1)).toBe(false)
   release();expect(removed).toBe(1);expect(listener).toBeUndefined();expect(commands).toHaveLength(3)
  }finally{release();globalThis.fetch=oldFetch}
+})
+
+test('异步读回零关节目标会填入0，缺失读数保持空态且不代发动作',async()=>{
+ const {JSDOM}=createRequire(new URL('../../../.upstream/deepseek-harness-0.2.0-rc.2/package.json',import.meta.url))('jsdom')
+ const dom=new JSDOM('<div id="root"></div>'),saved=new Map<string,PropertyDescriptor|undefined>()
+ for(const key of ['window','document','navigator','IS_REACT_ACT_ENVIRONMENT']){saved.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
+ const {createRoot}=await import('react-dom/client'),root=createRoot(dom.window.document.getElementById('root')!),joint={name:'joint1',type:'hinge',unit:'rad',range:[-2.9,2.9]} as const
+ let writes=0
+ try{
+  const render=async(value:number)=>act(async()=>root.render(createElement(JointTargetInput,{joint:{...joint,range:[...joint.range]},value,set:()=>{writes++},tr:(cn:string)=>cn})))
+  await render(Number.NaN)
+  const input=()=>dom.window.document.querySelector('input') as HTMLInputElement
+  expect(input().value).toBe('');expect(input().getAttribute('aria-invalid')).toBe('true')
+  await render(0)
+  expect(input().value).toBe('0');expect(input().getAttribute('aria-invalid')).toBe('false')
+  await render(.25);expect(input().value).toBe('0.25')
+  await render(0);expect(input().value).toBe('0');expect(writes).toBe(0)
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key)}}
 })

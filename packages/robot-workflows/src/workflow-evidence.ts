@@ -30,7 +30,7 @@ export function executionModeOf(actions: readonly ActionReceipt[], frames: reado
   return 'physical-contact'
 }
 /** 非 completed 回执必须停止后续提交；具体收尾（停止确认/结构化失败）由工作流负责。 */
-export class ActionReceiptError extends Error { constructor(readonly receipt: ActionReceipt) { super(receipt.reason ?? receipt.status) } }
+export class ActionReceiptError extends Error { readonly receipt: ActionReceipt; constructor(receipt: ActionReceipt) { super(receipt.reason ?? receipt.status); this.receipt = receipt } }
 /** 本次请求身份：world + 起始 generation。所有观测/回执都必须与之核对，fresh observe 不得自动更换本次目标代次。 */
 export interface RequestIdentity { worldId: string; generation: number }
 /** after 的来源：fresh = 本次新观测；last-known = 退回本次已持有的最后实际帧（不得冒充新 after）。 */

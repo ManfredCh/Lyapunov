@@ -18,6 +18,7 @@ import {SceneOperations} from '../../scene-kit/src/operations.ts'
 import {identityTransform} from '../../lyapunov-contracts/src/types.ts'
 import {solidGlb,box} from '../../scene-kit/test/glb-geometry-fixture.ts'
 import {isolateProviderInstaller} from './fixtures/isolated-provider-installer.ts'
+import {applyFlight} from '../../robot-workflows/src/flight-tools.ts'
 
 test('registered HTTP command回机器Scene/CAS结果；原生Scope隔离和未知命令无ui泄漏',async()=>{
  const root=await mkdtemp(join(tmpdir(),'a08-reconcile-http-')),ctx=new Context(),routes=new Map<string,(req:Request)=>Promise<Response>>()
@@ -30,7 +31,12 @@ test('registered HTTP command回机器Scene/CAS结果；原生Scope隔离和未�
  ctx.provide('attachments',{saveImage:async()=>({}),readImage:async()=>({data:new Uint8Array()})} as never)
  ctx.provide('subprocess',{} as never)
  await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Sessions);await ctx.plugin(Commands);await ctx.plugin(JobsLocal)
+ let toolExecutions=0
+ ctx.on('tools/execute',async(_exec,next)=>{toolExecutions++;return next()})
  for(const id of ['owned','other']){const workspace=join(root,id);await mkdir(workspace);const session=ctx.sessions.create(SessionId(id),{meta:{cwd:workspace}});agents.set(id,{id:session.id,session,ctx:createScope(ctx,{session:id}).ctx,send:()=>{},steer:()=>{},inject:()=>{}} as unknown as Agent)}
+ const fakeFlightWorld={worldId:'flight-world',worldGeneration:4,appliedSceneRevision:2,sceneId:'s'}
+ ctx.reflect.provide('sim',{forSession:(id:string)=>({listWorlds:async()=>id==='owned'?[fakeFlightWorld]:[]})} as never)
+ applyFlight(ctx)
  await ctx.plugin(scenePlugin,{dataRoot:join(root,'data'),productRoot:join(root,'no-bundled-product')})
  const operations=(ctx.get('scene') as scenePlugin.SceneService).forSession('owned')
  const initial=await operations.create({sceneId:'s'})
@@ -44,6 +50,26 @@ test('registered HTTP command回机器Scene/CAS结果；原生Scope隔离和未�
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('LOCAL_SERVER_BIND_FAILED')
  const command=async(sessionId:string,name:string,input:unknown)=>{const response=await fetch(`http://127.0.0.1:${address.port}/api/lyapunov/command`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sessionId,name,input})});return {status:response.status,body:await response.json() as any}}
  try{
+  const flightURL=`http://127.0.0.1:${address.port}/api/lyapunov/flight-status?sessionId=owned&worldId=flight-world&entityId=quad&expectedGeneration=4&expectedSceneRevision=2`
+  const ownerSession=agents.get('owned')!.session,eventsBefore=ownerSession.snapshotEvents().length
+  const polls=await Promise.all(Array.from({length:4},()=>fetch(flightURL)))
+  for(const response of polls){expect(response.status).toBe(200);expect(await response.json()).toMatchObject({status:'idle',worldId:'flight-world',generation:4})}
+  expect(ownerSession.snapshotEvents().length).toBe(eventsBefore)
+  expect(toolExecutions).toBe(0)
+  const injected=await fetch(flightURL+'&operation=hover');expect(injected.status).toBe(200);expect(await injected.json()).toMatchObject({status:'idle'})
+  expect(ownerSession.snapshotEvents().length).toBe(eventsBefore);expect(toolExecutions).toBe(0)
+  expect((await fetch(flightURL.replace('sessionId=owned','sessionId=other'))).status).toBe(400)
+  expect((await fetch(flightURL.replace('expectedGeneration=4','expectedGeneration=5'))).status).toBe(400)
+  expect((await fetch(flightURL.replace('expectedSceneRevision=2','expectedSceneRevision=3'))).status).toBe(400)
+  expect((await fetch(flightURL.replace('expectedGeneration=4','expectedGeneration=NaN'))).status).toBe(400)
+  const waits:any[]=[],originalWait=ctx.jobs.wait.bind(ctx.jobs)
+  ctx.jobs.wait=((...args:any[])=>{waits.push(args);return originalWait(...args as Parameters<typeof originalWait>)}) as typeof ctx.jobs.wait
+  const flightInput={worldId:'flight-world',entityId:'quad',expectedGeneration:4,expectedSceneRevision:2,operation:'hover',positionM:[0,0,.35],maxDurationS:1}
+  const manualFlight=await command('owned','robot_flight',flightInput);expect(manualFlight.body.kind).toBe('success');expect(waits).toHaveLength(1)
+  expect(waits[0][0]).toBe(manualFlight.body.ui.jobId);expect(waits[0][2]).toBe(agents.get('owned')!.id)
+  const modelFlight=await ctx.tools.execute({name:'robot_flight',arguments:{input:flightInput},callId:ToolCallId('model-flight-fixture'),agent:agents.get('owned'),signal:new AbortController().signal})
+  expect(modelFlight.isError).toBe(false);expect(waits).toHaveLength(1)
+  ctx.jobs.wait=originalWait
   const ok=await command('owned','scene_reconcile_physics',{sceneId:'s',expectedRevision:1})
   expect(ok.status).toBe(200);expect(ok.body.kind).toBe('success');expect(ok.body.ui).toMatchObject({changed:false,pending:false,worldNeedsSync:false,issues:[]})
   expect(ok.body.ui.snapshot).toMatchObject({sceneId:'s',revision:1});expect(ok.body.ui.snapshot.entities[0].entityId).toBe('e')

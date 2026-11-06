@@ -25,7 +25,11 @@ import CommandRuntime from '@deepseek-ai/dsh-commands'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { MockAdapter } from '../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/tests/mock-adapter.ts'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as SpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import SessionQuery from '@deepseek-ai/dsh-session-query'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { MockAdapter, textResponse, toolCallResponse } from '../../../.upstream/deepseek-harness-0.2.0-rc.2/packages/core/agent-loop/tests/mock-adapter.ts'
 import * as agentGraphPlugin from '../src/plugin.ts'
 import { applySkillTools } from '../../policy-registry/src/skill-tools.ts'
 import type { Campaign, CampaignRun, RunCallArtifact, SkillProposal } from '../../lyapunov-contracts/src/agent-graph.ts'
@@ -47,12 +51,12 @@ const TASKS = [
   { taskId: 'held-1', sceneId: 'scene-1', partition: 'heldout', goal: { kind: 'settled' } },
 ]
 
-async function boot() {
+async function boot(script: ConstructorParameters<typeof MockAdapter>[0] = []) {
   const ctx = new Context()
   try {
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(CommandRuntime)
-    ctx.llm.registerAdapter(['mock'], new MockAdapter([]))
+    ctx.llm.registerAdapter(['mock'], new MockAdapter(script))
     // 与产品同一装载路径：插件模块经 cordis 装载，inject(tools/commands) 缺服务即失败。
     await ctx.plugin(agentGraphPlugin)
     applySkillTools(ctx, { packsRoot })
@@ -85,6 +89,110 @@ function valueOf<T>(result: ToolExecutionResult): T {
   if (result.isError) throw new Error(`工具失败：${result.error.message}`)
   return result.value as T
 }
+
+const campaignOf = (campaignId: string): Campaign =>
+  JSON.parse(readFileSync(join(workDir, '.lyapunov', 'campaigns', campaignId, 'campaign.json'), 'utf8')) as Campaign
+const runOf = (campaignId: string, runId: string): CampaignRun =>
+  JSON.parse(readFileSync(join(workDir, '.lyapunov', 'campaigns', campaignId, 'runs', runId, 'run.json'), 'utf8')) as CampaignRun
+
+// 唯一替身是模型响应及e2e_probe读数；真实AgentLoop/Subagent/SessionQuery/事件/计量与落盘均走原SDK。
+describe('原生一次性子会话结束后的run收尾', () => {
+  test('原生续接子会话的epoch结束不关闭仍可继续的run', async () => {
+    const campaignId = 'native-continuable'
+    const host = await boot([
+      toolCallResponse('native-open', 'campaign_transition', { input: { campaignId, taskId: 'dev-1', to: 'exploring', role: 'worker' } }),
+      toolCallResponse('native-probe', 'e2e_probe', { input: {} }),
+      textResponse('本轮结束，后续仍可继续'),
+    ])
+    try {
+      await host.ctx.plugin(JsonlSessionPersistence, { root: join(workDir, 'sessions') })
+      await host.ctx.plugin(SessionQuery, [])
+      await host.ctx.plugin(SubagentRuntime)
+      await host.ctx.plugin(SpawnInProcess, { providerName: 'spawn' })
+      valueOf(await host.call('campaign_init', { campaignId, tasks: TASKS, budget: BUDGET }))
+      const ended = Promise.withResolvers<void>()
+      host.ctx.on('subagent/end', () => ended.resolve())
+      const child = await host.ctx.subagents.startContinuable({ provider: 'spawn', label: '续接反例', request: { parent: host.agent, prompt: [{ type: 'text', text: '驱动原续接生命周期' }] }, signal: AbortSignal.timeout(2000) })
+      await ended.promise
+      // 原生命周期监听器异步查询descriptor；留出有界落盘窗口后读原owner状态。
+      await new Promise(resolve => setTimeout(resolve, 50))
+      const id = campaignOf(campaignId).tasks[0]!.workerRunIds[0]!
+      expect(runOf(campaignId, id).summary).toBeUndefined()
+      expect(callsOf(campaignId, id)).toHaveLength(1)
+      using observed = await host.ctx.sessionQuery.observeSession(child.childId, { projectionMode: 'none' })
+      expect(observed.header.id).toBe(child.childId)
+    } finally {
+      await host.close()
+    }
+  })
+
+  for (const cancellation of [false, true]) test(cancellation ? '真实取消后按原计量中止，Parent run保留' : '结束但漏记账时按中止收尾，不推断成功', async () => {
+    const campaignId = cancellation ? 'native-cancel' : 'native-unclosed'
+    const host = await boot([
+      toolCallResponse('native-open', 'campaign_transition', { input: { campaignId, taskId: 'dev-1', to: 'exploring', role: 'worker' } }),
+      toolCallResponse('native-probe', 'e2e_probe', { input: {} }),
+      cancellation ? 'hang' : textResponse('接口夹具结束，故意不调用record_run'),
+    ])
+    let run: Awaited<ReturnType<typeof host.ctx.subagents.start>> | undefined
+    try {
+      await host.ctx.plugin(SessionQuery, [])
+      await host.ctx.plugin(SubagentRuntime)
+      await host.ctx.plugin(SpawnInProcess, { providerName: 'spawn' })
+      valueOf(await host.call('campaign_init', { campaignId, tasks: [...TASKS, { taskId: 'parent-dev', sceneId: 'parent-scene', partition: 'dev', goal: { kind: 'settled' } }], budget: BUDGET }))
+      const parentRun = valueOf<{ runId: string }>(await host.call('campaign_transition', { campaignId, taskId: 'parent-dev', to: 'exploring', role: 'coordinator' }))
+      const controller = new AbortController()
+      run = await host.ctx.subagents.start('spawn', { parent: host.agent, prompt: [{ type: 'text', text: '只驱动原生生命周期接口夹具' }], signal: controller.signal })
+      const until = async (predicate: () => boolean) => {
+        const deadline = Date.now() + 2000
+        while (!predicate()) {
+          if (Date.now() >= deadline) throw new Error('原生命周期收尾未在2秒内落盘')
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+      }
+      await until(() => {
+        const task = campaignOf(campaignId).tasks.find(task => task.taskId === 'dev-1')!
+        return task.workerRunIds.length === 1 && callsOf(campaignId, task.workerRunIds[0]!).length === 1
+      })
+      if (cancellation) controller.abort()
+      const result = await run.result
+      expect(result.stopReason).toBe(cancellation ? 'aborted' : 'completed')
+      const childRunId = campaignOf(campaignId).tasks.find(task => task.taskId === 'dev-1')!.workerRunIds[0]!
+      await until(() => runOf(campaignId, childRunId).summary !== undefined)
+      expect(runOf(campaignId, childRunId).summary).toMatchObject({ outcome: 'aborted', toolCalls: 1, simSteps: 4 })
+      expect(runOf(campaignId, childRunId).summary?.notes).toContain('不代表目标达成')
+      expect(runOf(campaignId, parentRun.runId).summary).toBeUndefined()
+      expect(campaignOf(campaignId).tasks.find(task => task.taskId === 'dev-1')!.status).toBe('exploring')
+      expect(valueOf<{ openRunIds: string[] }>(await host.call('campaign_status', { campaignId })).openRunIds).toEqual([parentRun.runId])
+    } finally {
+      await run?.dispose()
+      await host.close()
+    }
+  })
+
+  test('一次性子会话已显式完成的run保持原结果', async () => {
+    const campaignId = 'native-closed'
+    const host = await boot([
+      toolCallResponse('native-open', 'campaign_transition', { input: { campaignId, taskId: 'dev-1', to: 'exploring', role: 'worker' } }),
+      toolCallResponse('native-probe', 'e2e_probe', { input: {} }),
+      toolCallResponse('native-close', 'campaign_record_run', { input: { campaignId, taskId: 'dev-1', role: 'worker', summary: { outcome: 'failed', notes: '原Owner显式结果' } } }),
+      textResponse('已记账'),
+    ])
+    let run: Awaited<ReturnType<typeof host.ctx.subagents.start>> | undefined
+    try {
+      await host.ctx.plugin(SessionQuery, [])
+      await host.ctx.plugin(SubagentRuntime)
+      await host.ctx.plugin(SpawnInProcess, { providerName: 'spawn' })
+      valueOf(await host.call('campaign_init', { campaignId, tasks: TASKS, budget: BUDGET }))
+      run = await host.ctx.subagents.start('spawn', { parent: host.agent, prompt: [{ type: 'text', text: '按原owner显式记账' }], signal: new AbortController().signal })
+      await run.result
+      const id = campaignOf(campaignId).tasks[0]!.workerRunIds[0]!
+      expect(runOf(campaignId, id).summary).toEqual({ outcome: 'failed', toolCalls: 1, simSteps: 4, notes: '原Owner显式结果' })
+    } finally {
+      await run?.dispose()
+      await host.close()
+    }
+  })
+})
 function errorOf(result: ToolExecutionResult): string {
   if (!result.isError) throw new Error('期望具名拒绝但调用成功')
   return result.error.message

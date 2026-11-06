@@ -202,6 +202,45 @@ function bindEngineDevices(argv: readonly string[], devices: readonly string[]):
   return { argv: [...argv.slice(0, separator), ...mounts, ...argv.slice(separator)], applied: true }
 }
 
+/**
+ * 核实装配方声明的**引擎只读挂载目录**：必须是宿主上存在的目录（符号链接按真实目标解析）。
+ * WSL2 的 `/usr/lib/wsl` 是独立 overlay 挂载，`--ro-bind / /` 不会把它带进沙箱，
+ * CUDA 用户态库要单独挂回去。核实不过同样**抛错、不启动**，不静默少挂一条。
+ */
+function verifyEngineReadOnlyMounts(roots: readonly string[]): string[] {
+  return roots.map(root => {
+    if (!isAbsolute(root)) throw new Error(`SESSION_ENGINE_MOUNT_INVALID: 引擎只读挂载目录 ${root} 必须是绝对路径`)
+    const canonical = canonicalTargetPath(root)
+    if (!canonical.startsWith('/')) {
+      throw new Error(`SESSION_ENGINE_MOUNT_INVALID: 引擎只读挂载目录 ${root} 的真实目标 ${canonical} 不是 POSIX 绝对路径`)
+    }
+    let stats
+    try {
+      stats = statSync(canonical)
+    } catch {
+      throw new Error(`SESSION_ENGINE_MOUNT_UNAVAILABLE: 引擎只读挂载目录 ${root} 在宿主上不存在；本 Host 的引擎配置要求这个目录（例如 WSL2 的 CUDA 库目录），拒绝在没有它的情况下启动 worker 让它静默降级`)
+    }
+    if (!stats.isDirectory()) {
+      throw new Error(`SESSION_ENGINE_MOUNT_INVALID: 引擎只读挂载目录 ${root} 不是目录`)
+    }
+    return canonical
+  })
+}
+
+/**
+ * 把引擎只读目录挂进沙箱（`--ro-bind`：源与目标同路径）。与 {@link bindEngineDevices} 同一形态：
+ * 只认 bwrap 且挂载插在 `--` 之前；别的原生后端表达不了就**如实不加**，把边界记在启动事实里。
+ */
+function bindEngineReadOnlyMounts(argv: readonly string[], roots: readonly string[]): { argv: string[]; applied: boolean } {
+  if (roots.length === 0) return { argv: [...argv], applied: false }
+  if (basename(argv[0] ?? '') !== 'bwrap') return { argv: [...argv], applied: false }
+  const separator = argv.lastIndexOf('--')
+  if (separator < 0) return { argv: [...argv], applied: false }
+  const mounts: string[] = []
+  for (const root of roots) mounts.push('--ro-bind', root, root)
+  return { argv: [...argv.slice(0, separator), ...mounts, ...argv.slice(separator)], applied: true }
+}
+
 interface NativeSession { header: { id?: unknown; cwd?: unknown } }
 type NativeMode = SimWorkerLaunchFacts['mode']
 interface NativeSandboxPolicyService {
@@ -253,6 +292,8 @@ export interface SimSessionLauncherOptions {
    * 省略 = 本次启动不声明任何设备。
    */
   engineDevices?: () => string[]
+  /** 引擎要求的**只读**挂载目录（与 engineDevices 同一条核实/挂载/事实链，`--ro-bind`）。 */
+  engineReadOnlyMounts?: () => string[]
 }
 
 /**
@@ -352,6 +393,7 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
     const internalRoots = [...verifyInternalWritableRoots(declaredRoots, privateRoot), ...(tempRoot === undefined ? [] : [tempRoot])]
     // 设备同样按**本次执行**解析（设备可能在后来的启动里才出现）：声明了却拿不到就在这里失败关闭。
     const engineDevices = verifyEngineDevices(options.engineDevices?.() ?? [])
+    const engineReadOnlyMounts = verifyEngineReadOnlyMounts(options.engineReadOnlyMounts?.() ?? [])
     const env = {
       ...input.env,
       LYAPUNOV_SIM_SESSION: sessionKey,
@@ -397,6 +439,7 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
     let privateRootBoundary: 'os-bind' | 'none' = 'none'
     let internalWritableBoundary: 'os-bind' | 'none' = 'none'
     let engineDeviceBoundary: 'device-bind' | 'none' = 'none'
+    let engineReadOnlyBoundary: 'os-bind' | 'none' = 'none'
     if (policy.mode === 'workspace-write') {
       const narrowed = narrowSessionPrivateRoot(confinedArgv, { workspaceRoot, parent: runtimeParent, sessionKey })
       confinedArgv = narrowed.argv
@@ -407,7 +450,12 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
         confinedArgv = bound.argv
         engineDeviceBoundary = bound.applied ? 'device-bind' : 'none'
       }
-    } else if (internalRoots.length > 0 || engineDevices.length > 0) {
+      if (engineReadOnlyMounts.length > 0) {
+        const bound = bindEngineReadOnlyMounts(confinedArgv, engineReadOnlyMounts)
+        confinedArgv = bound.argv
+        engineReadOnlyBoundary = bound.applied ? 'os-bind' : 'none'
+      }
+    } else if (internalRoots.length > 0 || engineDevices.length > 0 || engineReadOnlyMounts.length > 0) {
       if (internalRoots.length > 0) {
         const bound = bindInternalWritableRoots(confinedArgv, internalRoots)
         confinedArgv = bound.argv
@@ -418,6 +466,11 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
         confinedArgv = bound.argv
         engineDeviceBoundary = bound.applied ? 'device-bind' : 'none'
       }
+      if (engineReadOnlyMounts.length > 0) {
+        const bound = bindEngineReadOnlyMounts(confinedArgv, engineReadOnlyMounts)
+        confinedArgv = bound.argv
+        engineReadOnlyBoundary = bound.applied ? 'os-bind' : 'none'
+      }
     }
     return {
       argv: confinedArgv, cwd: workspaceRoot, env, check,
@@ -425,6 +478,7 @@ export function createSimSessionLauncher(ctx: SimLaunchContext, options: SimSess
         ...facts, ...(runtimeRead.roots.length ? {runtimeReadRoots:runtimeRead.roots} : {}), runner: confinedArgv[0], enforcement: confined.enforcement, privateRootBoundary,
         ...(internalRoots.length === 0 ? {} : { internalWritableBoundary }),
         ...(engineDevices.length === 0 ? {} : { engineDevices, engineDeviceBoundary }),
+        ...(engineReadOnlyMounts.length === 0 ? {} : { engineReadOnlyMounts, engineReadOnlyBoundary }),
       },
     }
   }

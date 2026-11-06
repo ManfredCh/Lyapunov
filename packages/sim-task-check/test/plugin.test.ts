@@ -112,7 +112,11 @@ describe('sim_task_check 工具/命令面', () => {
     const pass = await callTool({ input: { worldId: WORLD_ID, expectedGeneration: 2, predicates: inBox } })
     expect(pass.isError).toBe(false)
     const passValue = JSON.parse(pass.text)
-    expect(passValue).toMatchObject({ taskAchieved: true, evaluated: true, failed: [], frameId: `${WORLD_ID}:2:4`, stepIndex: 4 })
+    expect(passValue).toMatchObject({ worldId:WORLD_ID,generation:2,taskAchieved: true, evaluated: true, failed: [], frameId: `${WORLD_ID}:2:4`, stepIndex: 4 })
+    expect(passValue).not.toHaveProperty('sceneRevision')
+    frame = observed([cube(0.03)],{sceneRevision:1})
+    const withRevision=await callTool({input:{worldId:WORLD_ID,expectedGeneration:2,predicates:inBox}})
+    expect(JSON.parse(withRevision.text)).toMatchObject({worldId:WORLD_ID,generation:2,sceneRevision:1,stepIndex:4})
 
     frame = observed([cube(0.5)])
     const fail = await callTool({ input: { worldId: WORLD_ID, expectedGeneration: 2, predicates: inBox } })

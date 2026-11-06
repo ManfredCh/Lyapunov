@@ -132,7 +132,8 @@ describe("发现集合：不许漏对象（2026-09-26 盲区的正对照）", ()
   test("收全扩展名后，扩展名清单本身是可见的（不是让读者去猜）", () => {
     const d = discover(ROOT)
     expect(d.present[".ts"]).toBeGreaterThan(0)
-    expect(d.present[".mts"]).toBe(3) // g10b.mts / run-g10b.mts / run-g19.mts
+    expect(d.present[".mts"]).toBe(4) // g10b / run-g10b / run-g19 / 原 MCP Viewer 子探针
+    expect(d.ledger.find(row=>row.file==='script/gates/mcp-viewer-probe.mts')?.kind).toBe('子探针')
     expect(d.present[".mjs"]).toBe(1) // anim-glb.mjs
     // `.parked/` 是目录、不是扩展名 —— 只数文件。
     expect(Object.keys(d.present)).not.toContain(".parked")
@@ -306,7 +307,7 @@ describe("审计面本身不完整（验收队 VERIFY2 ② 的正对照）", () 
       expect(d.ledger.find(row=>row.file==='script/gates/'+file)?.kind).toBe(kind)
     // 本次的真实分布（改动前这些文件里有一批根本不在输出里）。
     expect(d.totals.byKind).toEqual({
-      实现: 15, 驱动: 16, 子探针: 4, 目录级门禁: 4, 共享谓词: 4, 独立现场驱动: 4, 测试: 8, 非脚本: 2, 未知: 0,
+      实现: 15, 驱动: 16, 子探针: 5, 目录级门禁: 4, 共享谓词: 4, 独立现场驱动: 4, 测试: 8, 非脚本: 2, 未知: 0,
     })
   })
 

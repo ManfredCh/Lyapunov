@@ -10,7 +10,7 @@
  *
  * 纪律（与合同一致）：
  *  · **固定版本**：来源写死在 `script/prepare-viewer-test-assets.manifest.json`（repo + commit + 逐文件 size/sha256）。
- *  · **只取这 6 件 + LICENSE**：不拉整个模型仓库、不复制额外 URDF/重复 meshes、不下载策略权重。
+ *  · 默认只取 6 件 + LICENSE；显式 --urdf 切换到 Newton 的独立 Go1 URDF 固定清单。不下载策略权重。
  *  · **校验后原子落盘**：先写同目录临时文件、核对 size/sha256 通过后再 rename；半截文件不会留成"已就绪"。
  *  · **缓存复用**：目标文件已存在且 size/sha256 都对 ⇒ 直接复用、不重新下载。
  *  · **不覆盖坏件**：已存在但与固定版本不符 ⇒ 明确报错并非 0 退出，绝不覆盖（那可能是用户自己的模型）。
@@ -33,6 +33,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 const SCRIPT_DIR = import.meta.dirname
 const REPO_ROOT = resolve(SCRIPT_DIR, "..")
 const MANIFEST_PATH = join(SCRIPT_DIR, "prepare-viewer-test-assets.manifest.json")
+const URDF_MANIFEST_PATH = join(SCRIPT_DIR, "prepare-go1-urdf-test-assets.manifest.json")
 /** raw 内容端点；这里**只**拼公开仓库 + 固定 commit + 固定路径，不带任何凭据。 */
 const RAW_BASE = "https://raw.githubusercontent.com"
 /** 单次取件上限：公开 raw 端点在正常网络下远小于此；超时即失败，不无限等。 */
@@ -72,14 +73,17 @@ const USAGE = [
   "用法：bun --no-env-file script/prepare-viewer-test-assets.ts [--root <目录>] [--cache-root <目录>]",
   "  --root <目录>   目标根（默认仓库根）；文件落到 <目录>/materials/robots/unitree_go1/。",
   "  --cache-root <目录>  显式离线来源根；只读取同一固定清单，缺件或坏件即失败，不转网络。",
+  "  --urdf          准备 Newton Go1 URDF、7 个 DAE、package.xml 与 LICENSE。",
   "  --help          打印本说明。",
 ].join("\n")
 
-function parseArgs(argv: string[]): { root: string; cacheRoot?: string } {
+function parseArgs(argv: string[]): { root: string; cacheRoot?: string; urdf: boolean } {
   let root = REPO_ROOT
   let cacheRoot: string | undefined
+  let urdf = false
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!
+    if (arg === "--urdf") { urdf = true; continue }
     if (arg === "--help" || arg === "-h") {
       process.stdout.write(`${USAGE}\n`)
       process.exit(0)
@@ -105,16 +109,16 @@ function parseArgs(argv: string[]): { root: string; cacheRoot?: string } {
     }
     fail([`未知参数：${arg}`, USAGE])
   }
-  return { root, cacheRoot }
+  return { root, cacheRoot, urdf }
 }
 
-function loadManifest(): PrepareManifest {
-  if (!existsSync(MANIFEST_PATH)) fail([`清单不存在：${MANIFEST_PATH}`])
+function loadManifest(path = MANIFEST_PATH): PrepareManifest {
+  if (!existsSync(path)) fail([`清单不存在：${path}`])
   let parsed: unknown
   try {
-    parsed = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"))
+    parsed = JSON.parse(readFileSync(path, "utf8"))
   } catch (error) {
-    fail([`清单解不开：${MANIFEST_PATH}：${String(error)}`])
+    fail([`清单解不开：${path}：${String(error)}`])
   }
   const manifest = parsed as PrepareManifest
   if (manifest.schema !== 1) fail([`清单 schema 不是 1（实际 ${String(manifest.schema)}）：${MANIFEST_PATH}`])
@@ -174,8 +178,8 @@ function writeAtomically(destination: string, bytes: Uint8Array): void {
 }
 
 async function main(): Promise<void> {
-  const { root, cacheRoot } = parseArgs(process.argv.slice(2))
-  const manifest = loadManifest()
+  const { root, cacheRoot, urdf } = parseArgs(process.argv.slice(2))
+  const manifest = loadManifest(urdf ? URDF_MANIFEST_PATH : MANIFEST_PATH)
   const destinationRoot = join(root, manifest.destination)
   const specs = expectedSpecs(manifest)
 

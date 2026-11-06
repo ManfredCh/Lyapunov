@@ -30,7 +30,7 @@
  */
 
 import { execFileSync } from "node:child_process"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {resolveSdkPython, SDK_PYTHON_ENV, SDK_PYTHON_PACKAGE_PATH, type SdkPythonSource} from "../../lyapunov-product-bundle/src/sdk-python.mjs"
 import {inspectIsaacPythonSync} from "../../lyapunov-product-bundle/src/isaac-sdk-probe.mjs"
@@ -115,6 +115,7 @@ export {
   parseSmiCapacity,
   probeGpuDeviceVisibility,
   probeGpuFacts,
+  probeWslGpuDevices,
   probeSmiAbsenceEvidence,
   scanGpuDevices,
   smiAbsenceDetail,

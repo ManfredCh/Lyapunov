@@ -136,7 +136,7 @@ test('原生循环：两会话当前域指针替换与clear，相同正文不追
     const shell = {
       // Own the installer's controller and cleanup with native effects; no install is invoked.
       inject: async () => {}, effect: ctx.effect.bind(ctx), jobs: ctx.jobs,
-      provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
+      root: ctx.root, provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
       tools: { register: () => {}, get: ctx.tools.get.bind(ctx.tools), schemas: ctx.tools.schemas.bind(ctx.tools) },
       commands: { register: () => {}, execute: async () => undefined }, connection: { fetch: { register: () => {} } },
       get: (name: string) => name === 'skills' ? { snapshot: async () => ({ skills: [], complete: true }) } : ctx.get(name as never),
@@ -248,7 +248,7 @@ test('原生循环：迟到工具后当前事实替换，同名世界、真实�
     const shell = {
       // Own the installer's controller and cleanup with native effects; no install is invoked.
       inject: async () => {}, effect: ctx.effect.bind(ctx), jobs: ctx.jobs,
-      provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
+      root: ctx.root, provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
       tools: { register: () => {}, get: ctx.tools.get.bind(ctx.tools), schemas: ctx.tools.schemas.bind(ctx.tools) },
       commands: { register: () => {}, execute: async () => undefined }, connection: { fetch: { register: () => {} } },
       get: (name: string) => name === 'skills' ? { snapshot: async () => ({ skills: [], complete: true }) } : ctx.get(name as never),
@@ -354,7 +354,7 @@ async function skillContextHost() {
   await ctx.plugin(ToolSkill)
   const shell = {
     inject: async () => {}, effect: ctx.effect.bind(ctx), jobs: ctx.jobs,
-    provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
+    root: ctx.root, provide: ctx.provide.bind(ctx), on: ctx.on.bind(ctx), systemPrompt: ctx.systemPrompt,
     tools: { register: () => {}, get: ctx.tools.get.bind(ctx.tools), schemas: ctx.tools.schemas.bind(ctx.tools) },
     commands: { register: () => {}, execute: async () => undefined }, connection: { fetch: { register: () => {} } },
     get: (name: string) => ctx.get(name as never),

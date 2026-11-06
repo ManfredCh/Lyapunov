@@ -107,6 +107,25 @@ export class CampaignRuntime {
     return (this.openRuns.get(key) ?? []).filter(run => run.campaignId === campaignId).map(run => run.runId)
   }
 
+  /** 只供原生生命周期观察者判断；普通工具仍从调用方真实会话取归属。 */
+  hasOpenRuns(sessionId: string): boolean {
+    return (this.openRuns.get(sessionId)?.length ?? 0) > 0
+  }
+
+  /** 一次性会话实际结束后，原owner用真实计量中止尚未显式关闭的run，不推断任务成功。 */
+  async abortUnclosedRuns(owner: unknown, stopReason: string): Promise<void> {
+    const key = sessionIdOf(owner)
+    if (!key) return
+    for (const active of [...(this.openRuns.get(key) ?? [])]) {
+      await this.closeRun(owner, active.campaignId, active.taskId, {
+        toolCalls: active.executedCalls,
+        simSteps: active.simSteps,
+        outcome: 'aborted',
+        notes: `原生一次性子会话已结束（${stopReason}），尚未显式关闭的run由原Campaign owner中止记账；不代表目标达成或技能准入。`,
+      })
+    }
+  }
+
   /** 开 run：落 runs/<runId>/{run.json,calls.jsonl} 并登记到调用方会话。 */
   async openRun(owner: unknown, handle: CampaignHandle, task: CampaignTask, role: RunRole): Promise<ActiveRun> {
     const key = sessionIdOf(owner)

@@ -179,8 +179,10 @@ export interface ViewerCameraView {
 
 /** 结构化失败：`code` 是稳定机器码，`message` 是给人看的下一步。 */
 export class ViewerCameraError extends Error {
-  constructor(readonly code: string, message: string) {
+  readonly code: string
+  constructor(code: string, message: string) {
     super(`${code}: ${message}`)
+    this.code = code
     this.name = "ViewerCameraError"
   }
 }

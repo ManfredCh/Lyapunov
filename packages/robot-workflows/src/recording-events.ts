@@ -60,7 +60,9 @@ export function recordingActions(events: Array<Record<string, any>>): RecordedAc
 
 export class RecordingSessionEvents {
  private readonly calls = new Map<string, Call>()
- constructor(private readonly worldId: string, private readonly sceneId: string) {}
+ private readonly worldId: string
+ private readonly sceneId: string
+ constructor(worldId: string, sceneId: string) { this.worldId = worldId; this.sceneId = sceneId }
  private belongs(value?: Record<string, any>): boolean | undefined {
   if (!value) return undefined
   if (typeof value.worldId === 'string') return value.worldId === this.worldId && (value.sceneId === undefined || value.sceneId === this.sceneId)

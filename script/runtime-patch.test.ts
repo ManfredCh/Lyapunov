@@ -1,7 +1,7 @@
 /** Offline overlay assertions; no Host, UI, provider connection, or secret files. */
 import { expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,7 +15,7 @@ import { Config as PiAiSchema, type Options as PiAiOptions } from '@deepseek-ai/
 import { formalModelRows } from "../packages/lyapunov-product-bundle/src/account/formal.ts"
 import { runtimePaths } from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 import { backendEnvironment } from "./profile.ts"
-import { PRODUCT_LINK_SWITCH_AUDIT, INSTALLATION_MIRROR_AUDIT, censusModuleLinkScope, isaacRuntimeOptions, linkProductBundleSlot, migrateLegacyProfileAndReport, productLinkSwitchNotice, reconcileAndReportInstallationMirror, reconcileAndReportProductLinks, runtimePatch, runtimePluginInsert, publicChooserHome } from "./runtime-patch.ts"
+import { PRODUCT_LINK_SWITCH_AUDIT, INSTALLATION_MIRROR_AUDIT, censusModuleLinkScope, isaacRuntimeOptions, linkProductBundleSlot, migrateLegacyProfileAndReport, productLinkSwitchNotice, reconcileAndReportInstallationMirror, reconcileAndReportProductLinks, runtimePatch, runtimePluginInsert, publicChooserHome, hostDesktopAvailable } from "./runtime-patch.ts"
 
 const root = join(import.meta.dirname, "..")
 const source = readFileSync(join(root, "script/runtime-patch.ts"), "utf8")
@@ -23,6 +23,12 @@ const modelSection = source.slice(source.indexOf("const plugins=runtimePluginIns
 const upstream = JSON.parse(readFileSync(join(root, "UPSTREAM_LOCK.json"), "utf8")).directory as string
 const webBundle = readFileSync(join(root, upstream, "packages/bundle/web-app/cordis.patch.yml"), "utf8")
 const productBundle = readFileSync(join(root, "packages/lyapunov-product-bundle/cordis.patch.yml"), "utf8")
+
+test('SAM3在Mac装配原CPU分支，Linux仍保留插件原CUDA默认',()=>{
+ const entry=runtimePluginInsert({mode:'local',surface:'web',sceneRoot:'/fixture/scene',engine:'none'}).find(row=>row.id==='lyapunov-segment-sam3')
+ expect(entry).toBeDefined()
+ expect(entry?.config?.device).toBe(process.platform==='darwin'?'cpu':undefined)
+})
 
 /** 临时 Unity 供给 fixture：从本仓打包件复刻 distribution→固定 cache→venv 形状。仅证合同，不安装、不联网，也不宣称 Unity Editor 运行。 */
 async function preparedUnityFixture(box: string) {
@@ -55,7 +61,7 @@ test("Isaac 产品默认 GPU 物理、显式 cpu/none 不被环境覆盖，插�
 })
 
 test("local 的真实运行补丁与假 DSH 子进程读同一组三条 SDK 路径；父进程密钥被隔离", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-sdk-env-wire-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-sdk-env-wire-"))
   const savedUndo = process.env.LYAPUNOV_SESSION_UNDO
   try {
     process.env.LYAPUNOV_SESSION_UNDO = "0"
@@ -159,7 +165,7 @@ test("formal managed rows retain the gateway and environment-only credential", (
 })
 
 test("formal/local/guest消费旧Peiri Profile后清默认搜索，模型与客户端fetch保留", async () => {
-  const box=await mkdtemp(join(tmpdir(),"lyapunov-native-lookup-")),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
+  const box=await mkdtemp(join(realpathSync(tmpdir()),"lyapunov-native-lookup-")),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
   try{
     process.env.LYAPUNOV_SESSION_UNDO="0"
     for(const mode of ["formal","local","guest"] as const){
@@ -223,7 +229,7 @@ async function fixtureInstallation(root: string, names: readonly string[]) {
  * 这就是事故的形状——"链接所指的安装身份"与"正在运行的安装"不是同一个。
  */
 async function fixtureProfile(names: readonly string[]) {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-link-switch-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-link-switch-"))
   await fixtureInstallation(join(box, "parked"), names)
   await fixtureInstallation(join(box, "current"), names)
   const profile = join(box, "profile")
@@ -259,7 +265,7 @@ test("有改动时播报改指条数与包名，0 改动时一行都不打（纯
 })
 
 test("有改动：切换结果被消费并播报，审计记录落盘（替身 reconciler，不动任何链接）", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-link-report-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-link-report-"))
   try {
     const lines: string[] = []
     const report = await reconcileAndReportProductLinks({
@@ -281,7 +287,7 @@ test("有改动：切换结果被消费并播报，审计记录落盘（替身 r
 })
 
 test("0 改动：不播报、不写审计（替身 reconciler，零噪声）", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-link-quiet-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-link-quiet-"))
   try {
     const lines: string[] = []
     const report = await reconcileAndReportProductLinks({
@@ -414,7 +420,7 @@ test("归因播报不制造噪声：本次 0 改动且不归本函数的那部�
 })
 
 test("归属普查：只数软链、按指向归类；认不出的归属记「归属未识别」，不猜一个安装根", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-link-census-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-link-census-"))
   try {
     const current = join(box, "installs", "current"), parked = join(box, "installs", "parked")
     await mkdir(join(current, "packages"), { recursive: true })
@@ -443,7 +449,7 @@ test("归属普查：只数软链、按指向归类；认不出的归属记「�
 })
 
 test("B3：Profile 预切换的槽位必须在这里播报（reconcile 再跑时它已『无改动』）", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-preswitch-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-preswitch-"))
   try {
     const seen: string[] = []
     const changed = await linkProductBundleSlot({
@@ -478,7 +484,7 @@ test("B3：Profile 预切换的槽位必须在这里播报（reconcile 再跑时
 })
 
 test("同形第二处：旧 Profile 迁移的报告必须播报（此前整个丢掉），已迁移过的重启不重复打印", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-legacy-migrate-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-legacy-migrate-"))
   const base = { sourceProfile: "lyaup-developer-web", targetProfile: "lyapunov-developer-web", patchCopied: true, manifestMerged: true }
   try {
     const migrated: string[] = []
@@ -541,7 +547,7 @@ test("原生桌面 computer-use 只在显式启用时装配", () => {
     process.env.LYAPUNOV_COMPUTER_USE="0"
     expect(mounted()).toBe(false)
     process.env.LYAPUNOV_COMPUTER_USE="1"
-    expect(mounted()).toBe(process.platform==="linux")
+    expect(mounted()).toBe(hostDesktopAvailable())
   } finally {
     if(saved.display===undefined)delete process.env.DISPLAY;else process.env.DISPLAY=saved.display
     if(saved.enabled===undefined)delete process.env.LYAPUNOV_COMPUTER_USE;else process.env.LYAPUNOV_COMPUTER_USE=saved.enabled
@@ -559,8 +565,8 @@ test("浏览器能力的装配面保持 launch/headless:false，且不注入 --n
     process.env.DISPLAY=":fixture"
     delete process.env.LYAPUNOV_BROWSER_USE
     const mounted = rows()
-    expect(mounted.some(row => row.id === "lyapunov-browser-use")).toBe(true)
-    expect(mounted.find(row => row.id === "lyapunov-browser-use-chrome-devtools-mcp")?.config)
+    expect(mounted.some(row => row.id === "lyapunov-browser-use")).toBe(hostDesktopAvailable())
+    if(hostDesktopAvailable())expect(mounted.find(row => row.id === "lyapunov-browser-use-chrome-devtools-mcp")?.config)
       .toMatchObject({ mode: "launch", headless: false })
     process.env.LYAPUNOV_BROWSER_USE="0"
     expect(rows().some(row => row.id === "lyapunov-browser-use")).toBe(false)
@@ -600,7 +606,7 @@ async function writeOldInstall(old: string, names: readonly string[]) {
  * 共享镜像。镜像里的旧安装槽位先指向 `old`；`user-custom` 与真实目录 `keep-me` 代表用户自定义模块。
  */
 async function mirrorFixture(options: { custom?: boolean } = {}) {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-mirror-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-mirror-"))
   const current = join(box, "current"), old = join(box, "old")
   await writeCurrentInstall(current)
   await writeOldInstall(old, ["@deepseek-ai/dsh-base", "left-pad"])
@@ -634,7 +640,7 @@ test("RC2 原生解析：当前安装映射生效，旧镜像保留且不制造�
     expect(lines[0]).toContain("RC2 原生模块解析")
     expect(lines[0]).toContain("当前安装")
     expect(report?.resolution?.entries.find(row=>row.name==='left-pad')?.packageDir).toBe(join(fixture.current,'node_modules','left-pad'))
-    const nativeResolver = spawnSync('/usr/local/bin/node', ['--input-type=module', '-e', `
+    const nativeResolver = spawnSync(Bun.which('node')!, ['--input-type=module', '-e', `
       const { Context } = await import(process.argv[1]);
       const { PluginPackages } = await import(process.argv[2]);
       const resolution = JSON.parse(process.argv[3]);
@@ -714,7 +720,7 @@ test("共享依赖镜像：锚点不在时不做任何写入，也不猜一个�
 })
 
 test("共享依赖镜像：镜像目录不存在时零动作零输出（不制造噪声、不碰别的目录）", async () => {
-  const box = await mkdtemp(join(tmpdir(), "lyapunov-mirror-absent-"))
+  const box = await mkdtemp(join(realpathSync(tmpdir()), "lyapunov-mirror-absent-"))
   try {
     const lines: string[] = []
     const report = await reconcileAndReportInstallationMirror({
@@ -745,7 +751,7 @@ test('public chooser起点来自隔离前真实用户位置，Windows完全限�
 })
 
 test('实际web补丁禁首用自动默认工程，只保存chooser公共起点，不改已注册用户工程与model文件策略',async()=>{
-  const box=await mkdtemp(join(tmpdir(),'lyapunov-public-home-overlay-')),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
+  const box=await mkdtemp(join(realpathSync(tmpdir()),'lyapunov-public-home-overlay-')),savedUndo=process.env.LYAPUNOV_SESSION_UNDO
   try{
     process.env.LYAPUNOV_SESSION_UNDO='0';const dir=join(box,'profile');await mkdir(dir)
     // 显式 Unity 命令只隔离装配用例，避免调用默认 supply 时触发真实 pip；HOME 仍保留公共 chooser 的断言值。
@@ -762,25 +768,25 @@ test('实际web补丁禁首用自动默认工程，只保存chooser公共起点�
 
 test('已装known MCP贡献原生owner，计算机服务捕获父桌面目录且不带模型秘密', async()=>{
  const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
- const box=await mkdtemp(join(tmpdir(),'known-mcp-'))
+ const box=await mkdtemp(join(realpathSync(tmpdir()),'known-mcp-'))
  try{
   const launcher=join(box,'.codex/plugins/cache/computer-use-linux/computer-use-linux/0.7.13/bin/computer-use-linux')
   await mkdir(join(launcher,'..'),{recursive:true});await writeFile(launcher,'#!/bin/sh\nexit 0\n',{mode:0o755})
-  const env={HOME:box,DISPLAY:':8',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus',DEEPSEEK_API_KEY:'must-not-copy'}
+  const env={HOME:box,DISPLAY:':8',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus',COMPUTER_USE_LINUX_BIN:launcher,DEEPSEEK_API_KEY:'must-not-copy'}
   const rows=installedKnownMcpDefaults(env,'linux')
-  expect(rows.find(row=>row.kind==='computer-use-linux')).toMatchObject({command:join(root,'.runtime/computer-use-linux/official/computer-use-linux'),args:['mcp'],env:{HOME:box,DISPLAY:':8',XDG_STATE_HOME:join(box,'.local/state')}})
+  expect(rows.find(row=>row.kind==='computer-use-linux')).toMatchObject({command:launcher,args:['mcp'],env:{HOME:box,DISPLAY:':8',XDG_STATE_HOME:join(box,'.local/state')}})
   expect(JSON.stringify(rows)).not.toContain('must-not-copy')
   expect(installedKnownMcpDefaults(env,'darwin').some(row=>row.kind==='computer-use-linux')).toBe(false)
   const shell=runtimePluginInsert({mode:'developer',surface:'web',sceneRoot:box,engine:'none',sdkEnvironment:env}).find(row=>row.id==='lyapunov-shell')!
-  expect(shell.config?.knownMcpDefaults).toEqual(rows)
+  expect(shell.config?.knownMcpDefaults).toEqual(installedKnownMcpDefaults(env))
  }finally{await rm(box,{recursive:true,force:true})}
 })
 
 
-test('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checksum且明确缺件',async()=>{
+test.skipIf(process.platform!=='linux')('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checksum且明确缺件',async()=>{
  const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
  const {ensureComputerUseLinux,computerUseLinuxReady,computerUseLinuxPaths}=await import('./computer-use-linux.ts')
- const box=await mkdtemp(join(tmpdir(),'known-mcp-fresh-'))
+ const box=await mkdtemp(join(realpathSync(tmpdir()),'known-mcp-fresh-'))
  try{
   const env={HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/1000/bus'}
   expect(installedKnownMcpDefaults(env,'linux').find(row=>row.kind==='computer-use-linux')).toMatchObject({command:computerUseLinuxPaths(undefined,'official').command,env:{HOME:box,DISPLAY:':11',AT_SPI_BUS_ADDRESS:'unix:path=/tmp/explicit-ats-pi'}})
@@ -796,10 +802,10 @@ test('fresh HOME没有Codex仍优先产品固定供给，持有MIT/版本/checks
  }finally{await rm(box,{recursive:true,force:true})}
 })
 
-test('三个known原生默认包括Unity固定stdio供给，公开registry和optional更新参数明确',async()=>{
+test.skipIf(!['linux','darwin'].includes(process.platform))('三个known原生默认包括Unity固定stdio供给，公开registry和optional更新参数明确',async()=>{
  const {installedKnownMcpDefaults}=await import('./known-mcp.ts')
  const {unityMcpSupplyReady,installedUnityMcpCommand}=await import('./unity-mcp-supply.ts')
- const box=await mkdtemp(join(tmpdir(),'unity-native-default-'))
+ const box=await mkdtemp(join(realpathSync(tmpdir()),'unity-native-default-'))
  try{
   // 自有临时 fixture：只证供给合同（打包件→固定 cache→可执行入口），不安装、不联网，也不宣称 Unity Editor 运行。
   const {seed,paths,metadata}=await preparedUnityFixture(box)
@@ -822,17 +828,33 @@ test('三个known原生默认包括Unity固定stdio供给，公开registry和opt
 
 test('Unity发行缓存无需distribution，三个pins损坏明确拒绝而不回退',async()=>{
  const {prepareUnityMcpSupply,unityMcpSupplyPaths,ensureUnityMcp}=await import('./unity-mcp-supply.ts')
- const box=await mkdtemp(join(tmpdir(),'unity-packed-cache-')),cache=join(box,'cache-root'),paths=unityMcpSupplyPaths(cache)
+ const box=await mkdtemp(join(realpathSync(tmpdir()),'unity-packed-cache-')),cache=join(box,'cache-root'),paths=unityMcpSupplyPaths(cache)
  try{
   // 固定版本/许可证/来源回执来自临时 seed；cache 根没有 distribution，仍必须只凭缓存验 pins。
   const {metadata,wheel,license}=await preparedUnityFixture(box)
   await mkdir(join(paths.root,'cache'),{recursive:true});await writeFile(paths.wheel,wheel);await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify(metadata))
   expect(existsSync(join(cache,'distribution'))).toBe(false)
   expect(await prepareUnityMcpSupply(cache)).toEqual(metadata)
-  await expect(ensureUnityMcp({root:cache,env:{HOME:join(cache,'fresh-home'),PATH:'/usr/bin:/bin'},offline:true,forceProduct:true})).rejects.toThrow('UNITY_MCP_RUNTIME_MISSING')
+  await expect(ensureUnityMcp({root:cache,env:{HOME:join(cache,'fresh-home'),PATH:'/usr/bin:/bin'},offline:true,forceProduct:true})).rejects.toThrow(['linux','darwin'].includes(process.platform)?'UNITY_MCP_RUNTIME_MISSING':'UNITY_MCP_SUPPLY_PLATFORM_UNSUPPORTED')
   await writeFile(paths.wheel,'damaged');await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_WHEEL_CHECKSUM_FAILED');expect(await readFile(paths.wheel,'utf8')).toBe('damaged')
   await writeFile(paths.wheel,wheel);await writeFile(paths.license,'damaged');await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_LICENSE_CHECKSUM_FAILED')
   await writeFile(paths.license,license);await writeFile(paths.provenance,JSON.stringify({...metadata,version:'invalid'}));await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_PROVENANCE_PIN_MISMATCH')
   await rm(paths.provenance);await expect(prepareUnityMcpSupply(cache)).rejects.toThrow('UNITY_MCP_PACKED_SUPPLY_INCOMPLETE')
  }finally{await rm(box,{recursive:true,force:true})}
+})
+
+test('桌面兼容叶识别macOS WindowServer与Linux图形会话，实际插件仍由原DSH提供',()=>{
+ expect(hostDesktopAvailable({},'darwin')).toBe(true)
+ expect(hostDesktopAvailable({},'linux')).toBe(false)
+ expect(hostDesktopAvailable({DISPLAY:':1'},'linux')).toBe(true)
+ expect(hostDesktopAvailable({WAYLAND_DISPLAY:'wayland-1'},'linux')).toBe(true)
+ expect(hostDesktopAvailable({},'win32')).toBe(false)
+ const rows=runtimePluginInsert({mode:'developer',surface:'web',sceneRoot:'/fixture',engine:'none',sdkEnvironment:{LYAPUNOV_COMPUTER_USE:'1'}})
+ if(process.platform==='darwin'){
+  expect(rows.find(row=>row.id==='lyapunov-computer-use-cua-native')?.name).toContain('/experimental/computer-use-cua-driver-native/lib/index.js')
+  const browser=rows.find(row=>row.id==='lyapunov-browser-use-chrome-devtools-mcp')
+  expect(browser?.config).toMatchObject({mode:'launch',headless:false})
+  expect(String(browser?.config?.executablePath)).toMatch(/^\/Applications\/(Microsoft Edge|Google Chrome)\.app\//)
+ }
+ expect(runtimePluginInsert({mode:'developer',surface:'web',sceneRoot:'/fixture',engine:'none',sdkEnvironment:{LYAPUNOV_COMPUTER_USE:'0',LYAPUNOV_BROWSER_USE:'0'}}).some(row=>row.id==='lyapunov-computer-use-cua-native'||row.id==='lyapunov-browser-use')).toBe(false)
 })

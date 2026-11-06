@@ -15,6 +15,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { validateLiberoVlaAdapter } from '../src/adapter.ts'
@@ -59,6 +60,10 @@ describe('M1 · VLA 单次出块的 CPU 推理预算可配置', () => {
   test('接线判据：覆盖成 500 ms ⇒ 永不回包的桩引擎在秒级以 POLICY_CPU_TIMEOUT 结束（默认 30 s 不可能这么快）', async () => {
     const { root } = await snapshot()
     const engine = writeHangingEngine()
+    // 预热：全量 CI 并行负载下，桩（/usr/bin/env node 脚本）的首次 spawn 冷启动可超过 500 ms 预算
+    // （实测整目录并发跑时 load 阶段就超时、requests.jsonl 根本没写出）。先空跑一次把 node 二进制、
+    // dyld 缓存与脚本页热起来——stdin 忽略 ⇒ 桩读到 EOF 立即退出；500 ms 判据本身不动。
+    spawnSync(engine.path, [], { stdio: 'ignore' })
     const sim = {
       observe: async () => officialFrame() as any,
       execute: async () => { throw new Error('不应到达 sim.execute：推理超时发生在下发动作之前') },

@@ -59,8 +59,8 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
  const selectedEntry=view==='integrations'?entries.find(row=>row.id===detail):undefined
  const displayOrder=['blender','unity','blender-mcp','unity-mcp','sam3','sam3d','da3','fastgs','mcp']
  const versionText=(id:string,version?:string)=>id==='blender'?version?.replace(/^Blender\s+/i,''):version
- const packageRows=visibleOptions.slice().sort((a,b)=>displayOrder.indexOf(a.id)-displayOrder.indexOf(b.id)).filter(option=>packageFilter==='all'||packageFilter==='apps'&&(option.kind==='software'||option.kind==='tool')||packageFilter==='bridges'&&option.kind==='bridge'||packageFilter==='models'&&option.kind==='model')
  const optionName=(id:string)=>EXTERNAL_TOOL_OPTIONS.find(row=>row.id===id)?.name??id
+ const packageRows=visibleOptions.slice().sort((a,b)=>displayOrder.indexOf(a.id)-displayOrder.indexOf(b.id)).filter(option=>packageFilter==='all'||packageFilter==='apps'&&(option.kind==='software'||option.kind==='tool')||packageFilter==='bridges'&&option.kind==='bridge'||packageFilter==='models'&&option.kind==='model')
  const pageTitle=view==='downloads'?tr('下载','Downloads'):tr('集成','Integrations')
  const connectionFor=(id:string)=>{
   const kind=id==='blender'||id==='blender-mcp'?'blender':id==='unity'||id==='unity-mcp'?'unity':undefined
@@ -157,7 +157,7 @@ export function ExternalToolsSettings({view='integrations',tr,start,close,sessio
   </>}
   <SettingsDetails title={tr('安装活动','Activity')} meta={state?.installJobs.length??0}>
    {!state?.installJobs.length&&<p className='lya-settings-caption'>{tr('暂无安装作业。','No installation jobs.')}</p>}
-   {state?.installJobs.map(job=><div key={job.jobId}><div className='lya-settings-title-meta'><h3>{job.registryId?optionName(job.registryId):job.label}</h3><SettingsStatus state={job.status==='running'||job.status==='stopping'?'ongoing':job.status==='completed'?'done':job.status==='failed'?'error':'idle'}>{job.status}</SettingsStatus></div><p className='lya-settings-message'>{displayDetail(job.progress??job.detail??job.label)}</p><Button size='sm' disabled={!!busy} onClick={()=>void perform('output',()=>readJob(job.jobId))}>{tr('读取实际输出','View output')}</Button>{logs[job.jobId]&&<pre>{logs[job.jobId]}</pre>}<p className='lya-settings-caption'>{job.jobId}</p></div>)}
+   {state?.installJobs.map(job=><div key={job.jobId}><div className='lya-settings-title-meta'><h3>{job.label}</h3><SettingsStatus state={job.status==='running'||job.status==='stopping'?'ongoing':job.status==='completed'?'done':job.status==='failed'?'error':'idle'}>{job.status}</SettingsStatus></div><p className='lya-settings-message'>{displayDetail(job.progress??job.detail??job.label)}</p><Button size='sm' disabled={!!busy} onClick={()=>void perform('output',()=>readJob(job.jobId))}>{tr('读取实际输出','View output')}</Button>{logs[job.jobId]&&<pre>{logs[job.jobId]}</pre>}<p className='lya-settings-caption'>{job.jobId}</p></div>)}
   </SettingsDetails>
  </SettingsPage>
 }

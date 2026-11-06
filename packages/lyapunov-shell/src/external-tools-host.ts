@@ -201,13 +201,19 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
 }
 
 /** 安装仅在显式点击后起原生 Jobs；目录、版本与HF端点来自现有 owner。 */
-export async function startExternalAcquisition(ctx:Context,input:{id:string;localDir?:string;sessionId?:string}):Promise<string>{
+export async function startExternalAcquisition(ctx:Context,input:{id:string;localDir?:string;sessionId?:string},options:{manual?:boolean}={}):Promise<string>{
  const agent=input.sessionId?ctx.get('agents')?.get(SessionId(input.sessionId)):undefined
  if(input.sessionId&&!agent)throw Error('SESSION_NOT_LIVE: 请先打开会话。 / Open the session first.')
  const jobs=ctx.get('jobs');if(!jobs)throw Error('JOBS_UNAVAILABLE: 原生后台作业未装配。 / Native jobs are unavailable.')
+ // 人工入口同步登记原等待者，早于立即完成作业的settled事件；模型入口保留原通知。
+ const startJob=(spec:Parameters<typeof jobs.start>[0])=>{
+  const id=jobs.start(spec)
+  if(options.manual)void jobs.wait(id,2_147_483_647,agent?.id).catch(error=>ctx.logger.warn('人工安装作业等待结束：'+errorText(error)))
+  return id
+ }
  if(input.id==='blender-mcp'){
   requireExternalWrite(ctx,agent,blenderMcpPaths().root)
-  return jobs.start({kind:'external-install',label:'Blender MCP locked supply',owner:agent?.id,run:job=>{
+  return startJob({kind:'external-install',label:'Blender MCP locked supply',owner:agent?.id,run:job=>{
    const controller=new AbortController()
    const done=ensureBlenderMcp({signal:controller.signal,log:line=>job.append(redactSecretsText(line)+'\n',{channel:'stdout'})}).then(v=>({status:'completed' as const,result:JSON.stringify(v),detail:'Supply checked; editor addon activation and MCP handshake remain separate.'}),e=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:errorText(e),detail:controller.signal.aborted?'Owned supply cancelled; existing installation and editor were retained.':'Locked supply failed.'}))
    return {cancel:()=>controller.abort(),done}
@@ -215,7 +221,7 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
  }
  if(input.id==='unity-mcp'){
   requireExternalWrite(ctx,agent,unityMcpSupplyPaths().root)
-  return jobs.start({kind:'external-install',label:'Unity MCP pinned supply',owner:agent?.id,run:()=>{
+  return startJob({kind:'external-install',label:'Unity MCP pinned supply',owner:agent?.id,run:()=>{
    const controller=new AbortController()
    const done=ensureUnityMcp({signal:controller.signal}).then(async v=>{const picker=ctx.get('directoryPicker')?.capability(),home=picker?.kind==='browse'?picker.homeDirectory:undefined;await associateInstalledKnownMcp(ctx,[{kind:'unity',command:v.command,args:['--transport','stdio'],env:{...home?{UNITY_MCP_STATUS_DIR:join(home,'.unity-mcp')}:{},FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}}]);return {status:'completed' as const,result:JSON.stringify(v),detail:'Unity stdio bridge supplied; editor addon and live instance are separate.'}},e=>({status:controller.signal.aborted?'killed' as const:'failed' as const,result:errorText(e),detail:'Unity bridge supply did not complete; existing editor and settings retained.'}))
    return {cancel:()=>controller.abort(),done}
@@ -228,11 +234,11 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
   const resolved=await subprocess.resolveExecutable(entry.id==='unity'?'Unity':'blender').catch(()=>null)
   const executable=entry.id==='blender'?(process.env.BLENDER_EXECUTABLE?.trim()??(resolved?.startsWith('/snap/bin/')?resolveBlenderExecutable():resolved)):process.env.LYAPUNOV_UNITY_EXECUTABLE?.trim()??resolved??(await discoverIntegrations(ctx)).find(v=>v.kind==='unity'&&basename(v.path)==='Unity')?.path
   const installedVersion=executable?await softwareVersion(executable,entry.id as 'blender'|'unity'):null
-  if(installedVersion)return jobs.start({kind:'external-install',label:entry.name+' existing software check',owner:agent?.id,run:job=>{job.append(JSON.stringify({action:'reuse-existing-software',installationComplete:true,location:executable,version:installedVersion})+'\n',{channel:'stdout'});return {cancel:()=>{},done:Promise.resolve({status:'completed' as const,detail:'已有软件版本检查通过，已复用；MCP 与实际操作需另行验证。 / Existing software version checked and reused; verify MCP and the requested operation separately.'})}}})
+  if(installedVersion)return startJob({kind:'external-install',label:entry.name+' existing software check',owner:agent?.id,run:job=>{job.append(JSON.stringify({action:'reuse-existing-software',installationComplete:true,location:executable,version:installedVersion})+'\n',{channel:'stdout'});return {cancel:()=>{},done:Promise.resolve({status:'completed' as const,detail:'已有软件版本检查通过，已复用；MCP 与实际操作需另行验证。 / Existing software version checked and reused; verify MCP and the requested operation separately.'})}}})
   const plan=downloadPlan(entry.id)
   const opener=await subprocess.resolveExecutable(plan.argv[0]!).catch(()=>null)
   if(!opener)throw Error('OFFICIAL_INSTALLER_OPENER_MISSING: 无法打开官方下载页面，请使用条目中的官方链接。 / The system URL opener is unavailable; use the official link in this entry.')
-  return jobs.start({kind:'external-install',label:entry.name+' official installer page',owner:agent?.id,run:job=>{
+  return startJob({kind:'external-install',label:entry.name+' official installer page',owner:agent?.id,run:job=>{
    const controller=new AbortController();job.append('Official download page: '+entry.source.url+'\n',{channel:'stdout'})
    job.updateProgress('Opening the official download / installation page')
    const child=subprocess.spawn({argv:[opener,...plan.argv.slice(1)],cwd:ctx.profileContext?.cwd??process.cwd(),env:plan.env,signal:controller.signal,graceMs:3000,stdio:{stdin:'ignore',stdout:{maxBytes:120000},stderr:{maxBytes:120000}}})
@@ -252,7 +258,7 @@ export async function startExternalAcquisition(ctx:Context,input:{id:string;loca
  const plan=downloadPlan(input.id as CreativeToolId,{endpoint:HF_DEFAULT_MIRROR,localDir:input.localDir})
  const subprocess=ctx.get('subprocess');if(!subprocess)throw Error('SUBPROCESS_UNAVAILABLE')
  const hf=await subprocess.resolveExecutable('hf').catch(()=>null);if(!hf)throw Error('HF_CLI_MISSING: 未安装 hf CLI；请先准备隔离下载环境。 / Prepare an isolated hf CLI environment.')
- return jobs.start({kind:'external-install',label:entry.name+' pinned download',owner:agent?.id,run:job=>{
+ return startJob({kind:'external-install',label:entry.name+' pinned download',owner:agent?.id,run:job=>{
   const controller=new AbortController()
   const child=subprocess.spawn({argv:[hf,...plan.argv.slice(1)],cwd:ctx.profileContext?.cwd??process.cwd(),env:{...plan.env,HF_HUB_DISABLE_XET:'1',HF_HUB_CACHE:join(input.localDir!,'.hf-cache'),HF_XET_CACHE:join(input.localDir!,'.hf-xet')},signal:controller.signal,graceMs:3000,stdio:{stdin:'ignore',stdout:{maxBytes:120000},stderr:{maxBytes:120000}}})
   const offsets={stdout:0,stderr:0},pump=()=>{for(const channel of ['stdout','stderr'] as const){const read=child.collected[channel]?.readFrom(offsets[channel]);if(read){offsets[channel]=read.nextOffset;job.append(redactSecretsText(read.text),{channel,...read.lossy?{gapBefore:true as const}:{}})}}}
@@ -335,7 +341,7 @@ export function applyExternalToolsHost(ctx:Context,defaults:readonly import('../
  register('state',['GET'],async r=>Response.json(await externalToolsState(ctx,new URL(r.url).searchParams.get('sessionId')??undefined,r.signal),{headers:{'cache-control':'private, no-store'}}))
  register('mcp',['POST'],async r=>{await saveExternalMcp(ctx,await r.json() as ExternalMcpInput);return Response.json({saved:true,handshake:'Read the native server state and tool list separately.'})})
  register('enable',['POST'],async r=>Response.json(await setExternalMcpEnabled(ctx,await r.json() as {id:string;enabled:boolean})))
- register('acquire',['POST'],async r=>Response.json({jobId:await startExternalAcquisition(ctx,await r.json() as {id:string;localDir?:string;sessionId?:string})}))
+ register('acquire',['POST'],async r=>Response.json({jobId:await startExternalAcquisition(ctx,await r.json() as {id:string;localDir?:string;sessionId?:string},{manual:true})}))
  register('job',['GET'],async r=>{
   const q=new URL(r.url).searchParams,agent=q.get('sessionId')?ctx.agents.get(SessionId(q.get('sessionId')!)):undefined
   if(q.get('sessionId')&&!agent)throw Error('SESSION_NOT_LIVE')

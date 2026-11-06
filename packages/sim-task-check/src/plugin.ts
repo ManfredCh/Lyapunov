@@ -72,7 +72,7 @@ async function describeReachableRobots(sim: SimWorlds, worldId: string, expr: Pr
 export function apply(ctx: Context, config: Config = {}) {
   const packsRoot = config.packsDirectory ? resolve(config.packsDirectory) : resolve(dirname(fileURLToPath(import.meta.url)), '../../../packs')
   // 入口是模型 JSON/命令 JSON：先经 validateArgs + predicateExprProblems 两道校验再收窄类型。
-  const perform = async (raw: unknown, parent: Partial<ToolExecution>): Promise<TaskCheckResult> => {
+  const perform = async (raw: unknown, parent: Partial<ToolExecution>): Promise<TaskCheckResult & Partial<Pick<Frame,'worldId'|'generation'|'sceneRevision'>>> => {
     const errors = validateArgs(parameters, { input: raw })
     if (errors.length) throw new ToolArgsError(errors)
     const input = raw as SimTaskCheckInput
@@ -113,6 +113,9 @@ export function apply(ctx: Context, config: Config = {}) {
       }
     }
     return {
+      // 从实际观察帧传出身份，供现有执行图区分不同世界；不从调用方参数推测。
+      worldId: frame.worldId, generation: frame.generation,
+      ...(frame.sceneRevision === undefined ? {} : { sceneRevision: frame.sceneRevision }),
       taskAchieved: verdict.ok, evaluated: true, failed: verdict.failures, frameId: frame.frameId, stepIndex: frame.stepIndex,
       ...(matchedSkills ? { matchedSkills } : {}),
     }

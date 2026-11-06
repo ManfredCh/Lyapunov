@@ -51,6 +51,9 @@ import {
   evalTheme,
   evalTscCriterion,
   FLOOR_BASELINE_FROZEN,
+  DARWIN_FLOOR_BASELINE_FROZEN,
+  caseSpecsForPlatform,
+  floorBaselineForPlatform,
   floorBaselineDigest,
   GREEN_EXIT,
   MANIFEST_GAP_FROZEN,
@@ -119,6 +122,14 @@ function reading(raw: string, over: Partial<CaseReading> = {}): CaseReading {
 // ── 1. 输出解析：三种格式都要认，认不出就得是"没量到" ────────────────────────
 
 describe('parseCaseOutput · 三种输出格式', () => {
+  test('Bun 1.4 重列的跳过清单只作展示，逐条执行和汇总仍须一致', () => {
+    const raw = ['(pass) 甲', '(skip) 乙', '', '1 tests skipped:', '(skip) 乙', '', ' 1 pass', ' 1 skip', ' 0 fail', ' 2 expect() calls'].join('\n')
+    const c = parseCaseOutput(raw)
+    expect([c.pass, c.skip, c.markerPass, c.markerSkip]).toEqual([1, 1, 1, 1])
+    expect(evalCase(reading(raw, {spec: spec({waiveSkip: 1, waiveSkipReason: '平台夹具'})})).status).toBe('GREEN')
+    expect(evalCase(reading(raw.replace(' 1 skip', ' 2 skip'), {spec: spec({waiveSkip: 2})})).status).toBe('UNPROVEN')
+  })
+
   test('bun:test 汇总（数在前）', () => {
     const raw = ['(pass) 甲', '(pass) 乙', '(skip) 丙', '', ' 2 pass', ' 1 skip', ' 0 fail', ' 12 expect() calls'].join('\n')
     const c = parseCaseOutput(raw)
@@ -163,6 +174,40 @@ describe('parseCaseOutput · 三种输出格式', () => {
     expect(c.pass).toBe(3)
     expect(c.markerPass).toBe(1)
     expect(evalCase(reading(raw)).status).toBe('UNPROVEN')
+  })
+})
+
+describe('发布门的平台冻结值', () => {
+  test('macOS 安装器只计实际执行；Linux 原冻结覆盖不降', () => {
+    const linux = caseSpecsForPlatform('linux').find(row => row.id === 'linux-user-installer')!
+    const mac = caseSpecsForPlatform('darwin').find(row => row.id === 'linux-user-installer')!
+    expect([linux.minPass, linux.minAssert, linux.waiveSkip ?? 0]).toEqual([43, 63, 4])
+    expect([mac.minPass, mac.minAssert, mac.waiveSkip]).toEqual([9, 57, 39])
+    expect(linux.waiveSkipReason).toContain('不计作通过')
+    expect(mac.waiveSkipReason).toContain('不计作通过')
+    expect(FLOOR_BASELINE_FROZEN.pass['linux-user-installer']).toBe(43)
+    expect(DARWIN_FLOOR_BASELINE_FROZEN.pass['linux-user-installer']).toBe(9)
+  })
+
+  test('两平台用例身份相同，新增覆盖与摘要逐项可复算', () => {
+    const linux = caseSpecsForPlatform('linux'), mac = caseSpecsForPlatform('darwin')
+    expect(mac.map(row => row.id)).toEqual(linux.map(row => row.id))
+    expect(floorBaselineForPlatform('linux')).toBe(FLOOR_BASELINE_FROZEN)
+    expect(floorBaselineForPlatform('darwin')).toBe(DARWIN_FLOOR_BASELINE_FROZEN)
+    expect(floorBaselineDigest(DARWIN_FLOOR_BASELINE_FROZEN.pass)).toBe(DARWIN_FLOOR_BASELINE_FROZEN.digest)
+    for (const row of mac) expect(DARWIN_FLOOR_BASELINE_FROZEN.pass[row.id]).toBe(row.minPass)
+    expect(caseSpecsForPlatform('linux').find(row => row.id === 'runtime-patch')!.waiveSkip).toBeUndefined()
+    expect(mac.find(row => row.id === 'runtime-patch')!.waiveSkip).toBe(1)
+  })
+
+  test('macOS 无 Isaac 只登记平台豁免；Linux Isaac 冻结覆盖不降', () => {
+    const linux = caseSpecsForPlatform('linux').find(row => row.id === 'scene-adapter-transform')!
+    const mac = caseSpecsForPlatform('darwin').find(row => row.id === 'scene-adapter-transform')!
+    expect([linux.minPass, linux.minAssert, linux.waiveSkip ?? 0]).toEqual([7, 63, 0])
+    expect([mac.minPass, mac.minAssert, mac.waiveSkip]).toEqual([0, 0, 1])
+    expect(mac.waiveSkipReason).toContain('不计作通过')
+    expect(FLOOR_BASELINE_FROZEN.pass['scene-adapter-transform']).toBe(7)
+    expect(DARWIN_FLOOR_BASELINE_FROZEN.pass['scene-adapter-transform']).toBe(0)
   })
 })
 
@@ -1291,7 +1336,8 @@ describe('evalFloorDrift · 冻结下限漂移', () => {
       })
       .join('\n')
     // 定版单起，第四个判据多带两个参数：冻结基线 + "这次是不是全量内建用例表"（子集/夹具不判 `gone`）
-    expect(code.includes('criteria.push(evalFloorDrift(readings, FLOOR_BASELINE_FROZEN, !opts.only && !fixtureMode))')).toBe(true)
+    expect(code.includes('const floorBaseline = floorBaselineForPlatform()')).toBe(true)
+    expect(code.includes('criteria.push(evalFloorDrift(readings, floorBaseline, !opts.only && !fixtureMode))')).toBe(true)
     // 冻结基线必须**接在判据里**（光有常量不算接线）：判据函数里要读到 frozen.pass
     expect(code.includes('r.counts.pass < base')).toBe(true)
     // 判据必须真在跑：`floor-drift` 的 id 不许被改名（回执与读数行都按这个 id 引用）
@@ -1847,7 +1893,8 @@ describe('EPIPE · 消费者提前走了 ⇒ 独立退出码 5（不是 RED，�
     casesFile,
     JSON.stringify([
       {
-        id: 'epipe-fixture',
+        // 超过管道缓冲容量，确保 head 关闭后仍有真实写入，避免整份短报告先写完。
+        id: 'epipe-fixture-' + 'x'.repeat(2 * 1024 * 1024),
         path: fixture,
         theme: 'other-round',
         runner: 'bun:test',
@@ -1925,6 +1972,8 @@ describe('EPIPE · 消费者提前走了 ⇒ 独立退出码 5（不是 RED，�
       cwd: ROOT,
       encoding: 'utf8',
       timeout: 300_000,
+      // 放大后的断管夹具会输出约 4 MiB；读满对照不能被默认捕获上限截断。
+      maxBuffer: 8 * 1024 * 1024,
     })
     expect(piped.status).toBe(direct.status)
     expect(piped.stderrText).toBe('')

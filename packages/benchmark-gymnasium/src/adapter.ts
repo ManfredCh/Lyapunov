@@ -150,7 +150,7 @@ export class GymnasiumAntAdapter implements SimWorlds {
     if (isBenchmarkUnavailable(prepared)) return prepared
     await this.replaceWorld()
     this.guard()
-    const transport = new ProcessSimProvider({ pythonPath: prepared.pythonPath, workerPath: this.workerPath(), engineName: 'gymnasium', env: { PYTHONUNBUFFERED: '1', MUJOCO_GL: resolveMuJoCoGlBackend(), LYAPUNOV_GYM_OUTPUT: this.outputRoot() } })
+    const transport = new ProcessSimProvider({ pythonPath: prepared.pythonPath, workerPath: this.workerPath(), engineName: 'gymnasium', env: { PYTHONUNBUFFERED: '1', MUJOCO_GL: resolveMuJoCoGlBackend(undefined,process.platform,process.env.MUJOCO_GL,'benchmark'), LYAPUNOV_GYM_OUTPUT: this.outputRoot() } })
     try {
       const handle = await transport.open(emptyScene(task.sceneId), { worldId: input.worldId, clock: 'manual', timestepS: 1 / task.episode.controlFrequencyHz, seed: task.episode.seed, horizonSteps: task.episode.horizonSteps, outputDir: this.outputRoot() } as any)
       // dispose 在 open await 期间返回：销毁刚拉起的 worker 后 fail-closed，绝不 adopt 到已释放的适配器上。

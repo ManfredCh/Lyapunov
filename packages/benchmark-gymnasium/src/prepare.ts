@@ -49,7 +49,7 @@ export async function prepareGymnasiumSdk(input: { pythonPath: string; isolatedR
     'env.close()',
   ].join('; ')
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(done => {
-    const child = spawn(pythonPath, ['-u', '-c', script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1', MUJOCO_GL: resolveMuJoCoGlBackend() } })
+    const child = spawn(pythonPath, ['-u', '-c', script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1', MUJOCO_GL: resolveMuJoCoGlBackend(undefined,process.platform,process.env.MUJOCO_GL,'benchmark') } })
     let stdout = ''; let stderr = ''
     child.stdout.on('data', chunk => { stdout = (stdout + String(chunk)).slice(-4000) })
     child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-4000) })

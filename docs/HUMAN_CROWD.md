@@ -36,7 +36,7 @@ MUJOCO_GL=osmesa bun run packages/human-crowd/scripts/native-scene.ts /绝对输
 
 ```bash
 LYAPUNOV_MUJOCO_PYTHON=/绝对路径/sim-python/bin/python \
-MUJOCO_GL=osmesa node --experimental-transform-types --test packages/human-crowd/test/native.test.ts
+MUJOCO_GL=osmesa node --experimental-strip-types --test packages/human-crowd/test/native.test.ts
 /绝对路径/sim-python/bin/python packages/human-crowd/scripts/native-performance.py \
   /绝对路径/scene.json --count 20 --collision coarse --steps 10 --output /绝对输出路径/performance.json
 ```
@@ -62,7 +62,7 @@ Isaac与原生USD资产的同世界复跑（仅使用已安装且已有许可确
 ```bash
 LYAPUNOV_ISAAC_PYTHON=/绝对路径/isaac/bin/python \
 LYAPUNOV_USD_PYTHON=/绝对路径/usd-core/bin/python \
-node --experimental-transform-types --test packages/human-crowd/test/isaac-native.test.ts
+node --experimental-strip-types --test packages/human-crowd/test/isaac-native.test.ts
 
 LYAPUNOV_ISAAC_PYTHON=/绝对路径/isaac/bin/python \
 LYAPUNOV_USD_PYTHON=/绝对路径/usd-core/bin/python \

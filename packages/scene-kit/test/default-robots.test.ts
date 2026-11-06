@@ -21,6 +21,7 @@ const bodyModel=(joints=BODY_JOINTS)=>`<mujoco model="fixture_hand"><worldbody><
 const demoModel=`<mujoco model="fixture_scene"><include file="left_hand.xml"/><worldbody><geom name="floor" type="plane" size="1 1 0.1"/><body name="example"><freejoint/><geom type="sphere" size="0.05" mass="0.1"/></body></worldbody></mujoco>`
 
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex')
+const droneDefaults={controller:{type:'drone',thrustActuator:'body_thrust',torqueActuators:{x:'x_moment',y:'y_moment',z:'z_moment'}}}
 
 /** 建真实 product root：registry/roster + pack.json + asset 本体/demo + 供给 inventory。 */
 async function fixture(options:{body?:string|null;demo?:string|null;inventoryBody?:'ok'|'sha-mismatch'|'omit';model?:string;modelEntry?:string}={}){
@@ -60,6 +61,43 @@ test('真实 pack：Robot Library 选本体 asset.model 而非 demo，SHA/DOF �
   expect(row.modelBytes).toBe(inventory.models[0].bytes)
  }finally{await rm(fx.root,{recursive:true,force:true})}
 })
+
+test('原资源默认控制映射按源 SHA 登记和补齐，挂载复用，保留已有用户控制器',async()=>{
+ const fx=await fixture()
+ try{
+  const file=join(fx.packRoot,'pack.json'),pack=JSON.parse(await readFile(file,'utf8'))
+  pack.asset.componentDefaultsModelSha256=fx.bodySha;pack.asset.componentDefaults=droneDefaults
+  await writeFile(file,JSON.stringify(pack))
+  const fresh=new SceneOperations(join(fx.root,'fresh'),fx.product)
+  expect((await ensureDefaultRobotLibrary(fx.product,fresh)).registered).toEqual(['allegro_hand'])
+  const initial=(await fresh.resources.list())[0]!
+  expect(initial.componentDefaults?.controller).toEqual(droneDefaults.controller)
+  await fresh.create({sceneId:'scene'})
+  const placed=await fresh.mount({sceneId:'scene',resourceId:initial.ref.resourceId,entityId:'robot'})
+  expect(placed.snapshot.entities.find(entity=>entity.entityId==='robot')?.components.controller).toEqual(droneDefaults.controller)
+  expect((await ensureDefaultRobotLibrary(fx.product,fresh)).registered).toEqual([])
+  expect(await fresh.resources.list()).toHaveLength(1)
+
+  const legacy=new SceneOperations(join(fx.root,'legacy'),fx.product)
+  const existing=await legacy.resources.import({path:join(fx.asset,'left_hand.xml'),name:'allegro_hand',folder:'T0 机器人示例',tags:['T0','pack:allegro_hand']})
+  expect(existing.componentDefaults?.controller).toBeUndefined()
+  expect((await ensureDefaultRobotLibrary(fx.product,legacy)).registered).toEqual([])
+  const repaired=(await legacy.resources.list())[0]!
+  expect(repaired.ref.resourceId).toBe(existing.ref.resourceId)
+  expect(repaired.componentDefaults?.controller).toEqual(droneDefaults.controller)
+  expect(await legacy.resources.list()).toHaveLength(1)
+
+  const custom=new SceneOperations(join(fx.root,'custom'),fx.product)
+  const userController={type:'drone',thrustActuator:'user-thrust',torqueActuators:{x:'user-x',y:'user-y',z:'user-z'}}
+  await custom.resources.import({path:join(fx.asset,'left_hand.xml'),name:'allegro_hand',folder:'T0 机器人示例',tags:['T0','pack:allegro_hand'],components:{controller:userController}})
+  await ensureDefaultRobotLibrary(fx.product,custom)
+  expect((await custom.resources.list())[0]!.componentDefaults?.controller).toEqual(userController)
+  pack.asset.componentDefaultsModelSha256='0'.repeat(64);await writeFile(file,JSON.stringify(pack))
+  const wrong=new SceneOperations(join(fx.root,'wrong'),fx.product)
+  await ensureDefaultRobotLibrary(fx.product,wrong)
+  expect((await wrong.resources.list())[0]!.componentDefaults?.controller).toBeUndefined()
+ }finally{await rm(fx.root,{recursive:true,force:true})}
+},20000)
 
 // P16 单例预算：本条是真实原生集成（ResourceLibrary 连续多次落盘 import + 本体 SHA/DOF 复算 +
 // 重开幂等），在装有真实物理 Python 的环境下实测单用例 3.8~5.0s（前次签收 4156.98ms；主控精确环境

@@ -435,7 +435,7 @@
   "sdkSourceIntegrity": {
     "file": "script/sdk-source-integrity-rc2.json",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "a56ae64f1079f9bc5cf504fb0955cc6f72f28394b12bf6b1d0d2a75eaafeaec2"
+    "sha256": "924a9a41d1c060a3d606e5e202de8e148fd53b8f6b4b4379a7e2042fe3095274"
   },
   "sdkFormalEnglishUpgrade": {
     "file": "packages/lyapunov-shell/patches/dsh-formal-model-input.english-upgrade.json",
@@ -473,7 +473,7 @@
   "sdkProductPatch": {
     "file": "script/patches/dsh-v0.2.0-rc.2-product.patch",
     "baseCommit": "54312dc5a8c4a63b60b3b92f51109f7bd1c1e852",
-    "sha256": "1c3f36bee7e462a4347433c3d38a3104b7b48754f1c4b37bb403388b32901062"
+    "sha256": "6c473887f2dd7e9d95ee72f538d19777c93a09465b897641a3c840c17ee5afb8"
   },
   "forkSnapshot": {
     "repository": "https://github.com/ManfredCh/deepseek-harness.git",
@@ -493,5 +493,25 @@
     "upstreamBaseCommit": "639ed015397290b3745d163aafe02ffee4aa3f84",
     "includedInFork": true,
     "note": "固定54312来源已包含的旧267文件delta原字节与原签名；当前产品后继单独应用，不改fork来源"
+  },
+  "darwinClientArtifactIdentityCompatibility": {
+    "includedIn": "sdkProductPatch",
+    "packages": [
+      "@deepseek-ai/dsh-client-modules"
+    ],
+    "sourcePaths": [
+      "packages/client/modules/src/index.ts",
+      "packages/client/modules/tests/node-half.client.spec.ts"
+    ],
+    "scope": "仅Darwin在元数据改变时使用既有构建mtime与已读代码字节识别版本，避免ctime系统属性变化误触发代码替换；保留同大小真实改写、entry构建时间、sourcemap及分块更新，Linux/Windows继续原元数据标识；原插件图、HMR传输、Loader与状态owner不变。",
+    "verification": "原client/modules及client/hmr六文件159项通过，原包类型检查通过；实际安装副本的同权限chmod已复现旧SDK黑屏。"
+  },
+  "managedPeiriToolRequestCompatibility": {
+    "includedIn": "sdkProductPatch",
+    "packages": [
+      "@deepseek-ai/dsh-llm-pi-ai"
+    ],
+    "scope": "仅匹配product composition托管端点且model.id=peiri时，经原onPayload请求钩子设置parallel_tool_calls=false；其他模型及自配同名模型沿原请求参数，原API、续接body绑定、认证、计量、工具校验和执行服务不变。",
+    "evidence": "原始服务流中5个并行调用参数均为0字节，单调用参数完整；原adapter/SDK options/argument streaming三文件62项及包类型检查通过。"
   }
 }

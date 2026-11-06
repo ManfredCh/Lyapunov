@@ -9,6 +9,15 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { sdkProcessEnv } from '../src/prepare.ts'
+import { resolveMuJoCoGlBackend } from '../../sim-contract/src/mujoco-gl.ts'
+
+test('套件包装器在macOS选择原生GLFW，直接MuJoCo仍用CGL并尊重显式覆盖',()=>{
+ expect(resolveMuJoCoGlBackend(undefined,'darwin','', 'benchmark')).toBe('glfw')
+ expect(resolveMuJoCoGlBackend(undefined,'darwin','')).toBe('cgl')
+ expect(resolveMuJoCoGlBackend(undefined,'linux','', 'benchmark')).toBe('egl')
+ expect(resolveMuJoCoGlBackend(undefined,'darwin','osmesa','benchmark')).toBe('osmesa')
+ expect(resolveMuJoCoGlBackend('egl','darwin','glfw','benchmark')).toBe('egl')
+})
 
 describe('官方套件 SDK 子进程环境的前置校验', () => {
   test('空/空白 CUDA_VISIBLE_DEVICES ⇒ 点名变量的可读错误（不进入 SDK）', () => {

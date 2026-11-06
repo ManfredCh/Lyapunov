@@ -7,7 +7,9 @@
  */
 import {test, expect} from 'bun:test'
 import {createRequire} from 'node:module'
-import {readFile} from 'node:fs/promises'
+import {readFile,mkdtemp,realpath,writeFile,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import {createElement, act, useState} from 'react'
 import {createRoot} from 'react-dom/client'
 
@@ -507,7 +509,12 @@ test('attachRunCheck：迟到读回只落回同 API/Scene 版本/源实体/同 w
   const actual = source.slice(start, end)
   const factory = `export function bind(scope:any){const {sceneRef,worldRef,api,apiRef,attachSourceIdRef,selectedRef,setAttachCheck}=scope;${actual};return attachRunCheck}`
   const js = new Bun.Transpiler({loader: 'ts'}).transformSync(factory)
-  const {bind} = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'))
+  // Bun 1.3 的 data: 导入会按路径长度解析；实际临时模块对声明运行时和新版 Bun 都可执行。
+  const {bind} = await (async()=>{
+    const directory=await realpath(await mkdtemp(join(tmpdir(),'assembly-readback-')))
+    try{const path=join(directory,'bind.mjs');await writeFile(path,js);return await import(path)}
+    finally{await rm(directory,{recursive:true,force:true})}
+  })()
   const run = async (mode: string, identity?: {worldId?: string; generation?: number}) => {
     let finish!: (value: unknown) => void
     const landed: unknown[] = []

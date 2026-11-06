@@ -43,7 +43,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
   return m
  }
  const operations = {
-  async recording_start(input: { sceneId: string; worldId: string; expectedGeneration: number; maxDurationS: number; cameraNames?: string[]; width?: number; height?: number; cameraEveryNFrames?: number; source?: { robotEntityId?: string; robotName?: string; bodyName?: string; cameraName: string; referenceFrame?: string }; channels?: string[]; lidar?: { channels?: number; horizontalSamples?: number; horizontalFovDeg?: number; verticalFovDeg?: [number, number]; rangeM?: number; geomGroups?: number[] } }, agent?: Agent) {
+  async recording_start(input: { sceneId: string; worldId: string; expectedGeneration: number; maxDurationS: number; cameraNames?: string[]; width?: number; height?: number; cameraEveryNFrames?: number; source?: { robotEntityId?: string; robotName?: string; bodyName?: string; cameraName: string; referenceFrame?: string }; channels?: string[]; lidar?: { channels?: number; horizontalSamples?: number; horizontalFovDeg?: number; verticalFovDeg?: [number, number]; rangeM?: number; geomGroups?: number[] } }, agent?: Agent, manual = false) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    if (!Number.isFinite(input.maxDurationS) || input.maxDurationS < .1 || input.maxDurationS > 300) throw new Error('INVALID_ARGUMENT: maxDurationS必须在0.1至300之间')
    // 请求通道只认这三个真实量：RGB、相机轴向Z深度、LiDAR沿射线欧氏range。没给 channels 时沿用旧语义
@@ -162,6 +162,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
      if (timer) clearTimeout(timer); if (saveTimer) clearInterval(saveTimer); if (observationTimer) clearInterval(observationTimer); offEvents?.(); offScene?.(); recorder.pauseFrames(); manifest.elapsedS = elapsedS
      try {
       try { await queue } catch (error) { reason = String(error) }
+      if (cameraCapture) manifest.cameraCapture = { ...cameraCapture }
       const stats = await recorder.stop(); manifest.frameCount = stats.frameCount
       // 固定来源在换代/机位变化时被明确结束：不是失败，也不是正常时长终点，落 interrupted 并保留准确原因。
       const sourceEnded = ['source-generation-changed', 'source-attribution-mismatch', 'source-camera-removed', 'source-camera-unavailable', 'source-mount-changed', 'source-world-disappeared'].some(value => reason.startsWith(value))
@@ -183,6 +184,8 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
      if (cameraCapture && !cameraCapture.stopped && (cameraCapture.frames - 1) % cameraCapture.everyNFrames === 0) {
       if (cameraCapture.captures >= 600) cameraCapture.stopped = 'capture-limit'
       else queue = queue.then(async () => {
+       // 订阅帧可能先于采集完成而排队；在真正发出RPC前再次守住同一上限。
+       if (cameraCapture.captures >= 600) { cameraCapture.stopped = 'capture-limit'; return }
        // 排队捕获执行前先核当前真实归属：世界已换代/来源已摘除/机位已换挂时结束本次作业，不采错来源。
        const pre = await boundStillHolds()
        if (pre) { void finish(pre); return }
@@ -252,6 +255,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
     void queue.catch(error => finish(String(error)))
     return { cancel: reason => { void finish(reason === 'recording-stop' ? reason : 'job-killed') }, done: done.promise }
    } })
+   if(manual)void ctx.jobs.wait(jobId,2_147_483_647,agent.id).catch(error=>ctx.logger.warn('录制作业等待结束：'+String(error)))
    manifest.jobId = jobId; await writeRecordingManifest(directory(agent), manifest); return summary(manifest, agent)
   },
   async recording_stop(input: { recordingId: string }, agent?: Agent) {
@@ -279,10 +283,11 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
    if (!frame) throw new Error('RECORDING_STEP_NOT_FOUND: 仅接受实际已记录步号')
    return { ...summary(manifest, agent), selectedFrame: { ...sourceFrame(frame), worldId: frame.worldId, entityCount: frame.entities.length, entities: frame.entities.slice(0, 8).map(e => ({ entityId: e.entityId, position: e.transform.position, jointCount: e.joints?.names.length ?? 0 })) } }
   },
-  async recording_export(input: { recordingId: string }, agent?: Agent) {
+  async recording_export(input: { recordingId: string }, agent?: Agent, manual = false) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    const m = await current(agent, input.recordingId); if (m.status === 'recording') throw new Error('RECORDING_NOT_FINISHED')
    const jobId = ctx.jobs.start({ kind: 'dataset', label: `导出录制 ${m.recordingId}`, owner: agent?.id, outputLimitBytes: 4000, run: () => { let cancelled = false; return { cancel: () => { cancelled = true }, done: exportRecording(directory(agent), m.recordingId).then(result => ({ status: cancelled ? 'killed' as const : result.status === 'PARTIAL' ? 'failed' as const : 'completed' as const, result: JSON.stringify(result) }), error => ({ status: 'failed' as const, result: String(error) })) } } })
+   if(manual)void ctx.jobs.wait(jobId,2_147_483_647,agent.id).catch(error=>ctx.logger.warn('导出作业等待结束：'+String(error)))
    return { jobId, recordingId: m.recordingId }
   },
  }
@@ -302,8 +307,8 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
   recording_export: { input: { type: 'object', required: true, additionalProperties: false, properties: { recordingId: id } } },
  }
  for (const [name, operation] of Object.entries(operations)) {
-  const execute = (input: unknown, agent?: Agent) => (operation as (input: any, agent?: Agent) => Promise<any>)(input, agent)
+  const execute = (input: unknown, agent?: Agent, manual = false) => (operation as (input: any, agent?: Agent, manual?: boolean) => Promise<any>)(input, agent, manual)
   ctx.tools.register(defineTool({ name, description: descriptions[name as keyof typeof operations], parameters: parameters[name as keyof typeof operations], output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] }, execute: (args, execution) => execute(args.input, execution.agent) }))
-  ctx.commands.register({ name, description: descriptions[name as keyof typeof operations], input: { hint: "Recording arguments as JSON." }, handler: async invocation => { try { return { kind: 'success', text: JSON.stringify(await execute(JSON.parse(invocation.rawInput || '{}'), invocation.agent)) } } catch (error) { return { kind: 'error', text: String(error) } } } })
+  ctx.commands.register({ name, description: descriptions[name as keyof typeof operations], input: { hint: "Recording arguments as JSON." }, handler: async invocation => { try { return { kind: 'success', text: JSON.stringify(await execute(JSON.parse(invocation.rawInput || '{}'), invocation.agent, true)) } } catch (error) { return { kind: 'error', text: String(error) } } } })
  }
 }

@@ -93,6 +93,8 @@ export interface WorldHandle {
   /** 旧持久句柄可省略；当前 Provider 应报告实际时钟及物理步长。 */
   clock?: 'realtime' | 'manual'; timestepS?: number
   status: "ready" | "running" | "paused" | "unsynced" | "unavailable" | "closed"
+  /** Provider 报告 unavailable 时的实际原因；没有原因时不凭旧 Frame 推断。 */
+  statusReason?: string
   /** 最近一次成功编译的告警（无告警为空数组）：如纯视觉实体没有碰撞体被物理装配跳过。 */
   warnings?: WorldWarning[]
   /** 实际模型/PhysicsScene读回；安装候选或Scene声明本身不能填充此字段。 */

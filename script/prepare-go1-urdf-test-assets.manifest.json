@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "note": "Newton 原生 URDF 回归的独立固定来源；保留官方原件和 package URI 依赖闭包，不作为策略或真机能力证据。",
+  "repository": "unitreerobotics/unitree_ros",
+  "commit": "15ebe53f4cd77e7d745ae83b9d7ff90e685e8998",
+  "upstreamPath": ".",
+  "destination": "materials/robots/unitree_go1/go1_description",
+  "license": {
+    "spdx": "BSD-3-Clause",
+    "copyright": "Copyright (c) 2016-2022 HangZhou YuShu TECHNOLOGY CO.,LTD. (\"Unitree Robotics\")",
+    "sourcePath": "LICENSE",
+    "destinationPath": "LICENSE",
+    "bytes": 1558,
+    "sha256": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d"
+  },
+  "files": [
+    {
+      "sourcePath": "robots/go1_description/urdf/go1.urdf",
+      "destinationPath": "urdf/go1.urdf",
+      "bytes": 62096,
+      "sha256": "8c4c22e581b549027c1918259627bb5172afdf56ab970814b0c6f62ecf5604ff"
+    },
+    {
+      "sourcePath": "robots/go1_description/package.xml",
+      "destinationPath": "package.xml",
+      "bytes": 374,
+      "sha256": "6ee21e3a6b78899eac17f593810943f5c70e40f503b8ec95e3ba0f583b7fea65"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/calf.dae",
+      "destinationPath": "meshes/calf.dae",
+      "bytes": 2344345,
+      "sha256": "30b3cb8a2c50c4236cddfd4b3c15969a09b554bf95b9f8920c3d917fe984008b"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/depthCamera.dae",
+      "destinationPath": "meshes/depthCamera.dae",
+      "bytes": 78670,
+      "sha256": "4f11e7c84debe4dcba533b9ac5bb8cf143b5a855b682dc7aef79b1e265cb94a1"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/hip.dae",
+      "destinationPath": "meshes/hip.dae",
+      "bytes": 2436525,
+      "sha256": "a7474253eb20c243e216ee6b5eddd4b38b7c145c4353af94a83b3a93e7901407"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/thigh.dae",
+      "destinationPath": "meshes/thigh.dae",
+      "bytes": 1250695,
+      "sha256": "612cb3be91c98111417dea0b2c8044218ca524f90e8611395e0e74f054bc15ea"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/thigh_mirror.dae",
+      "destinationPath": "meshes/thigh_mirror.dae",
+      "bytes": 1538494,
+      "sha256": "9b41987afef98fad93b273aaf1ad3397acbbfa6c1308e6ff29a35e9786b0e98d"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/trunk.dae",
+      "destinationPath": "meshes/trunk.dae",
+      "bytes": 64274993,
+      "sha256": "3afb2e637a031156c92a4c9bdcb44586f1433cdd55a80fdf5d1ad380889efd1b"
+    },
+    {
+      "sourcePath": "robots/go1_description/meshes/ultraSound.dae",
+      "destinationPath": "meshes/ultraSound.dae",
+      "bytes": 281841,
+      "sha256": "f863b0cc35e358d328f9cf9c79ebb0419c2440a7659c21cc559ec143d96a41c9"
+    }
+  ]
+}

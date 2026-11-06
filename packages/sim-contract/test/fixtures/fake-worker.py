@@ -198,7 +198,8 @@ def main():
             # 已 prepared 的世界（initialPauseSupport）保留自己的暂停能力位：真实引擎 sync 后仍保留它。
             sync_world = args.get('worldId') or world or 'fake-world'
             sync_handle = prepared.get(sync_world, handle_of(sync_world))
-            emit({'id': request['id'], 'result': {**sync_handle, 'appliedSceneRevision': args.get('snapshot', {}).get('revision', 0)}})
+            generation = plan.get('rebuiltGeneration', sync_handle['worldGeneration']) if args.get('options', {}).get('forceRebuild') else sync_handle['worldGeneration']
+            emit({'id': request['id'], 'result': {**sync_handle, 'worldGeneration': generation, 'appliedSceneRevision': args.get('snapshot', {}).get('revision', 0)}})
         elif method == 'list_worlds':
             emit({'id': request['id'], 'result': [prepared.get(name, handle_of(name)) for name in worlds]})
         elif method == 'set_paused' and args.get('worldId') in prepared:
@@ -233,6 +234,18 @@ def main():
             if asked in prepared:
                 frame.update(stepIndex=0, simTime=0.0, frameId=f'{asked}:1:0')
             emit({'id': request['id'], 'result': {**frame, 'stillAlive': asked in worlds}})
+        elif method == 'execute' and plan.get('executeMode'):
+            action = args['action']
+            terminal = {'actionId': action['actionId'], 'worldId': args['worldId'], 'generation': action['expectedGeneration'], 'status': 'completed'}
+            accepted = {**terminal, 'status': 'accepted'}
+            if plan['executeMode'] == 'event-before-reply':
+                emit({'event': 'receipt', 'receipt': terminal})
+            emit({'id': request['id'], 'result': accepted})
+            if plan['executeMode'] == 'event-after-reply':
+                time.sleep(0.04)
+                emit({'event': 'receipt', 'receipt': terminal})
+        elif method == 'receipt' and plan.get('executeMode'):
+            emit({'id': request['id'], 'result': {'actionId': args['actionId'], 'worldId': args['worldId'], 'generation': args.get('expectedGeneration', 1), 'status': 'completed'}})
         elif method == 'stop':
             emit({'id': request['id'], 'result': {'stopped': True, 'stepIndex': 7, 'receipts': [], 'affectedEntityIds': []}})
         elif method == 'close':

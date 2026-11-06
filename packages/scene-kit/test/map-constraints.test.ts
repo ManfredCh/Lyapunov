@@ -8,7 +8,7 @@
  * 真实公开数据（swisstopo 市界、USGS 跨换日线目录）与 PROJ 独立口径见 map-constraints-real-data.test.ts。
  * 运行：`bun test packages/scene-kit/test/map-constraints.test.ts`
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { Context } from "@deepseek-ai/cordis"
 import Sessions, { SessionId } from "@deepseek-ai/dsh-session"
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt"
@@ -22,6 +22,12 @@ import {
   mapGeoJsonToLocal, normalizeLongitude, parseDatumPolicy, parseSourceCrs, sourceToGeodetic,
 } from "../src/map-constraints.ts"
 import { registerMapConstraintTools } from "../src/map-constraints.ts"
+import { installMissingOstn15Grid } from "./proj-missing-grid.fixture.ts"
+
+// 判据作者的环境（Debian/Ubuntu proj-bin、云 CI）不带 OSTN15 格网；Homebrew proj 自带 ⇒ macOS 上
+// 「缺格网」前提不成立。这里真实复现缺失（影子数据目录），不是跳测——见 fixture 文件头注释。
+const restoreMissingGrid = installMissingOstn15Grid()
+afterAll(restoreMissingGrid)
 
 const signal = new AbortController().signal
 /** 固定时间：结果里的 convertedAt 由注入依赖决定，断言不依赖跑测试的当下。 */

@@ -1,4 +1,4 @@
-# Agent Graph 用户文档（0.2.0α1）
+# Agent Graph 用户文档（0.2.1）
 
 Agent Graph 是 Lyapunov 的"回路之上的回路"：在既有 agent-loop 不动的前提下，
 用三个角色（Coordinator / Worker / Verifier）跑"生成 → 调试 → 验证 → 入库"的
@@ -7,7 +7,8 @@ Agent Graph 是 Lyapunov 的"回路之上的回路"：在既有 agent-loop 不�
 
 接口契约见 `docs/AGENT_GRAPH_CONTRACT.md`；类型唯一来源
 `packages/lyapunov-contracts/src/agent-graph.ts`；三个角色的操作协议见
-`.agents/skills/skill-debug/`、`skill-campaign/`、`skill-verify/`。
+原插件技能目录 `packages/lyapunov-shell/skills/skill-debug/`、`skill-campaign/`、`skill-verify/`。
+源码中 `.agents/skills/` 的对应入口链接到同一份文件；安装后由原 `skill` 工具发现，不依赖源码仓路径。
 
 ## 1. 全景图
 
@@ -52,6 +53,12 @@ heldout 回执对 worker 不可见——修不好就修不好，不许对着 hel
 任务状态：`pending → exploring → debugging → verifying → heldout-eval →
 done | blocked | rejected`，由 `campaign_transition` 驱动，非法迁移具名拒绝
 `CAMPAIGN_ILLEGAL_TRANSITION`。heldout 任务只允许 `heldout-eval → done|blocked`。
+
+run属于调用工具的真实会话。Coordinator把pending dev派给fresh Worker；Worker自行进入
+exploring／debugging并记账。fresh Verifier自行进入verifying，使用返回的自己的runId写验证记录，
+再关闭自己的run。Coordinator持有任务调度与自己实际dev／heldout执行的run，不代开／代关子角色。
+campaign_record_run的summary只接受outcome与可选notes，工具数及仿真步数由原owner取真实计量。
+one-shot原生结束时漏关的run由同一owner记aborted；续接epoch不关闭，不自动判成功或迁移任务。
 
 `campaign_init` 时设 `budget: {maxToolCalls, maxSimSteps, maxWallSeconds}`；
 `tools/execute` waterfall 按 run 记账（toolCalls 计数 + receipt.stepIndex 增量），
@@ -101,20 +108,22 @@ done | blocked | rejected`，由 `campaign_transition` 驱动，非法迁移具�
 
 ## 7. 快速上手
 
-装好 0.2.0α1 后，给 agent 一句话即可跑 campaign，例如：
+装好0.2.1并准备真实可执行的场景／控制配置后，给agent明确任务，例如：
 
 > "对 `franka_panda` pack 跑一个 pick-and-place campaign：用 `assembly-dev-01..05`
 > 五个 dev 场景做调试、`assembly-heldout-01..03` 做 heldout，目标是 cube-1 进入
 > 目标位姿盒且静止，预算 500 次工具调用 / 20 万 sim 步 / 2 小时，跑完汇报
 > heldout 通过率和新准入的技能。"
 
-agent（以 coordinator 身份）会依次：`campaign_init` 分区建任务 →
-`pack_skill_list` 排 curriculum → 逐任务 `campaign_transition` + 派
-skill-debug worker → 有提案派 skill-verify verifier → `skill_promote` →
+agent（以coordinator身份）会依次：campaign_init分区建任务 →
+pack_skill_list排curriculum → 派skill-debug Worker，由其自己transition开run →
+有提案派skill-verify Verifier，由其自己transition开验证run → passed:true才skill_promote →
 亲自跑 heldout-eval → rerun sweep → `campaign_status` 汇总。
 
 最小前提：场景中已有可驱动的机器人实体（`robot_describe` 能读到关节/能力），
 dev 与 heldout 是**不同 sceneId 的场景实例**，goal 谓词引用的实体真实存在。
+TCP动作还需要Scene中已有真实TCP配置；缺失时保留TCP_MAPPING_REQUIRED，不会自动选手腕。
+终态任务没有可重开出边；rerun sweep没有合法活动入口时必须报告未运行，不能换campaign重置预算。
 
 ## 8. 错误码速查
 

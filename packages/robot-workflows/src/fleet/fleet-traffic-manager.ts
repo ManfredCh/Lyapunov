@@ -458,10 +458,12 @@ export class FleetTrafficManager {
   #negotiations = new Map<string, number>()
   #sequence = 0
 
+  private readonly now: () => number
+  private readonly policy: FleetTrafficPolicy
   constructor(
-    private readonly now: () => number = () => Date.now(),
-    private readonly policy: FleetTrafficPolicy = DEFAULT_FLEET_TRAFFIC_POLICY,
-  ) {}
+    now: () => number = () => Date.now(),
+    policy: FleetTrafficPolicy = DEFAULT_FLEET_TRAFFIC_POLICY,
+  ) { this.now = now; this.policy = policy }
 
   propose(proposal: FleetTrajectoryProposal): FleetTrafficDecision {
     if (

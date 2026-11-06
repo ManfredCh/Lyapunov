@@ -28,7 +28,7 @@ export function installedKnownMcpDefaults(env:NodeJS.ProcessEnv=process.env,plat
  })
  const portText=env.LYAPUNOV_BLENDER_MCP_PORT??env.BLENDER_PORT??'9876',port=Number(portText)
  if(command&&/^\d+$/.test(portText)&&Number.isInteger(port)&&port>0&&port<=65535)rows.push({kind:'blender',command,args:[],port,env:{BLENDER_HOST:env.BLENDER_HOST??'127.0.0.1',BLENDER_PORT:String(port),DISABLE_TELEMETRY:'1'}})
- const unityCommand=platform==='linux'&&!env.LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!env.LYAPUNOV_UNITY_MCP_URL?.trim()?installedUnityMcpCommand(env,root):undefined
+ const unityCommand=['linux','darwin'].includes(platform)&&!env.LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!env.LYAPUNOV_UNITY_MCP_URL?.trim()?installedUnityMcpCommand(env,root):undefined
  if(unityCommand&&home)rows.push({kind:'unity',command:unityCommand,args:['--transport','stdio'],env:{UNITY_MCP_STATUS_DIR:env.UNITY_MCP_STATUS_DIR??join(home,'.unity-mcp'),FASTMCP_CHECK_FOR_UPDATES:'off',FASTMCP_SHOW_SERVER_BANNER:'false'}})
  return rows
 }

@@ -101,8 +101,8 @@ Cua打开服务打印的URL，等“已就绪”，选择正面或侧面，再�
 | `bun run test:ci --filter packages/sim-mujoco/` | 0，3文件通过 | walk-ci-mujoco.log |
 | `bun x tsc --noEmit --pretty false` | 0 | walk-tsc-final.log |
 | `bun run build:plugins` | 0 | walk-build-final.log |
-| `LYAPUNOV_MUJOCO_PYTHON=上述环境 node --experimental-transform-types --test packages/human-crowd/test/native.test.ts` | 0，2/2，0skip，原生16组 | clip-native.log |
-| `LYAPUNOV_EXTERNAL_HUMAN_ASSETS=.runtime/external-human-native-20261028/source LYAPUNOV_MUJOCO_PYTHON=上述环境 node --experimental-transform-types --test packages/human-crowd/test/external-native.test.ts` | 0，1/1，0skip，原Cesium57通道回归 | walk-external-native-final.log |
+| `LYAPUNOV_MUJOCO_PYTHON=上述环境 node --experimental-strip-types --test packages/human-crowd/test/native.test.ts` | 0，2/2，0skip，原生16组 | clip-native.log |
+| `LYAPUNOV_EXTERNAL_HUMAN_ASSETS=.runtime/external-human-native-20261028/source LYAPUNOV_MUJOCO_PYTHON=上述环境 node --experimental-strip-types --test packages/human-crowd/test/external-native.test.ts` | 0，1/1，0skip，原Cesium57通道回归 | walk-external-native-final.log |
 | `LYAPUNOV_ISAAC_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/python LYAPUNOV_USD_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/usd-python/bin/python bun run packages/human-crowd/scripts/isaac-human-usd.ts .runtime/human-r3/walk-isaac` | 0，同世界11项全部通过，closed=true | walk-isaac.log |
 | 上述prepare/clip-reference/trajectory/stance命令 | 0；重建SHA相同/3294样本差0/真实足底报告 | rocketbox-prepare.log、clip-sampling-verify.log、shoe-trajectory.log、stance-check.log |
 

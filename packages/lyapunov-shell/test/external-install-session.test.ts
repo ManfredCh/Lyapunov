@@ -181,7 +181,7 @@ import {createScope} from '@deepseek-ai/dsh-scope'
 import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import { initProfile, mountRootInclude, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
-import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -197,7 +197,7 @@ afterEach(async () => {
 })
 
 async function preferencesFixture(input: { legacy?: string; overrides?: object[]; built?: boolean } = {}) {
- const home = await mkdtemp(join(tmpdir(), 'lyapunov-rc2-config-'))
+ const home = await realpath(await mkdtemp(join(tmpdir(), 'lyapunov-rc2-config-')))
  ownedHomes.push(home)
  const dir = join(home, 'profile'), bundle = join(dir, 'node_modules', 'test-preferences-bundle')
  initProfile(dir, ['test-preferences-bundle'])
@@ -425,7 +425,7 @@ test('软件官方下载沿原native Jobs提交静态argv，成功只代表页�
 
 test('自然语言原生catalog工具复用实际版本探测的软件，不开URL、不重复下载；Job读回不能假安装',async()=>{
  const {default:NativeJobs}=await import('@deepseek-ai/dsh-jobs-local'),{SessionId}=await import('@deepseek-ai/dsh-session')
- const home=await mkdtemp(join(tmpdir(),'lyapunov-external-native-'));ownedHomes.push(home)
+ const home=await realpath(await mkdtemp(join(tmpdir(),'lyapunov-external-native-')));ownedHomes.push(home)
  const binary=join(home,'blender');await writeFile(binary,'#!/bin/sh\nprintf "Blender test-version\\n"\n',{mode:0o755})
  const old=process.env.BLENDER_EXECUTABLE;process.env.BLENDER_EXECUTABLE=binary
  const ctx=new NativeContext();ownedContexts.push(ctx)

@@ -27,6 +27,11 @@ export function publicChooserHome(env:NodeJS.ProcessEnv=process.env,platform:Nod
   return fallback
 }
 
+/** 原生 macOS 桌面不使用 DISPLAY；Linux 仍须有实际图形会话。 */
+export function hostDesktopAvailable(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Platform=process.platform):boolean{
+  return platform==='darwin'||platform==='linux'&&Boolean(env.DISPLAY||env.WAYLAND_DISPLAY)
+}
+
 /**
  * Resolve the optional SAM3 checkpoint without putting a machine-specific
  * absolute path in a profile. An explicit path always wins; otherwise an
@@ -78,11 +83,17 @@ function isSnapLauncher(path:string):boolean{
  *    其余情况（没有 blender／非 snap 安装／载荷不在）保持 `blender` 不变 —— 不猜、不改非 snap 环境的行为。
  * `probe` 只用于测试注入（默认读真实文件系统）。
  */
-export function resolveBlenderExecutable(env:NodeJS.ProcessEnv=process.env,probe:{exists?:(path:string)=>boolean;isSnapLauncher?:(path:string)=>boolean}={}):string{
+export function resolveBlenderExecutable(env:NodeJS.ProcessEnv=process.env,probe:{exists?:(path:string)=>boolean;isSnapLauncher?:(path:string)=>boolean;platform?:NodeJS.Platform}={}):string{
   const explicit=env.BLENDER_EXECUTABLE?.trim()
   if(explicit)return explicit
   const exists=probe.exists??existsSync,launcher=probe.isSnapLauncher??isSnapLauncher
   const first=firstOnPath("blender",env.PATH,exists)
+  // Finder 的 PATH 通常不含 .app 内部可执行文件；仅补标准应用安装布局，原 MCP/插件不变。
+  if(!first&&(probe.platform??process.platform)==='darwin'){
+    const candidates=['/Applications/Blender.app/Contents/MacOS/Blender',...env.HOME?[join(env.HOME,'Applications/Blender.app/Contents/MacOS/Blender')]:[]]
+    const installed=candidates.find(exists)
+    if(installed)return installed
+  }
   if(!first||!launcher(first))return "blender"
   return exists(SNAP_BLENDER_PAYLOAD)?SNAP_BLENDER_PAYLOAD:"blender"
 }
@@ -259,7 +270,8 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   if(input.mode!=="guest")for(const provider of ["marble","hunyuan","tripo","image"])add("generate-"+provider,{dataDirectory:join(providerData,provider),allowPaidSubmission:false})
   // FastGS 不再是随包算法插件：官方 fastgs/FastGS 改为包外可选工具，由 `./lyapunov fastgs`
   // 与设置里的「外部工具」按需下载/安装（见 packages/lyapunov-product-bundle/src/fastgs-external.ts）。
-  add("segment-sam3",{pythonPath:join(PRODUCT_ROOT,".runtime/conda/envs/sam3/bin/python"),checkpointPath:resolveSam3Checkpoint(),dataDirectory:join(providerData,"sam3")})
+  // macOS 没有 CUDA；选用该原插件已提供的 CPU 分支，不改推理／模型实现。
+  add("segment-sam3",{pythonPath:join(PRODUCT_ROOT,".runtime/conda/envs/sam3/bin/python"),checkpointPath:resolveSam3Checkpoint(),dataDirectory:join(providerData,"sam3"),...(process.platform==='darwin'?{device:'cpu'}:{})})
   if(input.surface==="web")plugins.push(
     {id:"lyapunov-desktop-lifecycle",name:join(PRODUCT_ROOT,"packages/desktop/dist/plugin.js")},
     {id:"lyapunov-shell",name:"@lyapunov/shell",config:{recordingRoot,captureRoot,knownMcpDefaults:installedKnownMcpDefaults(input.sdkEnvironment??process.env),...(d?{catalogRoot:d.catalogRoot}:{}),...input.administrator?{administrator:input.administrator,modelBilling:input.modelBilling}:{}}},
@@ -275,14 +287,17 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     {id:"lyapunov-directory-browse-ui",name:"@deepseek-ai/dsh-client-ui-directory-picker-browse"},
   )
   // 原生 computer-use 会访问宿主桌面，只有显式 LYAPUNOV_COMPUTER_USE=1 才挂载；普通启动不取得桌面能力。
-  if(input.surface==="web"&&process.env.LYAPUNOV_COMPUTER_USE==="1"&&process.platform==="linux"&&Boolean(process.env.DISPLAY||process.env.WAYLAND_DISPLAY))plugins.push(
+  const desktopEnv=input.sdkEnvironment??process.env
+  const desktopAvailable=hostDesktopAvailable(desktopEnv)
+  if(input.surface==="web"&&desktopEnv.LYAPUNOV_COMPUTER_USE==="1"&&desktopAvailable)plugins.push(
     {id:"lyapunov-computer-use",name:join(UPSTREAM,"packages/computer-use/computer-use/lib/index.js")},
     {id:"lyapunov-computer-use-cua-native",name:join(UPSTREAM,"packages/experimental/computer-use-cua-driver-native/lib/index.js")},
   )
   // browser-use:launch 模式每个会话独立隔离 Chromium,不占用 9222/9223 等既有调试通道;有显示环境时可见窗口便于观察。
-  if(input.surface==="web"&&process.env.LYAPUNOV_BROWSER_USE!=="0"&&process.platform==="linux"&&Boolean(process.env.DISPLAY||process.env.WAYLAND_DISPLAY))plugins.push(
+  const browserExecutable=process.platform==='darwin'?['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(existsSync):undefined
+  if(input.surface==="web"&&desktopEnv.LYAPUNOV_BROWSER_USE!=="0"&&desktopAvailable)plugins.push(
     {id:"lyapunov-browser-use",name:join(UPSTREAM,"packages/browser-use/browser-use/lib/index.js")},
-    {id:"lyapunov-browser-use-chrome-devtools-mcp",name:join(UPSTREAM,"packages/experimental/browser-use-chrome-devtools-mcp/lib/index.js"),config:{mode:"launch",headless:false}},
+    {id:"lyapunov-browser-use-chrome-devtools-mcp",name:join(UPSTREAM,"packages/experimental/browser-use-chrome-devtools-mcp/lib/index.js"),config:{mode:"launch",headless:false,...(browserExecutable?{executablePath:browserExecutable}:{})}},
   )
   if(input.mode==="developer"){
     if(input.surface!=="web")plugins.push({id:"lyapunov-cordis-host-runner",name:"@deepseek-ai/dsh-cordis-host-runner"})
@@ -329,7 +344,7 @@ export async function runtimePatch(input:RuntimePatchInput&{dir:string}){
     await ensurePluginModule(benchmarkProvider==="gymnasium"?"benchmark-gymnasium":"benchmark-libero")
   }
   if(process.platform==='linux'&&process.arch==='x64'&&!(input.sdkEnvironment??process.env).COMPUTER_USE_LINUX_BIN?.trim())await ensureComputerUseLinux({env:input.sdkEnvironment??process.env})
-  if(process.platform==='linux'&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_URL?.trim())await ensureUnityMcp({env:input.sdkEnvironment??process.env,signal:AbortSignal.timeout(120000)}).catch(error=>console.warn('Unity MCP供给尚未就绪：'+String(error instanceof Error?error.message:error)))
+  if(['linux','darwin'].includes(process.platform)&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_COMMAND?.trim()&&!(input.sdkEnvironment??process.env).LYAPUNOV_UNITY_MCP_URL?.trim())await ensureUnityMcp({env:input.sdkEnvironment??process.env,signal:AbortSignal.timeout(120000)}).catch(error=>console.warn('Unity MCP供给尚未就绪：'+String(error instanceof Error?error.message:error)))
   const plugins=runtimePluginInsert(input)
   let patch="- insert: "+JSON.stringify(plugins)+"\n"
   // 模型仍由登录/开发者后台装配；原生 Models 与 Agent 预设设置页沿用上游 owner，显式恢复已有 profile 的预设入口。

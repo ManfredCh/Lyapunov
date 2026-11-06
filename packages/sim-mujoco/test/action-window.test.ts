@@ -18,7 +18,7 @@
  *
  * 运行（产品 Host 是 Node；`@deepseek-ai/dsh-subprocess-local` 在 Bun 下加载即失败）：
  *   LYAPUNOV_MUJOCO_PYTHON=<含 mujoco 的解释器> \
- *     node --experimental-transform-types --test packages/sim-mujoco/test/action-window.test.ts
+ *     node --experimental-strip-types --test packages/sim-mujoco/test/action-window.test.ts
  * 可用 `LYAPUNOV_MUJOCO_TEST_WORKER=<worker.py>` 指向另一份 worker（例如修复前的版本）确认本文件的
  * ①②确实会因旧行为失败。未提供解释器（且仓内默认路径不存在）时整组 skip，不静默当成通过。
  */
@@ -235,6 +235,22 @@ suite(pythonPath ? `定时动作窗口终态（真实 MuJoCo：${pythonPath}）`
       // 拒绝不得把世界留在 running：时钟未被占用，下一次动作仍可受理。
       const worlds = await mujoco.listWorlds()
       assert.notEqual(worlds.find(handle => handle.worldId === 'nogain')?.status, 'running')
+    } finally { await mujoco.dispose() }
+  })
+
+  test('纯力矩电机无位置增益时实时世界可被动推进，停止后仍不猜位置控制', { timeout: 30_000 }, async () => {
+    const mujoco = create()
+    try {
+      const world = await mujoco.open(scene('realtime-nogain', TORQUE_ARM), { worldId: 'realtime-nogain', timestepS: TIMESTEP, clock: 'realtime' })
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const first = await mujoco.observe(world.worldId, { entityIds: ['arm'] })
+      assert.ok(first.stepIndex > 0, '无位置增益时仍须推进原生被动物理')
+      await assert.rejects(() => mujoco.execute(world.worldId, jointMove('realtime-nogain-action', ['j2'], [0.05])), (error: any) => error?.code === 'TORQUE_ACTUATOR_POSITION_GAINS_REQUIRED')
+      await mujoco.stop(world.worldId, { expectedGeneration: world.worldGeneration })
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const second = await mujoco.observe(world.worldId, { entityIds: ['arm'] })
+      assert.ok(second.stepIndex > first.stepIndex, '停止动作不能让无增益电机的世界故障')
+      assert.notEqual((await mujoco.listWorlds()).find(item => item.worldId === world.worldId)?.status, 'unavailable')
     } finally { await mujoco.dispose() }
   })
 

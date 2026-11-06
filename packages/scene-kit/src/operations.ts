@@ -312,7 +312,9 @@ export class SceneOperations {
   readonly resources: ResourceLibrary
   /** 生效布局：省略 layout 时五个域根都等于 directory（split=false），此时场景仍在 <directory>/scenes。 */
   readonly layout: ResolvedSceneLayout
-  constructor(readonly directory: string, productRootOrOptions?: string | SceneOperationsOptions) {
+  readonly directory: string
+  constructor(directory: string, productRootOrOptions?: string | SceneOperationsOptions) {
+    this.directory = directory
     // 旧调用把 productRoot 直接当第二参数传（script/refactor-verify.ts）；新调用一律用选项对象。
     const options: SceneOperationsOptions = typeof productRootOrOptions === "string" ? { productRoot: productRootOrOptions } : productRootOrOptions ?? {}
     this.layout = resolveSceneLayout(directory, options.layout)

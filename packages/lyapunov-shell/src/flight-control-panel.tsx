@@ -3,19 +3,20 @@ import type {Entity,EntityObservation,WorldHandle} from '../../lyapunov-contract
 import type {RobotDescription} from '../../sim-contract/src/index.ts'
 import {NumberField,type Translate} from './entity-editor.tsx'
 import {assertFlightProfile} from '../../robot-workflows/src/flight-controller.ts'
-export function FlightControlPanel({entity,description,observation,world,ready,command,tr,onWorldReset,describe}:{entity:Entity;description?:RobotDescription;observation?:EntityObservation;world:WorldHandle;ready:boolean;command:(name:string,input:Record<string,unknown>)=>Promise<any>;tr:Translate;onWorldReset?:(world:WorldHandle)=>void;describe?:()=>void}){
+export function FlightControlPanel({entity,description,observation,world,ready,command,readStatus,tr,onWorldReset,describe}:{entity:Entity;description?:RobotDescription;observation?:EntityObservation;world:WorldHandle;ready:boolean;command:(name:string,input:Record<string,unknown>)=>Promise<any>;readStatus:(input:Record<string,unknown>)=>Promise<any>;tr:Translate;onWorldReset?:(world:WorldHandle)=>void;describe?:()=>void}){
  const [target,setTarget]=useState<[number,number,number]>([0,0,.35]),[yaw,setYaw]=useState(0),[groundZ,setGroundZ]=useState(0),[duration,setDuration]=useState(8),[busy,setBusy]=useState(false),[status,setStatus]=useState<any>(),[error,setError]=useState('')
  const mapping=description?.bodyWrench
  let compatible=false;try{compatible=world.engineId==='mujoco'&&Boolean(assertFlightProfile(mapping))}catch{ /* 实際映射未就绪时禁用，不用模型名称猜就绪 */ }
  const identity={worldId:world.worldId,entityId:entity.entityId,expectedGeneration:world.worldGeneration,expectedSceneRevision:world.appliedSceneRevision}
  const commandRef=useRef(command);commandRef.current=command
+ const statusRef=useRef(readStatus);statusRef.current=readStatus
  const active=useRef(false)
  const controlKey=JSON.stringify([world.worldId,world.worldGeneration,entity.entityId])
  useEffect(()=>{const p=observation?.transform.position;if(p)setTarget([p[0],p[1],Math.max(p[2],.35)]);setStatus(undefined);setError('');return()=>{if(active.current){active.current=false;void commandRef.current('robot_flight',{...identity,operation:'stop'}).catch(()=>{})}}},[controlKey])
  useEffect(()=>{
   if(!ready||!compatible)return
   let ended=false
-  const refresh=async()=>{try{const value=await commandRef.current('robot_flight',{...identity,operation:'status'});if(!ended){setStatus(value);active.current=value.status==='running'}}catch(value){if(!ended)setError(String(value))}}
+  const refresh=async()=>{try{const value=await statusRef.current(identity);if(!ended){setStatus(value);active.current=value.status==='running'}}catch(value){if(!ended)setError(String(value))}}
   void refresh();const timer=setInterval(()=>void refresh(),500)
   return()=>{ended=true;clearInterval(timer)}
  },[controlKey,ready,compatible])

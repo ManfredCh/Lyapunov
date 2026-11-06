@@ -15,6 +15,7 @@ export interface NativeSystemPreparation {
 export const LINUX_NATIVE_LOADER_PACKAGES = [
   'node-addon-require-builtin-linux-x64-gnu',
 ] as const
+export const MACOS_NATIVE_LOADER_PACKAGES = ['node-addon-require-builtin-darwin-arm64'] as const
 
 /** 用载荷自己的 Node 从正常模块入口加载二进制；依赖存在但不可加载同样阻断归档。 */
 export function verifyLinuxNativeLoaders(stage: string, node: string): void {
@@ -29,13 +30,22 @@ export function verifyLinuxNativeLoaders(stage: string, node: string): void {
 
 /** 用所选发行 Node 执行固定 SDK 的 host-addon-only 构建，并核验 Linux x64 glibc 产物。 */
 export function prepareLinuxNativeSystem(upstream: string, node: string): NativeSystemPreparation {
+  return prepareHostNativeSystem(upstream,node,'linux')
+}
+
+/** macOS 沿固定 SDK 的同一 host-addon-only 命令构建，不另写锁实现。 */
+export function prepareMacOSNativeSystem(upstream:string,node:string):NativeSystemPreparation{
+  return prepareHostNativeSystem(upstream,node,'darwin')
+}
+
+function prepareHostNativeSystem(upstream: string, node: string, platform:'linux'|'darwin'): NativeSystemPreparation {
   const probe = spawnSync(node, ['-p', 'JSON.stringify({executable:process.execPath,version:process.version,platform:process.platform,arch:process.arch,glibc:process.report.getReport().header.glibcVersionRuntime})'], { encoding: 'utf8' })
   if (probe.error) throw probe.error
   if (probe.status !== 0) throw new Error('找不到可用的 Node 24 运行时：' + probe.stderr)
   const runtime = JSON.parse(probe.stdout) as { executable: string; version: string; platform: string; arch: string; glibc?: string }
   if (Number(runtime.version.slice(1).split('.')[0]) < 24) throw new Error('发行包要求 Node >= 24')
-  if (runtime.platform !== 'linux' || runtime.arch !== 'x64' || !runtime.glibc)
-    throw new Error('原生构建要求所选发行 Node 运行在 Linux x64 glibc 上')
+  if (platform==='linux'?(runtime.platform !== 'linux' || runtime.arch !== 'x64' || !runtime.glibc):(runtime.platform!=='darwin'||runtime.arch!=='arm64'))
+    throw new Error(platform==='linux'?'原生构建要求所选发行 Node 运行在 Linux x64 glibc 上':'原生构建要求所选发行 Node 运行在 macOS arm64 上')
   const manifest = join(upstream, 'package.json')
   const script = JSON.parse(readFileSync(manifest, 'utf8')).scripts?.['build:native-system']
   if (script !== 'tsx native/system/scripts/build.ts --host-addon-only')
@@ -45,8 +55,8 @@ export function prepareLinuxNativeSystem(upstream: string, node: string): Native
   const command = [runtime.executable, require.resolve('tsx/cli'), join(upstream, 'native/system/scripts/build.ts'), '--host-addon-only']
   const build = spawnSync(command[0]!, command.slice(1), { cwd: upstream, stdio: 'inherit', env: { ...process.env, HF_ENDPOINT: 'https://hf-mirror.com' } })
   if (build.error) throw build.error
-  if (build.status !== 0) throw new Error(`Linux x64 glibc 原生构建失败（退出 ${build.status}），停止打包`)
-  const problems = nativeSystemRuntimeViolations(upstream, '')
+  if (build.status !== 0) throw new Error(`${platform} 原生构建失败（退出 ${build.status}），停止打包`)
+  const problems = nativeSystemRuntimeViolations(upstream, '',platform)
   if (problems.length) throw new Error(problems.join('；'))
   return { executable: runtime.executable, version: runtime.version, command }
 }

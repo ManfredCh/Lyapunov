@@ -20,7 +20,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { chdir, cwd as processCwd } from 'node:process'
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { inflateSync } from 'node:zlib'
@@ -231,7 +231,8 @@ describe('真实 MuJoCo 引擎 + 真实 ToolRegistry/Command 的 outputDir 落�
   // 真引擎用例：整段要走真 MuJoCo worker + 真渲染，并发验收轮会贴着默认 5s 上限（单跑实测约 2.3–3.7s）；
   // 用 node:test 的 options 显式声明 60s，不让负载型偶发超时被读成产品回归。
   test('相对 outputDir 全部落到会话 cwd：宿主机 cwd 诱饵未动，主仓目录未新增', { timeout: 60_000 }, async () => {
-    const root = await mkdtemp(join(tmpdir(), 'robot-tools-mujoco-'))
+    // 引擎回执解析系统符号链接，临时根也采用同一真实路径（macOS /var → /private/var）。
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'robot-tools-mujoco-')))
     const hostCwd = join(root, 'host-cwd')
     const sessionCwd = join(root, 'session-workspace')
     // 诱饵：两边同名的相对路径，只有会话 cwd 那份应该被写到。

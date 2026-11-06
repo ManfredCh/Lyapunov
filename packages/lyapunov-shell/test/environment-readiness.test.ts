@@ -22,7 +22,7 @@ import {
   ENVIRONMENT_STATUS_LABEL, classifyGpu, environmentCode, environmentPanel, environmentRowWording,
   environmentRowById, evaluateEnvironment, featureEnvironmentVerdict, gpuRow, parseSmiCapacity, classifyGraphicsVendor,
   probeEngineRuntimes, probeGpuFacts, probeSdkImport, clearSdkImportCache, sdkInstalled, sitePackagesCandidates, smiFailureDetail, gpuRuntimeDecision, gpuRefusal,
-  webglNotice, compactDriverVersion, type EngineRuntimeFacts, type EnvironmentFacts, type EnvironmentRow, type GpuFacts, type GpuState,
+  probeWslGpuDevices, webglNotice, compactDriverVersion, type EngineRuntimeFacts, type EnvironmentFacts, type EnvironmentRow, type GpuFacts, type GpuState,
 } from "../src/environment-readiness.ts"
 import { createProviderInstaller, invalidateHostReadiness, ISAAC_EULA_URL, type EnvironmentGateMode } from "../src/provider-installer.ts"
 
@@ -851,3 +851,30 @@ async function ctx_jobs_wait(h: { installer: ReturnType<typeof createProviderIns
     await flush()
   }
 }
+describe("probeWslGpuDevices · WSL2 GPU（/dev/dxg + /usr/lib/wsl/lib）", () => {
+  const char = () => ({ isCharacterDevice: () => true })
+  const notChar = () => ({ isCharacterDevice: () => false })
+  test("dxg 是字符设备且 libcuda.so.1 存在 ⇒ 设备节点 + 库目录", () => {
+    const r = probeWslGpuDevices({ statDevice: () => char(), libExists: () => true })
+    expect(r).toEqual({ devices: ["/dev/dxg"], libraryDir: "/usr/lib/wsl/lib" })
+  })
+  test("dxg 缺席 ⇒ 两套都报空（不拿库目录冒充设备）", () => {
+    const r = probeWslGpuDevices({ statDevice: () => null, libExists: () => true })
+    expect(r).toEqual({ devices: [], libraryDir: null })
+  })
+  test("dxg 不是字符设备 ⇒ 报空", () => {
+    expect(probeWslGpuDevices({ statDevice: () => notChar(), libExists: () => true }).devices).toEqual([])
+  })
+  test("dxg 在但 libcuda 缺席 ⇒ 报空（设备与库配对才成立）", () => {
+    const r = probeWslGpuDevices({ statDevice: () => char(), libExists: () => false })
+    expect(r).toEqual({ devices: [], libraryDir: null })
+  })
+  test("自定义 devDir/libDir 走同一判据", () => {
+    const seen: string[] = []
+    const r = probeWslGpuDevices({ devDir: "/fake/dev", libDir: "/fake/lib",
+      statDevice: p => { seen.push(p); return char() }, libExists: p => { seen.push(p); return true } })
+    expect(r.devices).toEqual(["/fake/dev/dxg"])
+    expect(r.libraryDir).toBe("/fake/lib")
+    expect(seen).toContain("/fake/lib/libcuda.so.1")
+  })
+})

@@ -2,7 +2,7 @@
 set -eu
 export PYTHONNOUSERSITE=1
 unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP NODE_PATH NODE_OPTIONS
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
 provider=${1:-}
 case "$provider" in mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium) shift ;; *) printf '%s\n' '用法：./lyapunov install-provider mujoco|isaac|newton|policy-cpu|benchmark-libero|benchmark-gymnasium [--accept-omniverse-eula] [--human-cuda（仅MuJoCo）]' >&2; exit 2 ;; esac
 accept_eula=false
@@ -16,6 +16,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 if [ "$human_cuda" = true ] && [ "$provider" != mujoco ]; then printf '%s\n' '--human-cuda只适用于MuJoCo，不改其它SDK' >&2; exit 2; fi
+# CUDA 人体计算只在 Linux（NVIDIA）有效；macOS 上明确拒绝，不静默忽略。
+if [ "$human_cuda" = true ] && [ "$(uname -s)" = Darwin ]; then printf '%s\n' '--human-cuda仅支持Linux NVIDIA主机；macOS无CUDA人体计算' >&2; exit 2; fi
 if [ "$provider" = isaac ] && [ "$accept_eula" != true ]; then
   printf '%s\n' '{"provider":"isaac","status":"BLOCKED","code":"LICENSE_CONFIRMATION_REQUIRED","message":"安装并运行 Isaac 前请阅读 NVIDIA Omniverse 许可；明确同意后使用 --accept-omniverse-eula。","eulaUrl":"https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html"}'
   exit 2
@@ -28,17 +30,17 @@ if [ ! -f "$root/RELEASE.json" ] && [ -f "$root/script/package-linux.ts" ]; then
 if [ ! -x "$node_bin" ] && [ -z "${LYAPUNOV_NODE_BIN:-}" ] && [ "$dev_checkout" = true ]; then
   command -v node >/dev/null 2>&1 && node_bin=$(command -v node)
 fi
-[ -x "$node_bin" ] || { printf '%s\n' "PROVIDER_NODE_MISSING: 找不到可执行 Node：$node_bin；请重新完整解包或检查 LYAPUNOV_NODE_BIN。" >&2; exit 2; }
+[ -x "$node_bin" ] || { printf '%s\n' "PROVIDER_NODE_MISSING: 找不到可执行 Node：${node_bin}；请重新完整解包或检查 LYAPUNOV_NODE_BIN。" >&2; exit 2; }
 json_blocked() {
   "$node_bin" -e 'const [provider,code,message]=process.argv.slice(1); console.log(JSON.stringify({provider,status:"BLOCKED",code,message}))' "$1" "$2" "$3"
   exit 2
 }
-[ -x "$micromamba" ] || json_blocked runtime PROVIDER_ENV_TOOL_MISSING "找不到 micromamba：$micromamba（发行布局应自带 runtime/micromamba；开发检出可用 LYAPUNOV_MICROMAMBA 指向 .runtime/bin/micromamba）"
+[ -x "$micromamba" ] || json_blocked runtime PROVIDER_ENV_TOOL_MISSING "找不到 micromamba：${micromamba}（发行布局应自带 runtime/micromamba；开发检出可用 LYAPUNOV_MICROMAMBA 指向 .runtime/bin/micromamba）"
 assetbake_requirements="$root/packages/asset-bake/requirements.txt"
 if [ "$provider" = isaac ]; then assetbake_requirements="$root/packages/asset-bake/requirements-isaac.txt"; fi
 case "$provider" in
   mujoco|isaac) for file in "$assetbake_requirements" "$root/packages/asset-bake/requirements-common.txt"; do
-    [ -f "$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $file；请重新完整解包。"
+    [ -f "$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 ${file}；请重新完整解包。"
   done ;;
 esac
 if [ "$human_cuda" = true ]; then
@@ -46,13 +48,16 @@ if [ "$human_cuda" = true ]; then
     [ -s "$root/$file" ] || json_blocked mujoco RELEASE_PAYLOAD_MISSING "缺少非空 $file；请重新完整解包。"
   done
 fi
+if [ "$provider" = newton ] && [ ! -f "$root/packages/sim-newton/requirements.txt" ]; then
+  json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/packages/sim-newton/requirements.txt；请重新完整解包。"
+fi
 case "$provider" in
-  policy-cpu) for file in distribution/linux/policy-cpu.mjs packages/lyapunov-product-bundle/src/policy-runtime.mjs packages/policy-registry/requirements-cpu.txt; do
-       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
+  policy-cpu) for file in distribution/linux/fetch-extscache-kit.mjs distribution/linux/policy-cpu.mjs packages/lyapunov-product-bundle/src/policy-runtime.mjs packages/policy-registry/requirements-cpu.txt; do
+       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/${file}；请重新完整解包。"
      done ;;
   benchmark-*) [ -f "$root/distribution/linux/benchmark.js" ] || [ "$dev_checkout" = true ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/distribution/linux/benchmark.js；请重新完整解包。" ;;
   *) for file in distribution/linux/doctor.mjs distribution/linux/sandbox.mjs distribution/linux/register-managed-sdk.mjs packages/lyapunov-product-bundle/src/sdk-python.mjs; do
-       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/$file；请重新完整解包。"
+       [ -f "$root/$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $root/${file}；请重新完整解包。"
      done ;;
 esac
 export HF_ENDPOINT=https://hf-mirror.com
@@ -79,7 +84,7 @@ if [ -e "$prefix" ] || [ -L "$prefix" ]; then
   fi
   case "$expected_prefix/" in
     "$root/"*) ;;
-    *) json_blocked "$provider" PROVIDER_PREFIX_OUTSIDE_ROOT "$prefix 指向产品根之外（实际前缀：$expected_prefix）；为避免改写其它应用环境已停止。请在包内前缀安装或显式准备独立产品根。" ;;
+    *) json_blocked "$provider" PROVIDER_PREFIX_OUTSIDE_ROOT "$prefix 指向产品根之外（实际前缀：${expected_prefix}）；为避免改写其它应用环境已停止。请在包内前缀安装或显式准备独立产品根。" ;;
   esac
   if [ -n "$actual_prefix" ] && [ "$actual_prefix" = "$expected_prefix" ]; then
     reuse_prefix=true
@@ -108,7 +113,7 @@ ensure_pip() {
 pip_install() {
   # 隔离模式忽略 PIP_* 配置；直接传有界网络参数，慢元数据连接不受隐式 15 秒限制。
   # 保持原索引和依赖解析；失败照常非零退出，由正常 Repair 复用包内 partial 前缀。
-  "$prefix/bin/python" -m pip --isolated install --cache-dir "$pip_cache_dir" --timeout 60 --retries 3 --disable-pip-version-check "$@"
+  PATH="$prefix/bin:$PATH" "$prefix/bin/python" -m pip --isolated install --cache-dir "$pip_cache_dir" --timeout 60 --retries 3 --disable-pip-version-check "$@"
 }
 # --no-rc 只使用此包的显式配置，不读取或更改机器 Conda 配置。官方 LIBERO 锁 Python 3.8.13，其余 Provider 用 3.12。
 if [ "$reuse_prefix" != true ]; then
@@ -152,7 +157,9 @@ if [ "$provider" = mujoco ]; then
   fi
 elif [ "$provider" = policy-cpu ]; then
   # CPU策略与物理SDK使用独立前缀，安装器收尾只核包内本次前缀。
-  policy_wheel=$("$node_bin" "$root/distribution/linux/policy-cpu.mjs" wheel)
+  # 此一次性下载进程按用户已配置的 HTTP(S)_PROXY 路由；Node fetch 默认不读取它们。
+  # 仅影响下载子进程，保留显式 NODE_USE_ENV_PROXY=0，不改用户全局代理或 Host dispatcher。
+  policy_wheel=$(NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}" "$node_bin" "$root/distribution/linux/policy-cpu.mjs" wheel)
   pip_install --index-url https://pypi.org/simple "$policy_wheel" -r "$root/packages/policy-registry/requirements-cpu.txt"
   exec "$node_bin" "$root/distribution/linux/policy-cpu.mjs" doctor --managed-sdk
 elif [ "$provider" = newton ]; then
@@ -163,7 +170,8 @@ elif [ "$provider" = newton ]; then
   # 绝大多数是带 <mesh> 的 MJCF，缺 trimesh 时 Newton 的 import_mjcf 直接导不进来
   # （provider 会明确报 PROVIDER_DEPENDENCY_MISSING，而不是静默跳过实体）。
   # Newton 自带的复用前缀可能由 uv 创建且没有 pip；统一由上方 ensure_pip 修复。
-  pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0"
+  # 扩展依赖照原 Newton 安装；同时复用插件自己的固定清单，避免解析到未验收的 Warp 版本。
+  pip_install --index-url https://pypi.org/simple "newton[sim,importers]==1.6.0" -r "$root/packages/sim-newton/requirements.txt"
 elif [ "$provider" = isaac ]; then
   # 按当前 CPU 物理 worker（packages/sim-isaac/python/physics-cpu.kit）的真实依赖选择官方组件：
   # Kit/App、核心、MJCF/URDF 导入与测试组件，加当前 worker 需要的扩展缓存。
@@ -182,7 +190,7 @@ elif [ "$provider" = isaac ]; then
   if [ "$installed_extscache_kit" = 6.0.1.0 ]; then
     extscache_kit_requirement='isaacsim-extscache-kit==6.0.1.0'
   else
-    [ -f "$extscache_pin" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 $extscache_pin；请重新完整解包。"
+    [ -f "$extscache_pin" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 ${extscache_pin}；请重新完整解包。"
     extscache_wheels="$root/.runtime/provider-download-cache/wheels"
     mkdir -p "$extscache_wheels"
     if ! extscache_wheel=$("$node_bin" "$root/distribution/linux/fetch-extscache-kit.mjs" --pin "$extscache_pin" --wheels-dir "$extscache_wheels"); then
@@ -210,7 +218,7 @@ elif [ "$provider" = benchmark-libero ]; then
     incoming="$(mktemp -d "$root/.runtime/bench/libero-source-incoming.XXXXXX")"
     # 只清理本轮临时目录；trap 覆盖失败与中断路径。
     trap 'rm -rf "$incoming"' EXIT HUP INT TERM
-    "$node_bin" -e 'fetch(process.argv[1]).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.arrayBuffer()}).then(b=>require("node:fs").writeFileSync(process.argv[2],Buffer.from(b))).catch(e=>{console.error(String(e));process.exit(1)})' 'https://codeload.github.com/Lifelong-Robot-Learning/LIBERO/tar.gz/8f1084e3132a39270c3a13ebe37270a43ece2a01' "$incoming/libero-source.tar.gz"
+    NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}" "$node_bin" -e 'fetch(process.argv[1]).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.arrayBuffer()}).then(b=>require("node:fs").writeFileSync(process.argv[2],Buffer.from(b))).catch(e=>{console.error(String(e));process.exit(1)})' 'https://codeload.github.com/Lifelong-Robot-Learning/LIBERO/tar.gz/8f1084e3132a39270c3a13ebe37270a43ece2a01' "$incoming/libero-source.tar.gz"
     tar -xzf "$incoming/libero-source.tar.gz" -C "$incoming"
     if [ ! -d "$incoming/LIBERO-8f1084e3132a39270c3a13ebe37270a43ece2a01/libero/libero" ]; then
       json_blocked "$provider" LIBERO_SOURCE_ARCHIVE_UNEXPECTED '官方源码包解出的目录不符合预期（缺 LIBERO-固定提交/libero/libero）；未改动任何现有目录。'
@@ -224,9 +232,22 @@ elif [ "$provider" = benchmark-libero ]; then
     trap - EXIT HUP INT TERM
   fi
   pip_install --index-url https://pypi.org/simple setuptools wheel
+  # macOS 没有 cu113 wheel；复用同版官方 CPU wheel。先安装版本组，避免 requirements 中
+  # thop/robomimic 的无界 torch 依赖先装最新版；套件、worker、任务和判定仍完全复用原实现。
+  if [ "$(uname -s)" = Darwin ]; then
+    # 原锁定 tokenizers/egl_probe 没有本机预编译件时，沿原源码构建；工具只进此隔离前缀。
+    # 选择与旧 tokenizer 源兼容的 Rust，不为适配系统而升级业务依赖。
+    if [ ! -x "$prefix/bin/rustc" ] || [ ! -x "$prefix/bin/cmake" ]; then
+      "$micromamba" --no-rc install --yes --prefix "$prefix" --channel conda-forge 'python=3.8.13' 'rust=1.70.0' 'cmake<4'
+    fi
+    pip_install --index-url https://pypi.org/simple 'torch==1.11.0' 'torchvision==0.12.0' 'torchaudio==0.11.0'
+    PATH="$prefix/bin:$PATH" "$prefix/bin/python" "$root/packages/benchmark-libero/compat/tokenizers/build.py" "$root/.runtime/bench/tokenizers-build"
+  fi
   pip_install --index-url https://pypi.org/simple -r "$source_root/requirements.txt"
   # 官方锁定的 CUDA 11.3 组合取自 PyTorch 官方源；只在隔离前缀内安装。
-  pip_install --index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu113 'torch==1.11.0+cu113' 'torchvision==0.12.0+cu113' 'torchaudio==0.11.0'
+  if [ "$(uname -s)" != Darwin ]; then
+    pip_install --index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu113 'torch==1.11.0+cu113' 'torchvision==0.12.0+cu113' 'torchaudio==0.11.0'
+  fi
   pip_install --index-url https://pypi.org/simple -e "$source_root"
 else
   pip_install --index-url https://pypi.org/simple 'gymnasium[mujoco]==1.2.0'
@@ -236,7 +257,7 @@ fi
 case "$provider" in
   mujoco|isaac)
     if ! "$prefix/bin/python" -c 'import numpy,scipy,trimesh,coacd'; then
-      json_blocked "$provider" ASSET_BAKE_DEPENDENCY_MISSING "本次包内前缀无法导入 numpy/scipy/trimesh/coacd：$prefix；请查看导入错误并重试 install-provider 补齐依赖。"
+      json_blocked "$provider" ASSET_BAKE_DEPENDENCY_MISSING "本次包内前缀无法导入 numpy/scipy/trimesh/coacd：${prefix}；请查看导入错误并重试 install-provider 补齐依赖。"
     fi ;;
 esac
 # 基准 provider 的收尾自检由发行打包产物 distribution/linux/benchmark.js 完成；开发检出没有它，

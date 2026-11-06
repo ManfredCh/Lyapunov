@@ -24,7 +24,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { SceneSnapshot, Transform } from '../../lyapunov-contracts/src/types.ts'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,7 +38,7 @@ const WORKER = process.env.LYAPUNOV_NEWTON_WORKER_PATH ?? join(DEV, 'packages/si
 const REPO_WORKER = join(DEV, 'packages/sim-newton/python/worker.py')
 const README = join(DEV, 'packages/sim-newton/README.md')
 const ARM = join(DEV, 'packages/sim-mujoco/fixtures/arm.xml')
-const GO1_URDF = join(DEV, 'materials/robots/unitree_go1/xml/go1.urdf')
+const GO1_URDF = join(DEV, 'materials/robots/unitree_go1/go1_description/urdf/go1.urdf')
 const PANDA_MJCF = join(DEV, 'materials/robots/franka_panda/franka_emika_panda/panda_nohand.xml')
 const available = existsSync(PYTHON) && existsSync(WORKER)
 
@@ -159,12 +159,12 @@ function openSession(): Session {
 }
 
 let cacheRoot: string | undefined
-beforeAll(() => { cacheRoot = mkdtempSync(join(tmpdir(), 'dev008-ss-')) })
+beforeAll(() => { cacheRoot = mkdtempSync(join(realpathSync(tmpdir()), 'dev008-ss-')) })
 afterAll(() => { if (cacheRoot) rmSync(cacheRoot, { recursive: true, force: true }); cacheRoot = undefined })
 
 describe.skipIf(!available)('A09：Scene collision 真实 CPU 几何、同步与接触因果验证', () => {
   test('普通 GLB 实际派生 OBJ → Newton 形状与落球；关碰撞穿透；同世界恢复与明确拒绝', () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), 'a09-newton-collision-'))
+    const fixtureRoot = mkdtempSync(join(realpathSync(tmpdir()), 'a09-newton-collision-'))
     try {
       const run = spawnSync(PYTHON, ['-B', join(HERE, 'scene_collision_fixture.py'), WORKER,
         join(DEV, 'packages/asset-bake/src/bake.py'), fixtureRoot], {
@@ -256,7 +256,7 @@ describe.skipIf(!available)('DEV-008：supported 面逐键「声明 ↔ 现实�
       list_worlds: listBefore.some(world => world.worldId === 'w-ss' && world.status === 'ready'),
       mjcf: armDescribe.joints.length === 3 && armDescribe.nativeShapeLabels.length >= 1,
       urdf: urdfOpen?.status === 'ready' && urdfDescribe?.joints?.length === 12
-        && urdfDescribe.joints.every((joint: any) => String(joint.name).startsWith('go1_description/')),
+        && urdfDescribe.joints.every((joint: any) => String(joint.name).startsWith('go1/')),
       groundPlane: JSON.stringify(armOpen.groundGeomNames) === JSON.stringify(['__ground']) && groundOffOpen.groundGeomNames.length === 0,
       // realtimeClock 在下面单独的 describe 里量（要在请求之间真的等挂钟）。
       realtimeClock: true,

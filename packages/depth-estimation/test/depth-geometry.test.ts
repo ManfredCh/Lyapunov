@@ -20,7 +20,7 @@
  *   LYAPUNOV_DEPTH_GEOMETRY_TEST_PHOTO      真实原照片（顶点颜色与来源，只读）
  *   LYAPUNOV_DEPTH_GEOMETRY_TEST_DATA_DIR   产物目录（可选，默认 mkdtemp）
  * 用法：node packages/depth-estimation/test/depth-geometry.test.ts（要复用真实 scene-kit，Node 的 strip-only
- *       解析不了它的构造函数参数属性 → 脚本自己带 --experimental-transform-types 重进一次；bun 直接跑也兼容）
+ *       解析不了它的构造函数参数属性 → 脚本自己带 --experimental-strip-types 重进一次；bun 直接跑也兼容）
  * 退出码：0=全部通过；1=有失败；2=缺前置条件。
  */
 import { Context } from '@deepseek-ai/cordis'
@@ -44,15 +44,15 @@ import {
 } from '../src/geometry.ts'
 
 // Node 的 strip-only 解析器不支持构造函数参数属性（scene-kit/src/operations.ts 用了；script/gates/run-g13.ts 有同样的适配）。
-// 本测试要复用**真实** SceneOperations，所以带着 --experimental-transform-types 重新进入一次（幂等，私有标记防递归；
+// 本测试要复用**真实** SceneOperations，所以带着 --experimental-strip-types 重新进入一次（幂等，私有标记防递归；
 // bun 自己能解析，不重进）。
 if(typeof (process.versions as Record<string,unknown>).bun!=='string'
    &&process.env.LYAPUNOV_DEPTH_GEOMETRY_TRANSFORM_TYPES!=='1'
-   &&!process.execArgv.includes('--experimental-transform-types')){
-  const child=spawnSync(process.execPath,['--experimental-transform-types','--no-warnings',...process.argv.slice(1)],{
+   &&!process.execArgv.includes('--experimental-strip-types')){
+  const child=spawnSync(process.execPath,['--experimental-strip-types','--no-warnings',...process.argv.slice(1)],{
     stdio:'inherit',env:{...process.env,LYAPUNOV_DEPTH_GEOMETRY_TRANSFORM_TYPES:'1'},
   })
-  if(child.error){console.error('无法用 --experimental-transform-types 重新进入 node: '+String(child.error));process.exit(2)}
+  if(child.error){console.error('无法用 --experimental-strip-types 重新进入 node: '+String(child.error));process.exit(2)}
   process.exit(child.status??1)
 }
 const { SceneOperations }=await import('../../scene-kit/src/operations.ts')
@@ -1114,9 +1114,13 @@ await check('运行中取消 → status=killed，且不交付任何报告/产物
 })
 console.log('[11] 真实照片的相对深度产物（真实数组 + 真实照片）')
 const realField=(await readNpy(realDepthNpy!)).float!
-const REAL_WIDTH=3840,REAL_HEIGHT=2880
+// 从真实原照片独立解码尺寸，不能把旧开发机的一张 3840×2880 照片写死为输入合同。
+const realPhotoSize=spawnSync(python!,['-c','import json,sys; from PIL import Image; print(json.dumps(Image.open(sys.argv[1]).size))',realPhoto!],{encoding:'utf8'})
+assert(realPhotoSize.status===0,'真实照片尺寸读取失败: '+realPhotoSize.stderr)
+const [REAL_WIDTH,REAL_HEIGHT]=JSON.parse(realPhotoSize.stdout) as [number,number]
+assert(REAL_WIDTH>0&&REAL_HEIGHT>0,'真实照片尺寸无效')
 /** 无 EXIF：K 是**假定**值（约 62° 水平视场），报告里必须如实标注。 */
-const REAL_FX=3200,REAL_FY=3200,REAL_CX=1919.5,REAL_CY=1439.5
+const REAL_FX=REAL_WIDTH*(3200/3840),REAL_FY=REAL_FX,REAL_CX=(REAL_WIDTH-1)/2,REAL_CY=(REAL_HEIGHT-1)/2
 function realImageEntry(options:{registration?:Record<string,unknown>}={}){
   return {
     relativeDepth:{path:realDepthNpy},
@@ -1213,7 +1217,7 @@ await check('真实照片 + 假定锚点（无独立 check）→ 米制产物给
   console.log('      假定标定 scale='+Number(entry.scale).toExponential(3)+' shift='+Number(entry.shift).toExponential(3)+'；米制深度 '+min.toFixed(2)+'..'+max.toFixed(2)+' m')
 })
 await check('真实尺寸下采样过密 → TOO_MANY_POINTS（在采样前就拒绝，不产出半份几何）',async()=>{
-  const runResult=await run({requestId:'real-too-many',images:[realImageEntry()],params:{sampleStep:2}})
+  const runResult=await run({requestId:'real-too-many',images:[realImageEntry()],params:{sampleStep:1}})
   assert(runResult.status==='failed','过密采样竟然成功')
   assert(errorCodeOf(runResult)==='TOO_MANY_POINTS','错误码不是 TOO_MANY_POINTS: '+errorCodeOf(runResult))
 })

@@ -25,10 +25,12 @@ export function resolveMuJoCoGlBackend(
   explicit?: string,
   platform: NodeJS.Platform = process.platform,
   inherited: string | undefined = process.env.MUJOCO_GL,
+  consumer: 'mujoco'|'benchmark' = 'mujoco',
 ): string {
   const configured = explicit?.trim() || inherited?.trim()
   if (configured) return configured
-  if (platform === 'darwin') return 'cgl'
+  // Gymnasium/robosuite 的渲染包装器不接受 cgl 枚举；仍调用它们原生 GLFW 路径。
+  if (platform === 'darwin') return consumer==='benchmark'?'glfw':'cgl'
   if (platform === 'win32') return 'wgl'
   return 'egl'
 }

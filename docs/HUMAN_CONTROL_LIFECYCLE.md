@@ -61,8 +61,8 @@ LYAPUNOV_ISAAC_PYTHON=/home/s18/WS/Lyapunov/Dev/.runtime/conda/envs/isaac/bin/py
 
 | 实际命令 | 退出与结果 | 日志 |
 | --- | --- | --- |
-| `LYAPUNOV_MUJOCO_PYTHON=/已有Mu解释器 node --experimental-transform-types --test packages/human-crowd/test/native.test.ts` | 0，4/4、0skip；原16组（含3000tick/1e-9及当前步1e-12）保留 | owner-native-final.log |
-| `LYAPUNOV_ISAAC_PYTHON=/已有Isaac解释器 LYAPUNOV_USD_PYTHON=/已有USD解释器 node --experimental-transform-types --test packages/human-crowd/test/isaac-native.test.ts` | 0，2/2、0skip；原11项与新增8生命周期项 | owner-isaac-native-all.log |
+| `LYAPUNOV_MUJOCO_PYTHON=/已有Mu解释器 node --experimental-strip-types --test packages/human-crowd/test/native.test.ts` | 0，4/4、0skip；原16组（含3000tick/1e-9及当前步1e-12）保留 | owner-native-final.log |
+| `LYAPUNOV_ISAAC_PYTHON=/已有Isaac解释器 LYAPUNOV_USD_PYTHON=/已有USD解释器 node --experimental-strip-types --test packages/human-crowd/test/isaac-native.test.ts` | 0，2/2、0skip；原11项与新增8生命周期项 | owner-isaac-native-all.log |
 | `bun run test:ci --filter packages/human-crowd/` | 0，1文件通过 | owner-ci-human.log |
 | `TESTCI_PYTHON=/已有Mu解释器 bun run test:ci --filter packages/sim-mujoco/` | 0，3文件通过 | owner-ci-mujoco-final.log |
 | `TESTCI_PYTHON=/已有Isaac解释器 bun run test:ci --filter packages/sim-isaac/` | 0，18文件通过 | owner-ci-isaac-complete.log |

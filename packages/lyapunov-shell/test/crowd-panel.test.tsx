@@ -118,3 +118,19 @@ test('运行中只禁用同范围「开始」：另一组开始/本组停止照�
   for(const[key,value]of saved){if(value)Object.defineProperty(globalThis,key,value);else Reflect.deleteProperty(globalThis,key)}
  }
 })
+
+test('countCrowdStarts 只计在途 crowd_start，resolve/reject 均归零且原样透传',async()=>{
+ const {countCrowdStarts}=await import('../src/crowd-panel.tsx')
+ const running={current:0},seen:string[]=[],deferred:Array<(e?:Error)=>void>=[]
+ const command=(name:string,input:unknown)=>{seen.push(name);return name==='crowd_start'?new Promise((res,rej)=>deferred.push(e=>e?rej(e):res(name))):Promise.resolve(name)}
+ const wrapped=countCrowdStarts(command,running)
+ const a=wrapped('crowd_start',{a:1}),b=wrapped('crowd_start',{a:2}),c=wrapped('crowd_stop',{x:1})
+ expect(running.current).toBe(2)
+ deferred[0]!();await a
+ expect(running.current).toBe(1)
+ deferred[1]!(new Error('STOP_CONFIRMED'))
+ await expect(b).rejects.toThrow('STOP_CONFIRMED')
+ expect(running.current).toBe(0)
+ await expect(c).resolves.toBe('crowd_stop')
+ expect(seen).toEqual(['crowd_start','crowd_start','crowd_stop'])
+})

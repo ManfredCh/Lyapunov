@@ -3,7 +3,16 @@ name: desktop-automation
 description: Use computer-use for local desktop applications (windows/clicks/keyboard/clipboard), or browser-use to open an isolated browser and visit web pages. Use for automate desktop app, click window, or browse web page requests; this does not operate the Lyapunov 3D scene itself.
 ---
 
-# Desktop and Browser Automation Rules
+# 桌面与浏览器自动化
+
+## 原生 Cua Driver（macOS 与已装配的其它平台）
+
+- 使用当前注册的 `cua_driver_native__*` 工具及其真实 schema，先核对应用与窗口，再读取新快照。macOS 不依赖 X11、DISPLAY 或 ComputerUseLinux。
+- 后续操作沿用该快照的 `element_token` 或截图坐标；新快照会使旧 token 失效。使用 `target` 时不要同时提交旧式 pid/window_id 参数。
+- Electron 等嵌入式网页的 AX 文本可能只回显而没有进入页面；不能仅凭 AX 值确认输入。可在目标窗口可见且截图有效时，按最新窗口截图的像素坐标向同一 `type_text` 传 `x`、`y`（不同时传 element token/index），让原驱动在控件上聚焦并输入；操作后用新截图及页面实际结果核对。尚未展开的控件先用原 AX 操作打开，再取新截图。
+- 优先后台投递；焦点或权限拒绝不授权前台重试。操作后读回真实结果，不能把输入已投递当成任务完成。
+- 权限检查默认 `prompt:false`；缺少屏幕录制或辅助功能权限时说明实际缺项，沿系统正常授权流程处理。取消不会撤销已经投递的输入。
+- macOS 光标叠层可能明确返回 facility_unavailable；截图、状态读取及输入能力分别核验。
 
 ## 原生 ComputerUseLinux（使用当前发现的 `mcp__computer-use-linux__*` 工具）
 

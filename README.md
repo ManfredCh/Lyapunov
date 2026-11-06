@@ -17,7 +17,7 @@
   — William Blake, <a href="https://poets.org/poem/auguries-innocence"><em>Auguries of Innocence</em></a>
 </p>
 
-**Linux x64** · **Apache-2.0**
+**Linux x64 · macOS Apple Silicon · Windows/WSL2** · **Apache-2.0**
 
 | Publication metadata | Value |
 | --- | --- |
@@ -44,7 +44,8 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Current default — [0.2.2](docs/releases/0.2.2.md):** full Linux x64 distribution, adding people and crowds (bundled characters, Crowd panel and natural-language control), first-class USD and SimReady assets, and explicit NVIDIA rendering.
+- **Current default — [0.2.3](docs/releases/0.2.3.md):** Linux x64, macOS Apple Silicon and Windows/WSL2 installation routes, with crowd, exit/recovery and platform compatibility updates.
+- **Previous release — [0.2.2](docs/releases/0.2.2.md):** retained historical release with people/crowds, first-class USD/SimReady assets and NVIDIA rendering.
   - **People and crowds:** 12 bundled Rocketbox characters, a default 20-person crowd in four appearances, routes with obstacle stops and optional fixed-plane navigation.
   - **Two ways to control them:** the new **Crowd** panel on the right tool rail (start/stop per group or everyone, back-and-forth / square-loop / stand presets) and natural-language requests to the agent.
   - **USD and SimReady:** USD files are first-class assets with layers, materials and physics preserved; pinned SimReady packages import with license and file verification through the Hugging Face mirror.
@@ -57,13 +58,13 @@ Use the versioned release identifier with `--version` to install a previous rele
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session. The default command below installs **0.2.2**:
+From a regular terminal in your graphical desktop session. The default command below installs **0.2.3**:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-**Direct download (Vorynel OSS/CDN):** [Linux x64 0.2.2 archive](https://vorynel.com/lyapunov/releases/0.2.2-20261030/lyapunov-linux-x64-0.2.2-20261030.tar.gz) (1,052,456,167 bytes) · [JSON manifest](https://vorynel.com/lyapunov/releases/0.2.2-20261030/linux-x64.json) · [SHA256SUMS](https://vorynel.com/lyapunov/releases/0.2.2-20261030/SHA256SUMS). SHA256: `545c3b584c7c75416762a4c6f383a14910927da4cdd8482c2fd447e2ded5f4cd`. The same files are attached to the [GitHub release](https://github.com/ManfredCh/Lyapunov/releases/tag/v0.2.2).
+**Direct download (Vorynel OSS/CDN):** [Linux / WSL2 0.2.3 archive](https://vorynel.com/lyapunov/releases/0.2.3-20261102/lyapunov-linux-x64-0.2.3-20261102.tar.gz) (1,052,896,299 bytes) · [Linux JSON manifest](https://vorynel.com/lyapunov/releases/latest/linux-x64.json) · [Mac Apple Silicon archive](https://vorynel.com/lyapunov/releases/0.2.3-macos-e17f03f259e9/lyapunov-darwin-arm64-0.2.3-macos-e17f03f259e9.tar.gz) (1,013,944,434 bytes) · [Mac JSON manifest](https://vorynel.com/lyapunov/releases/latest/darwin-arm64.json). Each manifest records its actual SHA-256 and source commit. See the [0.2.3 release notes](https://vorynel.com/lyapunov/updates/0.2.3.html). On Mac, run the same installer in the system terminal and retain the complete portable folder; the arm64 package is not notarized.
 
 After installation succeeds and reports ready, start Lyapunov separately:
 
@@ -182,7 +183,7 @@ A fixed base attached to another entity uses the target body's native parent-chi
 
 A **world-fixed camera** uses a world pose. A **body/parent-mounted camera** uses a local installation pose and follows the actual parent body. Use **Save current view installation** to persist the current camera installation and **Restore installation baseline** to restore it. **Enter camera / Enter and follow camera** and **Return to main view** control the camera view; saved Viewer views do not replace native calibration.
 
-MuJoCo and Isaac provide named-camera list/adjust paths; sensor capture requires the real rendering backend, and Isaac RGB-D needs actual RTX. Newton currently reports these camera interfaces as unsupported. For RGB-D, inspect camera name, resolution, K, worldFromCamera, meter depth, captureId and frame/Scene/world provenance. A visible environment does not by itself establish aligned collision geometry.
+MuJoCo and Isaac provide named-camera list/adjust; sensor capture requires the real rendering backend, and Isaac RGB-D needs actual RTX. Newton supports RGB and axial meter-depth capture for both native named cameras and Scene-mounted cameras; temporary camera adjustment, pixel annotation and camera dataset export are not yet supported. For RGB-D, inspect camera name, resolution, K, worldFromCamera, meter depth, captureId and frame/Scene/world provenance. A camera seeing the environment does not by itself establish aligned collision geometry.
 
 Add an annotation to the current entity/view or a registered capture, edit its position/text, save it and reopen it. Project a pixel into 3D only with real depth and calibration. Send annotated observations to the agent as a reference; requested geometry changes use native Scene edits and revision checks. Annotation edits themselves do not silently change geometry or physics. Export actual captures, annotations and datasets with their references.
 
@@ -217,7 +218,7 @@ For Isaac, read the [NVIDIA Omniverse license](https://docs.omniverse.nvidia.com
 "$HOME/.local/bin/lyapunov" install-provider isaac --accept-omniverse-eula
 ```
 
-An installed SDK, a ready physics world, and a successful robot task are different results. Newton consumes supported Scene collision from ordinary GLB assets alongside native MJCF/URDF sources; static OBJ retains triangle surfaces, dynamic OBJ uses prepared convex parts, and physics changes are synchronized to the world. Robot actions, general contacts/penetrations/topology, camera capture and collisionPatches remain unsupported. Optional models and policy weights are fetched only when selected. Hugging Face Hub access uses `https://hf-mirror.com`; missing mirrored files, revisions, permissions, or failed checksum verification are reported as blocked.
+An installed SDK, a ready physics world, and a successful robot task are different results. Newton consumes supported Scene collision derived from ordinary GLB assets alongside native MJCF/URDF sources; static OBJ retains triangle surfaces, dynamic OBJ uses prepared convex parts, and physics changes are synchronized to the current world. Real contact, penetration, named cameras and verifiable source position-PD actions are exposed per Provider capability; general topology and collisionPatches remain unsupported. Source-fixed joint chains use the native fixed representation and are initialized from FK; task stability of articulated robots requires per-model acceptance, and when a source forcerange cannot be executed by XPBD the product warns and rejects the affected position actions. Optional models and policy weights are fetched only when selected. Hugging Face Hub uses `https://hf-mirror.com`; missing mirrored files, revisions, permissions, or failed checksum verification are reported as blocked.
 
 ## Update and troubleshoot
 
@@ -240,28 +241,39 @@ The same installer prepares missing desktop libraries on supported Ubuntu/Debian
 - [ ] VR/XR input and coordinates.
 - [ ] DSH companion upgrades (pinned upstream revision).
 
-## Windows evaluation route
+## Windows: run inside WSL2
 
-Windows is a proposed **Linux package under WSL2 + WSLg** route, not a native Windows executable. [Microsoft's GUI-app prerequisites](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps) specify Windows 10 build 19044+ or Windows 11, WSL2/WSLg and an appropriate GPU driver. In administrator PowerShell:
+Windows users run Lyapunov's Linux package inside WSL2 (Ubuntu 24.04 or newer) and use WSLg for the desktop window. [Microsoft's GUI-app prerequisites](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps) specify Windows 10 build 19044+ or Windows 11, WSL2/WSLg and an appropriate GPU driver. In administrator PowerShell:
 
 ```powershell
 wsl --install
 wsl --update
 ```
 
-Complete the distribution setup, then use its Ubuntu/Linux terminal:
+Complete the distribution setup, then run the Linux installation steps above in the WSL2 Ubuntu terminal:
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
-```
-
-After installation succeeds and reports ready, start Lyapunov separately:
-
-```sh
 "$HOME/.local/bin/lyapunov"
 ```
 
-Keep the installation and data in the Linux filesystem. This release has not been accepted on Windows/WSLg or every GPU; follow the Linux package's actual doctor and sandbox results.
+Keep the checkout and install prefix on the WSL ext4 filesystem (for example under `~`), not under `/mnt/c`. NVIDIA GPU access in WSL2 comes from the Windows NVIDIA driver; do not install a Linux GPU driver inside WSL.
+
+Tested on one machine (Windows 11, WSL2 kernel 6.6.87.2, Ubuntu 24.04, RTX 5070 Laptop, release 0.2.2-20261030, 2026-11-01/02); other machines are untested:
+
+- Installer, `doctor`, desktop under WSLg, formal-account login and MuJoCo `sim_open`: passed. An Agent task (mount Franka Panda, add a 5 cm cube, run 1 s of MuJoCo) completed with engine readback of the cube at rest on the ground.
+- Newton 1.6.0: world opens on the CPU path (`gpuAvailable:false`; no CUDA path verified).
+- Isaac Sim 6.0.1.0: installs, passes the dependency preflight, and opens a real world under WSL2 on the default `physicsDevice=cuda:0` path (verified: `sim_open` receipt, GPU-only capability fields `deformable`/`fluid` true, and an Agent task that mounted Franka Panda, dropped a 5 cm cube and ran 500 steps of 0.002 s with the cube read back at rest on the ground, z=0.025). From 0.2.3, the adapter's pre-spawn GPU gate also accepts WSL2's `/dev/dxg` plus the `/usr/lib/wsl/lib` CUDA libraries, which the sandboxed worker gets via an extra read-only bind; without that the gate threw `ISAAC_GPU_DEVICE_UNAVAILABLE` (public P422) because WSL2 has no `/dev/nvidia*` nodes. `rendering:rtx` and RTX-dependent features remain unverified under WSLg.
+- 3D view: 0.2.3 enables WebGL under WSL by ignoring Chromium's GPU blocklist; not yet re-verified on WSL. Physics and Agent work without it.
+
+WSL2 prerequisites and caveats:
+
+- Install `bubblewrap` (`sudo apt install bubblewrap`). A minimal WSL Ubuntu does not ship it; without a sandbox runner `sim_open` fails with public error P422 and `doctor` reports `SANDBOX_RUNNER_UNAVAILABLE`. A user-level `bwrap` on `PATH` also works.
+- Behind an HTTP(S) proxy, Node's `fetch` ignores `HTTPS_PROXY`; from 0.2.3, the launcher sets `NODE_USE_ENV_PROXY=1` when a proxy variable exists.
+- WSL has no browser: from 0.2.3, the desktop opens the login page on the Windows host through `powershell.exe`.
+- Keep a WSL session open while using the desktop; WSL stops idle distros and kills background processes. Put the WSL virtual disk (`ext4.vhdx`) on a drive with space (`wsl --manage <distro> --move <dir>`); filling `C:` mid-install corrupts the install.
+
+The native Windows port is archived; its last state is preserved in the LyapunovWin repository at tag `archive/windows-native-20261030`. It is not part of this Dev repository and is no longer maintained.
 
 ## Built on an upstream ecosystem
 
@@ -273,7 +285,7 @@ Share ideas in [Discussions](https://github.com/ManfredCh/Lyapunov/discussions),
 
 ## Develop and contribute
 
-This source repository builds the product on a pinned DSH revision. Development requires Git, Node.js 24+, Bun 1.3.13, and pnpm 11.7.0; the packaged installation above supplies its own runtime.
+This source repository builds the product on a pinned DSH revision. Development requires Git, Node.js 24+, Bun 1.4.2, and pnpm 11.7.0; the packaged installation above supplies its own runtime.
 
 ```sh
 git clone https://github.com/ManfredCh/Lyapunov.git

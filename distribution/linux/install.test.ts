@@ -1,11 +1,11 @@
 import {afterAll,describe,expect,test} from 'bun:test'
-import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,readlinkSync,rmSync,symlinkSync,writeFileSync} from 'node:fs'
+import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,readlinkSync,rmSync,symlinkSync,writeFileSync,realpathSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import {dirname,join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {spawnSync} from 'node:child_process'
 import {runInNewContext} from 'node:vm'
-import {checkedRuntimeManifest,releaseManifestTsv,type LinuxReleaseManifest} from './release-manifest.ts'
+import {checkedRuntimeManifest,releaseManifestTsv,type LinuxReleaseManifest,type ReleaseManifest,type MacOSReleaseManifest} from './release-manifest.ts'
 import {desktopExecutable} from './install-entry.mjs'
 
 const source=dirname(import.meta.path),directories:string[]=[]
@@ -17,25 +17,25 @@ const node=spawnSync('node',['-p','process.execPath'],{encoding:'utf8'}).stdout.
 const curl=Bun.which('curl')!
 const versions={mujoco:'3.13.0',mink:'1.3.0',ompl:'2.0.1',daqp:'0.9.1',coacd:'1.0.7',trimesh:'5.1.0',numpy:'2.4.6',scipy:'1.17.0',pyzmq:'27.2.0',msgpack:'1.2.2','msgpack-numpy':'0.4.8'}
 
-function fixture(){
-  const root=mkdtempSync(join(tmpdir(),'lya-install-'));directories.push(root)
+function fixture(fixturePlatform:'linux-x64'|'darwin-arm64'='linux-x64'){
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'lya-install-')));directories.push(root)
   const prefix=join(root,'install dir safe'),bin=join(root,"user bin 'safe"),data=join(root,'data home'),home=join(root,'home')
   mkdirSync(home)
-  const manifests=new Map<string,LinuxReleaseManifest>(),files=new Map<string,Buffer>(),ranges:string[]=[],requests:string[]=[]
+  const manifests=new Map<string,ReleaseManifest>(),files=new Map<string,Buffer>(),ranges:string[]=[],requests:string[]=[]
   let selected=''
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
-    const path=new URL(request.url).pathname.slice(1),release=path==='releases/latest/linux-x64.tsv'?selected:path.split('/')[1]!
+    const path=new URL(request.url).pathname.slice(1),release=path===`releases/latest/${fixturePlatform}.tsv`?selected:path.split('/')[1]!
     requests.push(path)
-    if(path.endsWith('/linux-x64.tsv')){const row=manifests.get(release);return row?new Response(releaseManifestTsv(row)):new Response('missing',{status:404})}
+    if(path.endsWith('/linux-x64.tsv')||path.endsWith('/darwin-arm64.tsv')){const row=manifests.get(release);return row?new Response(releaseManifestTsv(row)):new Response('missing',{status:404})}
     const bytes=files.get(path);if(!bytes)return new Response('missing',{status:404})
     const range=request.headers.get('range')
     if(range){ranges.push(range);const match=/^bytes=(\d+)-(\d*)$/.exec(range);const start=Number(match?.[1]);const end=match?.[2]?Number(match[2]):bytes.length-1;return new Response(bytes.subarray(start,end+1),{status:206,headers:{'Content-Range':`bytes ${start}-${end}/${bytes.length}`,'Content-Length':String(end-start+1)}})}
     return new Response(bytes,{headers:{'Content-Length':String(bytes.length)}})
   }})
   function candidate(id:string,options:{defaultPolicy?:'ready'|'failed';mode?:'conda-pack'|'install-provider';physicsFails?:boolean;doctorBlocked?:boolean;pipFails?:boolean;entryFails?:boolean;desktopLibraries?:'required'|'unknown'|'changed'|'remain'|'sandbox'|'bad-exit';sandbox?:'required'|'context'|'nnp'|'nosuid'|'libraries'|'provider'|'helper'|'recheck'}={}){
-    const archiveRoot='lyapunov-dsh-0.1.0-linux-x64',product=join(root,id,archiveRoot),mode=options.mode??'conda-pack'
+    const archiveRoot='lyapunov-dsh-0.1.0-'+fixturePlatform,product=join(root,id,archiveRoot),mode=options.mode??(fixturePlatform==='darwin-arm64'?'install-provider':'conda-pack')
     put(join(product,'runtime/node/bin/node'),`#!/bin/sh\nexec ${quote(node)} "$@"\n`,true)
-    put(join(product,'RELEASE.json'),JSON.stringify({releaseId:id,version:'0.1.0',platform:'linux-x64',sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',sourceCommitMatchesPayload:true,userDataBundled:false}))
+    put(join(product,'RELEASE.json'),JSON.stringify({releaseId:id,version:'0.1.0',platform:fixturePlatform,sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',sourceCommitMatchesPayload:true,userDataBundled:false}))
     put(join(product,'packages/desktop/icons/lyapunov.png'),'fixture icon')
     if(options.defaultPolicy)put(join(product,'packs/default-policy-supply.json'),JSON.stringify({schemaVersion:1,entries:[{adapterId:'fixture'}],blocked:[]}))
     mkdirSync(join(product,'distribution/linux'),{recursive:true});copyFileSync(join(source,'install-entry.mjs'),join(product,'distribution/linux/install-entry.mjs'))
@@ -47,9 +47,10 @@ function fixture(){
     const blocked=`{"status":"BLOCKED","desktop":{"status":"BLOCKED","code":"SANDBOX_CONTEXT_ONLY"},"providers":{"mujoco":{"status":"AVAILABLE"}}}`
     put(join(product,'lyapunov'),`#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nprintf '%s\\n' "python_path=\${PYTHONPATH-}" "python_home=\${PYTHONHOME-}" "node_path=\${NODE_PATH-}" "no_user_site=\${PYTHONNOUSERSITE-}" > "$root/environment.vars"\ncase "$1" in\ninstall-provider) ${options.defaultPolicy?`if [ \"$2\" = policy-cpu ];then printf '%s\\n' \"$*\" > \"$root/policy.args\";printf '%s\\n' 'fixture original policy CPU preparation';exit ${options.defaultPolicy==='failed'?17:0};fi;`:''}printf '%s\\n' 'fixture provider progress';${options.pipFails?"printf '%s\\n' 'pip download failed';exit 19":`printf '%s\\n' '${blocked}';exit 2`};;\ndoctor) printf '%s\\n' "$*" >> "$root/doctor.args";${options.desktopLibraries?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-library-doctor.mjs" "$root" ${quote(options.desktopLibraries)}`:options.sandbox?`exec "$root/runtime/node/bin/node" "$root/distribution/linux/fixture-doctor.mjs" "$root" ${quote(options.sandbox)}`:options.doctorBlocked?`printf '%s\\n' '${blocked}';exit 2`:"printf '%s\\n' '{\"status\":\"AVAILABLE\"}';exit 0"};;\nsetup-sandbox) printf '%s\\n' "$*" >> "$root/setup.args"; : > "$root/setup.done";printf '%s\\n' 'fixture setup complete';exit 0;;\nphysics-check) [ "$2" = --managed-sdk ] || exit 99; printf '%s\\n' "$*" > "$root/physics.args";${options.physicsFails?'exit 17':"printf '%s\\n' '{\"status\":\"PASS\"}';exit 0"};;\ndesktop) printf '%s\\n' "$*" > "$root/gui.args";exit 0;;\n*) printf '%s\\n' "$*";;\nesac\n`,true)
     const archive=join(root,id+'.tar.gz'),tar=spawnSync('tar',['-czf',archive,'-C',dirname(product),archiveRoot]);if(tar.status!==0)throw Error('fixture tar failed')
-    const bytes=readFileSync(archive),archiveFile=`lyapunov-linux-x64-${id}.tar.gz`
+    const bytes=readFileSync(archive),archiveFile=`lyapunov-${fixturePlatform}-${id}.tar.gz`
     files.set(`releases/${id}/${archiveFile}`,bytes)
-    const row:LinuxReleaseManifest={schema:1,releaseId:id,version:'0.1.0',platform:'linux-x64',minimumGlibc:'2.28',sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',archiveRoot,archive:{path:archiveFile,sha256:sha(bytes),bytes:bytes.length},mujoco:{mode:'install-provider'}}
+    // 负对照会有意变异清单；正式序列化仍由同一 checkedReleaseManifest 严格校验。
+    const row:any={schema:1,releaseId:id,version:'0.1.0',platform:fixturePlatform,...fixturePlatform==='linux-x64'?{minimumGlibc:'2.28'}:{minimumMacOS:'14.0'},sourceCommit:'ea350139dba86777d0a350da6181b0072a807e08',archiveRoot,archive:{path:archiveFile,sha256:sha(bytes),bytes:bytes.length},mujoco:{mode:'install-provider'}}
     if(mode==='conda-pack'){
       const runtime=join(root,id,'runtime');put(join(runtime,'bin/python'),'#!/bin/sh\nexit 0\n',true);put(join(runtime,'bin/conda-unpack'),'fixture relocation callback\n')
       const runtimeFile=`lyapunov-mujoco-linux-x64-${id}.tar.gz`,runtimeTar=join(root,runtimeFile)
@@ -78,7 +79,7 @@ function fixture(){
   }
   fakeSpace()
   async function run(flags:string[]=[],overrides:Record<string,string>={},trace=false){
-    const child=Bun.spawn(['/bin/sh',...(trace?['-x']:[]),join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin,...flags],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,LYAPUNOV_MUJOCO_PYTHON:'/outside/python',...overrides,PATH:storageBin+':'+(overrides.PATH??process.env.PATH)},stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn(['/bin/sh',...(trace?['-x']:[]),join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin,...flags],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_APPLICATIONS_DIR:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,LYAPUNOV_MUJOCO_PYTHON:'/outside/python',...overrides,PATH:storageBin+':'+(overrides.PATH??process.env.PATH)},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
   const sudoBin=join(root,'sudo fixture'),sudoLog=join(root,'sudo.args'),sudoTty=join(root,'sudo.stdin-tty')
@@ -98,7 +99,7 @@ function fixture(){
   }
   async function runPty(input='qa-approve\n',pathTail=process.env.PATH??''){
     const cmd=`cat ${quote(join(source,'install.sh'))} | /bin/sh -s -- --prefix ${quote(prefix)} --bin-dir ${quote(bin)}`
-    const child=Bun.spawn([Bun.which('script')!,'--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+(pathTail?':'+pathTail:'')},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn([Bun.which('script')!,'--quiet','--return','--command',cmd,'/dev/null'],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_APPLICATIONS_DIR:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+(pathTail?':'+pathTail:'')},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
     child.stdin.write(input);child.stdin.end()
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
@@ -106,7 +107,7 @@ function fixture(){
     // A new session with no controlling terminal, even when CI was launched
     // from a terminal. The actual installer still reads a curl-style pipe.
     const code='import subprocess,sys;raise SystemExit(subprocess.run(["/bin/sh","-s","--",*sys.argv[2:]],input=open(sys.argv[1],"rb").read(),start_new_session=True).returncode)'
-    const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
+    const child=Bun.spawn(['/usr/bin/python3','-c',code,join(source,'install.sh'),'--prefix',prefix,'--bin-dir',bin],{cwd:root,env:{...process.env,HOME:home,XDG_DATA_HOME:data,LYAPUNOV_INSTALL_APPLICATIONS_DIR:data,LYAPUNOV_INSTALL_BASE_URL:`http://127.0.0.1:${server.port}`,PATH:storageBin+':'+sudoBin+':'+process.env.PATH},stdout:'pipe',stderr:'pipe'})
     const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out,err}
   }
   function legacyDesktop(wrapper=true){
@@ -120,7 +121,38 @@ function fixture(){
   }
   return {root,prefix,bin,data,home,candidate,run,runPty,runNoTty,fakeSudo,fakeDependencies,sudoLog,sudoTty,legacyDesktop,fakeSpace,withoutDfPath,fakeCurlFailure,dfLog,curlLog,files,ranges,requests,manifests,port:server.port,stop:()=>server.stop(true)}
 }
-describe('公开 POSIX 用户安装入口',()=>{
+
+async function verifyPinnedWheelHelper(f:ReturnType<typeof fixture>,wheelName='isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl'){
+  // 通用 Kit 大 wheel 的独立 helper：以真实 loopback Range 证明续传、完整缓存复用、
+  // 错误 Content-Range 与错误 SHA256 都不会产出交给 pip 的正式 .whl，且不静默删错件。
+  const wheel=Buffer.alloc(1024);for(let index=0;index<wheel.length;index++)wheel[index]=index%251
+  f.files.set(`wheels/${wheelName}`,wheel)
+  const wheelsDir=join(f.root,'wheel-cache'),pinPath=join(f.root,'extscache-pin.json'),helper=join(source,'fetch-extscache-kit.mjs')
+  const writePin=(overrides:Record<string,unknown>={})=>writeFileSync(pinPath,JSON.stringify({filename:wheelName,url:`http://127.0.0.1:${f.port}/wheels/${wheelName}`,bytes:wheel.length,sha256:sha(wheel),...overrides}))
+  const runHelper=async()=>{const child=Bun.spawn([node,helper,'--pin',pinPath,'--wheels-dir',wheelsDir,'--segment-bytes','256'],{stdout:'pipe',stderr:'pipe'});const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out:out.trim(),err}}
+  const wheelPath=join(wheelsDir,wheelName),wheelPartial=wheelPath+'.partial'
+  // ① 从已有 100 字节 partial 续传：必须发 bytes=100-355 并从该处接续，最终原子改名去 partial。
+  mkdirSync(wheelsDir,{recursive:true});writeFileSync(wheelPartial,wheel.subarray(0,100));writePin();f.ranges.length=0
+  let helperRun=await runHelper()
+  expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath)
+  expect(readFileSync(wheelPath).equals(wheel)).toBe(true);expect(existsSync(wheelPartial)).toBe(false);expect(f.ranges).toContain('bytes=100-355')
+  // ② 完整缓存重验复用：不再发任何网络请求。
+  f.ranges.length=0;helperRun=await runHelper()
+  expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath);expect(f.ranges).toEqual([])
+  // ③ 错误 Content-Range（pin 总长度与官方实际不符）：明确非零、不产出正式 .whl。
+  rmSync(wheelPath);rmSync(wheelPartial,{force:true});writePin({bytes:wheel.length+1})
+  helperRun=await runHelper()
+  expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('Content-Range');expect(existsSync(wheelPath)).toBe(false)
+  // ④ 错误 SHA256：完整下载后校验失败，不原子改名，保留完整 partial 并明确报错。
+  rmSync(wheelPath,{force:true});rmSync(wheelPartial,{force:true});writePin({sha256:'a'.repeat(64)})
+  helperRun=await runHelper()
+  expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('SHA256_MISMATCH');expect(existsSync(wheelPath)).toBe(false);expect(existsSync(wheelPartial)).toBe(true)
+  // ⑤ 已存在的完整文件不是固定字节：保留原文件并明确报错，不覆盖、不降低校验。
+  rmSync(wheelPartial,{force:true});writeFileSync(wheelPath,Buffer.alloc(wheel.length,9));writePin()
+  helperRun=await runHelper()
+  expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('WHEEL_CACHE_MISMATCH');expect(readFileSync(wheelPath).equals(Buffer.alloc(wheel.length,9))).toBe(true)
+}
+describe.skipIf(process.platform!=='linux')('公开 POSIX 用户安装入口',()=>{
   test('无系统Git的普通PTY安装自动准备固定git包并真实重验；准备后仍不可用保current',async()=>{
     for(const gitRemainsMissing of [false,true]){
       const f=fixture()
@@ -134,6 +166,26 @@ describe('公开 POSIX 用户安装入口',()=>{
         else{expect(result.status,result.out+result.err).toBe(0);expect(readlinkSync(join(f.prefix,'current'))).toContain('git-required');expect(readFileSync(join(f.prefix,'versions/git-required/doctor.args'),'utf8')).toContain('doctor mujoco --managed-sdk')}
       }finally{f.stop()}
     }
+  })
+  test('WSL缺bubblewrap打印非致命警告且安装继续；已装bwrap或非WSL不警告',async()=>{
+    const unameStub=(commands:string,release:string)=>{rmSync(join(commands,'uname'));put(join(commands,'uname'),`#!/bin/sh\nif [ "$1" = -r ];then printf '%s\\n' ${quote(release)};else exec ${quote(Bun.which('uname')!)} "$@";fi\n`,true)}
+    // WSL + 无 bwrap：stderr 警告提示 apt 安装 bubblewrap，安装流程不中断。
+    {const f=fixture();try{f.candidate('a08-wsl-need');const commands=f.withoutDfPath();f.fakeSpace();unameStub(commands,'6.6.87.2-microsoft-standard-WSL2')
+      const result=await f.run([],{PATH:commands})
+      expect(result.status,result.out+result.err).toBe(0)
+      expect(result.err).toContain('bubblewrap');expect(result.err).toContain('SANDBOX_RUNNER_UNAVAILABLE')
+      expect(readlinkSync(join(f.prefix,'current'))).toContain('a08-wsl-need')
+    }finally{f.stop()}}
+    // WSL + 已装 bwrap：不打印警告。
+    {const f=fixture();try{f.candidate('a08-wsl-ok');const commands=f.withoutDfPath();f.fakeSpace();unameStub(commands,'6.6.87.2-microsoft-standard-WSL2');put(join(commands,'bwrap'),'#!/bin/sh\nexit 0\n',true)
+      const result=await f.run([],{PATH:commands})
+      expect(result.status,result.out+result.err).toBe(0);expect(result.err).not.toContain('bubblewrap')
+    }finally{f.stop()}}
+    // 非 WSL：不打印警告。
+    {const f=fixture();try{f.candidate('a08-nowsl');const commands=f.withoutDfPath();f.fakeSpace()
+      const result=await f.run([],{PATH:commands})
+      expect(result.status,result.out+result.err).toBe(0);expect(result.err).not.toContain('bubblewrap')
+    }finally{f.stop()}}
   })
   test('默认策略发行清单调用原policy-cpu正常接口，失败保current且不激活',async()=>{
     for(const status of ['ready','failed'] as const){const f=fixture();try{f.candidate('default-policy',{defaultPolicy:status});const old=join(f.prefix,'versions/old-policy');mkdirSync(old,{recursive:true});symlinkSync('versions/old-policy',join(f.prefix,'current'));const result=await f.run();expect(readFileSync(join(f.prefix,'versions/default-policy/policy.args'),'utf8')).toBe('install-provider policy-cpu\n');if(status==='ready'){expect(result.status,result.out+result.err).toBe(0);expect(readlinkSync(join(f.prefix,'current'))).toContain('default-policy')}else{expect(result.status).toBe(2);expect(result.err).toContain('DEFAULT_POLICY_RUNTIME_FAILED');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/old-policy')}}finally{f.stop()}}
@@ -182,35 +234,7 @@ describe('公开 POSIX 用户安装入口',()=>{
   test('下载已有partial使用真实HTTP Range续传，再按完整bytes/hash验收',async()=>{
     const f=fixture();try{const row=f.candidate('a08-resume');const bytes=f.files.get(`releases/${row.releaseId}/${row.archive.path}`)!;const partial=join(f.prefix,'downloads',row.archive.sha256+'.tar.gz.partial');mkdirSync(dirname(partial),{recursive:true});writeFileSync(partial,bytes.subarray(0,64))
       const result=await f.run();expect(result.status,result.err).toBe(0);expect(f.ranges).toContain('bytes=64-');expect(existsSync(partial)).toBe(false)
-      // 通用 Kit 大 wheel 的独立 helper：以真实 loopback Range 证明续传、完整缓存复用、
-      // 错误 Content-Range 与错误 SHA256 都不会产出交给 pip 的正式 .whl，且不静默删错件。
-      const wheel=Buffer.alloc(1024);for(let index=0;index<wheel.length;index++)wheel[index]=index%251
-      const wheelName='isaacsim_extscache_kit-6.0.1.0-cp312-none-manylinux_2_35_x86_64.whl'
-      f.files.set(`wheels/${wheelName}`,wheel)
-      const wheelsDir=join(f.root,'wheel-cache'),pinPath=join(f.root,'extscache-pin.json'),helper=join(source,'fetch-extscache-kit.mjs')
-      const writePin=(overrides:Record<string,unknown>={})=>writeFileSync(pinPath,JSON.stringify({filename:wheelName,url:`http://127.0.0.1:${f.port}/wheels/${wheelName}`,bytes:wheel.length,sha256:sha(wheel),...overrides}))
-      const runHelper=async()=>{const child=Bun.spawn([node,helper,'--pin',pinPath,'--wheels-dir',wheelsDir,'--segment-bytes','256'],{stdout:'pipe',stderr:'pipe'});const [status,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {status,out:out.trim(),err}}
-      const wheelPath=join(wheelsDir,wheelName),wheelPartial=wheelPath+'.partial'
-      // ① 从已有 100 字节 partial 续传：必须发 bytes=100-355 并从该处接续，最终原子改名去 partial。
-      mkdirSync(wheelsDir,{recursive:true});writeFileSync(wheelPartial,wheel.subarray(0,100));writePin();f.ranges.length=0
-      let helperRun=await runHelper()
-      expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath)
-      expect(readFileSync(wheelPath).equals(wheel)).toBe(true);expect(existsSync(wheelPartial)).toBe(false);expect(f.ranges).toContain('bytes=100-355')
-      // ② 完整缓存重验复用：不再发任何网络请求。
-      f.ranges.length=0;helperRun=await runHelper()
-      expect(helperRun.status,helperRun.err).toBe(0);expect(helperRun.out).toBe(wheelPath);expect(f.ranges).toEqual([])
-      // ③ 错误 Content-Range（pin 总长度与官方实际不符）：明确非零、不产出正式 .whl。
-      rmSync(wheelPath);rmSync(wheelPartial,{force:true});writePin({bytes:wheel.length+1})
-      helperRun=await runHelper()
-      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('Content-Range');expect(existsSync(wheelPath)).toBe(false)
-      // ④ 错误 SHA256：完整下载后校验失败，不原子改名，保留完整 partial 并明确报错。
-      rmSync(wheelPath,{force:true});rmSync(wheelPartial,{force:true});writePin({sha256:'a'.repeat(64)})
-      helperRun=await runHelper()
-      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('SHA256_MISMATCH');expect(existsSync(wheelPath)).toBe(false);expect(existsSync(wheelPartial)).toBe(true)
-      // ⑤ 已存在的完整文件不是固定字节：保留原文件并明确报错，不覆盖、不降低校验。
-      rmSync(wheelPartial,{force:true});writeFileSync(wheelPath,Buffer.alloc(wheel.length,9));writePin()
-      helperRun=await runHelper()
-      expect(helperRun.status).not.toBe(0);expect(helperRun.err).toContain('WHEEL_CACHE_MISMATCH');expect(readFileSync(wheelPath).equals(Buffer.alloc(wheel.length,9))).toBe(true)
+      await verifyPinnedWheelHelper(f)
     }finally{f.stop()}
   })
   test('SDK已准备但desktop CONTEXT_ONLY只保留pending版本，不称ready或切current',async()=>{
@@ -355,7 +379,7 @@ describe('公开 POSIX 用户安装入口',()=>{
     }finally{f.stop()}
   })
 })
-describe('安装下载空间与写入失败回归（受控df、真实POSIX入口和loopback）',()=>{
+describe.skipIf(process.platform!=='linux')('安装下载空间与写入失败回归（受控df、真实POSIX入口和loopback）',()=>{
   test('低空间在归档下载前拒绝，保留current/previous/用户数据及partial，释放后同入口Range续传',async()=>{
     const f=fixture();try{
       f.candidate('storage-old');expect((await f.run()).status).toBe(0)
@@ -491,4 +515,55 @@ describe('发布manifest身份与Desktop规则',()=>{
   test('桌面Exec保留空格与字面美元、反斜线、百分号',()=>{
     expect(desktopExecutable('/with space/$cash\\icon%/lyapunov')).toBe('"/with space/\\\\$cash\\\\\\\\icon%%/lyapunov"')
   })
+})
+
+// 同一 POSIX 安装器在 Mac 只能消费 Darwin 清单，Linux 字节不因宿主兼容而被冒充可用。
+if(process.platform==='darwin')test('macOS 拒绝 Linux 清单且不取归档、不激活',async()=>{
+ const f=fixture('darwin-arm64');try{
+  const row=f.candidate('wrong-platform');row.platform='linux-x64';delete row.minimumMacOS;row.minimumGlibc='2.28'
+  const result=await f.run();expect(result.status).toBe(2);expect(result.err).toContain('Unsupported or incomplete release manifest');expect(f.requests).toEqual(['releases/latest/darwin-arm64.tsv']);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+ }finally{f.stop()}
+})
+
+test('共享固定pin下载器跨平台支持CPU +cpu文件名、续传、缓存与失败不发布',async()=>{
+ const f=fixture();try{await verifyPinnedWheelHelper(f,'torch-2.11.0+cpu-cp312-cp312-manylinux_2_28_x86_64.whl')}finally{f.stop()}
+},20000)
+
+describe.skipIf(process.platform!=='darwin')('macOS复用原安装与升级状态机（真实sh/curl/tar/Node，SDK为明确离线夹具）',()=>{
+ test('首次安装与升级保留版本，Applications入口沿用同一个current，重复安装复用完整缓存',async()=>{
+  const f=fixture('darwin-arm64');try{
+   f.candidate('mac-a',{defaultPolicy:'ready'});let result=await f.run(['--without-mujoco'])
+   expect(result.status,result.err).toBe(0)
+   expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/mac-a')
+   expect(readlinkSync(join(f.data,'Lyapunov.app'))).toBe(join(f.prefix,'current/runtime/electron/Lyapunov.app'))
+   expect(readFileSync(join(f.prefix,'versions/mac-a/policy.args'),'utf8')).toContain('install-provider policy-cpu')
+   const a=f.candidate('mac-b',{defaultPolicy:'ready'});result=await f.run(['--without-mujoco'])
+   expect(result.status,result.err).toBe(0);expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/mac-b');expect(readlinkSync(join(f.prefix,'previous'))).toBe('versions/mac-a')
+   expect(existsSync(join(f.prefix,'versions/mac-a/RELEASE.json'))).toBe(true)
+   const before=f.requests.length;result=await f.run(['--without-mujoco']);expect(result.status,result.err).toBe(0)
+   expect(f.requests.slice(before).some(path=>path.endsWith('.tar.gz'))).toBe(false)
+   expect(readFileSync(join(f.prefix,'versions/mac-b/.install/archive.sha256'),'utf8').trim()).toBe(a.archive.sha256)
+  }finally{f.stop()}
+ },30000)
+ test('SDK准备失败保留current和原件，成功重试才激活；不绕过原CPU运行时准备',async()=>{
+  const f=fixture('darwin-arm64');try{
+   f.candidate('mac-good',{defaultPolicy:'ready'});expect((await f.run(['--without-mujoco'])).status).toBe(0)
+   f.candidate('mac-bad',{defaultPolicy:'failed'});const result=await f.run(['--without-mujoco'])
+   expect(result.status).toBe(2);expect(result.err).toContain('DEFAULT_POLICY_RUNTIME_FAILED');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/mac-good');expect(existsSync(join(f.prefix,'versions/mac-bad/.install/policy-cpu.log'))).toBe(true)
+  }finally{f.stop()}
+ },20000)
+ test('用户现有app目录不覆盖，current和用户内容保留',async()=>{
+  const f=fixture('darwin-arm64');try{
+   f.candidate('mac-one');expect((await f.run(['--without-mujoco','--no-desktop'])).status).toBe(0)
+   const app=join(f.data,'Lyapunov.app');put(join(app,'user-content'),'keep')
+   f.candidate('mac-two');const result=await f.run(['--without-mujoco'])
+   expect(result.status).not.toBe(0);expect(result.err).toContain('unmanaged entry');expect(readFileSync(join(app,'user-content'),'utf8')).toBe('keep');expect(readlinkSync(join(f.prefix,'current'))).toBe('versions/mac-one')
+  }finally{f.stop()}
+ },20000)
+ test('最低macOS版本拒绝在归档下载前发生，原current保留',async()=>{
+  const f=fixture('darwin-arm64');try{
+   const row=f.candidate('mac-future');row.minimumMacOS='999.0';const result=await f.run(['--without-mujoco'])
+   expect(result.status).toBe(2);expect(result.err).toContain('macOS 999.0 or later');expect(f.requests.some(path=>path.endsWith('.tar.gz'))).toBe(false);expect(existsSync(join(f.prefix,'current'))).toBe(false)
+  }finally{f.stop()}
+ })
 })

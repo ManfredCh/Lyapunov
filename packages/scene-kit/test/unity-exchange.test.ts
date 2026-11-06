@@ -11,7 +11,7 @@
  * 独立算出来对账，因此这些断言真的能抓到四元数公式写错（历史上就写错过一次）。
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { Matrix4, Quaternion, Vector3 } from "three"
@@ -343,7 +343,9 @@ function fakeUnity(options: {
       const path = join(directory, name)
       let request: Record<string, any>
       try { request = JSON.parse(await readFile(path, "utf8")) as Record<string, any> } catch { continue }
-      try { await rm(path) } catch { continue }   // 已被另一次运行认领
+      // 认领必须是**原子**原语（与 C# File.Move 同形）：Bun 的 rm()/unlink() 异步封装有存在性先检，
+      // 并发下两个 drain 都能删掉同一份（实测 macOS 上一份请求被执行两次）；rename 只有第一个能赢。
+      try { await mkdir(join(scratch, "claimed"), { recursive: true }); await rename(path, join(scratch, "claimed", name)) } catch { continue }   // 已被另一次运行认领
       count++
       // 过期请求：编辑器只写一份 REQUEST_EXPIRED 回执，不执行（取消/崩溃留下的孤儿不会很久以后突然跑）。
       if (typeof request.deadlineUnixMs === "number" && Date.now() > request.deadlineUnixMs) {

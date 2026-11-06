@@ -99,9 +99,9 @@ export function PolicyLibraryPanel({available,canLoad,canRegister=true,canLoadAs
  const priorWorld=application&&!acceptedBinding.current?.observed&&application.before.worldId===worldId&&application.before.expectedRevision===expectedRevision&&application.before.expectedGeneration===expectedGeneration
  const applied=Boolean(accepted&&kind==='policy'&&accepted.sceneId===sceneId&&accepted.entityId===entityId&&sameIdentity(accepted.identity,identity)&&(ownWorld||priorWorld)&&worldAllowsApply(worldStatus))
  const input=()=>({...context,...localId?{entryId:localId}:path.trim()?(localPolicyBundlePath(path.trim())?{manifestPath:path.trim()}:{filePath:path.trim()}):{},...identity?{identity}:{},...state?.localSource?{localSource:state.localSource}:{}})
- const run=async(task:(current:()=>boolean)=>Promise<any>,activate=false)=>{
+ const run=async(task:(current:()=>boolean)=>Promise<any>,activate=false,preserveState=false)=>{
   const request=++serial.current,current=()=>alive.current&&request===serial.current,before={...context,identity}
-  activating.current=activate;acceptedBinding.current=undefined;setApplication(undefined);setBusy(true);setState(undefined);setError('');setFailure(undefined)
+  activating.current=activate;if(!preserveState){acceptedBinding.current=undefined;setApplication(undefined);setState(undefined);setFailure(undefined)}setBusy(true);setError('')
   try{
    const result=await task(current);if(!current())return
    const bound=result.appliedBinding as PolicyAppliedBinding|undefined,latest=bindingRef.current
@@ -122,18 +122,28 @@ export function PolicyLibraryPanel({available,canLoad,canRegister=true,canLoadAs
  }
  const action=(value:'check'|'load'|'download'|'prepare'|'activate')=>run(async current=>value==='load'&&!localId?(await importLocalPolicy({command,current},path.trim(),{...context,...identity?{identity}:{}})).face:policyPanelAction({command,current},value,value==='download'?{...context,modelId:selected?.downloadModelId}:input()),value==='activate')
  const loadAsset=()=>run(async current=>{const id=selected?.downloadModelId;if(!id)return {};const result=await policyPanelAction({command,current},'asset',{modelId:id});if(current()&&result.result?.status==='ASSET_DOWNLOADED'&&typeof result.result.modelPath==='string'&&onAssetLoaded)await onAssetLoaded(result.result.modelPath,id,{packId:selected?.packId??id,downloadModelId:id,source:result.result.source,assetModel:result.result.assetModel,assetBytesVerified:result.result.assetBytesVerified,fullBundleReady:result.result.fullBundleReady,policyPrepared:false});return result})
- // 桌面选择器可能既不 resolve 也不 reject（实测：按钮卡在 Working… 永不回来）。
- // 这里给它一个有界等待：超时就把真实原因说出来，并露出"输入本地路径"这条可走的路，而不是无限转圈。
+ // 选择器有界等待后提供路径输入；原选择器仍可能在用户选完后返回，未切换目标时继续处理其结果。
  const chooseAndRegister=()=>run(async current=>{
   setChooserStalled(false)
-  const chosen=await Promise.race([
-   (chooseFile?.() ?? Promise.resolve(undefined)),
-   new Promise<undefined>(resolve=>{setTimeout(()=>resolve(undefined),CHOOSER_TIMEOUT_MS)}),
-  ])
-  if(!chosen){if(current()){setChooserStalled(true);setError(tr('系统文件选择器没有响应。可以直接在下面输入本机路径后导入。','The system file picker did not respond. Enter a local path below to import instead.'))}return {}}
-  if(current()){setPath(chosen);setLocalId('');setInstalledIdentity(undefined);return (await importLocalPolicy({command,current},chosen,{...context,...selected?.identity?{identity:selected.identity}:{}})).face}
+  const picker=chooseFile?.() ?? Promise.resolve(undefined)
+  const timeout=Symbol('picker-timeout')
+  let timer:ReturnType<typeof setTimeout>|undefined
+  let chosen:string|undefined|typeof timeout
+  try{chosen=await Promise.race([picker,new Promise<typeof timeout>(resolve=>{timer=setTimeout(()=>resolve(timeout),CHOOSER_TIMEOUT_MS)})])}finally{clearTimeout(timer)}
+  if(chosen===timeout){
+   if(current()){setChooserStalled(true);setError(tr('文件选择尚未返回。可以继续选择，也可以输入本机路径后导入。','The file picker has not returned yet. Continue choosing or enter a local path to import.'))}
+   void picker.then(late=>{
+    if(!current())return
+    setChooserStalled(false)
+    if(!late){setError('');return}
+    void run(async latest=>{setPath(late);setLocalId('');setInstalledIdentity(undefined);return (await importLocalPolicy({command,current:latest},late,{...context,...selected?.identity?{identity:selected.identity}:{}})).face})
+   }).catch(error=>{if(current())setError(String(error))})
+   return {}
+  }
+  if(!chosen)return {}
+  if(current()){acceptedBinding.current=undefined;setApplication(undefined);setState(undefined);setFailure(undefined);setPath(chosen);setLocalId('');setInstalledIdentity(undefined);return (await importLocalPolicy({command,current},chosen,{...context,...selected?.identity?{identity:selected.identity}:{}})).face}
   return {}
- })
+ },false,true)
  // R-004 主路径：先显示身份与当前状态，再给**一个**语义明确的下一步；底层 register/download/adapter 命令全部收进高级详情。
  const chooseValue=localId?`entry:${localId}`:sourceId?`source:${sourceId}`:''
  const currentPolicyLabel=localId?(localEntries.find(entry=>entry.id===localId)?.label??localId):identity?`${identity.modelId} · ${identity.revision.slice(0,12)}`:tr('未配置策略','No policy configured')
@@ -142,14 +152,15 @@ export function PolicyLibraryPanel({available,canLoad,canRegister=true,canLoadAs
  const policyChoice=useRef<HTMLSelectElement>(null)
  // 应用资格由服务端按“字节/来源/本体/引擎/绑定”核对并单独返回；不把“应用后必须匹配”误当前置。
  const applyEligible=Boolean(state&&identity&&entityId&&worldId&&worldAllowsApply(worldStatus)&&state.applyEligible===true)
- const incompatible=Boolean(state&&state.recovery!=='prepare_on_instance'&&(state.category==='model_incompatible'||hasAny(state,/MISMATCH/,['ROBOT_MODEL_MISMATCH','JOINT_COUNT_MISMATCH','POLICY_SOURCE_MISMATCH'])))
+ const incompatible=Boolean(state&&state.recovery!=='prepare_on_instance'&&(state.category==='model_incompatible'||(state.missing??[]).some(item=>/MISMATCH/.test(item.code)&&item.code!=='POLICY_ADAPTER_SOURCE_MISMATCH')))
+ const needsFiles=hasAny(state,/^(POLICY_ADAPTER_SOURCE_MISMATCH|POLICY_DEPENDENCY_MISSING|POLICY_FILES_NOT_VERIFIED)$/)
  // paused 的 WORLD_NOT_EXECUTABLE 不是绑定故障：准备/Apply 仍可继续；缺实例/场景/代次等真实绑定问题才拦。
  const bindingMissing=Boolean(state&&(state.missing??[]).some((item:{code:string})=>item.code!=='WORLD_NOT_EXECUTABLE'&&(/^(WORLD_|SCENE_)/.test(item.code)||['POLICY_ENTITY_NOT_FOUND','POLICY_EXPECTED_GENERATION_REQUIRED','POLICY_ROBOT_SELECTION_REQUIRED'].includes(item.code))))
  const needsWorld=bindingMissing||(worldStatus!==undefined&&worldStatus!=='paused'&&!executableWorld(worldStatus))
  const needsRuntime=hasAny(state,/^(RUNTIME_|POLICY_RUNTIME_)/)
  const primary=!identity&&!localId&&!path.trim()
   ? {label:chooseFile?tr('导入策略','Import policy'):tr('输入本地路径以导入','Enter a local path to import'),run:chooseFile?chooseAndRegister:undefined,disabled:!available||!canRegister||busy||!chooseFile}
-  : !localId&&!identity&&path.trim()
+  : !localId&&path.trim()&&(!identity||!state)
    ? {label:tr('登记并检查此路径','Register and check this path'),run:()=>action('load'),disabled:!available||!canRegister||busy}
    : !state
     ? {label:tr('检查兼容','Check compatibility'),run:()=>action('check'),disabled:!available||busy}
@@ -159,6 +170,8 @@ export function PolicyLibraryPanel({available,canLoad,canRegister=true,canLoadAs
       ? {label:tr('为本实例准备','Prepare for this instance'),run:()=>action('prepare'),disabled:!available||!canLoad||busy||!entityId||!identity}
       : incompatible
        ? {label:tr('当前实例不兼容','Incompatible with this instance'),run:undefined,disabled:true}
+      : needsFiles
+       ? {label:chooseFile?tr('导入策略文件','Import policy files'):tr('先输入策略文件路径','Enter a policy file path first'),run:chooseFile?chooseAndRegister:undefined,disabled:!available||!canRegister||busy||!chooseFile}
       : needsWorld||!worldId
        ? worldId
         ? {label:tr('重新检查世界绑定','Re-check world binding'),run:()=>action('check'),disabled:!available||busy}

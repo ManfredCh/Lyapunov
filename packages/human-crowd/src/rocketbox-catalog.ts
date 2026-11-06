@@ -3,6 +3,7 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HUMAN_GLB_MAX_BYTES } from './glb.ts'
+import { HUMAN_AVATAR_ROOT_ENV } from './env.ts'
 import { ROCKETBOX_AVATAR_IDS, ROCKETBOX_LICENSE_SHA256, ROCKETBOX_SOURCE, type RocketboxAvatarId } from './rocketbox-sample.ts'
 export interface RocketboxSourceFile {path:string;bytes:number;sha256:string;gitBlob?:string}
 export interface RocketboxPreview {path:string;bytes:number;sha256:string;gitBlob:string;sourcePath:string;kind:'upstream-official'}
@@ -12,7 +13,8 @@ export interface RocketboxAvatar {
  headingOffsetRad:number; walkClip:string; walkSpeedMps:number; boneMapping:Record<string,string>; sourceFiles:RocketboxSourceFile[];preview?:RocketboxPreview
 }
 export interface RocketboxCatalog {schema:1;avatars:RocketboxAvatar[]}
-export const rocketboxCatalogRoot=()=>process.env.LYAPUNOV_HUMAN_AVATAR_ROOT??resolve(dirname(fileURLToPath(import.meta.url)),'../assets/rocketbox')
+export { HUMAN_AVATAR_ROOT_ENV }
+export const rocketboxCatalogRoot=()=>process.env[HUMAN_AVATAR_ROOT_ENV]??resolve(dirname(fileURLToPath(import.meta.url)),'../assets/rocketbox')
 export function safeAvatarRelative(path:unknown):asserts path is string {if(typeof path!=='string'||!path||isAbsolute(path)||path.includes('\\')||path.split('/').some(p=>!p||p==='.'||p==='..'))throw Error('HUMAN_CATALOG_PATH_INVALID: '+String(path))}
 export function validateRocketboxAvatar(value:unknown):RocketboxAvatar {
  const row=value as RocketboxAvatar

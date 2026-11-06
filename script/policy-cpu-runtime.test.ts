@@ -1,9 +1,9 @@
 import {describe,expect,test}from "bun:test"
-import {mkdtempSync,mkdirSync,copyFileSync,writeFileSync,chmodSync,readFileSync,rmSync}from "node:fs"
+import {mkdtempSync,mkdirSync,copyFileSync,writeFileSync,chmodSync,readFileSync,rmSync,realpathSync,readdirSync}from "node:fs"
 import {tmpdir}from "node:os"
 import {join,dirname}from "node:path"
 import {spawnSync}from "node:child_process"
-import {resolvePolicyPython,checkPolicyCpu,policyRuntimeCandidates}from "../packages/lyapunov-product-bundle/src/policy-runtime.mjs"
+import {resolvePolicyPython,checkPolicyCpu,policyRuntimeCandidates,policyCpuWheel,ensurePolicyCpuWheel}from "../packages/lyapunov-product-bundle/src/policy-runtime.mjs"
 import {backendEnvironment}from "./profile.ts"
 import {runtimePaths}from "../packages/lyapunov-product-bundle/src/runtime-paths.ts"
 import {runtimePluginInsert}from "./runtime-patch.ts"
@@ -21,7 +21,7 @@ describe("独立CPU策略前缀与Host解释器",()=>{
   expect(rows.find(row=>row.id==="lyapunov-sim-mujoco")?.config?.pythonPath).toBe("/selected/mujoco/python")
  })
  test("无policy override的实际Host只登记有限正式候选，由来源模块决定CPU解释器",()=>{
-  const root=mkdtempSync(join(tmpdir(),'policy-candidate-'))
+  const root=mkdtempSync(join(realpathSync(tmpdir()),'policy-candidate-'))
   try{const preference=join(root,'engine.json');writeFileSync(preference,JSON.stringify({sdkPython:{mujoco:'/saved/mujoco/python',isaac:'/saved/isaac/python'}}))
    const env={LYAPUNOV_ENGINE_PREFERENCE_FILE:preference},candidates=policyRuntimeCandidates(root,env)
    expect(candidates).toEqual([{python:join(root,'.runtime/policy-python/bin/python'),source:'package-default',provider:'policy-cpu'},{python:'/saved/mujoco/python',source:'saved-preference',provider:'mujoco'},{python:'/saved/isaac/python',source:'saved-preference',provider:'isaac'}])
@@ -31,17 +31,17 @@ describe("独立CPU策略前缀与Host解释器",()=>{
   }finally{rmSync(root,{recursive:true,force:true})}
  })
  test("隔离Host仅保留policy路径配置，不透传其他父秘密",async()=>{
-  const root=mkdtempSync(join(tmpdir(),"policy-host-env-"))
+  const root=mkdtempSync(join(realpathSync(tmpdir()),"policy-host-env-"))
   try{const paths=runtimePaths({root,mode:"local"}),env=await backendEnvironment("local",paths,{isolated:true,parent:{PATH:"/usr/bin",LYAPUNOV_POLICY_PYTHON:"/selected/policy/python",OTHER_SECRET:"must-not-cross"}})
    expect(env.LYAPUNOV_POLICY_PYTHON).toBe("/selected/policy/python");expect(env.OTHER_SECRET).toBeUndefined()
   }finally{rmSync(root,{recursive:true,force:true})}
  })
  test("真实安装脚本仅调用新前缀，收尾managed不能借外部解释器；pip/下载为明确离线替身",()=>{
-  const fixture=mkdtempSync(join(tmpdir(),"policy-install-routing-")),product=join(fixture,"product"),source=join(import.meta.dir,"..")
+  const fixture=mkdtempSync(join(realpathSync(tmpdir()),"policy-install-routing-")),product=join(fixture,"product"),source=join(import.meta.dir,"..")
   const put=(path:string,content:string)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,content)}
   const executable=(path:string,content:string)=>{put(path,content);chmodSync(path,0o755)}
   try{
-   for(const file of ["distribution/linux/install-provider","packages/policy-registry/requirements-cpu.txt"]){mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(source,file),join(product,file))}
+   for(const file of ["distribution/linux/install-provider","distribution/linux/fetch-extscache-kit.mjs","packages/policy-registry/requirements-cpu.txt"]){mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(source,file),join(product,file))}
    put(join(product,"script/package-linux.ts"),"// source fixture")
    put(join(product,"packages/lyapunov-product-bundle/src/policy-runtime.mjs"),"// payload existence fixture")
    put(join(product,"distribution/linux/policy-cpu.mjs"),`import{writeFileSync}from'node:fs';if(process.argv[2]==='wheel')console.log(${JSON.stringify(join(fixture,"torch-cpu.whl"))});else{writeFileSync(${JSON.stringify(join(fixture,"doctor.json"))},JSON.stringify({action:process.argv[2],managed:process.argv[3],envPolicy:process.env.LYAPUNOV_POLICY_PYTHON}));console.log(JSON.stringify({status:'AVAILABLE',scope:'offline routing fixture'}))}`)
@@ -55,4 +55,24 @@ describe("独立CPU策略前缀与Host解释器",()=>{
    expect(JSON.parse(readFileSync(join(fixture,"doctor.json"),"utf8"))).toMatchObject({action:"doctor",managed:"--managed-sdk"})
   }finally{rmSync(fixture,{recursive:true,force:true})}
  })
+})
+
+test('CPU策略平台选择保留Linux固定轮子，并选用同版macOS arm64官方轮子',()=>{
+ expect(policyCpuWheel('linux','x64').name).toBe('torch-2.11.0+cpu-cp312-cp312-manylinux_2_28_x86_64.whl')
+ expect(policyCpuWheel('darwin','arm64').name).toBe('torch-2.11.0-cp312-cp312-macosx_11_0_arm64.whl')
+ expect(policyCpuWheel('darwin','arm64').url).toStartWith('https://files.pythonhosted.org/')
+ expect(()=>policyCpuWheel('win32','x64')).toThrow('POLICY_CPU_PLATFORM_UNSUPPORTED')
+})
+test('平台轮子的坏缓存不覆盖；冷下载复用发行分段工具并保留可续传partial',async()=>{
+ const root=mkdtempSync(join(realpathSync(tmpdir()),'policy-wheel-integrity-')),wheel=policyCpuWheel(),dir=join(root,'.runtime/provider-download-cache/policy-cpu-wheels'),target=join(dir,wheel.name)
+ try{
+  mkdirSync(dir,{recursive:true});writeFileSync(target,'existing mismatch')
+  await expect(ensurePolicyCpuWheel(root)).rejects.toThrow('POLICY_CPU_WHEEL_CACHE_INVALID')
+  expect(readFileSync(target,'utf8')).toBe('existing mismatch');rmSync(target)
+  const helper=join(root,'distribution/linux/fetch-extscache-kit.mjs');mkdirSync(dirname(helper),{recursive:true})
+  writeFileSync(helper,`import{readFileSync,writeFileSync}from'node:fs';import{join}from'node:path';const args=process.argv.slice(2),pin=JSON.parse(readFileSync(args[args.indexOf('--pin')+1],'utf8')),dir=args[args.indexOf('--wheels-dir')+1];writeFileSync(join(dir,'observed-pin.json'),JSON.stringify(pin));writeFileSync(join(dir,pin.filename+'.partial'),'partial bytes');process.exit(19)`)
+  await expect(ensurePolicyCpuWheel(root)).rejects.toThrow('POLICY_CPU_WHEEL_DOWNLOAD_FAILED')
+  expect(JSON.parse(readFileSync(join(dir,'observed-pin.json'),'utf8'))).toMatchObject({filename:wheel.name,url:wheel.url,bytes:wheel.bytes,sha256:wheel.sha256})
+  expect(readFileSync(target+'.partial','utf8')).toBe('partial bytes');expect(readdirSync(dir).some(name=>name.startsWith('.policy-wheel-'))).toBe(false)
+ }finally{rmSync(root,{recursive:true,force:true})}
 })

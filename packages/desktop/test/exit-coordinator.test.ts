@@ -5,6 +5,64 @@ import {SessionId} from "@deepseek-ai/dsh-session/types"
 import type {JobView} from "@deepseek-ai/dsh-api-job-controller/client"
 import {fileAddressFor} from "@deepseek-ai/dsh-util-workspace-path"
 import {fileDocument,documentExitParticipant} from "../../lyapunov-workspace/src/native-documents.ts"
+import {createRequire} from "node:module"
+import {spawn} from "node:child_process"
+import {pathToFileURL} from "node:url"
+
+for(const signal of ["SIGTERM","SIGINT"] as const)test.skipIf(process.platform==="win32")(`真实 ${signal} 被 when-exit 重发时仍等待 flush/stop/close，只清理一次`,async()=>{
+  const require=createRequire(new URL("../package.json",import.meta.url))
+  const conf=createRequire(require.resolve("electron-store")).resolve("conf")
+  const atomically=createRequire(conf).resolve("atomically")
+  const hook=pathToFileURL(createRequire(atomically).resolve("when-exit")).href
+  const coordinator=new URL("../src/exit-coordinator.ts",import.meta.url).href
+  const source=`
+    import whenExit from ${JSON.stringify(hook)};
+    import {ExitCoordinator,registerDesktopTerminationSignals} from ${JSON.stringify(coordinator)};
+    const calls=[];
+    whenExit(()=>{});
+    const phase=async name=>{calls.push(name);await new Promise(resolve=>setTimeout(resolve,30))};
+    const exit=new ExitCoordinator({summary:async()=>({dirtyDrafts:0,runningActions:0}),confirm:async()=>{throw Error('system must not confirm')},flush:()=>phase('flush'),stop:()=>phase('stop'),close:()=>phase('close'),failed:async error=>{throw error},exit:origin=>{console.log(JSON.stringify({origin,calls}));process.exit(0)}});
+    registerDesktopTerminationSignals(exit);
+    setInterval(()=>{},1000);
+    console.log('READY');
+  `
+  const child=spawn(Bun.which("node")!,["--experimental-strip-types","--input-type=module","-e",source],{stdio:["ignore","pipe","pipe"]})
+  let output="",stderr="",sent=false
+  child.stdout!.on("data",chunk=>{output+=chunk;if(!sent&&output.includes("READY")){sent=true;child.kill(signal)}})
+  child.stderr!.on("data",chunk=>{stderr+=chunk})
+  const timer=setTimeout(()=>child.kill("SIGKILL"),5000)
+  try{
+    const result=await new Promise<{code:number|null;signal:NodeJS.Signals|null}>((resolve,reject)=>{child.once("error",reject);child.once("close",(code,signal)=>resolve({code,signal}))})
+    expect({result,stderr}).toMatchObject({result:{code:0,signal:null}})
+    expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({origin:"system",calls:["flush","stop","close"]})
+  }finally{clearTimeout(timer);if(child.exitCode===null&&child.signalCode===null)child.kill("SIGKILL")}
+})
+
+test("父子 IPC 只接受已登记的终止信号，并发转发仍只执行一次清理",async()=>{
+  const coordinator=new URL("../src/exit-coordinator.ts",import.meta.url).href
+  const source=`
+    import {ExitCoordinator,registerDesktopTerminationSignals} from ${JSON.stringify(coordinator)};
+    const calls=[],origins=[];
+    const phase=async name=>{calls.push(name);await new Promise(resolve=>setTimeout(resolve,20))};
+    const exit=new ExitCoordinator({summary:async()=>({dirtyDrafts:0,runningActions:0}),confirm:async()=>{throw Error('system must not confirm')},flush:()=>phase('flush'),stop:()=>phase('stop'),close:()=>phase('close'),failed:async error=>{throw error},exit:origin=>{console.log(JSON.stringify({origin,calls}));process.exit(0)}});
+    registerDesktopTerminationSignals({request:origin=>{origins.push(origin);return exit.request(origin)}});
+    process.on('message',message=>{if(message?.type==='probe'){if(origins.length)throw Error('invalid message accepted');process.send('probe-clean')}});
+    process.send('ready');
+  `
+  const child=spawn(Bun.which("node")!,["--experimental-strip-types","--input-type=module","-e",source],{stdio:["ignore","pipe","pipe","ipc"]})
+  let output="",stderr="",probed=false
+  child.stdout!.on("data",chunk=>{output+=chunk});child.stderr!.on("data",chunk=>{stderr+=chunk})
+  child.on("message",message=>{
+    if(message==="ready"){child.send({type:"lyapunov:terminate",signal:"SIGKILL"});child.send({type:"unrelated",signal:"SIGTERM"});child.send({type:"probe"})}
+    if(message==="probe-clean"){probed=true;child.send({type:"lyapunov:terminate",signal:"SIGTERM"});child.send({type:"lyapunov:terminate",signal:"SIGINT"})}
+  })
+  const timer=setTimeout(()=>child.kill("SIGKILL"),5000)
+  try{
+    const result=await new Promise<{code:number|null;signal:NodeJS.Signals|null}>((resolve,reject)=>{child.once("error",reject);child.once("close",(code,signal)=>resolve({code,signal}))})
+    expect({result,stderr}).toMatchObject({result:{code:0,signal:null}});expect(probed).toBe(true)
+    expect(JSON.parse(output.trim())).toEqual({origin:"system",calls:["flush","stop","close"]})
+  }finally{clearTimeout(timer);if(child.exitCode===null&&child.signalCode===null)child.kill("SIGKILL")}
+})
 
 test("桌面退出消费原生Job roster，保留运行动作告警并释放目录订阅",async()=>{
   const previous=Object.getOwnPropertyDescriptor(globalThis,"window"),watched:string[]=[],released:string[]=[],listeners=new Set<()=>void>(),cleanups:Array<()=>void>=[]

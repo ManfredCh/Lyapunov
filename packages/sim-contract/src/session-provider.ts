@@ -83,7 +83,8 @@ export class SessionSimFactory implements SimService {
   private readonly unfinished = new Map<string, { instance: SimWorlds; failure: unknown }>()
   /** Host 级 dispose 一旦开始就永久关闭新实例入口，即使旧实例收尾失败。 */
   private disposed = false
-  constructor(private readonly options: SessionSimFactoryOptions) {}
+  private readonly options: SessionSimFactoryOptions
+  constructor(options: SessionSimFactoryOptions) { this.options = options }
 
   forSession(sessionKey: string): SimWorlds {
     const key = typeof sessionKey === 'string' ? sessionKey.trim() : ''

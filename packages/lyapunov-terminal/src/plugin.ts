@@ -302,6 +302,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       await operation(agent.id, async signal => {
         const value = await readTerminalClipboard({ kind: kind as 'auto' | 'text' | 'image', signal, tools: {
           'xclip': process.env.LYAPUNOV_CLIPBOARD_XCLIP, 'xsel': process.env.LYAPUNOV_CLIPBOARD_XSEL, 'wl-paste': process.env.LYAPUNOV_CLIPBOARD_WL_PASTE,
+          'pbpaste': process.env.LYAPUNOV_CLIPBOARD_PBPASTE, 'osascript': process.env.LYAPUNOV_CLIPBOARD_OSASCRIPT,
         } })
         signal.throwIfAborted()
         if (value.kind === 'text') drafts.setText(agent.id, drafts.getText(agent.id) + value.text)

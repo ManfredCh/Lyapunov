@@ -7,7 +7,15 @@
     "model": "asset/cf2.xml",
     "builtinAssetId": "crazyflie_2",
     "builtinModel": "materials/robots/crazyflie_2/bitcraze_crazyflie_2/cf2.xml",
-    "preview": "asset/cf2.png"
+    "preview": "asset/cf2.png",
+    "componentDefaultsModelSha256": "c1260dd47cded49edd5c1c02226529a5452a73f70000515f83bf223814037933",
+    "componentDefaults": {
+      "controller": {
+        "type": "drone",
+        "thrustActuator": "body_thrust",
+        "torqueActuators": {"x": "x_moment", "y": "y_moment", "z": "z_moment"}
+      }
+    }
   },
   "pieces": {
     "asset": {

@@ -17,8 +17,8 @@
  *    解析会 ERR_MODULE_NOT_FOUND（这些文件不在本任务允许改动的范围内）。这里注册一个
  *    "无扩展名相对 import → 同目录同名 .ts" 的解析兜底，不改写源码、不改变模块语义。
  *    Bun 下没有 `module.registerHooks`，相应的兜底也不需要（bun 自己解析无扩展名）。
- * 2. **构造函数参数属性**：Node 的 strip-only 模式不支持（`recording.ts` 用了参数属性），需要
- *    `--experimental-transform-types`；本脚本按需带该 flag 重新进入一次（幂等、不递归）。
+ * 2. **类型剥除**：`node --test` 直跑 `.ts` 需要 `--experimental-strip-types`（22/24/26 均可用；
+ *    曾经挡路的构造函数参数属性已全部改成可擦除写法）；本脚本按需带该 flag 重新进入一次（幂等、不递归）。
  */
 import { spawnSync } from "node:child_process"
 
@@ -35,7 +35,7 @@ const registerHooks = moduleApi?.registerHooks
 // bun 没有 registerHooks：改成 node 重新进入（幂等，由 G13_RUNNER 防止递归）。
 if (typeof registerHooks !== "function" && process.env.G13_RUNNER !== "node") {
   console.error("G13: 当前运行器缺少 module.registerHooks（bun），改用 node 重新进入。")
-  const child = spawnSync("node", ["--experimental-transform-types", "--no-warnings", ...process.argv.slice(1)], {
+  const child = spawnSync("node", ["--experimental-strip-types", "--no-warnings", ...process.argv.slice(1)], {
     stdio: "inherit",
     env: { ...process.env, G13_RUNNER: "node" },
   })
@@ -43,10 +43,10 @@ if (typeof registerHooks !== "function" && process.env.G13_RUNNER !== "node") {
   process.exit(child.status ?? 1)
 }
 
-// Node 的 strip-only 模式不支持构造函数参数属性（recording.ts 用了），需要 --experimental-transform-types。
+// 统一走 --experimental-strip-types：Node 26 已删除 transform-types，参数属性等真实转换已可擦除化。
 // 判定只看自己的私有标记（不看 G13_RUNNER：bun 分支设过它，否则这里会被误跳过，实测会 ERR_MODULE_NOT_FOUND）。
 if (process.env.G13_TRANSFORM_TYPES !== "1") {
-  const child = spawnSync(process.execPath, ["--experimental-transform-types", "--no-warnings", ...process.argv.slice(1)], {
+  const child = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", ...process.argv.slice(1)], {
     stdio: "inherit",
     env: { ...process.env, G13_TRANSFORM_TYPES: "1" },
   })

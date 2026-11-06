@@ -183,6 +183,33 @@ describe("ENV-01 同一句话因附件不同走不同路径", () => {
   })
 })
 
+describe("执行流程的收尾与当前停止", () => {
+  for (const text of [
+    "新建物理场景，运行机器人并检查目标，最后停止本次动作",
+    "在独立场景实际开世界、运行原程序、用sim_task_check求值，并停止本次动作",
+    "Run the scene and check the goal, then stop the robot",
+    "Run the scene, then immediately stop the robot",
+    "在场景里运行程序、求值，并停止本次动作。记录outcome仅可为success/failed/budget-exceeded/aborted。",
+    "在scene里说明AbortController、cancelled状态与asphalt材质字段",
+  ]) test(text, () => {
+    const decision = routeEnvironment({ messages: [userMessage({ type: "text", text })], hasTool: () => true })
+    expect(decision.stage).not.toBe("stop")
+    expect(renderEnvironmentPointer(decision) ?? "").not.toContain("Stop the action immediately")
+  })
+  for (const text of [
+    "运行机器人，立即停止这个场景动作",
+    "先停止当前场景，再运行程序",
+    "已经完成场景检查，然后停止",
+    "运行场景A，并停止场景B",
+    "Abort the scene now",
+    "Cancel the scene",
+  ]) test(text, () => {
+    const decision = routeEnvironment({ messages: [userMessage({ type: "text", text })], hasTool: () => true })
+    expect(decision.stage).toBe("stop")
+    expect(decision.hints.some(hint => hint.name === "sim_stop")).toBe(true)
+  })
+})
+
 describe("ENV-53 阶段区分：新建 / 继续 / 局部 / 只方案 / 停止", () => {
   test("新建：文字请求先规划", () => {
     const decision = routeEnvironment({ messages: [userMessage({ type: "text", text: "新建一个仓库场景" })] })
@@ -683,6 +710,7 @@ async function applyOnStub(skillNames?: readonly string[],mode:'formal'|'develop
     // 原生技能目录的替身：默认故意不含 cad-import，用来验证"目录完整但缺该技能 → 写成缺口"。
     const skills = { snapshot: async () => ({ skills: (skillNames ?? ["environment-planning", "scene-construction", "architectural-world"]).map(name => ({ name })), complete: true }) }
     const ctx = {
+      root: lifecycle.root,
       jobs: lifecycle.jobs,
       inject: async () => {},
       effect: lifecycle.effect.bind(lifecycle),
