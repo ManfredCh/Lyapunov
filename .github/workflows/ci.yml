@@ -79,6 +79,12 @@ jobs:
       - name: Build desktop
         run: bun run script/build-desktop.ts
 
+      # Isaac SDK 发现的离线夹具要求真实 Python 3.12；不继承 runner 滚动更新的默认版本。
+      - name: Set up Python 3.12 for offline SDK fixtures
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       # CI 唯一的 python venv（CCMM-09）：**在技能校验之前**就绪，装齐下面实际使用的依赖。
       #  · PyYAML：`Validate skill files` 解析 SKILL.md frontmatter 要 `import yaml`；
       #  · numpy / Pillow：纳入清单的 python 用例真实依赖（`test_worker_protocol.py` import numpy；
@@ -88,6 +94,7 @@ jobs:
       - name: Provision CI python venv (PyYAML + numpy + Pillow + pinned MuJoCo/OpenUSD parsers)
         run: |
           set -eu
+          python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
           python3 -m venv .runtime/ci-py
           export TESTCI_PYTHON="$PWD/.runtime/ci-py/bin/python"
           echo "TESTCI_PYTHON=$TESTCI_PYTHON" >> "$GITHUB_ENV"
