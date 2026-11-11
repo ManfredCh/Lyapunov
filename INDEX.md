@@ -28,6 +28,7 @@
 | [发布说明目录](docs/releases) | 各历史版本的发布说明；旧版本记录只描述对应版本 |
 | [README](README.md) / [简体中文](README.zh-CN.md) | 产品介绍、安装、首次运行、工作流和开发入口 |
 | [中文操作手册](docs/MANUAL.zh-CN.md) | 完整安装 → Guest／登录 → 场景 → 机器人 → 相机 → 录制 → 导出流程 |
+| [场景与 Isaac 工作流](docs/ISAAC_SCENE_WORKFLOWS.zh-CN.md) | 录制、资产检查和通过 Agent Graph 使用 USD、NuRec、Mimic 与位姿配准 |
 | [快速上手](docs/QUICKSTART.md) / [简体中文](docs/QUICKSTART.zh-CN.md) | 输入、动作顺序、示例请求和输出检查 |
 | [安装说明](docs/install.md) | 安装、运行时与版本准备 |
 | [Isaac 安装与选择](docs/isaac-setup.md) / [English](docs/isaac-setup.en.md) | Isaac SDK、许可与本地安装选择 |

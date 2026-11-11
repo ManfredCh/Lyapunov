@@ -13,7 +13,7 @@
  * 与产品装配同一归属路径。
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -22,6 +22,12 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createHash } from 'node:crypto'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import Timer from '@deepseek-ai/cordis-plugin-timer'
+import Jobs from '@deepseek-ai/dsh-jobs-local'
+import Subprocess from '@deepseek-ai/dsh-subprocess-local'
+import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
+import { JobId } from '@deepseek-ai/dsh-jobs'
+import { applyOfflineSceneWorkflows } from '../../robot-workflows/src/offline-scene-plugin.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -384,4 +390,49 @@ describe('campaign E2E：真实 Cordis 装配下的全链路', () => {
       await host.close()
     }
   })
+})
+
+
+test('场景准备工具复用原生 Jobs 与 campaign 留痕', async () => {
+  const host = await boot()
+  try {
+    await host.ctx.plugin(Timer)
+    await host.ctx.plugin(Jobs)
+    await host.ctx.plugin(Subprocess)
+    await host.ctx.plugin(ToolJobs, { completionDelivery: 'quiet' })
+    const interpreter = join(workDir, 'usd-worker-fixture.sh')
+    // 这里只替换离线算法进程，工具、Job、结果回收与 campaign 都走真实宿主。
+    writeFileSync(interpreter, `#!/bin/sh
+set -eu
+mkdir usd
+printf fixture > usd/asset.usd
+printf '%s' '{"rootUsd":"usd/asset.usd","summary":{"mass":0.25}}' > result.json
+`, { mode: 0o700 })
+    writeFileSync(join(workDir, 'object.glb'), 'fixture input')
+    applyOfflineSceneWorkflows(host.ctx, { offlineUsdPython: interpreter })
+    for (const name of ['asset_prepare_usd', 'nurec_evaluate', 'lab_mimic_run', 'simfoundry_match_poses']) {
+      expect(host.ctx.tools.get(name)).toBeDefined()
+    }
+    const capabilities = await host.ctx.tools.execute({ name: 'scene_workflow_capabilities', arguments: {}, callId: ToolCallId('offline-capabilities'), signal: AbortSignal.timeout(5000), agent: host.agent })
+    expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'asset_prepare_usd', interpreter: true })
+    expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'nurec_evaluate', interpreter: false })
+    const campaignId = 'offline-tools'
+    valueOf(await host.call('campaign_init', { campaignId, tasks: TASKS, budget: BUDGET }))
+    valueOf(await host.call('campaign_transition', { campaignId, taskId: 'dev-1', to: 'exploring', role: 'worker' }))
+    const input = { sourcePath: 'object.glb', upAxis: 'y', scale: 0.1, massKg: 0.25, collision: 'convexHull' }
+    const started = valueOf<{ jobId: string; outputDir: string }>(await host.call('asset_prepare_usd', input))
+    const settled = await host.ctx.jobs.wait(JobId(started.jobId), 5_000, host.agent.id)
+    expect(settled.status).toBe('completed')
+    const output = valueOf<{ text: string }>(await host.ctx.tools.execute({ name: 'job_output', arguments: { job_id: started.jobId }, callId: ToolCallId('offline-output'), signal: AbortSignal.timeout(5000), agent: host.agent }))
+    expect(JSON.parse(output.text)).toMatchObject({ outputDir: started.outputDir, usdPath: join(started.outputDir, 'usd', 'asset.usd'), summary: { mass: 0.25 } })
+    const missingRuntime = await host.call('nurec_evaluate', { stagePath: 'scene.usdz', referenceDir: 'refs', camera: 'cam' })
+    expect(missingRuntime.isError && missingRuntime.error.message).toContain('OFFLINE_RUNTIME_UNAVAILABLE')
+    valueOf(await host.call('campaign_record_run', { campaignId, taskId: 'dev-1', role: 'worker', summary: { outcome: 'success' } }))
+    const runs = campaignOf(campaignId).tasks[0]!.workerRunIds
+    expect(runs).toHaveLength(1)
+    const calls = readFileSync(join(workDir, '.lyapunov', 'campaigns', campaignId, 'runs', runs[0]!, 'calls.jsonl'), 'utf8')
+    expect(calls).toContain('asset_prepare_usd')
+    expect(calls).toContain('job_output')
+    expect(calls).toContain('OFFLINE_RUNTIME_UNAVAILABLE')
+  } finally { await host.close() }
 })

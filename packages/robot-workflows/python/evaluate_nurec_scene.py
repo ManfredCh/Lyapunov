@@ -30,7 +30,9 @@ def main():
     if not stage.is_file() or not references.is_dir():
         parser.error("需要本地 USD 场景文件与参考图目录")
     output = args.output.resolve()
-    output.mkdir(parents=True)
+    if output.exists() and any(output.iterdir()):
+        parser.error("需要空的输出目录")
+    output.mkdir(parents=True, exist_ok=True)
     cache = args.shader_cache.resolve() if args.shader_cache else output / "shader-cache"
     for name in ("shadercache", "nv_shadercache"):
         (cache / name).mkdir(parents=True, exist_ok=True)

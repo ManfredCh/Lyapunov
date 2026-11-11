@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 import { simWorldsFor } from '../../sim-contract/src/index.ts'
 import type { RobotDescription } from '../../sim-contract/src/index.ts'
 import { applyRecording, type RecordingConfig } from './recording-plugin.ts'
+import { applyOfflineSceneWorkflows, type OfflineSceneConfig } from './offline-scene-plugin.ts'
 import { applyCargoTransfer } from './cargo-transfer-plugin.ts'
 import { applyFleet } from './fleet-plugin.ts'
 import { assertWorkflowArguments, pick, place, robotPickParameters, robotPlaceParameters, type Planner, type PickInput, type PlaceInput } from './pick-place.ts'
@@ -27,8 +28,9 @@ function gripperJointsOf(description: RobotDescription): Set<string> {
   return new Set(Array.isArray(mapping) ? mapping.filter((n): n is string => typeof n === 'string') : [])
 }
 /** 组合只消费当前Profile注册的 motion_plan，不依赖 Mink 或其他Provider私有实现。 */
-export function apply(ctx: Context, config: RecordingConfig = {}) {
+export function apply(ctx: Context, config: RecordingConfig & OfflineSceneConfig = {}) {
   applyRecording(ctx, config)
+  applyOfflineSceneWorkflows(ctx, config)
   applyFleet(ctx)
   applyFlight(ctx)
   applyCargoTransfer(ctx)

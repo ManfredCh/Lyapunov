@@ -36,6 +36,11 @@ export const RUNTIME_ENV = {
   policyPython: "LYAPUNOV_POLICY_PYTHON",
   labExportPython: "LYAPUNOV_LAB_EXPORT_PYTHON",
   capturePython: "LYAPUNOV_CAPTURE_PYTHON",
+  offlineUsdPython: "LYAPUNOV_OFFLINE_USD_PYTHON",
+  labMimicPython: "LYAPUNOV_LAB_MIMIC_PYTHON",
+  labSourceRoot: "LYAPUNOV_LAB_SOURCE_ROOT",
+  simfoundryPython: "LYAPUNOV_SIMFOUNDRY_PYTHON",
+  simfoundryRoot: "LYAPUNOV_SIMFOUNDRY_ROOT",
   mujocoPython: SDK_PYTHON_ENV.mujoco,
   isaacPython: SDK_PYTHON_ENV.isaac,
   // FastGS 外部工具的本地覆盖键：设置界面/CLI 都在 Host 进程内读 process.env，隔离启动必须逐键搬运。

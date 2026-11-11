@@ -210,7 +210,15 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     }
     add("robot-tools")
   }
-  add("robot-workflows",{recordingRoot,labExportPython:sdkEnvironment.LYAPUNOV_LAB_EXPORT_PYTHON})
+  add("robot-workflows",{
+    recordingRoot, labExportPython: sdkEnvironment.LYAPUNOV_LAB_EXPORT_PYTHON,
+    offlineUsdPython: sdkEnvironment.LYAPUNOV_OFFLINE_USD_PYTHON,
+    nurecPython: isaacPython,
+    labMimicPython: sdkEnvironment.LYAPUNOV_LAB_MIMIC_PYTHON,
+    labSourceRoot: sdkEnvironment.LYAPUNOV_LAB_SOURCE_ROOT,
+    simfoundryPython: sdkEnvironment.LYAPUNOV_SIMFOUNDRY_PYTHON,
+    simfoundryRoot: sdkEnvironment.LYAPUNOV_SIMFOUNDRY_ROOT,
+  })
   if(input.engine==="mujoco"||input.engine==="isaac")add("teleop-capture",{python:sdkEnvironment.LYAPUNOV_CAPTURE_PYTHON})
   add("human-crowd")
   // agent-graph 编排面（docs/AGENT_GRAPH_CONTRACT.md §6）：campaign_* 工具 + run 证据收集器 +

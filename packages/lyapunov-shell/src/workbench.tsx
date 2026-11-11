@@ -1,4 +1,5 @@
 import { HumanCrowdPanel, humanGroupMember } from './human-crowd-panel.tsx'
+import { SceneWorkflowHelp } from './scene-workflow-help.tsx'
 import { CrowdPanel,countCrowdStarts } from './crowd-panel.tsx'
 import {isNativeUsdEntity,usdSourceFacts} from '../../lyapunov-contracts/src/usd.ts'
 import {ViewerContextMenu,writeViewerReference,type ViewerContextRequest,type InsertViewerReference} from './viewer-context-menu.tsx'
@@ -2391,6 +2392,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   * 复用同一份 AssetRecord/ResourceLibrary，只按 domain 限定显示（不新建第二份库）。
   */
  const libraryManagement=(domain:AssetDomain)=><>
+  <SceneWorkflowHelp key={sessionId} tr={tr} load={()=>api.command('scene_workflow_capabilities',{})}/>
   <AssetLibraryPanel domain={domain} assets={assets} builtin={builtinAssets} builtinBusy={importBusy} query={assetQuery} loading={assetsLoading} includeDeleted={includeDeleted} canMount={canMountAsset} available={Boolean(sessionId)} tr={tr} {...assetInstanceControls}
    setQuery={setAssetQuery} setIncludeDeleted={setIncludeDeleted} search={()=>perform(()=>refreshAssets(assetQuery))} refresh={()=>perform(()=>refreshAssets())}
    mount={mountAsset} rename={asset=>setRenameAsset({resourceId:asset.ref.resourceId,original:asset.name,value:asset.name})}
