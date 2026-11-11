@@ -24,7 +24,6 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import Jobs from '@deepseek-ai/dsh-jobs-local'
-import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import { JobId } from '@deepseek-ai/dsh-jobs'
 import { applyOfflineSceneWorkflows } from '../../robot-workflows/src/offline-scene-plugin.ts'
@@ -398,18 +397,17 @@ test('场景准备工具复用原生 Jobs 与 campaign 留痕', async () => {
   try {
     await host.ctx.plugin(Timer)
     await host.ctx.plugin(Jobs)
-    await host.ctx.plugin(Subprocess)
     await host.ctx.plugin(ToolJobs, { completionDelivery: 'quiet' })
-    const interpreter = join(workDir, 'usd-worker-fixture.sh')
-    // 这里只替换离线算法进程，工具、Job、结果回收与 campaign 都走真实宿主。
-    writeFileSync(interpreter, `#!/bin/sh
-set -eu
-mkdir usd
-printf fixture > usd/asset.usd
-printf '%s' '{"rootUsd":"usd/asset.usd","summary":{"mass":0.25}}' > result.json
-`, { mode: 0o700 })
+    // 替换离线算法进程。工具、Job、结果回收和 campaign 都走真实宿主。
+    host.ctx.reflect.provide('subprocess', { spawn(spec: { argv: readonly string[]; cwd: string }) {
+      expect(spec.argv[1]?.endsWith('/prepare_simfoundry_usd.py')).toBe(true)
+      mkdirSync(join(spec.cwd, 'usd'))
+      writeFileSync(join(spec.cwd, 'usd', 'asset.usd'), 'fixture')
+      writeFileSync(join(spec.cwd, 'result.json'), JSON.stringify({ rootUsd: 'usd/asset.usd', summary: { mass: 0.25 } }))
+      return { done: Promise.resolve({ exitCode: 0 }) }
+    } } as never)
     writeFileSync(join(workDir, 'object.glb'), 'fixture input')
-    applyOfflineSceneWorkflows(host.ctx, { offlineUsdPython: interpreter })
+    applyOfflineSceneWorkflows(host.ctx, { offlineUsdPython: process.execPath })
     for (const name of ['asset_prepare_usd', 'nurec_evaluate', 'lab_mimic_run', 'simfoundry_match_poses']) {
       expect(host.ctx.tools.get(name)).toBeDefined()
     }
