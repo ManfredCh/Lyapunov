@@ -135,3 +135,7 @@ TCP动作还需要Scene中已有真实TCP配置；缺失时保留TCP_MAPPING_REQ
 | `SKILL_NOT_VERIFIED` | 未过 verify 的提案被 promote |
 | `SPEC_UNREACHABLE` / `SPEC_ENTITY_MISSING` / `SPEC_ALREADY_SATISFIED` | `sim_task_check` spec 级门拦截（未推进物理） |
 | `OBSERVATION_UNAVAILABLE` | 谓词求值缺数据——如实报告，不猜 |
+
+## 场景准备与后台评估
+
+在工作台资源库展开「这台工作台能做什么？」或调用 `scene_workflow_capabilities` 查看会话入口与本机配置。活动 run 可用现有工具准备 USD、评估 NuRec、运行 Lab Mimic 或读取 SimFoundry 位姿候选。由 `job_output` 取得真实报告，再按目标使用 `sim_task_check`。完整参数和前置条件见[场景与 Isaac 工作流](ISAAC_SCENE_WORKFLOWS.zh-CN.md)。

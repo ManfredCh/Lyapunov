@@ -455,7 +455,7 @@ class Publisher:
         require(shell.git('branch', '--show-current') == 'main', '请在 Dev main 调用发布命令；不会切换或覆盖已有分支')
         package = json.loads(shell.git('show', source + ':package.json'))
         version = package['version']
-        require(re.fullmatch(r'\d+\.\d+\.\d+', version), '本命令发布正式版本，package.json 必须为 x.y.z')
+        require(re.fullmatch(r'[0-9]+(?:\.[0-9]+){2,3}', version), '本命令发布正式版本，package.json 须为三段或四段数字版本')
         require(read_json(self.root / 'package.json')['version'] == version, 'package.json 的版本变更尚未提交')
         names = shell.git('ls-tree', '-r', '--name-only', source).splitlines()
         require('docs/releases/' + version + '.md' in names, '缺少已提交的本版发布说明: docs/releases/' + version + '.md')

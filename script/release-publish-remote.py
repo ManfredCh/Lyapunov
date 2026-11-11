@@ -120,7 +120,8 @@ class Server:
         assert source.startswith(self.prefix + '/staging/')
         header = self.head(source)
         assert header is not None and int(header['content-length']) == item['bytes'], 'staging 对象缺失或不完整'
-        self.oss(['cp', self.uri(source), self.uri(key), '--metadata', 'sha256=' + item['sha256'],
+        self.oss(['cp', self.uri(source), self.uri(key), '--metadata-directive', 'REPLACE',
+                  '--metadata', 'sha256=' + item['sha256'],
                   '--cache-control', 'public,max-age=31536000,immutable', '--no-progress', '-f'])
         assert self.matches(key, item)
 

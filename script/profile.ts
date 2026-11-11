@@ -374,7 +374,7 @@ export async function backendEnvironment(mode:RunMode, paths:ReturnType<typeof r
   // Profile 在父进程已按这三条规范 SDK 路径生成；子 Host 的设置页/Provider 再读时必须是同一份。
   // 只转发明确登记的解释器路径，formal/local 其余父环境和模型密钥仍受上面的有界白名单约束。
   if(parent[RUNTIME_ENV.policyPython]!==undefined)env[RUNTIME_ENV.policyPython]=parent[RUNTIME_ENV.policyPython]
-  for(const key of [RUNTIME_ENV.usdPython,RUNTIME_ENV.labExportPython,RUNTIME_ENV.capturePython,...Object.values(SDK_PYTHON_ENV)]){
+  for(const key of [RUNTIME_ENV.usdPython,RUNTIME_ENV.labExportPython,RUNTIME_ENV.capturePython,RUNTIME_ENV.offlineUsdPython,RUNTIME_ENV.labMimicPython,RUNTIME_ENV.labSourceRoot,RUNTIME_ENV.simfoundryPython,RUNTIME_ENV.simfoundryRoot,...Object.values(SDK_PYTHON_ENV)]){
     const path=parent[key]?.trim()
     if(path)env[key]=path
     else delete env[key]

@@ -54,6 +54,10 @@ Blender colours/materials must use real nodes: find `node.type == 'BSDF_PRINCIPL
 - Source markers builtin/download/generated/import remain queryable.
 - Splat-to-collision-GLB bindings register on import. Hash-verified built-ins retain machine-verified binding, mount collision automatically and enter the world via `sim.sync`. A same-name `.glb` is only a candidate until axes/alignment are verified and confirmed. Paired GLB is a surface-collision proxy, not semantic mesh understanding.
 
+## Native USD handoff
+
+When `asset_prepare_usd` is available and the user needs a native USD from an existing GLB, use it with the known axis, scale and mass. Read `job_output` for `usdPath`, import that path with `physicalize:false`, then use `asset_verify` and real World contact checks. Keep `usd/` and `material/` together. An existing native USD goes directly to `scene_import`.
+
 ## Collision derivation and verification
 
 - GLB/mesh collision derives by default during `scene_import` registration. `physicalize:false` skips; `physicalizeStrategy` selects `auto/convex_hull/voxel_boxes/coacd/triangle_mesh`. Read `asset_list.physicalization.status`; derived defaults make later resourceId mounting collision-bearing. **There is no `asset_physicalize` tool.** Rework/customization uses `asset_bake.request_json` with sourcePath/outputDirectory/method/strategy/usage. `asset_verify` checks refs; `asset_edit` changes names/tags/folders.

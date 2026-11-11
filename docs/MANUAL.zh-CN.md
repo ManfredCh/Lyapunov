@@ -623,6 +623,8 @@ Camera 面板里的原生相机拖动／Aim 调整也走临时试拍；界面会
 
 ## 11. 录制（Recording 面板）
 
+控制步、Lab HDF5、Capture 键盘与 IRA 的操作示例，以及通过 Agent Graph 执行 USD 转件、NuRec 评分和 Mimic 的方法，见[场景与 Isaac 工作流](ISAAC_SCENE_WORKFLOWS.zh-CN.md)。
+
 ### 11.1 前提
 
 Recording 只录**机器人 body 上的真实挂载机位**：
