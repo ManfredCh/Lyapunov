@@ -463,7 +463,8 @@ class Publisher:
         before = protected_files(self.root, shell)
         manifests, archives = {}, []
         roots = [self.root / p for p in config.get('artifactRoots', ['.runtime/releases', '.runtime/release-inputs'])]
-        for platform in PLATFORMS:
+        platforms = (arguments.platform,) if arguments.platform else PLATFORMS
+        for platform in platforms:
             explicit = arguments.linux if platform == 'linux-x64' else arguments.mac
             path = choose_manifest(roots, platform, version, explicit)
             value = check_manifest(read_json(path), platform, version)
@@ -492,13 +493,13 @@ class Publisher:
         run_id = version + '-' + source[:12] + '-' + identity
         for item in archives:
             item['stageKey'] = config['oss'].get('prefix', 'lyapunov') + '/staging/' + run_id + '/' + Path(item['local']).name
-        self.receipt.update(version=version, sourceCommit=source, archives=archives, runId=run_id)
+        self.receipt.update(version=version, sourceCommit=source, platforms=list(platforms), archives=archives, runId=run_id)
         self.progress('发布已提交的 main ' + source[:12] + '，版本 ' + version)
         if arguments.plan:
             self.receipt['状态'] = '计划'
             self.progress('计划已生成；未写入 GitHub、OSS 或官网')
             return self.receipt
-        for platform in PLATFORMS:
+        for platform in platforms:
             _, _, body = http_get(config['baseUrl'].rstrip('/') + '/lyapunov/releases/latest/' + platform + '.json')
             current = json.loads(body)['version']
             require(tuple(map(int, current.split('.'))) <= tuple(map(int, version.split('.'))), '线上已有更新版本，拒绝降级 latest: ' + current)
@@ -549,7 +550,8 @@ class Publisher:
             shell.run(['sh', '-n', str(installer)])
             assets = self.directory / 'github-assets'
             assets.mkdir(exist_ok=True)
-            sums, by_release = [], {}
+            sums_name, sums = checksum_asset(manifests, archives)
+            by_release = {}
             for platform, (path, value) in manifests.items():
                 target = payload / 'releases' / value['releaseId']
                 target.mkdir(parents=True, exist_ok=True)
@@ -560,11 +562,10 @@ class Publisher:
             for item in archives:
                 rid = item['key'].split('/releases/', 1)[1].split('/', 1)[0]
                 line = item['sha256'] + '  ' + Path(item['local']).name + '\n'
-                sums.append(line)
                 by_release.setdefault(rid, []).append(line)
             for rid, lines in by_release.items():
                 (payload / 'releases' / rid / 'SHA256SUMS').write_text(''.join(lines))
-            (assets / 'SHA256SUMS').write_text(''.join(sums))
+            (assets / sums_name).write_bytes(sums)
             expected_assets = {p.name: {'sha256': sha(p), 'bytes': p.stat().st_size} for p in assets.iterdir()}
             for repo in [config['devRepo'], config['publicRepo']]:
                 self.gh.check_assets(repo, 'v' + version, expected_assets)
@@ -607,21 +608,28 @@ class Publisher:
         return self.receipt
 
 
+def checksum_asset(manifests, archives):
+    # 单平台批次各用一个附件，后续平台可追加到同一版本。
+    name = 'SHA256SUMS-' + next(iter(manifests)) if len(manifests) == 1 else 'SHA256SUMS'
+    content = ''.join(a['sha256'] + '  ' + Path(a['local']).name + '\n' for a in archives).encode()
+    return name, content
+
+
 def metadata_assets(manifests, archives):
     items = {}
     for platform, (path, _) in manifests.items():
         for extension in ['json', 'tsv']:
             file = path.with_suffix('.' + extension)
             items[file.name] = {'sha256': sha(file), 'bytes': file.stat().st_size}
-    sums = ''.join(a['sha256'] + '  ' + Path(a['local']).name + '\n' for a in archives).encode()
-    items['SHA256SUMS'] = {'sha256': hashlib.sha256(sums).hexdigest(), 'bytes': len(sums)}
+    name, sums = checksum_asset(manifests, archives)
+    items[name] = {'sha256': hashlib.sha256(sums).hexdigest(), 'bytes': len(sums)}
     return items
 
 
 def release_notes(config, version, manifests):
     base = config['baseUrl'].rstrip('/')
     rows = [f'# Lyapunov {version}', '', f'[官网安装页]({base}/lyapunov/) · [完整发布说明](https://github.com/{config["publicRepo"]}/blob/v{version}/docs/releases/{version}.md)',
-            '', 'Linux、Mac 在本机终端执行；Windows 在 WSL2 的 Ubuntu 24.04+ 终端执行：', '',
+            '', '安装器按当前平台选择下载版本。Windows 用户在 WSL2 的 Ubuntu 24.04+ 终端执行。', '',
             '```sh', 'curl -fsSL ' + base + '/lyapunov/install.sh | sh', '"$HOME/.local/bin/lyapunov"', '```', '',
             '| 平台 | 下载 | 发布 ID |', '| --- | --- | --- |']
     for platform, (_, value) in manifests.items():
@@ -637,6 +645,7 @@ def main():
     parser.add_argument('--config', default=str(ROOT / '.runtime/release-publish.json'))
     parser.add_argument('--linux', help='指定 Linux JSON 清单')
     parser.add_argument('--mac', help='指定 Mac JSON 清单')
+    parser.add_argument('--platform', choices=PLATFORMS, help='只发布指定平台，省略时发布双平台')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--plan', action='store_true', help='仅检查本地输入并显示计划，不写生产')
     mode.add_argument('--verify-only', action='store_true', help='仅核对线上状态，不写生产或重跑检查')

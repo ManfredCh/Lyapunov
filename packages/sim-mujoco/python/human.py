@@ -201,6 +201,7 @@ def bind(model,data,info):
 
 def prepare(world,info,m,error):
  if 'human'not in info:raise error('HUMAN_COMPONENT_REQUIRED','目标不是已编译人体')
+ if info['human'].get('ira'):raise error('HUMAN_IRA_PROVIDER_UNSUPPORTED','IRA 人物需要启用官方 SDK 的 Isaac world')
  duration=m.get('durationS')
  if isinstance(duration,bool)or not isinstance(duration,(int,float))or not math.isfinite(duration)or not 0<duration<=300:raise error('HUMAN_DURATION_INVALID','动作时长须为0-300秒')
  m['_duration']=m['_end']=duration;m['_origin']=info['humanRoot'].copy();m['_rootQ']=info['humanRootQ'].copy();m['_distance']=0.;m['_lastElapsed']=0.;m['_yielded']=False;m['_travelledM']=0.;m['_yaw']=float(2*math.atan2(m['_rootQ'][3],m['_rootQ'][0]));m['_blockedS']=0.

@@ -1,4 +1,6 @@
 import type { HumanMotion } from '../../lyapunov-contracts/src/human.ts'
+import type { ControlSample, ControlSamplingOptions, ControlSamplingState } from './control-samples.ts'
+export type { ControlSample, ControlSamplingOptions, ControlSamplingState } from './control-samples.ts'
 export type { HumanMotion } from '../../lyapunov-contracts/src/human.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt, MotionPlan, WorldWarning, PenetrationSummary, PenetrationPair } from '../../lyapunov-contracts/src/types.ts'
 import { requireSessionId } from '../../lyapunov-contracts/src/session-scope.ts'
@@ -395,6 +397,9 @@ export interface SimWorlds {
   /** 可选原生 Restore：只解除本次 Freeze 的 native 保持；不自动恢复旧动作/旧速度，重新 Start 才执行。 */
   restore?(worldId: string, selection?: FreezeSelection): Promise<FreezeReceipt>
   subscribeFrames(worldId: string, listener: (frame: Frame) => void): () => void
+  /** 可选控制步采样；未实现的 Provider 不得以异步显示帧合成。 */
+  configureControlSampling?(worldId: string, options: ControlSamplingOptions): Promise<ControlSamplingState>
+  subscribeControlSamples?(worldId: string, listener: (sample: ControlSample) => void): () => void
   close(worldId: string): Promise<void>
   /** 辅助附着保持初始相对位置与姿态；仍标记 assisted-teleport，不计作真实接触抓取。 */
   assist(worldId: string, options: { mode: 'attach' | 'release'; expectedGeneration: number; objectId: string; robotId?: string; anchorBody?: string }): Promise<Record<string, unknown>>

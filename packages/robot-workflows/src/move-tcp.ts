@@ -24,8 +24,8 @@ function sceneMatrix(scene: SceneSnapshot, entity: Entity): Matrix4 {
   return entity.parentId ? sceneMatrix(scene, scene.entities.find(e => e.entityId === entity.parentId)!).multiply(local) : local
 }
 /** 笛卡尔相对动作仅从当前物理 site/关节观测出发，IK 仍用既有 motion_plan；不编辑 Scene 根位姿。 */
-export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMoveInput, planner: TcpPlanner, signal?: AbortSignal) {
-  if (!Array.isArray(input.deltaM) || input.deltaM.length !== 3 || !input.deltaM.every(Number.isFinite) || Math.hypot(...input.deltaM) <= 0 || Math.hypot(...input.deltaM) > .15) throw new Error('TCP_DELTA_INVALID: deltaM 必须是三个米制分量，长度大于0且不超过0.15m')
+export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMoveInput, planner: TcpPlanner, signal?: AbortSignal, manual?: { stepCount: number; rotationVector: Vec3; gripperTargets: Record<string, number> }) {
+  if (!Array.isArray(input.deltaM) || input.deltaM.length !== 3 || !input.deltaM.every(Number.isFinite) || (!manual && Math.hypot(...input.deltaM) <= 0) || Math.hypot(...input.deltaM) > .15) throw new Error('TCP_DELTA_INVALID: deltaM 必须是三个米制分量，长度不超过0.15m')
   const durationS = input.durationS ?? 1
   if (!Number.isFinite(durationS) || durationS <= 0 || durationS > 5) throw new Error('TCP_DURATION_INVALID: durationS 必须在0至5秒内')
   const world = (await sim.listWorlds()).find(w => w.worldId === input.worldId)
@@ -59,7 +59,13 @@ export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMo
   if (!names.length || starts.some(v => typeof v !== 'number' || !Number.isFinite(v))) throw new Error('JOINT_MAPPING_MISSING: 受控关节与实测关节不完整匹配')
   const target = from.positionM.map((v, i) => v + input.deltaM[i]!) as Vec3
   const modelTarget = new Vector3(...target).applyMatrix4(root.clone().invert()).toArray()
-  const modelQ = rootQ.clone().invert().multiply(new Quaternion(...from.quaternionXyzw)).normalize().toArray()
+  const targetQ = new Quaternion(...from.quaternionXyzw)
+  if (manual) {
+    const axis = new Vector3(...manual.rotationVector)
+    const angle = axis.length()
+    if (angle) targetQ.premultiply(new Quaternion().setFromAxisAngle(axis.normalize(), angle))
+  }
+  const modelQ = rootQ.clone().invert().multiply(targetQ).normalize().toArray()
   const actionId = input.actionId ?? `tcp-${randomUUID()}`
   const stopController = new AbortController(), operationSignal = signal ? AbortSignal.any([signal, stopController.signal]) : stopController.signal
   const issuedIds = new Set([actionId])
@@ -76,7 +82,7 @@ export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMo
   let after = before, to = from, afterPositions = starts, receipt: ActionReceipt | undefined, collisionChecked = true
   let reason = 'TCP_TARGET_NOT_REACHED', previousErrorM = Math.hypot(...input.deltaM), stagnant = 0
   const bias = names.map(() => 0)
-  const maximumAttempts = 4
+  const maximumAttempts = manual ? 1 : 4
   try {
     for (let attempt = 0; attempt < maximumAttempts; attempt++) {
       operationSignal.throwIfAborted()
@@ -108,7 +114,15 @@ export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMo
       const plan = { ...solution, planId: attempt ? `${solution.planId}:feedback-${attempt}` : solution.planId, points }
       const attemptId = attempt ? `${actionId}:tracking-${attempt}` : actionId
       issuedIds.add(attemptId)
-      receipt = await sim.execute(input.worldId, { kind: 'trajectory', entityId: input.robotId, actionId: attemptId, expectedGeneration: input.expectedGeneration, jointNames: plan.jointNames, points, plan, settleTimeS: .5, partialJointVector: true }, operationSignal)
+      if (manual) {
+        const targets = points.at(-1)!.positions
+        const controlled = description.controlledJointNames
+        const positions = controlled.map(name => manual.gripperTargets[name] ?? (names.includes(name) ? targets[names.indexOf(name)]! : fixedJoints[name]!))
+        receipt = await sim.execute(input.worldId, { kind: 'control', entityId: input.robotId, actionId: attemptId, expectedGeneration: input.expectedGeneration, jointNames: controlled, positions, stepCount: manual.stepCount }, operationSignal)
+        collisionChecked = false
+      } else {
+        receipt = await sim.execute(input.worldId, { kind: 'trajectory', entityId: input.robotId, actionId: attemptId, expectedGeneration: input.expectedGeneration, jointNames: plan.jointNames, points, plan, settleTimeS: .5, partialJointVector: true }, operationSignal)
+      }
       after = await sim.observe(input.worldId, { entityIds: [input.robotId], sensors: true, contacts: true })
       if (after.worldId !== before.worldId || after.generation !== before.generation || after.sceneRevision !== before.sceneRevision) throw new Error('STALE_OBSERVATION: 动作后观测不属于原世界/场景版本')
       if (typeof receipt.endStep === 'number' && after.stepIndex < receipt.endStep) throw new Error('STALE_OBSERVATION: 末端读回早于本次动作终态，不能签到达')
@@ -142,14 +156,14 @@ export async function moveTcp(sim: SimWorlds, scene: SceneSnapshot, input: TcpMo
       bias.splice(0, bias.length, ...nextBias)
     }
   } catch (error) {
-    await sim.stop(input.worldId, { entityIds: [input.robotId], expectedGeneration: input.expectedGeneration })
+    if (!manual) await sim.stop(input.worldId, { entityIds: [input.robotId], expectedGeneration: input.expectedGeneration })
     throw error
   } finally {
     unsubscribeStop?.()
   }
   const measuredDeltaM = to.positionM.map((value, index) => value - from.positionM[index]!) as Vec3
   const arrival = tcpArrival(input.deltaM, measuredDeltaM)
-  const taskAchieved = receipt?.status === 'completed' && after.executionMode === 'physical-contact' && arrival.reached
+  const taskAchieved = receipt?.status === 'completed' && after.executionMode === 'physical-contact' && arrival.reached && (!manual || targetQ.angleTo(new Quaternion(...to.quaternionXyzw)) < .01)
   if (!taskAchieved) await sim.stop(input.worldId, { entityIds: [input.robotId], expectedGeneration: input.expectedGeneration })
   // 使用前后同一真实世界帧补齐原生身份与步区间，保留既有 beforeStep/afterStep。
   return { worldId: after.worldId, generation: after.generation, sceneRevision: after.sceneRevision, startStep: before.stepIndex, endStep: after.stepIndex, stepIndex: after.stepIndex, status: taskAchieved ? 'completed' : receipt?.status === 'cancelled' ? 'cancelled' : 'failed', taskAchieved, ...(taskAchieved ? {} : { reason }), executionMode: after.executionMode ?? 'unknown', ...(tcp.site === undefined ? {} : { site: tcp.site }), bodyName: tcp.body, requestedDeltaM: input.deltaM, measuredDeltaM, targetErrorM: arrival.targetErrorM, beforeTcp: from, afterTcp: to, action: { actionId: receipt?.actionId ?? actionId, status: receipt?.status ?? 'not-started' }, beforeStep: before.stepIndex, afterStep: after.stepIndex, jointNames: names, beforePositions: starts, afterPositions, contacts: (after.contacts ?? []).filter(contact => robotContact(contact.geom1, contact.geom2)), collisionChecked, tracking: { mode: 'native-frame-feedback', maximumAttempts, attempts, toleranceM: arrival.toleranceM, directionMatches: arrival.directionMatches, progressM: arrival.progressM, lateralErrorM: arrival.lateralErrorM } }

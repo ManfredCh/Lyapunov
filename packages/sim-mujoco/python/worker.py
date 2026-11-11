@@ -966,8 +966,12 @@ def urdf_joint_unbounded_notes(urdf_path):
     return notes
 
 
+# 控制采样只接入既有 tick 与动作边界。
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[2] / 'sim-contract' / 'python'))
+from control_sampling import ControlSampler
 class World:
     def __init__(self, scene, options, collision_patches=None):
+        self.control_sampler = ControlSampler(self, emit, SimError)
         validate_exact_triangle_surfaces(scene,SimError)
         self.id = options.get('worldId') or str(uuid.uuid4())
         self.options = options
@@ -2104,6 +2108,7 @@ class World:
         self.signature = signature
         self.applied_revision = scene['revision']
         if not initial:
+            self.control_sampler.config = None
             self.generation += 1
         # 模型重建后旧的临时相机 override 属于上一个代次的渲染状态，必须清除而不是继续冒充；
         # 已完成的 capture 记录保留（各自带自己的 generation/frameId，文件仍在磁盘上）。
@@ -2716,6 +2721,7 @@ class World:
         if any(m['entityId'] in occupied for m in motions):
             raise SimError('ENTITY_BUSY', '目标实体已有活动或已排队动作')
         prepared = [self.prepare_motion(m) for m in motions]
+        self.control_sampler.validate(action)
         # 载荷事实基线：动作开始前记录全部已加载实体的实测世界位置；finish 只在此基础上报真实位移，
         # 不为没有基线（排队中未开始）的动作编造起点。
         payload_start = self.entity_positions()
@@ -3176,6 +3182,7 @@ class World:
                 active['endStep'] = active['start'] + active['motions'][0]['stepCount'] - 1
 
     def finish(self, aid, status, reason=None, facts=None):
+        self.control_sampler.finish(aid, status, reason)
         active = self.active.pop(aid)
         receipt = self.receipts[aid]
         # 部分停止过的父 batch 即使其余成员后来跑完，也不能把被撤销成员说成成功。
@@ -3208,6 +3215,7 @@ class World:
         action_id = selection.get('actionId')
         if action_id and action_id not in self.receipts:
             raise SimError('ACTION_NOT_FOUND', '停止请求的动作不存在')
+        self.control_sampler.stop(selection)
         entity_filter = selection.get('entityIds')
         selected = set(entity_filter) if entity_filter else set(self.entities)
         affected = set()
@@ -3453,6 +3461,7 @@ class World:
             if active['startTime'] is None:
                 active['startTime'] = float(self.data.time)
                 receipt.update({'status': 'running', 'startStep': self.step_index + 1})
+            self.control_sampler.before(aid, active['motions'])
             # 本动作窗口内真实经历辅助 tick 的事实：只累计已开始且本 tick 正在被驱动的动作，
             # scheduled 未来动作不提前标脏；解除 attach 不清除已发生的事实，动作结束随动作生命周期消失。
             if self.assisted:
@@ -4779,6 +4788,8 @@ def main():
                         result = world.observe(args.get('selection'))
                     elif method == 'set_paused':
                         result = world.set_paused(args['paused'],args['expectedGeneration'])
+                    elif method == 'configure_control_sampling':
+                        result = world.control_sampler.configure(args['options'])
                     elif method == 'describe':
                         result = world.describe(args['entityId'])
                     elif method == 'execute':

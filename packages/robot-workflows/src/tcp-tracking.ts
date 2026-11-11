@@ -3,6 +3,10 @@ import type { Vec3 } from '../../lyapunov-contracts/src/types.ts'
 /** 请求1mm→0.1mm容差、5mm→0.5mm、20mm及以上→1mm；容差始终小于请求幅度。 */
 export function tcpArrival(requested: Vec3, measured: Vec3) {
   const requestedDistanceM = Math.hypot(...requested)
+  if (!requestedDistanceM) {
+    const drift = Math.hypot(...measured)
+    return { requestedDistanceM, toleranceM: .001, targetErrorM: drift, progressM: 0, lateralErrorM: drift, directionMatches: true, reached: drift <= .001 }
+  }
   const toleranceM = Math.min(.001, requestedDistanceM * .1)
   const targetErrorM = Math.hypot(...measured.map((value, index) => value - requested[index]!))
   const progressM = measured.reduce((sum, value, index) => sum + value * requested[index]!, 0) / requestedDistanceM

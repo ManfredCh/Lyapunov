@@ -1,0 +1,5 @@
+# 独立设备与重定向环境，核心包不安装 CloudXR extra。
+isaaccapture==1.8.29a1
+numpy==2.2.6
+scipy==1.17.0
+pyyaml==6.0.3

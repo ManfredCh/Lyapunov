@@ -16,7 +16,7 @@ import { EmptyState } from './panel-chrome.tsx'
 // 落在清单上的只有被截到前 20 条的 `missing`）⇒ 只能在行类型里显式声明 `number`。
 // 把它塞进 `Pick<RecordingManifest, …>` 会是一条 **tsc 错误**（TS2344：`'missingCount'` 不满足
 // `keyof RecordingManifest` 约束）⇒ 拿一句 grep 把仓库的门弄红，方向反了（2026-09-27 实测：这个形状红过 3 条）。
-type Summary = Pick<RecordingManifest, 'recordingId' | 'sceneId' | 'status' | 'stopReason' | 'frameCount' | 'maxDurationS' | 'elapsedS' | 'firstFrame' | 'lastFrame' | 'createdAt' | 'missing' | 'source' | 'channels'> & { missingCount: number; generations: Array<{ generation: number; sceneRevision: number }> }
+type Summary = Pick<RecordingManifest, 'recordingId' | 'sceneId' | 'status' | 'stopReason' | 'frameCount' | 'maxDurationS' | 'elapsedS' | 'firstFrame' | 'lastFrame' | 'createdAt' | 'missing' | 'source' | 'channels' | 'controlSamples'> & { missingCount: number; generations: Array<{ generation: number; sceneRevision: number }> }
 /** RecordingPanel 的座位身份：同一 Session 内切 Scene 必须重建并丢弃旧回放/在途 open。 */
 export function recordingPanelSeatKey(sessionId?: string, sceneId?: string) { return `${sessionId ?? 'no-session'}:${sceneId ?? 'no-scene'}` }
 /** 已录时长读回：只显示服务端累计 `elapsedS`；旧清单缺字段如实写“未记录”，不拿绝对 simTime 冒充。 */
@@ -113,6 +113,40 @@ export function RecordingPanel({ api, sceneId, scene, world, nativeReceipt, nati
  const sizeKey = JSON.stringify([sourceSeat, sourceKey])
  const { width, height } = sizes[sizeKey] ?? { width: selected?.width, height: selected?.height }
  const editSize = (change: Partial<{ width: number; height: number }>) => setSizes(old => ({ ...old, [sizeKey]: { ...(old[sizeKey] ?? { width, height }), ...change } }))
+ const [controlEntity, setControlEntity] = useState('')
+ const [teleop, setTeleop] = useState<{ teleopId: string; entityId: string; worldId: string; generation: number; keys: string[] }>()
+ const teleopRef = useRef<typeof teleop>()
+ const keyboardSurface = useRef<HTMLDivElement>(null), keyBusy = useRef(false)
+ const startTeleop = async () => {
+  if (!world || !controlEntity) return
+  const result = await api.command<NonNullable<typeof teleop>>('robot_teleop_start', { worldId: world.worldId, entityId: controlEntity, expectedGeneration: world.worldGeneration, stepCount: 100 })
+  teleopRef.current = result; setTeleop(result)
+  return result
+ }
+ const stopTeleop = async () => {
+  const session = teleopRef.current
+  if (!session) return
+  try { await api.command('robot_teleop_stop', { teleopId: session.teleopId }) }
+  catch (error) { if (!String(error).includes('TELEOP_SESSION_NOT_FOUND')) throw error }
+  teleopRef.current = undefined; setTeleop(undefined)
+ }
+ useEffect(() => { if (teleop) keyboardSurface.current?.focus() }, [teleop])
+ useEffect(() => () => {
+  const session = teleopRef.current
+  if (session) void api.command('robot_teleop_stop', { teleopId: session.teleopId }).catch(() => undefined)
+  teleopRef.current = undefined
+ }, [api])
+ useEffect(() => {
+  const session = teleopRef.current
+  if (session && (!visible || session.worldId !== world?.worldId || session.generation !== world.worldGeneration)) perform(stopTeleop)
+ }, [visible, world?.worldId, world?.worldGeneration])
+
+ const startControl = async () => {
+  if (!world || !sceneId || !controlEntity) return
+  const result = await api.command('recording_start', { sceneId, worldId: world.worldId, expectedGeneration: world.worldGeneration, maxDurationS: limit, controlSamples: { entityId: controlEntity } })
+  await refresh()
+  return result
+ }
  const ready = recordingSourceReady(selected)
  const startInput = recordingStartInput(selected, channels, limit, width, height)
  const currentSegment = replay?.segments[segment], frames = currentSegment?.frames ?? [], frame = frames[index]
@@ -214,10 +248,11 @@ export function RecordingPanel({ api, sceneId, scene, world, nativeReceipt, nati
    {['failed','interrupted','killed'].includes(row.status)&&row.stopReason&&<p className="lya-warning" role="alert">{row.stopReason}</p>}
    {runningScope(row)}
    <RecordingMissingFiles row={row} tr={tr}/>
+   {row.controlSamples && <div className="lya-help">{tr('控制样本','Control samples')} {row.controlSamples.completeCount}/{row.controlSamples.sampleCount} · {row.controlSamples.entityId} · {row.controlSamples.profile}</div>}
    <RecordingChannels channels={row.channels as never} source={recordingFixedScope(row.source)} mediaURL={uri => api.mediaURL('recording-resource', { recordingId: row.recordingId, uri })} tr={tr}/>
    <div className="lya-row">{row.status === 'recording'
     ? <button className="lya-stop" onClick={() => perform(async () => { const result = await api.command('recording_stop', { recordingId: row.recordingId }); await refresh(); return result })}>{tr('停止录制', 'Stop recording')}</button>
-    : <><button onClick={() => perform(() => open(row.recordingId))}>{tr('观看回放', 'Watch replay')}</button><button onClick={() => perform(async () => { const result = await api.command<any>('recording_export', { recordingId: row.recordingId }); setNote(tr('导出已开始', 'Export started')); return result })}>{tr('导出', 'Export')}</button></>}</div>
+    : <><button onClick={() => perform(() => open(row.recordingId))}>{tr('观看回放', 'Watch replay')}</button><button onClick={() => perform(async () => { const result = await api.command<any>('recording_export', { recordingId: row.recordingId }); setNote(tr('导出已开始', 'Export started')); return result })}>{tr('导出', 'Export')}</button>{row.controlSamples && row.status === 'completed' && row.controlSamples.completeCount > 0 && row.controlSamples.completeCount === row.controlSamples.sampleCount && <button onClick={() => perform(() => api.command('recording_export', { recordingId: row.recordingId, format: 'isaac-lab' }))}>{tr('导出 Lab HDF5','Export Lab HDF5')}</button>}</>}</div>
    <details className="lya-advanced" data-testid="recording-technical-details"><summary>{tr('录制详情','Recording details')}</summary><div className="lya-help">{row.recordingId}</div><div className="lya-help">{row.status}{row.stopReason?` · ${row.stopReason}`:''}{row.lastFrame?` · g${row.lastFrame.generation} / step ${row.lastFrame.stepIndex}`:''}</div></details>
   </div>)}
   {recentRows.length===0&&rows.length>0&&<p className="lya-help">{tr('当前没有其它录制。','No other recordings.')}</p>}
@@ -225,8 +260,33 @@ export function RecordingPanel({ api, sceneId, scene, world, nativeReceipt, nati
  const side=<div className="lya-recording-side">
   {panelHead}
   {replay&&<div className="lya-row" data-testid="recording-replay-summary"><strong>{tr('正在回放','Playing back')}</strong></div>}
+  {!replay && world?.clock === 'manual' && !running && !!scene?.entities.length && <div className="lya-detail-box">
+   <label>{tr('控制步示教对象','Control demonstration target')} <select value={controlEntity} onChange={event=>setControlEntity(event.target.value)}><option value="">{tr('选择实体','Select entity')}</option>{scene.entities.map(entity=><option key={entity.entityId} value={entity.entityId}>{entity.name}</option>)}</select></label>
+   <div className="lya-field-row"><label>{tr('时长（秒）','Duration (s)')} <input type="number" min={.1} max={300} value={limit} onChange={event=>setLimit(Number(event.target.value))}/></label><button disabled={!scene.entities.some(entity=>entity.entityId===controlEntity)} onClick={()=>perform(startControl)}>{tr('录制控制步','Record control steps')}</button></div>
+  </div>}
+  {!replay && world?.clock === 'manual' && controlEntity && !teleop && <button onClick={() => perform(startTeleop)}>{tr('启动 Capture 键盘遥操作', 'Start Capture keyboard teleoperation')}</button>}
+  {!replay && teleop && <div className="lya-detail-box" ref={keyboardSurface} tabIndex={0} aria-label={tr('Capture 键盘输入区域', 'Capture keyboard input area')} onKeyDown={event => {
+   if (!teleop.keys.includes(event.code) || event.altKey || event.ctrlKey || event.metaKey) return
+   event.preventDefault(); event.stopPropagation()
+   if (event.repeat || keyBusy.current) return
+   keyBusy.current = true
+   const key = event.code, eventTimeMs = Date.now()
+   perform(async () => {
+    try { return await api.command('robot_teleop_key', { teleopId: teleop.teleopId, key, eventTimeMs }) }
+    catch (error) {
+     if (String(error).includes('TELEOP_SESSION_NOT_FOUND')) { teleopRef.current = undefined; setTeleop(undefined) }
+     throw error
+    }
+    finally { keyBusy.current = false }
+   })
+  }}>
+   <p className="lya-help">{teleop.entityId} · {tr('在此区域按 W/S、A/D、Q/E 平移，Z/X、T/G、C/V 旋转，K 切换夹爪。', 'Focus here and press W/S, A/D, Q/E to translate, Z/X, T/G, C/V to rotate, and K to toggle the gripper.')}</p>
+   <button className="lya-stop" onClick={() => perform(stopTeleop)}>{tr('停止键盘遥操作', 'Stop keyboard teleoperation')}</button>
+  </div>}
   {!replay&&stage==='running'&&runningCard}
-  {!replay&&stage==='empty'&&emptyState}
+  {!replay && stage === 'empty' && (world?.clock === 'manual' && !!scene?.entities.length
+   ? <p className="lya-help">{tr('相机录制需要可用机位。', 'Camera recording requires an available camera.')}{openCamera && <button onClick={openCamera}>{tr('配置机位', 'Configure camera')}</button>}</p>
+   : emptyState)}
   {!replay&&stage==='choose-source'&&sourceForm}
   {!replay&&stage==='unavailable-source'&&sourceForm}
   {!replay&&stage==='setup'&&sourceForm}

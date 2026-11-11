@@ -1,0 +1,34 @@
+{
+  "repository": "https://github.com/isaac-sim/IsaacLab",
+  "revision": "e3f7d9ff1f5d7f8280de3ece9000b7117f66bcf4",
+  "tag": "v3.0.0",
+  "license": "BSD-3-Clause",
+  "integration": "原样复制四份模块，仅使用独立命名空间；避免导入 Lab 根包时修改 SDK 搜索路径。",
+  "files": [
+    {
+      "path": "utils/math.py",
+      "sourcePath": "source/isaaclab/isaaclab/utils/math.py",
+      "sha256": "be896b1734900f5ed5751de75a8ad517f131358934f5247968bd5f905ca9cd47"
+    },
+    {
+      "path": "utils/datasets/episode_data.py",
+      "sourcePath": "source/isaaclab/isaaclab/utils/datasets/episode_data.py",
+      "sha256": "23cac25ed8cc5fb4827c1b5c82fb4b2fe0a309c1f534a6059e04e26607197fd8"
+    },
+    {
+      "path": "utils/datasets/dataset_file_handler_base.py",
+      "sourcePath": "source/isaaclab/isaaclab/utils/datasets/dataset_file_handler_base.py",
+      "sha256": "020aa68e4a623322a47787b00415f5dafdf746b66b02ef9bf41521f3fd8d844b"
+    },
+    {
+      "path": "utils/datasets/hdf5_dataset_file_handler.py",
+      "sourcePath": "source/isaaclab/isaaclab/utils/datasets/hdf5_dataset_file_handler.py",
+      "sha256": "92f795f7e6b9aebbefc6f0eb66b179a4010d6a618a868d3c7956236f9185f97d"
+    },
+    {
+      "path": "LICENSE",
+      "sourcePath": "LICENSE",
+      "sha256": "932e8d7120d38062d68754314b8be64380bc8236eb012626f9c6c1353d6dc9df"
+    }
+  ]
+}

@@ -28,6 +28,12 @@ bun run release:publish
 bun run release:publish --linux /绝对路径/linux-x64.json --mac /绝对路径/darwin-arm64.json
 ```
 
+分批发布时，用 `--platform` 指定本次的下载平台。单平台批次用带平台后缀的 `SHA256SUMS` 附件，后续可向同一个正式版本追加另一平台。
+
+```sh
+bun run release:publish --platform linux-x64 --linux /绝对路径/linux-x64.json
+```
+
 ## 命令会完成的工作
 
 1. 从已提交的 main 读取版本与源码树，校验双平台 JSON/TSV、完整归档大小与 SHA-256、包内 `RELEASE.json` 及真实来源。

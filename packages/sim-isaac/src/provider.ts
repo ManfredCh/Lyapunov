@@ -1,3 +1,4 @@
+import type { ControlSample, ControlSamplingOptions } from '../../sim-contract/src/control-samples.ts'
 import { dirname, resolve } from 'node:path'
 import { existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -6,6 +7,25 @@ import { randomUUID } from 'node:crypto'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
 import { SimError, type SimWorlds, type SimAction, type WorldOptions, type ObservationSelection, type StopSelection, type CaptureOptions, type MultiCaptureOptions, type CameraAdjustOptions, type CameraAnnotationOptions, type CameraDatasetExportOptions, type LidarScanOptions, type FreezeSelection, type FreezeReceipt } from '../../sim-contract/src/index.ts'
 import type { SceneSnapshot, WorldHandle, Frame, ActionReceipt } from '../../lyapunov-contracts/src/types.ts'
+/**
+ * 从 Scene 快照判定 IRA opt-in。IRA 只在声明了 `components.human.ira` 的实体存在时启用；
+ * 资源路径只来自 profile/环境变量，不接受任意场景路径，也不在实时循环里下载或补件。
+ */
+export interface HumanIraRequest { enabled: boolean; motionLibrary?: string; character?: string }
+export function humanIraRequest(snapshot: SceneSnapshot, env: NodeJS.ProcessEnv = process.env): HumanIraRequest {
+  const enabled = snapshot.entities.some(entity => entity.components.human?.ira !== undefined)
+  if (!enabled) return { enabled: false }
+  const motionLibrary = env.LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY?.trim()
+  const character = env.LYAPUNOV_ISAAC_IRA_CHARACTER?.trim()
+  const missing = [
+    ...(motionLibrary ? [] : ['LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY']),
+    ...(character ? [] : ['LYAPUNOV_ISAAC_IRA_CHARACTER']),
+  ]
+  if (missing.length > 0) throw new SimError('HUMAN_IRA_ASSET_UNAVAILABLE', `HUMAN_IRA_ASSET_UNAVAILABLE: Scene 声明了 IRA 巡逻，但本机没有配置可信资源：${missing.join('、')}。请由 profile 指向本地完整 motion library 与 IRA USD 角色资产后重新 open；不会接受场景里的任意路径，也不会在运行中下载或补件。`, { engineId: 'isaac', stage: 'ira-assets', availability: 'missing', variables: missing, physicalExecution: false })
+  if (!existsSync(motionLibrary!)) throw new SimError('HUMAN_IRA_ASSET_UNAVAILABLE', `HUMAN_IRA_ASSET_UNAVAILABLE (ira-motion-library): IRA motion library 不存在：${motionLibrary!}（来自 LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY）`, { engineId: 'isaac', stage: 'ira-motion-library', availability: 'missing', motionLibrary, physicalExecution: false })
+  if (!existsSync(character!)) throw new SimError('HUMAN_IRA_ASSET_UNAVAILABLE', `HUMAN_IRA_ASSET_UNAVAILABLE (ira-character): IRA 角色资产不存在：${character!}（来自 LYAPUNOV_ISAAC_IRA_CHARACTER）`, { engineId: 'isaac', stage: 'ira-character', availability: 'missing', character, physicalExecution: false })
+  return { enabled: true, motionLibrary, character }
+}
 export interface IsaacConfig {
   pythonPath?: string; workerPath?: string; cacheRoot?: string; physicsDevice?: 'cpu' | 'cuda:0'; rendering?: 'none' | 'rtx'
   /**
@@ -208,7 +228,9 @@ export class IsaacProvider implements SimWorlds {
       // 不伪造成功；原始解释器路径只进这句内部诊断，出站投影不显示它。
       if(!existsSync(pythonPath))throw new SimError('ISAAC_SDK_UNAVAILABLE',`Isaac Sim 6.0.1 当前 Python 入口不存在：${pythonPath}。请在「设置 → 物理引擎」安装 Isaac，或检查并登记已有的兼容本地安装。需要先使用一般物理仿真时，可在同页核对并显式选择 MuJoCo，重启工作台后生效。`,{engineId:'isaac',stage:'python-path',availability:'missing',pythonPath,physicalExecution:false,settingsSection:'lyapunov-engine'})
       this.warnIfShaderCacheCold(cacheRoot)
-      const child=new ProcessSimProvider({pythonPath,workerPath:this.config.workerPath??resolve(here,'../python/worker.py'),engineName:'Isaac Sim 6.0.1',env:{...isaacLoaderEnvironment(pythonPath),LYAPUNOV_ISAAC_CACHE:cacheRoot,LYAPUNOV_ISAAC_DEVICE:this.config.physicsDevice??'cpu',LYAPUNOV_ISAAC_RENDERING:this.config.rendering??'none',XDG_CACHE_HOME:resolve(cacheRoot,'xdg-cache'),XDG_CONFIG_HOME:resolve(cacheRoot,'xdg-config'),XDG_DATA_HOME:resolve(cacheRoot,'xdg-data')},...(this.config.launch===undefined?{}:{launch:this.config.launch}),...(this.config.startupBudgetMs===undefined?{}:{startupBudgetMs:this.config.startupBudgetMs})})
+      // opt-in 来自**本次 open 的 Scene 快照**：普通 world 不加载任何 IRA 扩展/资产，也不改启动参数。
+      const ira=humanIraRequest(snapshot)
+      const child=new ProcessSimProvider({pythonPath,workerPath:this.config.workerPath??resolve(here,'../python/worker.py'),engineName:'Isaac Sim 6.0.1',env:{...isaacLoaderEnvironment(pythonPath),LYAPUNOV_ISAAC_CACHE:cacheRoot,LYAPUNOV_ISAAC_DEVICE:this.config.physicsDevice??'cpu',LYAPUNOV_ISAAC_RENDERING:this.config.rendering??'none',XDG_CACHE_HOME:resolve(cacheRoot,'xdg-cache'),XDG_CONFIG_HOME:resolve(cacheRoot,'xdg-config'),XDG_DATA_HOME:resolve(cacheRoot,'xdg-data'),...(ira.enabled?{LYAPUNOV_ISAAC_IRA:'1',LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY:ira.motionLibrary!,LYAPUNOV_ISAAC_IRA_CHARACTER:ira.character!}:{})},...(this.config.launch===undefined?{}:{launch:this.config.launch}),...(this.config.startupBudgetMs===undefined?{}:{startupBudgetMs:this.config.startupBudgetMs})})
       this.lastStarted=child
       this.starts.set(worldId,child)
       this.pending.set(worldId,child)
@@ -245,7 +267,7 @@ export class IsaacProvider implements SimWorlds {
     if(worldId===undefined)return this.lastStarted?.lifecyclePhases() ?? []
     return this.starts.get(worldId)?.lifecyclePhases() ?? []
   }
-  async sync(worldId:string,snapshot:SceneSnapshot,options:{forceRebuild?:boolean}={}){const i=this.instance(worldId);try{const handle=await i.process.sync(worldId,snapshot,options);i.handle=handle;return handle}catch(error){i.handle={...i.handle,status:'unavailable'};throw error}}
+  async sync(worldId:string,snapshot:SceneSnapshot,options:{forceRebuild?:boolean}={}){const i=this.instance(worldId);try{const handle=await i.process.sync(worldId,snapshot,options);i.handle=handle;return handle}catch(error){if(!(error instanceof SimError&&error.code==='HUMAN_IRA_REOPEN_REQUIRED'))i.handle={...i.handle,status:'unavailable'};throw error}}
   describe(worldId:string,entityId:string){return this.instance(worldId).process.describe(worldId,entityId)}
   observe(worldId:string,selection:ObservationSelection={}){return this.instance(worldId).process.observe(worldId,selection)}
   async setPaused(worldId:string,paused:boolean,expectedGeneration:number){const i=this.instance(worldId);const handle=await i.process.setPaused(worldId,paused,expectedGeneration);i.handle=handle;return handle}
@@ -266,6 +288,8 @@ export class IsaacProvider implements SimWorlds {
   freeze(worldId:string,selection:FreezeSelection={}):Promise<FreezeReceipt>{return this.instance(worldId,true).process.freeze(worldId,selection)}
   restore(worldId:string,selection:FreezeSelection={}):Promise<FreezeReceipt>{return this.instance(worldId,true).process.restore(worldId,selection)}
   subscribeFrames(worldId:string,listener:(frame:Frame)=>void){return this.instance(worldId).process.subscribeFrames(worldId,listener)}
+  configureControlSampling(worldId:string,options:ControlSamplingOptions){return this.instance(worldId).process.configureControlSampling(worldId,options)}
+  subscribeControlSamples(worldId:string,listener:(sample:ControlSample)=>void){return this.instance(worldId).process.subscribeControlSamples(worldId,listener)}
   // `geomGroups` 只在 MuJoCo 的 RGB/深度渲染里被真实消费（sim-mujoco worker 的 display_groups）；
   // Isaac 的 USD/RTX 采集没有显示组概念，worker.capture 从不读该字段。原来是原样转发=静默忽略，
   // 调用方会以为过滤生效。显式给出时在这里拒绝，不把参数送给一个不读它的 worker；未给出时行为不变。

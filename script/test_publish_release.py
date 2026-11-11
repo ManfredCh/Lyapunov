@@ -140,6 +140,19 @@ class PublisherTests(unittest.TestCase):
         with self.assertRaises(pub.PublishError):
             pub.choose_manifest([self.root], 'darwin-arm64', '0.2.3')
 
+    def test_platform_batches_have_distinct_checksum_assets(self):
+        linux = self.manifest(self.root / 'linux')
+        mac = self.manifest(self.root / 'mac', platform='darwin-arm64')
+        for path, _ in (linux, mac):
+            path.with_suffix('.tsv').write_text('fixture')
+        archives = [{'sha256': 'a' * 64, 'local': 'linux.tar.gz'}, {'sha256': 'b' * 64, 'local': 'mac.tar.gz'}]
+        linux_assets = pub.metadata_assets({'linux-x64': linux}, archives[:1])
+        mac_assets = pub.metadata_assets({'darwin-arm64': mac}, archives[1:])
+        combined_assets = pub.metadata_assets({'linux-x64': linux, 'darwin-arm64': mac}, archives)
+        self.assertEqual(set(linux_assets), {'linux-x64.json', 'linux-x64.tsv', 'SHA256SUMS-linux-x64'})
+        self.assertEqual(set(mac_assets), {'darwin-arm64.json', 'darwin-arm64.tsv', 'SHA256SUMS-darwin-arm64'})
+        self.assertEqual(set(combined_assets), {'linux-x64.json', 'linux-x64.tsv', 'darwin-arm64.json', 'darwin-arm64.tsv', 'SHA256SUMS'})
+
     def test_invalid_archive_path_and_json_tsv_mismatch_stop_before_upload(self):
         path, manifest = self.manifest()
         manifest['archive']['path'] = '../escape.tar.gz'

@@ -113,7 +113,26 @@ function presetRoute(scene:SceneSnapshot,e:Entity,preset:CrowdRoutePreset,catalo
  if(!clip)throw Error(`HUMAN_PRESET_DEFAULTS_MISSING: ${human.definition?.entityId??'（无定义引用）'} 没有clip可沿用，且定义来源不是随包内置角色；请显式给route`)
  return{...inherited,pointsM,speedMps,behavior:'walk',loop:true,clip}
 }
-export async function configureCrowd(ops:SceneOperations,input:CrowdScope&{expectedRevision:number;route?:HumanRoute;preset?:CrowdRoutePreset;collision?:HumanComponent['collision']},catalogRoot=rocketboxCatalogRoot()){
+/**
+ * IRA 只接受本实现真实消费的配置：显式循环 walk 路线、米制点/速度，加显式区域与停留。
+ * 不支持的行为/可选能力在写入 Scene 前具名拒绝，避免“保存了但运行时不生效”。
+ */
+export function validateIra(ira:HumanComponent['ira'],route:HumanRoute|undefined,label='human'){
+ if(!ira||typeof ira!=='object'||Array.isArray(ira))throw Error('HUMAN_IRA_INVALID: '+label+' ira 必须是对象')
+ if(!Number.isInteger(ira.seed)||ira.seed<0||ira.seed>2147483647)throw Error('HUMAN_IRA_SEED_INVALID: '+label+' ira.seed 必须是0–2147483647的整数')
+ vector(ira.region?.min,'ira.region.min');vector(ira.region?.max,'ira.region.max')
+ if(ira.region.min.some((v,i)=>v>ira.region.max[i]!))throw Error('HUMAN_IRA_REGION_INVALID: '+label+' ira.region.min 不得大于 max')
+ if(!(ira.region.max[0]>ira.region.min[0])||!(ira.region.max[1]>ira.region.min[1]))throw Error('HUMAN_IRA_REGION_INVALID: '+label+' ira.region 的 X/Y 必须是正范围（区域停留需要可进入的平面）')
+ if(!Number.isFinite(ira.dwellS)||ira.dwellS<=0||ira.dwellS>300)throw Error('HUMAN_IRA_DWELL_INVALID: '+label+' ira.dwellS 必须>0且≤300秒')
+ if(!route)throw Error('HUMAN_IRA_ROUTE_REQUIRED: '+label+' IRA 需要现有显式循环walk路线')
+ if(route.behavior!=='walk')throw Error('HUMAN_IRA_ROUTE_UNSUPPORTED: '+label+' IRA 只执行 walk；run/stand 不冒充官方巡逻')
+ if(route.loop!==true)throw Error('HUMAN_IRA_ROUTE_UNSUPPORTED: '+label+' IRA 需要 loop:true 的循环路线')
+ if(!Array.isArray(route.pointsM)||route.pointsM.length<2||route.pointsM.length>256)throw Error('HUMAN_IRA_ROUTE_UNSUPPORTED: '+label+' IRA 需要2–256个米制 pointsM')
+ for(const [index,point]of route.pointsM.entries())vector(point,'ira.route.pointsM['+index+']')
+ if(!Number.isFinite(route.speedMps)||route.speedMps<=0||route.speedMps>6)throw Error('HUMAN_IRA_ROUTE_UNSUPPORTED: '+label+' IRA speedMps 须>0且≤6')
+ for(const [key,value]of Object.entries({navigation:route.navigation,dwellS:route.dwellS,yieldToHumans:route.yieldToHumans,avoidanceRadiusM:route.avoidanceRadiusM,avoidObstacles:route.avoidObstacles,turnRateRadps:route.turnRateRadps,clip:route.clip}))if(value!==undefined)throw Error(`HUMAN_IRA_ROUTE_UNSUPPORTED: ${label} IRA 不消费 ${key}`)
+}
+export async function configureCrowd(ops:SceneOperations,input:CrowdScope&{expectedRevision:number;route?:HumanRoute;preset?:CrowdRoutePreset;collision?:HumanComponent['collision'];ira?:HumanComponent['ira']|null},catalogRoot=rocketboxCatalogRoot()){
  const scene=await ops.scene.snapshot(input.sceneId);revision(scene,input.expectedRevision);const rows=ids(scene,input)
  if(input.route&&input.preset)throw Error('HUMAN_ROUTE_PRESET_CONFLICT: preset与显式route只能给一个')
  if(input.preset){
@@ -132,10 +151,14 @@ export async function configureCrowd(ops:SceneOperations,input:CrowdScope&{expec
    changes.route=presetRoute(scene,e,input.preset,catalog)
   }
   if(input.collision)changes.collision=input.collision
-  patch.push({op:'update' as const,entityId:e.entityId,changes:{components:{...e.components,human:{...e.components.human!,...changes}}}})
+  const nextHuman={...e.components.human!,...changes}
+  if(input.ira===null)delete nextHuman.ira
+  else if(input.ira!==undefined){if(nextHuman.mode!=='kinematic')throw Error('HUMAN_IRA_MODE_UNSUPPORTED: IRA 需要运动学人物');validateIra(input.ira,nextHuman.route,e.entityId);nextHuman.ira=structuredClone(input.ira)}
+  else if(nextHuman.ira)validateIra(nextHuman.ira,nextHuman.route,e.entityId)
+  patch.push({op:'update' as const,entityId:e.entityId,changes:{components:{...e.components,human:nextHuman}}})
  }
  const snapshot=await ops.scene.commit({sceneId:scene.sceneId,expectedRevision:input.expectedRevision,patch});return{status:'completed',snapshot,entityIds:rows.map(e=>e.entityId),worldNeedsSync:true}}
-export async function startCrowd(ops:SceneOperations,sim:SimWorlds,input:CrowdScope&{worldId:string;expectedGeneration:number;durationS:number;actionId?:string;forceN?:Vec3},signal?:AbortSignal){const scene=await ops.scene.snapshot(input.sceneId),rows=ids(scene,input);const world=(await sim.listWorlds()).find(w=>w.worldId===input.worldId);if(!world||world.sceneId!==scene.sceneId)throw Error('HUMAN_WORLD_SCENE_MISMATCH');if(world.appliedSceneRevision!==scene.revision)throw Error('HUMAN_WORLD_UNSYNCED');if(world.worldGeneration!==input.expectedGeneration)throw Error('STALE_GENERATION');if(!['mujoco','isaac'].includes(world.engineId))throw Error('HUMAN_PROVIDER_UNSUPPORTED: 当前Provider未实现人体物理tick与原生姿态读回');return sim.execute(input.worldId,{actionId:input.actionId??'human_'+randomUUID(),expectedGeneration:input.expectedGeneration,kind:'batch',motions:rows.map(e=>({kind:'human' as const,entityId:e.entityId,durationS:input.durationS,...e.components.human!.route?{route:e.components.human!.route}:{},...input.forceN?{forceN:input.forceN}:{}}))},signal)}
+export async function startCrowd(ops:SceneOperations,sim:SimWorlds,input:CrowdScope&{worldId:string;expectedGeneration:number;durationS:number;actionId?:string;forceN?:Vec3},signal?:AbortSignal){const scene=await ops.scene.snapshot(input.sceneId),rows=ids(scene,input);const world=(await sim.listWorlds()).find(w=>w.worldId===input.worldId);if(!world||world.sceneId!==scene.sceneId)throw Error('HUMAN_WORLD_SCENE_MISMATCH');if(world.appliedSceneRevision!==scene.revision)throw Error('HUMAN_WORLD_UNSYNCED');if(world.worldGeneration!==input.expectedGeneration)throw Error('STALE_GENERATION');if(!['mujoco','isaac'].includes(world.engineId))throw Error('HUMAN_PROVIDER_UNSUPPORTED: 当前Provider未实现人体物理tick与原生姿态读回');const iraRows=rows.filter(e=>e.components.human!.ira);if(iraRows.length&&world.engineId!=='isaac')throw Error('HUMAN_IRA_ISAAC_ONLY: IRA 巡逻/区域停留只在 Isaac 已加载官方 SDK/资产的 world 执行；不会在 MuJoCo 上静默走普通路线');if(iraRows.length){const supported=(world.capabilities as {supported?:Record<string,unknown>}|undefined)?.supported;if(supported?.humanIra!==true)throw Error('HUMAN_IRA_REOPEN_REQUIRED: 当前 Isaac world 未启用 IRA SDK/资产（开放世界时快照没有 ira 声明或 Kit 未加载官方扩展）；请 sim_close 后按当前 Scene 重新 open')}return sim.execute(input.worldId,{actionId:input.actionId??'human_'+randomUUID(),expectedGeneration:input.expectedGeneration,kind:'batch',motions:rows.map(e=>({kind:'human' as const,entityId:e.entityId,durationS:input.durationS,...e.components.human!.route?{route:e.components.human!.route}:{},...input.forceN?{forceN:input.forceN}:{}}))},signal)}
 export async function stopCrowd(ops:SceneOperations,sim:SimWorlds,input:CrowdScope&{worldId:string;expectedGeneration:number}){const scene=await ops.scene.snapshot(input.sceneId),rows=ids(scene,input);const world=(await sim.listWorlds()).find(w=>w.worldId===input.worldId);if(!world||world.sceneId!==scene.sceneId)throw Error('HUMAN_WORLD_SCENE_MISMATCH');const requestedEntityIds=rows.map(e=>e.entityId),receipt=await sim.stop(input.worldId,{expectedGeneration:input.expectedGeneration,entityIds:requestedEntityIds}),affected=new Set(receipt.affectedEntityIds??[]);return{...receipt,requestedEntityIds,alreadyIdleEntityIds:requestedEntityIds.filter(id=>!affected.has(id))}}
 export async function inspectCrowd(ops:SceneOperations,sim:SimWorlds|undefined,input:CrowdScope&{worldId?:string}){const scene=await ops.scene.snapshot(input.sceneId),rows=ids(scene,input);if(input.worldId){const world=sim&&(await sim.listWorlds()).find(w=>w.worldId===input.worldId);if(!world||world.sceneId!==scene.sceneId)throw Error('HUMAN_WORLD_SCENE_MISMATCH')}const frame=input.worldId&&sim?await sim.observe(input.worldId,{entityIds:rows.map(e=>e.entityId),contacts:true}):undefined;if(frame&&frame.sceneRevision!==scene.revision)throw Error('HUMAN_WORLD_UNSYNCED');return{sceneId:scene.sceneId,revision:scene.revision,entities:rows.map(e=>({entityId:e.entityId,group:e.components.humanGroup,human:e.components.human,resources:e.resources})),frame,limitations:{kinematic:'不会自然受力失衡；显式navigation可在固定Z平面自动绕障，未启用时保守停止',ragdoll:'真实自由动力学受力/跌倒；无稳定行走及恢复控制器',appearance:'未选模板时为占位预览；Scene已导入角色可共享模板批量创建，其许可由导入者显式声明'}}}
 

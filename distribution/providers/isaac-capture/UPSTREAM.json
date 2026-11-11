@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/NVIDIA/IsaacCapture",
+  "revision": "2b72b3aac75f87e5043bcb3411f9a75c294f7ba7",
+  "distribution": "isaaccapture",
+  "version": "1.8.29a1",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "src/python/isaaccapture/retargeters/se3_retargeter.py",
+      "module": "se3_retargeter",
+      "sha256": "30f20ca3c8e1023b2ca7738db73f5ce835a1e446b02c5bd8c276eb85b40b4728"
+    },
+    {
+      "path": "src/python/isaaccapture/retargeters/tensor_reorderer.py",
+      "module": "tensor_reorderer",
+      "sha256": "b7423e4bef016d7ad363ac23922b27916d8a273dab03358ce227254c0746b71b"
+    },
+    {
+      "path": "src/python/isaaccapture/retargeters/gripper_retargeter.py",
+      "module": "gripper_retargeter",
+      "sha256": "a9fcf3cc17e809afc53483c371f155b1704e66e22fe93f2aaeda2d7da92c9a2d"
+    }
+  ]
+}

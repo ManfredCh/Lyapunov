@@ -2,6 +2,8 @@ import type { SimWorlds } from '../../sim-contract/src/index.ts'
 import type { Frame, ActionReceipt } from '../../lyapunov-contracts/src/types.ts'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createWriteStream, type WriteStream } from 'node:fs'
+import type { ControlSamplingOptions } from '../../sim-contract/src/index.ts'
+import { ControlSampleRecording } from './recording-control.ts'
 import { join } from 'node:path'
 /** 同一步可以应用新的Scene元数据版本；不能只用不含revision的frameId去重。 */
 export function recordingFrameIdentity(frame: Pick<Frame, 'worldId' | 'generation' | 'sceneRevision' | 'stepIndex'>): string { return JSON.stringify([frame.worldId, frame.generation, frame.sceneRevision, frame.stepIndex]) }
@@ -46,6 +48,7 @@ export function recordingAttributionMismatch(receipt: any, bound: BoundRecording
  return undefined
 }
 export class SimulationRecording {
+ private controls?: ControlSampleRecording
  private stream?: WriteStream
  private unsubscribe?: () => void
  private last?: Frame
@@ -55,7 +58,7 @@ export class SimulationRecording {
  readonly sessionRef: string
  constructor(directory: string, sessionRef: string) { this.directory = directory; this.sessionRef = sessionRef }
  get progress() { return { frameCount: this.count, lastFrame: this.last } }
- async start(sim: SimWorlds, worldId: string, onFrame?: (frame: Frame) => void, observed?: Frame, gate?: RecordingFrameGate) {
+ async start(sim: SimWorlds, worldId: string, onFrame?: (frame: Frame) => void, observed?: Frame, gate?: RecordingFrameGate, controlSampling?: ControlSamplingOptions) {
   if (this.stream) throw new Error('RECORDING_ALREADY_ACTIVE')
  await mkdir(this.directory, { recursive: true })
  this.stream = createWriteStream(join(this.directory, 'events.jsonl'), { flags: 'ax', mode: 0o600 })
@@ -71,6 +74,10 @@ export class SimulationRecording {
   this.last = first
   this.count = 1
   this.event({ kind: 'start', frame: first })
+  if (controlSampling) {
+   this.controls = new ControlSampleRecording(this.directory, this.sessionRef, controlSampling)
+   await this.controls.start(sim, worldId, error => { this.failure ??= error })
+  }
   onFrame?.(first)
   this.unsubscribe = sim.subscribeFrames(worldId, frame => {
    if (!this.last || frame.worldId !== this.last.worldId || frame.generation < this.last.generation || frame.generation === this.last.generation && ((frame.sceneRevision ?? -1) < (this.last.sceneRevision ?? -1) || frame.stepIndex < this.last.stepIndex || frame.stepIndex === this.last.stepIndex && frame.sceneRevision === this.last.sceneRevision)) return
@@ -89,9 +96,13 @@ export class SimulationRecording {
  pauseFrames() { this.unsubscribe?.(); this.unsubscribe = undefined }
  async stop() {
   this.pauseFrames()
+  let controlSamples
+  try { controlSamples = await this.controls?.stop() } catch (error) { this.failure ??= error instanceof Error ? error : new Error(String(error)) }
+  this.controls = undefined
   const stream = this.stream; this.stream = undefined
-  if (stream) await new Promise<void>((resolve, reject) => { if (this.failure) return reject(this.failure); stream.once('error', reject); stream.end(resolve) })
-  const summary = { sessionRef: this.sessionRef, frameCount: this.count, lastFrameId: this.last?.frameId, worldId: this.last?.worldId, generation: this.last?.generation, eventsFile: 'events.jsonl' }
+  if (stream) await new Promise<void>((resolve, reject) => { stream.once('error', reject); stream.end(resolve) })
+  if (this.failure) throw this.failure
+  const summary = { sessionRef: this.sessionRef, frameCount: this.count, lastFrameId: this.last?.frameId, worldId: this.last?.worldId, generation: this.last?.generation, eventsFile: 'events.jsonl', ...(controlSamples ? { controlSamples } : {}) }
   await writeFile(join(this.directory, 'manifest.json'), JSON.stringify(summary, null, 2), { mode: 0o600 }); return summary
  }
 }

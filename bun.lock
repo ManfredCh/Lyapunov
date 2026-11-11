@@ -588,6 +588,10 @@
         "@deepseek-ai/dsh-tools",
       ],
     },
+    "packages/teleop-capture": {
+      "name": "@lyapunov/teleop-capture",
+      "version": "0.1.0",
+    },
     "packages/viewer": {
       "name": "@lyapunov/viewer",
       "version": "0.1.0",
@@ -685,6 +689,8 @@
     "@lyapunov/sim-newton": ["@lyapunov/sim-newton@workspace:packages/sim-newton"],
 
     "@lyapunov/sim-task-check": ["@lyapunov/sim-task-check@workspace:packages/sim-task-check"],
+
+    "@lyapunov/teleop-capture": ["@lyapunov/teleop-capture@workspace:packages/teleop-capture"],
 
     "@lyapunov/terminal": ["@lyapunov/terminal@workspace:packages/lyapunov-terminal"],
 

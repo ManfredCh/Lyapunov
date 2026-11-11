@@ -1,0 +1,3 @@
+- insert:
+    - id: lyapunov-teleop-capture
+      name: '@lyapunov/teleop-capture/plugin'

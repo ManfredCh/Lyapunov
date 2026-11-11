@@ -161,7 +161,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   const captureRoot=runtimeRoot?join(runtimeRoot,"captures"):join(input.sceneRoot,"captures")
   // 录制是用户产物（不属于三类可调用资产，也不进可整删的 cache），留在运行根下的 recordings/。
   const recordingRoot=join(d?.cacheRoot??input.sceneRoot,"..","recordings")
-  add("scene-kit",{dataRoot:d?.catalogRoot??input.sceneRoot,productRoot:PRODUCT_ROOT,algorithmPython,mapTool:true,...(unityMcp?{unity:{serverName:UNITY_SERVER_NAME,...(unityProjectPath?{projectPath:unityProjectPath}:{})}}:{}),...(d?{layout:{worlds:d.worldsRoot,assets:d.assetsRoot,robots:d.robotsRoot,cache:d.cacheRoot,catalog:d.catalogRoot},defaultStorage:"materialized"}:{})})
+  add("scene-kit",{dataRoot:d?.catalogRoot??input.sceneRoot,productRoot:PRODUCT_ROOT,algorithmPython,isaacValidation:{python:isaacPython,workerPath:join(PRODUCT_ROOT,"packages/sim-isaac/python/worker.py"),cacheRoot:join(d?.cacheRoot??input.sceneRoot,"provider-cache/isaac-validation")},mapTool:true,...(unityMcp?{unity:{serverName:UNITY_SERVER_NAME,...(unityProjectPath?{projectPath:unityProjectPath}:{})}}:{}),...(d?{layout:{worlds:d.worldsRoot,assets:d.assetsRoot,robots:d.robotsRoot,cache:d.cacheRoot,catalog:d.catalogRoot},defaultStorage:"materialized"}:{})})
   const policyRuntimes=policyRuntimeCandidates(PRODUCT_ROOT,sdkEnvironment)
   add("policy-registry",{dataDirectory:d?.cacheRoot??input.sceneRoot,endpoint:process.env.MODELSCOPE_ENDPOINT??"https://modelscope.cn",...(input.mode==="guest"?{guest:true}:{}),...(policyRuntimes[0]?.provider==='policy-configured'?{pythonPath:policyRuntimes[0].python}:{pythonRuntimes:policyRuntimes})})
   add("lyapunov-mcp-extras",input.mode==="guest"?{guest:true}:undefined)
@@ -210,7 +210,8 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
     }
     add("robot-tools")
   }
-  add("robot-workflows",{recordingRoot})
+  add("robot-workflows",{recordingRoot,labExportPython:sdkEnvironment.LYAPUNOV_LAB_EXPORT_PYTHON})
+  if(input.engine==="mujoco"||input.engine==="isaac")add("teleop-capture",{python:sdkEnvironment.LYAPUNOV_CAPTURE_PYTHON})
   add("human-crowd")
   // agent-graph 编排面（docs/AGENT_GRAPH_CONTRACT.md §6）：campaign_* 工具 + run 证据收集器 +
   // 确定性谓词判定 sim_task_check。都无装配期配置——campaign 归属取调用方会话工作目录，

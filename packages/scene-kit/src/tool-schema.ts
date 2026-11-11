@@ -199,6 +199,8 @@ export const assetVerifyParameters:ParameterSchemaSpec={input:{
   properties:{
     resourceId:{type:'string',required:true,description:"Stable resource ID returned by asset_list."},
     version:{type:'integer',description:"Optional resource version; omitted checks the current version."},
+    isaacProfile:{type:'string',enum:['physics','explicit-mass','robot'],description:'Optional USD rule profile. Physics accepts implicit mass; explicit-mass requires authored mass; robot also checks articulation and robot relationships.'},
+    simulate:{type:'boolean',description:'With isaacProfile, explicitly run the non-adjacent collision rule in the isolated validator.'},
   },
 }}
 

@@ -1637,7 +1637,9 @@
     {
       "path": "packages/motion-ompl/test/real-provider.test.ts",
       "declaredRunner": "node:test",
-      "markers": ["envgate"],
+      "markers": [
+        "envgate"
+      ],
       "decision": "exclude",
       "reason": "真实 SDK 工具、MuJoCo 与 OMPL 的通路、阻断及绕行测试；需现有 Python 环境，单独运行并核对未跳过。"
     },
@@ -1689,7 +1691,10 @@
     {
       "path": "packages/policy-registry/test/native-cpu-execution.test.ts",
       "declaredRunner": "node:test",
-      "markers": ["envgate", "realmodel"],
+      "markers": [
+        "envgate",
+        "realmodel"
+      ],
       "decision": "exclude",
       "reason": "真实发行策略权重、独立CPU解释器和MuJoCo，验证原工具/作业执行与停止重启；仅在显式准备后单独运行。"
     },
@@ -2976,7 +2981,9 @@
     {
       "path": "packages/sim-newton/test/fault-cleanup-real.test.ts",
       "declaredRunner": "node:test",
-      "markers": ["envgate"],
+      "markers": [
+        "envgate"
+      ],
       "decision": "exclude",
       "reason": "真实 Newton CPU World 与原生动作，受控注入故障验证收尾；需要独立 Newton Python，单独运行。"
     },
@@ -3589,6 +3596,27 @@
       "reason": "人体创建/合法GLB导入与许可、骨架共享、seed、保存重开、场景隔离及Viewer只消费物理姿态的离线行为。无网络/SDK，不冒充原生碰撞。"
     },
     {
+      "path": "packages/human-crowd/test/ira-config.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "S5 IRA 场景配置、保存重开、配置校验与引擎选择的离线检查。"
+    },
+    {
+      "path": "packages/sim-isaac/test/ira-provider.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "S5 IRA 显式启动与本地资源路径检查。"
+    },
+    {
+      "path": "packages/sim-isaac/test/ira-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": ["envgate"],
+      "decision": "exclude",
+      "reason": "S5 原生验收需要 Isaac Sim 6.0.1、usd-core、完整动作库和官方角色 USD。提供 LYAPUNOV_ISAAC_PYTHON、LYAPUNOV_USD_PYTHON、LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY 与 LYAPUNOV_ISAAC_IRA_CHARACTER 后独立执行。"
+    },
+    {
       "path": "packages/scene-kit/test/simready-assets.test.ts",
       "declaredRunner": "bun:test",
       "markers": [],
@@ -3651,6 +3679,40 @@
       "markers": [],
       "decision": "include",
       "reason": "统一发布CLI离线回归：真实临时Git/文件/本机HTTP，GitHub/OSS写入均用替身；核对取消检查不能冒充全绿、显式发布标签、不可变资产冲突与工作区保护，不访问生产或外网。"
+    },
+    {
+      "path": "packages/robot-workflows/test/isaac-upstream.test.ts",
+      "declaredRunner": "bun:test",
+      "markers": [],
+      "decision": "include",
+      "reason": "S0：固定 Isaac Lab 数据模块的原样字节与 BSD-3-Clause 许可检查；本地只读，不启动 SDK、不联网。"
+    },
+    {
+      "path": "packages/sim-contract/test/control-sampling-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "S1 原生 MuJoCo／Isaac 控制边界验收：显式指定现有 SDK 运行，主控单独回收真实步数与状态；默认离线 CI 不启动 SDK。"
+    },
+    {
+      "path": "packages/sim-isaac/test/asset-validation-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "S3 独立 Kit 资产验证需真实 Isaac Sim 6.0.1 和既有许可；以专用原生命令运行。"
+    },
+    {
+      "path": "packages/teleop-capture/test/keyboard-native.test.ts",
+      "declaredRunner": "node:test",
+      "markers": [
+        "realmodel"
+      ],
+      "decision": "exclude",
+      "reason": "S4 Capture、MuJoCo、Mink、Lab HDF5 闭环需三套已安装解释器与构建产物；以专用原生命令运行。"
     }
   ]
 }

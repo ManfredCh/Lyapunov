@@ -15,11 +15,17 @@ import { captureRecordingScene, captureRecordingResult, captureRecordingLidarRes
 import { accumulateRecordingElapsed } from './recording.ts'
 import { worldScene } from './world-scene.ts'
 import { RecordingSessionEvents } from './recording-events.ts'
+import { labExportJob } from './recording-lab.ts'
 declare module '@deepseek-ai/dsh-jobs' { interface JobKindMap { recording: 'recording'; dataset: 'dataset' } }
-export interface RecordingConfig { recordingRoot?: string }
+export interface RecordingConfig { recordingRoot?: string; labExportPython?: string }
 const sourceFrame = (f: Frame) => ({ frameId: f.frameId, generation: f.generation, ...(f.sceneRevision === undefined ? {} : { sceneRevision: f.sceneRevision }), stepIndex: f.stepIndex, simTime: f.simTime })
 
 export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
+ let subprocess: Context['subprocess'] | undefined
+ ctx.inject(['subprocess'], owner => {
+  subprocess = owner.subprocess
+  owner.effect(() => () => { subprocess = undefined })
+ })
  // 世界服务与场景订阅都按**发起录制的会话**取（同一个 agent 推出来的会话键），
  // 没有会话就明确失败：录制不会读到别的会话的世界，也不订阅别人的场景。
  const sim = (agent: Agent) => simWorldsFor(ctx, agent)
@@ -43,7 +49,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
   return m
  }
  const operations = {
-  async recording_start(input: { sceneId: string; worldId: string; expectedGeneration: number; maxDurationS: number; cameraNames?: string[]; width?: number; height?: number; cameraEveryNFrames?: number; source?: { robotEntityId?: string; robotName?: string; bodyName?: string; cameraName: string; referenceFrame?: string }; channels?: string[]; lidar?: { channels?: number; horizontalSamples?: number; horizontalFovDeg?: number; verticalFovDeg?: [number, number]; rangeM?: number; geomGroups?: number[] } }, agent?: Agent, manual = false) {
+  async recording_start(input: { sceneId: string; worldId: string; expectedGeneration: number; maxDurationS: number; controlSamples?: { entityId: string; episodeId?: string }; cameraNames?: string[]; width?: number; height?: number; cameraEveryNFrames?: number; source?: { robotEntityId?: string; robotName?: string; bodyName?: string; cameraName: string; referenceFrame?: string }; channels?: string[]; lidar?: { channels?: number; horizontalSamples?: number; horizontalFovDeg?: number; verticalFovDeg?: [number, number]; rangeM?: number; geomGroups?: number[] } }, agent?: Agent, manual = false) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    if (!Number.isFinite(input.maxDurationS) || input.maxDurationS < .1 || input.maxDurationS > 300) throw new Error('INVALID_ARGUMENT: maxDurationS必须在0.1至300之间')
    // 请求通道只认这三个真实量：RGB、相机轴向Z深度、LiDAR沿射线欧氏range。没给 channels 时沿用旧语义
@@ -94,6 +100,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
     if (camera.parentEntityId !== undefined && fixedSource.robotEntityId === undefined) fixedSource.robotEntityId = String(camera.parentEntityId)
    }
    const manifest: RecordingManifest = { recordingId: 'recording-' + randomUUID(), sessionRef: agent.id, sceneId: input.sceneId, status: 'recording', createdAt: new Date().toISOString(), runId, maxDurationS: input.maxDurationS, elapsedS: 0, frameCount: 0, eventCount: 0, segments: [], resources: [], missing: [], ...(fixedSource === undefined ? {} : { source: fixedSource }) }
+   const controlReady = input.controlSamples ? Promise.withResolvers<void>() : undefined
    const source = await worldScene(ctx, sim(agent), world, agent)
    const sourceScene = source.snapshot
    await captureRecordingScene(directory(agent), manifest, world, sourceScene)
@@ -142,8 +149,9 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
      return undefined
     }
     // 订阅帧的归属门：非本代次的帧不写入 events.jsonl/不计数，并结束本次固定来源作业；旧调用无门，保持兼容分代语义。
-    const frameGate = bound === undefined ? undefined : {
-     accept: (frame: Frame) => frame.worldId === bound.worldId && frame.generation === bound.generation,
+    const frameOwner = bound ?? (input.controlSamples ? { worldId: input.worldId, generation: input.expectedGeneration } : undefined)
+    const frameGate = frameOwner === undefined ? undefined : {
+     accept: (frame: Frame) => frame.worldId === frameOwner.worldId && frame.generation === frameOwner.generation,
      onReject: () => { if (!stopping) void finish('source-generation-changed') },
     }
     const recordSceneFor = async (frame: Pick<Frame, 'worldId' | 'generation' | 'sceneRevision'>) => {
@@ -163,7 +171,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
      try {
       try { await queue } catch (error) { reason = String(error) }
       if (cameraCapture) manifest.cameraCapture = { ...cameraCapture }
-      const stats = await recorder.stop(); manifest.frameCount = stats.frameCount
+      const stats = await recorder.stop(); manifest.frameCount = stats.frameCount; if (stats.controlSamples) manifest.controlSamples = stats.controlSamples
       // 固定来源在换代/机位变化时被明确结束：不是失败，也不是正常时长终点，落 interrupted 并保留准确原因。
       const sourceEnded = ['source-generation-changed', 'source-attribution-mismatch', 'source-camera-removed', 'source-camera-unavailable', 'source-mount-changed', 'source-world-disappeared'].some(value => reason.startsWith(value))
       manifest.status = ['recording-stop', 'duration-limit', 'frame-limit', 'wall-time-limit'].includes(reason) ? 'completed' : reason === 'job-killed' || reason.includes('disposed') ? 'killed' : sourceEnded ? 'interrupted' : 'failed'
@@ -229,7 +237,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
       }
      }
      if (elapsedS >= input.maxDurationS || manifest.frameCount >= 10000) void finish(elapsedS >= input.maxDurationS ? 'duration-limit' : 'frame-limit')
-    }, initial, frameGate)
+    }, initial, frameGate, input.controlSamples ? { enabled: true, expectedGeneration: input.expectedGeneration, entityId: input.controlSamples.entityId, episodeId: input.controlSamples.episodeId ?? manifest.recordingId } : undefined).then(() => { controlReady?.resolve() }, error => { controlReady?.reject(error); throw error })
     const sessionEvents = new RecordingSessionEvents(input.worldId, input.sceneId)
     offEvents = ctx.on('session/event', (session, event) => {
      if (session.id !== agent.id || stopping) return
@@ -256,6 +264,7 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
     return { cancel: reason => { void finish(reason === 'recording-stop' ? reason : 'job-killed') }, done: done.promise }
    } })
    if(manual)void ctx.jobs.wait(jobId,2_147_483_647,agent.id).catch(error=>ctx.logger.warn('录制作业等待结束：'+String(error)))
+   if (controlReady) await controlReady.promise
    manifest.jobId = jobId; await writeRecordingManifest(directory(agent), manifest); return summary(manifest, agent)
   },
   async recording_stop(input: { recordingId: string }, agent?: Agent) {
@@ -283,9 +292,16 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
    if (!frame) throw new Error('RECORDING_STEP_NOT_FOUND: 仅接受实际已记录步号')
    return { ...summary(manifest, agent), selectedFrame: { ...sourceFrame(frame), worldId: frame.worldId, entityCount: frame.entities.length, entities: frame.entities.slice(0, 8).map(e => ({ entityId: e.entityId, position: e.transform.position, jointCount: e.joints?.names.length ?? 0 })) } }
   },
-  async recording_export(input: { recordingId: string }, agent?: Agent, manual = false) {
+  async recording_export(input: { recordingId: string; format?: 'lyapunov' | 'isaac-lab' }, agent?: Agent, manual = false) {
    if (!agent) throw new Error('RECORDING_AGENT_REQUIRED')
    const m = await current(agent, input.recordingId); if (m.status === 'recording') throw new Error('RECORDING_NOT_FINISHED')
+   if (input.format === 'isaac-lab') {
+    const jobId = ctx.jobs.start({ kind: 'dataset', label: `导出 Isaac Lab 示教 ${m.recordingId}`, owner: agent.id, outputLimitBytes: 32_768,
+     run: () => labExportJob(subprocess, directory(agent), m, config.labExportPython ?? process.env.LYAPUNOV_LAB_EXPORT_PYTHON) })
+    if (manual) void ctx.jobs.wait(jobId, 2_147_483_647, agent.id).catch(error => ctx.logger.warn('导出作业等待结束：'+String(error)))
+    return { jobId, recordingId: m.recordingId, format: input.format }
+   }
+   if (input.format && input.format !== 'lyapunov') throw new Error('RECORDING_EXPORT_FORMAT_UNSUPPORTED')
    const jobId = ctx.jobs.start({ kind: 'dataset', label: `导出录制 ${m.recordingId}`, owner: agent?.id, outputLimitBytes: 4000, run: () => { let cancelled = false; return { cancel: () => { cancelled = true }, done: exportRecording(directory(agent), m.recordingId).then(result => ({ status: cancelled ? 'killed' as const : result.status === 'PARTIAL' ? 'failed' as const : 'completed' as const, result: JSON.stringify(result) }), error => ({ status: 'failed' as const, result: String(error) })) } } })
    if(manual)void ctx.jobs.wait(jobId,2_147_483_647,agent.id).catch(error=>ctx.logger.warn('导出作业等待结束：'+String(error)))
    return { jobId, recordingId: m.recordingId }
@@ -300,11 +316,11 @@ export function applyRecording(ctx: Context, config: RecordingConfig = {}) {
  }
  const id = { type: 'string' as const, required: true as const, description: "recordingId returned by recording_start/list." }
  const parameters: Record<keyof typeof operations, ParameterSchemaSpec> = {
-  recording_start: { input: { type: 'object', required: true, additionalProperties: false, properties: { sceneId: { type: 'string', required: true }, worldId: { type: 'string', required: true }, expectedGeneration: { type: 'integer', required: true }, maxDurationS: { type: 'number', required: true, description: "Recording duration in physical seconds, from 0.1 to 300." }, source: { type: 'object', additionalProperties: false, description: "Fixed recording source. robotEntityId/bodyName/cameraName identify one real mounted camera and are validated against the live camera list; after Start the source cannot be replaced by a later selection.", properties: { robotEntityId: { type: 'string' }, robotName: { type: 'string' }, bodyName: { type: 'string' }, cameraName: { type: 'string', required: true }, referenceFrame: { type: 'string', enum: ['world', 'parent'] } } }, channels: { type: 'array', items: { type: 'string', enum: ['rgb', 'camera-depth', 'lidar-range'] }, description: "Real quantities to record for the fixed source. rgb = PNG, camera-depth = axial Z depth npy in meters, lidar-range = native euclidean ray range npy in meters. A requested channel is only reported complete when it produced real files; unsupported or failed channels keep an unavailable reason and zero frames." }, lidar: { type: 'object', additionalProperties: false, description: "Optional LiDAR ray pattern for the lidar-range channel; omitted uses the engine defaults.", properties: { channels: { type: 'integer' }, horizontalSamples: { type: 'integer' }, horizontalFovDeg: { type: 'number' }, verticalFovDeg: { type: 'array', items: { type: 'number' } }, rangeM: { type: 'number' }, geomGroups: { type: 'array', items: { type: 'integer' } } } }, cameraNames: { type: 'array', items: { type: 'string', description: "Named camera in this world, returned by camera_list." }, description: "Optional multi-view recording. When supplied, each capture during recording calls camera_capture_multi once for all listed cameras at the same physics step, writing per-camera RGB, depth in meters, and calibration into the manifest and exported dataset. Omission preserves the existing recording behavior. Reject the entire request for missing or duplicate names." }, width: { type: 'integer', description: "Multi-view capture width in pixels; must be supplied together with height." }, height: { type: 'integer', description: "Multi-view capture height in pixels; must be supplied together with width." }, cameraEveryNFrames: { type: 'integer', description: "Capture all cameras every N subscribed frames. Defaults to 1, meaning every frame; this does not configure physics steps. Record actual capture/subscription step differences as synchronized/stepDrift instead of combining unsynchronized captures as synchronized data." } } } },
+  recording_start: { input: { type: 'object', required: true, additionalProperties: false, properties: { controlSamples: { type: 'object', additionalProperties: false, description: 'Optional native manual control-cycle dataset source. Provider must support control sampling; recording_start waits until enabled.', properties: { entityId: { type: 'string', required: true }, episodeId: { type: 'string' } } }, sceneId: { type: 'string', required: true }, worldId: { type: 'string', required: true }, expectedGeneration: { type: 'integer', required: true }, maxDurationS: { type: 'number', required: true, description: "Recording duration in physical seconds, from 0.1 to 300." }, source: { type: 'object', additionalProperties: false, description: "Fixed recording source. robotEntityId/bodyName/cameraName identify one real mounted camera and are validated against the live camera list; after Start the source cannot be replaced by a later selection.", properties: { robotEntityId: { type: 'string' }, robotName: { type: 'string' }, bodyName: { type: 'string' }, cameraName: { type: 'string', required: true }, referenceFrame: { type: 'string', enum: ['world', 'parent'] } } }, channels: { type: 'array', items: { type: 'string', enum: ['rgb', 'camera-depth', 'lidar-range'] }, description: "Real quantities to record for the fixed source. rgb = PNG, camera-depth = axial Z depth npy in meters, lidar-range = native euclidean ray range npy in meters. A requested channel is only reported complete when it produced real files; unsupported or failed channels keep an unavailable reason and zero frames." }, lidar: { type: 'object', additionalProperties: false, description: "Optional LiDAR ray pattern for the lidar-range channel; omitted uses the engine defaults.", properties: { channels: { type: 'integer' }, horizontalSamples: { type: 'integer' }, horizontalFovDeg: { type: 'number' }, verticalFovDeg: { type: 'array', items: { type: 'number' } }, rangeM: { type: 'number' }, geomGroups: { type: 'array', items: { type: 'integer' } } } }, cameraNames: { type: 'array', items: { type: 'string', description: "Named camera in this world, returned by camera_list." }, description: "Optional multi-view recording. When supplied, each capture during recording calls camera_capture_multi once for all listed cameras at the same physics step, writing per-camera RGB, depth in meters, and calibration into the manifest and exported dataset. Omission preserves the existing recording behavior. Reject the entire request for missing or duplicate names." }, width: { type: 'integer', description: "Multi-view capture width in pixels; must be supplied together with height." }, height: { type: 'integer', description: "Multi-view capture height in pixels; must be supplied together with width." }, cameraEveryNFrames: { type: 'integer', description: "Capture all cameras every N subscribed frames. Defaults to 1, meaning every frame; this does not configure physics steps. Record actual capture/subscription step differences as synchronized/stepDrift instead of combining unsynchronized captures as synchronized data." } } } },
   recording_stop: { input: { type: 'object', required: true, additionalProperties: false, properties: { recordingId: id } } },
   recording_list: { input: { type: 'object', required: true, additionalProperties: false, properties: { sceneId: { type: 'string' } } } },
   recording_inspect: { input: { type: 'object', required: true, additionalProperties: false, properties: { recordingId: id, generation: { type: 'integer' }, sceneRevision: { type: 'integer' }, stepIndex: { type: 'integer' } } } },
-  recording_export: { input: { type: 'object', required: true, additionalProperties: false, properties: { recordingId: id } } },
+  recording_export: { input: { type: 'object', required: true, additionalProperties: false, properties: { recordingId: id, format: { type: 'string', enum: ['lyapunov', 'isaac-lab'], description: 'Isaac Lab HDF5 requires a complete native control-step recording.' } } } },
  }
  for (const [name, operation] of Object.entries(operations)) {
   const execute = (input: unknown, agent?: Agent, manual = false) => (operation as (input: any, agent?: Agent, manual?: boolean) => Promise<any>)(input, agent, manual)

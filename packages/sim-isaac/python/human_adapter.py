@@ -11,7 +11,7 @@ finally:sys.path.remove(shared_path)
 
 def validate(cfg,error):
  shared.validate(cfg,error)
- if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')!='cpu' or os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='none':raise error('HUMAN_ISAAC_DEVICE_UNSUPPORTED','HUMAN_ISAAC_DEVICE_UNSUPPORTED: 当前人体适配和验收仅CPU/rendering:none，RTX/CUDA未接通')
+ if os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')!='cpu' or (os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')!='none' and not cfg.get('ira')):raise error('HUMAN_ISAAC_DEVICE_UNSUPPORTED','HUMAN_ISAAC_DEVICE_UNSUPPORTED: 常规人体要求 CPU/rendering:none，IRA 要求 CPU 物理')
  if cfg['mode']!='kinematic':raise error('HUMAN_ISAAC_RAGDOLL_UNSUPPORTED','HUMAN_ISAAC_RAGDOLL_UNSUPPORTED: Isaac人体当前只适配运动学分段碰撞；MuJoCo ragdoll不静默移植')
  if 'navigation'in(cfg.get('route')or{}):raise error('HUMAN_ISAAC_NAVIGATION_UNSUPPORTED','HUMAN_ISAAC_NAVIGATION_UNSUPPORTED: Isaac尚未适配平面A*占用查询；基础路径与原生PhysX停障可用')
 
@@ -20,6 +20,8 @@ def set_pose(prim,p,q):
  x=UsdGeom.Xformable(prim);x.ClearXformOpOrder();x.AddTransformOp().Set(matrix(p,q))
 def install(stage,path,entity,world,error):
  cfg=copy.deepcopy(entity['components']['human']);validate(cfg,error);cfg['_poseRuntime']=shared.compile_pose(cfg)
+ # IRA 角色由官方 SDK 提供原生视觉/行为；保留既有 kinematic 分段仅作可选碰撞代理，不再显示第二套骨骼。
+ ira_proxy=bool(cfg.get('ira'))
  if entity.get('parentId')or not np.allclose(entity['transform'].get('scale',[1,1,1]),[1,1,1]):raise error('HUMAN_TRANSFORM_UNSUPPORTED','人体须为场景根实体且scale=1')
  route=cfg.get('route')or{};initial=shared.pose(cfg,np.zeros(3),np.array([1.,0,0,0]),0,route.get('behavior','stand'),route.get('speedMps',0),route.get('clip'));joints=[];segments=[];allpaths=[]
  def body(geom,position,quat,visible,collision):
@@ -32,7 +34,7 @@ def install(stage,path,entity,world,error):
   marker=UsdGeom.Sphere.Define(stage,path+'/joint_'+str(i));marker.CreateRadiusAttr(.001);p,q=initial[j['name']];joints.append({'name':j['name'],'path':body(marker,p,q,False,False)})
  edges=shared.SEGMENTS if cfg['collision']=='detailed'else[('pelvis','neck',.23)]
  for i,(a,b,r)in enumerate(edges):
-  an,bn=cfg['boneMapping'][a],cfg['boneMapping'][b];calibration=shared.segment_calibration(cfg,a,b);pa,pb=shared.segment_points(initial,{'a':an,'b':bn,'calibration':calibration});half=float(np.linalg.norm(pb-pa))/2;q=np.zeros(4);shared.mj.mju_quatZ2Vec(q,pb-pa);radius=calibration['radiusM']if calibration else r*cfg['heightM']/1.75;geom=UsdGeom.Capsule.Define(stage,path+'/segment_'+str(i));geom.CreateAxisAttr('Z');geom.CreateRadiusAttr(radius);geom.CreateHeightAttr(2*half);segments.append({'name':a+'-'+b,'a':an,'b':bn,'radius':radius,'half':half,'path':body(geom,(pa+pb)/2,q,True,True),**({'calibration':calibration}if calibration else{})})
+  an,bn=cfg['boneMapping'][a],cfg['boneMapping'][b];calibration=shared.segment_calibration(cfg,a,b);pa,pb=shared.segment_points(initial,{'a':an,'b':bn,'calibration':calibration});half=float(np.linalg.norm(pb-pa))/2;q=np.zeros(4);shared.mj.mju_quatZ2Vec(q,pb-pa);radius=calibration['radiusM']if calibration else r*cfg['heightM']/1.75;geom=UsdGeom.Capsule.Define(stage,path+'/segment_'+str(i));geom.CreateAxisAttr('Z');geom.CreateRadiusAttr(radius);geom.CreateHeightAttr(2*half);segments.append({'name':a+'-'+b,'a':an,'b':bn,'radius':radius,'half':half,'path':body(geom,(pa+pb)/2,q,not ira_proxy,True),**({'calibration':calibration}if calibration else{})})
  q=world.ExtractRotationQuat();return{'human':cfg,'humanRoot':np.asarray(world.ExtractTranslation()),'humanRootQ':np.array([float(q.GetReal()),*map(float,q.GetImaginary())]),'humanPaths':allpaths,'humanRootPath':root,'humanJoints':joints,'humanSegments':segments}
 
 def bind(entry,RigidPrim):
@@ -61,12 +63,23 @@ def commit(world,entry,root,q,sampled):
  values=[]
  for path in entry['humanView'].paths:
   position,quat=poses[path];values.append([*position,*quat[1:],quat[0]])
+ set_kinematic_targets(world,entry,values)
+
+def set_kinematic_targets(world,entry,values):
  view=entry['humanView']
+ targets=np.asarray(values,dtype=np.float32)
+ indices=np.arange(len(values),dtype=np.uint32)
  # 只用PhysX原生kinematic target，让引擎在下一SM.step消费，不用USD动画或set_world_poses回放冒充。
- if hasattr(view,'_tensor'):native=view._tensor()._physics_view
- else:native=getattr(view,'_physics_rigid_body_view',None)
+ native=view._tensor()._physics_view if hasattr(view,'_tensor') else getattr(view,'_physics_rigid_body_view',None)
  if native is None or not hasattr(native,'set_kinematic_targets'):raise world.human_error('HUMAN_KINEMATIC_TARGET_UNAVAILABLE','当前SDK没有已初始化的PhysX RigidBodyView.set_kinematic_targets')
- native.set_kinematic_targets(np.asarray(values,dtype=np.float32),np.arange(len(values),dtype=np.uint32))
+ if 'humanWarpDevice' not in entry:
+  transforms=native.get_transforms()
+  entry['humanWarpDevice']=transforms.device if type(transforms).__module__.startswith('warp.') else None
+ if entry['humanWarpDevice'] is not None:
+  import warp as wp
+  targets=wp.array(targets,dtype=wp.float32,device=entry['humanWarpDevice'])
+  indices=wp.array(indices,dtype=wp.uint32,device=entry['humanWarpDevice'])
+ native.set_kinematic_targets(targets,indices)
 
 def observe(world,entry):
  from scene_adapter import use_backend

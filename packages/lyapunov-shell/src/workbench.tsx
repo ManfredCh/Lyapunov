@@ -2395,6 +2395,14 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    setQuery={setAssetQuery} setIncludeDeleted={setIncludeDeleted} search={()=>perform(()=>refreshAssets(assetQuery))} refresh={()=>perform(()=>refreshAssets())}
    mount={mountAsset} rename={asset=>setRenameAsset({resourceId:asset.ref.resourceId,original:asset.name,value:asset.name})}
    verify={asset=>perform(async()=>{const result=await api.command<{valid:boolean;missing:string[];changed:string[]}>("asset_verify",{resourceId:asset.ref.resourceId,version:asset.ref.version});setNotice(result.valid?tr(`${asset.name} 的文件可用。`,`${asset.name} files are available.`):tr(`${asset.name} 有 ${result.missing.length+result.changed.length} 个文件需要处理。`,`${asset.name} has ${result.missing.length+result.changed.length} file issues.`))})}
+   verifyIsaac={asset=>perform(async()=>{
+    const result=await api.command<{isaac?:{status:string;reason?:string;sdkVersion?:string;static?:{issues:Array<{message:string}>}}}>("asset_verify",{resourceId:asset.ref.resourceId,version:asset.ref.version,isaacProfile:domain==='robot'?'robot':'physics'})
+    const report=result.isaac
+    if(report?.status!=='CHECKED')throw new Error(report?.reason??'ISAAC_VALIDATOR_UNAVAILABLE')
+    const issues=report.static?.issues??[]
+    setNotice(`${asset.name} · Isaac ${report.sdkVersion} · ${tr('静态检查','Static checks')} · ${issues.length} ${tr('项发现','findings')}${issues[0]?.message ? ` · ${issues[0].message}` : ''}`)
+    return result
+   })}
    toggleDeleted={asset=>perform(()=>toggleAssetDeleted(asset))}
    importFile={openDomainImport} importBuiltin={item=>perform(()=>importBuiltin(item))} browseEnvironment={()=>ui.openTool("environment")}
    importPanel={domainImportControl}/>

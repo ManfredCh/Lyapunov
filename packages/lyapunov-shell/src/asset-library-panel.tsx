@@ -116,6 +116,7 @@ type Props = {
   refresh(): void
   mount(asset: AssetRecord): void
   verify(asset: AssetRecord): void
+  verifyIsaac?(asset: AssetRecord): void
   rename(asset: AssetRecord): void
   toggleDeleted(asset: AssetRecord): void
   importFile(): void
@@ -216,7 +217,7 @@ export function AssetLibraryPanel(p: Props) {
             <dt>{tr("存储", "Storage")}</dt><dd>{asset.storage === "cas" ? tr("已存副本（内容寻址，原件可移动）", "Stored copy (content-addressed)") : tr("引用原位置", "References original location")}</dd>
             {asset.storedEntryPath && <><dt>{tr("存储路径", "Stored at")}</dt><dd title={asset.storedEntryPath}>{truncateMiddle(asset.storedEntryPath)}</dd></>}
             {asset.folder && <><dt>{tr("文件夹", "Folder")}</dt><dd>{asset.folder}</dd></>}</dl>
-          <div className="lya-asset-actions"><button disabled={!p.available||p.loading} onClick={() => p.verify(asset)}>{tr("检查文件", "Check files")}</button><button disabled={!p.available||p.loading} onClick={() => p.rename(asset)}>{tr("重命名", "Rename")}</button><button disabled={!p.available||p.loading} title={tr("只回收或恢复本会话的素材条目，原文件和已放置实例保留。","Trash or restore this session's library entry; originals and placed instances remain.")} onClick={() => p.toggleDeleted(asset)}>{asset.deletedAt ? tr("恢复素材", "Restore") : tr("回收素材条目", "Trash library entry")}</button></div>
+          <div className="lya-asset-actions"><button disabled={!p.available||p.loading} onClick={() => p.verify(asset)}>{tr("检查文件", "Check files")}</button>{p.verifyIsaac && asset.ref.original.mimeType === "model/vnd.usd" && <button disabled={!p.available||p.loading} onClick={() => p.verifyIsaac!(asset)}>{tr("检查 USD 物理", "Check USD physics")}</button>}<button disabled={!p.available||p.loading} onClick={() => p.rename(asset)}>{tr("重命名", "Rename")}</button><button disabled={!p.available||p.loading} title={tr("只回收或恢复本会话的素材条目，原文件和已放置实例保留。","Trash or restore this session's library entry; originals and placed instances remain.")} onClick={() => p.toggleDeleted(asset)}>{asset.deletedAt ? tr("恢复素材", "Restore") : tr("回收素材条目", "Trash library entry")}</button></div>
         </details>
         <AssetSceneInstances asset={asset} controls={p} available={p.available} busy={p.loading} tr={tr}/>
       </article>)}

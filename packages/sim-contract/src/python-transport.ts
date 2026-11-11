@@ -1,3 +1,4 @@
+import { validControlSample, type ControlSample, type ControlSamplingOptions, type ControlSamplingState } from './control-samples.ts'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { tmpdir } from 'node:os'
@@ -177,6 +178,7 @@ export class ProcessSimProvider implements SimWorlds {
   private serial = 0
   private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: unknown) => void }>()
   private listeners = new Map<string, Set<(frame: Frame) => void>>()
+  private sampleListeners = new Map<string, Set<(sample: ControlSample) => void>>()
   private latest = new Map<string, Frame>()
   private generations = new Map<string, number>()
   private revisions = new Map<string, number>()
@@ -459,6 +461,13 @@ export class ProcessSimProvider implements SimWorlds {
           return
         }
         if (message.event === 'receipt') { this.rememberReceipt(message.receipt as ActionReceipt); return }
+        if (message.event === 'control-sample') {
+          if (!validControlSample(message.sample)) { this.failProvider(new SimError('CONTROL_SAMPLE_INVALID', 'worker 返回了无效控制样本'), child); return }
+          const sample = message.sample
+          if (sample.generation !== this.generations.get(sample.worldId) || sample.sceneRevision !== this.revisions.get(sample.worldId)) return
+          for (const listener of this.sampleListeners.get(sample.worldId) ?? []) listener(structuredClone(sample))
+          return
+        }
         if (message.event === 'frame') {
           const frame = message.frame as Frame
           const generation = this.generations.get(frame.worldId)
@@ -797,6 +806,15 @@ export class ProcessSimProvider implements SimWorlds {
   restore(worldId: string, selection: FreezeSelection = {}) {
     return this.request<FreezeReceipt>('restore', { worldId, selection })
   }
+  configureControlSampling(worldId: string, options: ControlSamplingOptions) {
+    return this.request<ControlSamplingState>('configure_control_sampling', { worldId, options })
+  }
+  subscribeControlSamples(worldId: string, listener: (sample: ControlSample) => void) {
+    let set = this.sampleListeners.get(worldId)
+    if (!set) this.sampleListeners.set(worldId, set = new Set())
+    set.add(listener)
+    return () => { set!.delete(listener); if (!set!.size) this.sampleListeners.delete(worldId) }
+  }
   subscribeFrames(worldId: string, listener: (frame: Frame) => void) {
     let set = this.listeners.get(worldId)
     if (!set) this.listeners.set(worldId, set = new Set())
@@ -818,7 +836,7 @@ export class ProcessSimProvider implements SimWorlds {
       await this.stop(worldId, {}, worker)
       await this.request('close', { worldId }, worker)
       if (this.closing.get(worldId) !== closing) return
-      this.worlds.delete(worldId); this.latest.delete(worldId); this.listeners.delete(worldId); this.generations.delete(worldId); this.revisions.delete(worldId); this.handles.delete(worldId)
+      this.worlds.delete(worldId); this.latest.delete(worldId); this.listeners.delete(worldId); this.sampleListeners.delete(worldId); this.generations.delete(worldId); this.revisions.delete(worldId); this.handles.delete(worldId)
       this.clearClosedWorldExtras(worldId)
     })
     this.closing.set(worldId, closing)
@@ -982,7 +1000,7 @@ export class ProcessSimProvider implements SimWorlds {
       // disposal completes, even though there was no child to terminate.
       await this.starting?.catch(() => undefined)
     } finally {
-      this.worlds.clear(); this.listeners.clear(); this.latest.clear(); this.generations.clear(); this.revisions.clear(); this.handles.clear(); this.syncQueues.clear(); this.closing.clear()
+      this.worlds.clear(); this.sampleListeners.clear(); this.listeners.clear(); this.latest.clear(); this.generations.clear(); this.revisions.clear(); this.handles.clear(); this.syncQueues.clear(); this.closing.clear()
     }
   }
 

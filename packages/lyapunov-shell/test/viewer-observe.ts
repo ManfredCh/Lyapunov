@@ -1560,7 +1560,7 @@ try {
 
     // ⑥ 与观察队列相容：同一条队列里"先切场景、再观察"时，观察要么拍到请求的那一版、要么明确失败——
     //    绝不拿切换后的画面顶替（这正是"排队≠显示"在竞争下的形态）。
-    const switchAway = textValue(await harness.tool(SESSION_A, "ui_action", { input: { action: "selectScene", sceneId: SCENE_A } })) as { queued?: string }
+    const switchAway = textValue(await harness.tool(SESSION_A, "ui_action", { input: { action: "selectScene", sceneId: SCENE_A, clientId: window.clientId } })) as { queued?: string }
     const raced3 = await drive(harness.tool(SESSION_A, "viewer_observe", { input: { sceneId: SCENE_B, expectedRevision: 1, clientId: window.clientId } }), [window], { maxMs: 4000 })
     const result3 = "value" in raced3 ? raced3.value : undefined
     const leftOver = (await readQueue()).length

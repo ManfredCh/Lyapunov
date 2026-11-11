@@ -74,6 +74,27 @@ bun run packages/human-crowd/scripts/isaac-human-usd.ts /全新绝对输出目�
 真实外部Khronos CesiumMan的固定许可/版本、矩阵/平移/根运动兼容、两Provider实测与共享Viewer对照见 [外部角色样例](HUMAN_EXTERNAL_CHARACTER.md)。
 
 
+## Isaac IRA 巡逻与区域停留
+
+IRA 使用 Isaac Sim 6.0.1 的官方角色与行为扩展，在同一个 Isaac 世界中运行。配置两项本地资源后启动工作台。
+
+- `LYAPUNOV_ISAAC_IRA_CHARACTER` 指向有使用权且含 SkelRoot 的官方兼容 USD 角色。
+- `LYAPUNOV_ISAAC_IRA_MOTION_LIBRARY` 指向完整动作库的根 USD，包含所有相对引用文件。引擎启动时核对依赖。
+
+在具有可烘焙地面网格的场景中选择运动学人物。路径字段填写 `pointsM`、`speedMps`、`behavior: "walk"` 和 `loop: true`，再展开「Isaac IRA 巡逻与区域停留」保存。以下配置使人物从区域外进入后停留半个物理秒，再恢复巡逻。坐标为世界 XYZ 米。
+
+```json
+{
+  "seed": 7,
+  "region": { "min": [0, -1.4, -0.1], "max": [1, -0.6, 0.1] },
+  "dwellS": 0.5
+}
+```
+
+首次启用后重新打开 Isaac 世界，再使用既有开始、暂停和停止。停止的范围可以是指定人物或群组。场景保存区域、种子、停留和路线，重开时依照该声明加载。工作台的「恢复常规路径」移除 IRA 配置，命令入口可对 `crowd_configure` 传 `ira: null`。通过 `crowd_inspect` 可读取官方任务、事件次数和实际物理姿态。
+
+IRA SDK 决定巡逻、导航、区域触发后的停留和角色动画。现有 PhysX 运动学人体作为随角色根位置移动的碰撞代理，Viewer 的物理姿态读取该代理。两者的读数按 Frame 分开记录。此模式使用 CPU 物理与官方 SDK 的米制 NavMesh，可配合 RTX 命名相机采集同帧 RGB、深度和标定。[官方 IRA 配置](https://docs.isaacsim.omniverse.nvidia.com/6.0.1/action_and_event_data_generation/ext_replicator-agent/ext_replicator_agent_configuration.html)
+
 ## 随包真人角色与混合创建
 
 「创建或导入人体」的角色选择提供用户确认的 12 个 Microsoft Rocketbox 成人角色，许可为 MIT：Female_Adult_01、Female_Adult_05、Female_Adult_07、Female_Adult_10、Female_Adult_12、Female_Adult_16、Male_Adult_01、Male_Adult_04、Male_Adult_10、Male_Adult_15、Male_Adult_20、Male_Adult_21。默认选择四种外观混合，默认数量为 20；内置角色的默认示例按人数分散为4×2米网格，每人从各自起点沿X往返2米，20人为20×8米区域；也可以选择一个内置角色、当前 Scene 的已导入模板，或显式选择原创占位预览。

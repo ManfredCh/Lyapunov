@@ -53,20 +53,35 @@ except Exception as exc:
     fail_startup('ISAAC_KIT_START_FAILED',str(exc),'kit-import',causeType=type(exc).__name__)
 rendering=os.environ.get('LYAPUNOV_ISAAC_RENDERING','none')=='rtx'
 cpu_native=not rendering and os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')=='cpu'
+ira_enabled=os.environ.get('LYAPUNOV_ISAAC_IRA')=='1'
+if ira_enabled and os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu')!='cpu':
+    fail_startup('HUMAN_ISAAC_DEVICE_UNSUPPORTED','IRA 行为要求 CPU 物理设备','ira-preflight')
+if ira_enabled:
+    try:
+        import ira_adapter
+        ira_adapter.prepare_native_library_path()
+    except Exception as exc:
+        fail_startup('HUMAN_IRA_SDK_UNAVAILABLE',str(exc),'ira-preflight',causeType=type(exc).__name__)
 privacy=['--/telemetry/enableAnonymousData=false','--/telemetry/enableNVDF=false','--/telemetry/enableSentry=false','--/privacy/usage=false','--/privacy/performance=false','--/privacy/personalization=false']
 def start_kit():
     portable=Path(os.environ['LYAPUNOV_ISAAC_CACHE'])/'kit'/str(os.getpid());portable.mkdir(parents=True,exist_ok=True)
-    if rendering:
-        sys.argv.extend(['--portable-root',str(portable)])
-        # Profile 私有 shader 缓存跨 worker 复用；日志和其余数据仍按 PID 隔离。
+    shader_args=[]
+    if rendering or ira_enabled:
+        # IRA 的 Replicator 依赖也会启动着色器编译，复用同一会话已有的 Kit 缓存。
         shader_root=Path(os.environ['LYAPUNOV_ISAAC_CACHE'])/'rtx-cache'/state['sdkVersion']
         for name in ['shadercache','nv_shadercache']:(shader_root/name).mkdir(parents=True,exist_ok=True)
         shader_args=['--/rtx/shaderDb/shaderCachePath='+str(shader_root/'shadercache'),'--/rtx/shaderDb/driverShaderCachePath='+str(shader_root/'nv_shadercache')]
+    if rendering:
+        sys.argv.extend(['--portable-root',str(portable)])
         # 保持原来的离线经验文件和扩展路径；这里只增加阶段诊断。
         ext_args=[]
         for directory in ['extscache','extsDeprecated','extsUser']:ext_args.extend(['--ext-folder',str(Path(os.environ['ISAAC_PATH'])/directory)])
+        if ira_enabled:
+            for name in ('omni.metropolis.schema','omni.anim.navigation.schema','omni.anim.behavior.schema','isaacsim.replicator.agent.schema','isaacsim.replicator.agent.core'):
+                ext_args.extend(['--enable',name])
         return SimulationApp({'headless':True,'renderer':'RaytracedLighting','width':640,'height':480,'sync_loads':True,'multi_gpu':False,'enable_crashreporter':False,'limit_cpu_threads':4,'extra_args':privacy+shader_args+ext_args},str(Path(__file__).with_name('physics-rtx.kit')))
-    args=[str(Path(__file__).with_name('physics-cpu.kit')),'--no-window','--portable-root',str(portable),*privacy]
+    kit_name='physics-ira.kit' if ira_enabled else 'physics-cpu.kit'
+    args=[str(Path(__file__).with_name(kit_name)),'--no-window','--portable-root',str(portable),*privacy,*shader_args]
     for directory in ['exts','extscache','extsDeprecated']:args.extend(['--ext-folder',str(Path(os.environ['ISAAC_PATH'])/directory)])
     return AppFramework(name='lyapunov-isaac-cpu',argv=args)
 
@@ -101,6 +116,15 @@ try:
         from isaacsim.core.experimental.objects import Camera as UsdCamera
 except Exception as exc:
     fail_startup('ISAAC_EXTENSION_UNAVAILABLE',str(exc),'extensions-load',causeType=type(exc).__name__)
+ira_runtime_facts={'enabled':False}
+if ira_enabled:
+    emit({'event':'phase','phase':'ira-runtime'})
+    try:
+        import ira_adapter
+        ira_runtime_facts=ira_adapter.initialize_runtime()
+        emit({'event':'ira-runtime','facts':ira_runtime_facts})
+    except Exception as exc:
+        fail_startup('HUMAN_IRA_SDK_UNAVAILABLE',str(exc),'ira-runtime',causeType=type(exc).__name__)
 from scene_adapter import SceneAdapter,SceneError,quat_to_matrix,signatures,wrench_mapping,camera_mount_bodies,poses,observe_native_geometry,native_material_readback
 emit({'event':'phase','phase':'physx-initialize'})
 try:
@@ -243,11 +267,17 @@ def glb_import_reports(warnings_list):
                        'retained':document.get('retained'),'notSupported':document.get('notSupported')})
     return parsed
 
+# 控制采样只接入既有 tick 与动作边界。
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[2] / 'sim-contract' / 'python'))
+from control_sampling import ControlSampler
 class World:
     def __init__(self,scene,options):
+        self.control_sampler = ControlSampler(self, emit, SceneError)
         self.clock=options.get('clock','realtime')
         if self.clock not in ('manual','realtime'):raise SceneError('INVALID_ARGUMENT','clock 必须为 manual 或 realtime')
         self.control_owners={}
+        # IRA 只在本 world 明确 opt-in 时存在；普通 world 保持 None，不加载 SDK 行为。
+        self.ira=None
         self.id=options.get('worldId',str(uuid.uuid4()));self.options=options;self.generation=0;self.revision=-1;self.scene=None;self.signature=None;self.status='unavailable';self.index=0;self.sim_time=0.;self.actions={};self.receipts={};self.requests={};self.entities={};self.contacts={};self.assisted={};self.assist_advances=0;self.frozen={};self.contact_subscription=None;self.camera=None;self.frame_rendered=False;self.camera_overrides={}
         self.paused=options.get('startPaused',False)
         if not isinstance(self.paused,bool):raise SceneError('INVALID_ARGUMENT','startPaused 必须为 boolean')
@@ -316,6 +346,10 @@ class World:
         result={'worldId':self.id,'sceneId':self.scene['sceneId'],'engineId':'isaac','engineVersion':state['sdkVersion'],'worldGeneration':self.generation,'appliedSceneRevision':self.revision,'status':self.run_status(),'clock':self.clock,'timestepS':self.dt,'groundGeomNames':self.ground_geom_names(),'supportsPause':True}
         if self.status in ('ready','running'):result['worldPhysics']=self.world_physics()
         result['capabilities']=native_capabilities(os.environ.get('LYAPUNOV_ISAAC_DEVICE','cpu'),rendering)
+        if getattr(self,'ira',None):
+            import ira_adapter
+            result['capabilities']['supported']['humanIra']=bool(self.ira.get('ready'))
+            result['capabilities']['ira']=ira_adapter.state(self)
         # 本次 populate 真实发生的 GLB 导入回执（无丢弃项时不出现该键，不产生噪音）。
         warnings_out=list(self.import_warnings)
         # ISAAC-10：纯视觉实体（无原生源、只有 GLB 视觉；USD 层 collider 为 purpose=guide、非物理）此前在
@@ -401,8 +435,10 @@ class World:
         try:return bool(omni.physx.get_physx_simulation_interface().is_sleeping(self.stage_id,PhysicsSchemaTools.sdfPathToInt(prim.GetPath())))
         except Exception:self.sleep_query=False;return None
     def sync(self,scene,force=False):
-        import human_adapter
+        import human_adapter,ira_adapter
         human_adapter.preflight(scene,SceneError)
+        # opt-in 只认快照；普通 Scene 这里返回 enabled:false，不触碰 IRA SDK/资产。
+        ira_adapter.preflight(scene,SceneError)
         if self.scene and scene['sceneId']!=self.scene['sceneId']:raise SceneError('SCENE_MISMATCH','world与scene绑定不可改变')
         # 回执声明的 clearsOn 含 sim_sync：临时相机 override 属于上一个代次的渲染状态，任何一次被接受的
         # sync 都按源快照恢复并丢弃（同 revision 的空 sync 也清，绝不继续冒充）。
@@ -413,6 +449,8 @@ class World:
             self.scene=copy.deepcopy(scene);self.revision=scene['revision'];return self.handle()
         self.stop({});self.control_owners.clear();self.status='unsynced';self.assisted.clear();self.contact_subscription=None;self.native_error_subscription=None;self.native_failure=None;self.frozen={}
         self.timeline.stop();self.timeline.commit();self.timeline.set_auto_update(False);self.timeline.commit()
+        # 官方 AgentsManager 随 Timeline stop 清理，随后 populate 替换 stage。
+        self.ira=None
         self.entities={};self.contacts={};gc.collect()
         try:
             # ISAAC-19／D4：GLB 视觉导入的回执走标准 warnings 通道，这里读回来挂到句柄的 warnings 上；
@@ -423,10 +461,14 @@ class World:
             self.import_warnings=glb_import_warnings(caught)
             self.glb_imports=glb_import_reports(self.import_warnings)
             for entry in caught:warnings.warn_explicit(entry.message,entry.category,entry.filename,entry.lineno)
+            # 官方角色装配在 stage populate 之后、物理初始化之前；失败保留结构化错误，不回退 GLB 路线。
+            ira_info=ira_adapter.prepare_scene(self,scene,SceneError)
+            if ira_info.get('enabled'):
+                emit({'event':'ira-prepared',**ira_info})
             initial_rigid_poses={}
             from robot_authoring import native_initial_pose,verify_native_origin,snapshot_model_origin,capture_model_origin
             for eid,e in self.entities.items():
-                if not cpu_native and e['articulation'] is None and e['rigidPaths']:
+                if not cpu_native and not e.get('human') and e['articulation'] is None and e['rigidPaths']:
                     initial_rigid_poses[eid]=native_initial_pose(self.stage,e)
             # 同一条处方也必须落在 articulation 上，否则只做了一半：引擎装配的种子位形是
             # 「模型自带的基体位姿 + 各DOF引擎默认0」（导入产物里没有任何关节状态，见下方 configure_robots
@@ -461,6 +503,11 @@ class World:
                 # 同一 SM.step 的原生节点/粒子写回供 Frame 使用；RTX 仍保留 Fabric，不另起物理时钟。
                 for key in ('/physics/updateToUsd','/physics/updateParticlesToUsd','/physics/updateVelocitiesToUsd'):
                     carb.settings.get_settings().set_bool(key,True)
+            if ira_info.get('enabled'):
+                # 复用实际世界 dt；auto-update 始终关闭，提交时间线才推进一个物理步。
+                self.timeline.set_time_codes_per_second(max(1,round(1/self.dt)))
+                self.timeline.set_start_time(self.timeline.get_current_time())
+                self.timeline.set_end_time(self.timeline.get_current_time()+3600.)
             self.timeline.set_auto_update(False);self.timeline.play();self.timeline.commit();SM.initialize_physics()
             self.assert_native_physics()
             if cpu_native:
@@ -474,6 +521,10 @@ class World:
                     elif e['rigidPaths']:initial_rigid_poses[eid]=initial
             self.configure_robots()
             for entry in self.entities.values():verify_native_origin(entry)
+            # Timeline 已 play（auto-update 已关）→ AgentsManager 收集官方 IRA 角色；bootstrap 的 app.update 不推进物理。
+            if ira_info.get('enabled'):
+                ira_ready=ira_adapter.wait_ready(self,SceneError)
+                emit({'event':'ira-ready',**ira_ready})
             # SDK初始化会内部预热物理。关节初态刚写入时，独立刚体也须回到
             # Scene声明的初态，不能把预热中与默认机器人姿态碰撞的冲量带入第0帧。
             for eid,(p,q) in initial_rigid_poses.items():
@@ -492,6 +543,7 @@ class World:
             # “是否真在GPU执行”以 physicsScenes 的 gpuDynamics/broadphase 与真实world路径为准。
             carb.log_info('LYAPUNOV_ISAAC_BACKEND '+json.dumps({'requestedPhysicsDevice':device,'simulationManagerReportedDevice':str(SM.get_device()),'suppressReadback':bool(carb.settings.get_settings().get_as_bool('/physics/suppressReadback')),'rendering':'rtx' if rendering else 'none','physicsScenes':[{'gpuDynamics':s.get_enabled_gpu_dynamics(),'broadphase':s.get_broadphase_type()} for s in SM.get_physics_scenes()]}))
             self.contact_subscription=omni.physx.get_physx_simulation_interface().subscribe_contact_report_events(self.contact_event)
+            self.control_sampler.config = None
             self.scene=copy.deepcopy(scene);self.signature=signature;self.revision=scene['revision'];self.generation+=1;self.index=0;self.sim_time=0.;self.status='ready';self.next_tick=time.monotonic()
             from initial_overlap import initial_overlap
             self.initial_overlap=initial_overlap(self)
@@ -1042,8 +1094,12 @@ class World:
                 item['physics']={'source':'isaac-compiled','dynamic':dynamic,'massKg':mass_kg,'gravityEnabled':gravity,
                                  'collisionEnabled':any(enabled),'colliderCount':len(collider_prims),'bodyName':e['path']}
             if e.get('human'):
-                import human_adapter
-                item['humanPose']=human_adapter.observe(self,e)
+                if e['human'].get('ira'):
+                    import ira_adapter
+                    item['humanPose']=ira_adapter.observe(self,e)
+                else:
+                    import human_adapter
+                    item['humanPose']=human_adapter.observe(self,e)
                 item['physics']={'source':'isaac-compiled','dynamic':False,'massKg':None,'gravityEnabled':False,'collisionEnabled':True,'colliderCount':len(e['humanSegments']),'bodyName':e['humanRootPath']}
             native_objects=[]
             if e.get('nativeGeometry'):
@@ -1174,6 +1230,9 @@ class World:
         # thrust 与无关节实体的动作在取 articulation **之前**分派：无关节实体没有 self.robot
         # 可取，误入那条路径只会给出 ENTITY_NOT_ARTICULATED 这种与真实原因无关的错误。
         if kind=='human':
+            if e.get('human',{}).get('ira'):
+                import ira_adapter
+                return ira_adapter.prepare(self,e,m,SceneError)
             import human_adapter
             return human_adapter.prepare(self,e,m,SceneError)
         if kind=='thrust':return self.prepare_thrust(m,e)
@@ -1478,6 +1537,7 @@ class World:
         if frozen:raise SceneError('ROBOT_FROZEN','目标实体处于原生 Freeze 保持中；先 robot_restore 再执行：'+', '.join(frozen))
         if occupied.intersection(ids):raise SceneError('ENTITY_BUSY','目标实体有活动或排队动作')
         prepared=[self.prepare(m)for m in motions];start=action.get('startStep',self.index+1)
+        self.control_sampler.validate(action)
         controls=[m for m in prepared if m['kind']=='control']
         if controls and (len(controls)!=len(prepared) or len({m['stepCount'] for m in controls})!=1):raise SceneError('INVALID_ARGUMENT','control batch 各成员须使用相同 stepCount，不混入定时轨迹')
         if isinstance(start,bool) or not isinstance(start,int)or start<=self.index:raise SceneError('INVALID_START_STEP','startStep必须在未来')
@@ -1495,6 +1555,12 @@ class World:
     def apply_motion(self,m,elapsed):
         e=self.entry(m['entityId']);robot=e['articulation'];cfg=e['controller']
         if m['kind']=='human':
+            if m.get('_ira'):
+                if not m.get('_iraStarted'):
+                    import ira_adapter
+                    ira_adapter.set_enabled(self,m['entityId'],True,SceneError)
+                    m['_iraStarted']=True
+                return
             import human_adapter
             return human_adapter.shared.advance(self,e,m,elapsed)
         if m['kind']=='thrust':return self.apply_thrust(m)
@@ -1541,8 +1607,13 @@ class World:
         """
         e=self.entry(eid);robot=e['articulation']
         if e.get('human'):
-            import human_adapter
-            human_adapter.stop(e)
+            if e['human'].get('ira'):
+                import ira_adapter
+                if self.ira and self.ira.get('ready'):
+                    ira_adapter.stop_entity(self,eid,SceneError)
+            else:
+                import human_adapter
+                human_adapter.stop(e)
         if robot is None:
             if self.has_thrust_channel(e):self.write_wrench(e,[0.,0.,0.],[0.,0.,0.],zero=True)
             return
@@ -1557,7 +1628,7 @@ class World:
         receipt=self.receipts[aid]
         e=self.entry(m['entityId']);frame=self.observe({'entityIds':[m['entityId']]});actual=frame['entities'][0];effect={'entityId':m['entityId'],'kind':m['kind'],'displacementM':(np.asarray(actual['transform']['position'])-np.asarray(m['_initialPosition'])).tolist()}
         if m['kind']=='human':
-            effect.update({'mode':'kinematic','nativePose':actual.get('humanPose'),'targetReached':None,'controller':'physx-kinematic-target'})
+            effect.update({'mode':'ira' if m.get('_ira') else 'kinematic','nativePose':actual.get('humanPose'),'targetReached':None,'controller':'official-ira-behavior' if m.get('_ira') else 'physx-kinematic-target'})
         elif m['kind']=='thrust':
             # 推力回执必须让消费者能分清“请求/计划控制/映射估算/真实可观测”，并在完成时也撤销推力。
             effect.update(self.thrust_effect(m,e))
@@ -1596,6 +1667,7 @@ class World:
             elif all(m['kind']=='control' for m in action['motions']):action['endStep']=action['start']+action['motions'][0]['stepCount']-1
 
     def finish(self,aid,status,reason=None):
+        self.control_sampler.finish(aid, status, reason)
         action=self.actions.pop(aid);receipt=self.receipts[aid]
         # 部分停止过的父 batch 即使其余成员后来跑完，也不能把被撤销成员说成成功。
         if action.get('cancelled')and status=='completed':status='cancelled';reason=reason or 'STOP_CONFIRMED_PARTIAL'
@@ -1616,6 +1688,7 @@ class World:
         if selection.get('expectedGeneration')is not None and selection['expectedGeneration']!=self.generation:raise SceneError('STALE_GENERATION','停止请求属于旧模型代次，不触碰新代次控制')
         action_id=selection.get('actionId')
         if action_id and action_id not in self.receipts:raise SceneError('ACTION_NOT_FOUND','停止请求的动作不存在')
+        self.control_sampler.stop(selection)
         entity_filter=selection.get('entityIds');selected=set(entity_filter)if entity_filter else set(self.entities)
         affected=set();result=[]
         for aid,action in list(self.actions.items()):
@@ -1737,6 +1810,7 @@ class World:
             if action['generation']!=self.generation:self.finish(aid,'failed','STALE_GENERATION');continue
             if self.index+1<action['start']:continue
             if action['startTime']is None:action['startTime']=self.sim_time;self.receipts[aid].update({'status':'running','startStep':self.index+1})
+            self.control_sampler.before(aid, action['motions'])
             # 本动作窗口内真实经历辅助tick的事实：只累计已开始且本tick正在被驱动的动作，scheduled未来动作不提前标脏；
             # 解除attach不清除已发生的事实，动作结束随动作生命周期消失。
             if self.assisted:action['assistedTicks']=action.get('assistedTicks',0)+1
@@ -1751,8 +1825,21 @@ class World:
             with use_backend('tensor',raise_on_fallback=True):attachment['object'].set_world_poses(positions=[target.tolist()],orientations=[[float(orientation.GetReal()),*map(float,orientation.GetImaginary())]]);attachment['object'].set_velocities(linear_velocities=[[0.]*3],angular_velocities=[[0.]*3])
             # 真实辅助推进计数只随一次真实写回递增；attach/release 调用本身不在计数点内。
             self.assist_advances+=1
-        # 唯一推进点；Timeline自动更新被关闭，Viewer/渲染不会推进physics。
-        SM.step(steps=1,update_fabric=False);self.assert_native_physics();self.index+=1;self.sim_time+=self.dt
+        # 唯一推进点。IRA：只提交 Timeline，由 SDK 触发一次物理步；常规：仍用 SM.step。
+        # 两个来源不能相加（已实测 时间线提交=1、SM.step=1、单独 Kit.update=0）。
+        if getattr(self,'ira',None) and self.ira.get('ready'):
+            import ira_adapter
+            before=SM.get_num_physics_steps()
+            self.timeline.set_current_time(self.timeline.get_current_time()+self.dt)
+            self.timeline.commit()
+            advanced=SM.get_num_physics_steps()-before
+            if advanced!=1:raise SceneError('CLOCK_CONFLICT','IRA Timeline tick 推进了 '+str(advanced)+' 个物理步；要求恰好1')
+            self.ira['physicsSteps']=int(self.ira.get('physicsSteps',0))+advanced
+            self.assert_native_physics()
+            self.index+=1;self.sim_time+=self.dt
+            ira_adapter.after_step(self,SceneError)
+        else:
+            SM.step(steps=1,update_fabric=False);self.assert_native_physics();self.index+=1;self.sim_time+=self.dt
         for aid,action in list(self.actions.items()):
             if action['startTime']is not None:
                 for motion in action['motions']:
@@ -2589,7 +2676,9 @@ class World:
             raise SceneError(error.code,error.message)
 
     def close(self):
-        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.lidar_scans.clear();self.contact_subscription=None;self.native_error_subscription=None;self.timeline.stop();self.timeline.commit();self.entities={};gc.collect();self.status='closed'
+        self.stop({});self.assisted.clear();self.camera_overrides.clear();self.captures.clear();self.lidar_scans.clear();self.contact_subscription=None;self.native_error_subscription=None;self.timeline.stop();self.timeline.commit()
+        self.ira=None
+        self.entities={};gc.collect();self.status='closed'
 
 requests=queue.Queue()
 def reader():
@@ -2610,11 +2699,16 @@ while running and omni.kit.app.get_app().is_running():
                 if world:raise SceneError('WORLD_EXISTS','每个Kit进程只管理一个world')
                 world=World(args['snapshot'],args.get('options',{}));result=world.handle()
             elif method=='list_worlds':result=[world.handle()]if world else[]
+            elif method=='validate_asset':
+                if world:raise SceneError('ISAAC_VALIDATION_REQUIRES_ISOLATED_WORKER','资产验证需要独立 worker')
+                from asset_validation import validate_asset
+                result=validate_asset(args,manager,state['sdkVersion'])
             else:
                 if world is None or args['worldId']!=world.id:raise SceneError('WORLD_NOT_FOUND','world不存在')
                 if method=='sync':result=world.sync(args['snapshot'],args.get('options',{}).get('forceRebuild',False))
                 elif method=='observe':result=world.observe(args.get('selection'))
                 elif method=='set_paused':result=world.set_paused(args['paused'],args['expectedGeneration'])
+                elif method=='configure_control_sampling':result=world.control_sampler.configure(args['options'])
                 elif method=='describe':result=world.describe(args['entityId'])
                 elif method=='execute':result=world.execute(args['action'])
                 elif method=='receipt':

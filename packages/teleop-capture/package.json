@@ -1,0 +1,8 @@
+{
+  "name": "@lyapunov/teleop-capture",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./plugin": "./src/plugin.ts" },
+  "dsh": { "bundle": { "patch": "cordis.patch.yml" } }
+}

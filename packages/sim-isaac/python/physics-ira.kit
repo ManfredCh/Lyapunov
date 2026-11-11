@@ -1,0 +1,29 @@
+[package]
+title = "Lyapunov Isaac CPU Physics + IRA"
+version = "0.1.0"
+[dependencies]
+"isaacsim.replicator.agent.core" = {}
+"omni.metropolis.schema" = {}
+"omni.anim.navigation.schema" = {}
+"omni.anim.behavior.schema" = {}
+"isaacsim.replicator.agent.schema" = {}
+"omni.usd" = {}
+"omni.physics.physx" = {}
+"omni.physx.tensors" = {}
+"isaacsim.core.simulation_manager" = {}
+"omni.kit.loop-isaac" = {}
+[settings.persistent]
+renderer.startupMessageDisplayed = true
+[settings]
+app.settings.fabricDefaultStageFrameHistoryCount = 3
+app.runLoops.main.manualModeEnabled = true
+app.window.enabled = false
+app.renderer.enabled = false
+app.settings.persistent = false
+app.fastShutdown = true
+telemetry.enableAnonymousData = false
+telemetry.enableNVDF = false
+telemetry.enableSentry = false
+privacy.usage = false
+privacy.performance = false
+privacy.personalization = false

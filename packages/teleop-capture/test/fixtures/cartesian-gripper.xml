@@ -1,0 +1,35 @@
+<mujoco model="capture-cartesian-gripper">
+  <compiler angle="radian"/>
+  <option timestep="0.002"/>
+  <default>
+    <joint damping="1" armature="0.01"/>
+    <geom friction="2 0.01 0.001" condim="4"/>
+  </default>
+  <worldbody>
+    <body name="base">
+      <geom name="anchor" type="sphere" size="0.01" contype="0" conaffinity="0"/>
+      <body name="carriage" pos="0 0 0.03">
+        <inertial pos="0 0 0" mass="0.15" diaginertia="0.001 0.001 0.001"/>
+        <joint name="x" type="slide" axis="1 0 0" range="-0.2 0.2"/>
+        <joint name="y" type="slide" axis="0 1 0" range="-0.2 0.2"/>
+        <joint name="z" type="slide" axis="0 0 1" range="-0.015 0.2"/>
+        <site name="tcp" pos="0 0 0"/>
+        <body name="left" pos="0 0.034 0">
+          <joint name="left" type="slide" axis="0 1 0" range="-0.026 0.01"/>
+          <geom name="left-pad" type="box" size="0.022 0.005 0.022" mass="0.025"/>
+        </body>
+        <body name="right" pos="0 -0.034 0">
+          <joint name="right" type="slide" axis="0 -1 0" range="-0.026 0.01"/>
+          <geom name="right-pad" type="box" size="0.022 0.005 0.022" mass="0.025"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="x-servo" joint="x" kp="1200" kv="26"/>
+    <position name="y-servo" joint="y" kp="1200" kv="26"/>
+    <position name="z-servo" joint="z" kp="1600" kv="28"/>
+    <position name="left-servo" joint="left" kp="300" kv="5"/>
+    <position name="right-servo" joint="right" kp="300" kv="5"/>
+  </actuator>
+</mujoco>

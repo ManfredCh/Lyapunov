@@ -9,6 +9,7 @@ import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { validateIsaacAsset, type IsaacValidationConfig } from '../../sim-isaac/src/asset-validation.ts'
 import type {} from "@deepseek-ai/dsh-commands"
 import type {} from "@deepseek-ai/dsh-client-connection"
 import type { SceneCommit, SceneSnapshot } from "../../lyapunov-contracts/src/types.ts"
@@ -42,6 +43,7 @@ export interface Config {
   /** 运行根（必填）：省略 layout 时五个域根都等于它，落点与过去的单根行为逐字一致。 */
   dataRoot: string
   productRoot?: string
+  isaacValidation?: IsaacValidationConfig
   /** 存储分治布局：worlds（场景+环境）/assets（可调用小物件）/robots（机器人）/cache（派生+下载+CAS）/catalog（目录索引）。 */
   layout?: SceneLayout
   /** 新导入的默认存储模式：materialized 时按资源类别落进对应域目录（需要 layout）。 */
@@ -213,6 +215,11 @@ function describePathArgument(value: unknown): string {
 
 /** Tool 与人工 Commands 直接调用同一 operation，来源事件由 DSH 原生服务分别记账。 */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  let validationSubprocess: Context['subprocess'] | undefined
+  if (config.isaacValidation) ctx.inject(['subprocess'], owner => {
+    validationSubprocess = owner.subprocess
+    owner.effect(() => () => { validationSubprocess = undefined })
+  })
   if (!config?.dataRoot) throw new Error("SCENE_DATA_ROOT_REQUIRED")
   /**
    * 会话命名空间：场景与可变的资源状态都落到 `<域根>/sessions/<会话键>`，一个会话一套 SceneOperations。
@@ -402,7 +409,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     {name:'scene_bind_physics',persists:true,description:"Verify the selected mesh or explicitly physicalized splat originals at the same resourceId/version, then generate/reuse actual derivations and bind the complete instance. Single/multi-mesh layouts must be complete and share one representable root transform; normalization preserves visible world matrices. Reject independently edited nodes or existing customized collision. Preserve resource usage/strategy and normal Scene CAS/history. Synchronize the same Scene world after completion.",operation:(operations,input,signal)=>operations.bindPhysics(input,signal)},
     {name:'scene_reconcile_physics',persists:true,description:"Recover this session's registered same-version collision refs and reconcile mounted derivation terminal states. Restore missing successful-cache artifacts in the original variant while preserving history and user settings. Failed resources return BIND_REQUIRED/reasons by default; only explicit retryFailed:true retries. waitForPending:true waits. Return the snapshot's actual revision with pending/issues; world startup must use that revision. pending does not mean collision-ready.",operation:(operations,input,signal)=>operations.reconcilePhysics(input,signal)},
     {name:'scene_physics_update',persists:true,description:"Update the selected instance through normal Scene CAS at expectedRevision. Use either the existing rigid-body type/massKg/gravityEnabled/collisionEnabled fields, or native:{engine,kind,nativeName,parameters,dimensions?}; never mix the two. The native branch preserves complete source documents, arrays and other components on the server. Read the entity/revision from scene_inspect and actual names/values from robot_state.sensors.nativePhysics, submit only requested material parameters, then sim_sync the same Scene/world and robot_state to verify the loaded revision and actual values. UPDATED/UNCHANGED confirms declarations only. MuJoCo flex/cable, Isaac deformable/PBD and existing Newton water MPM use their native parameter names; MPM Young/Poisson are compression-response parameters. Rigid-body fixing retains mass; unfixing needs reliable mass. Native body fixing still uses its dedicated interface. / 按 expectedRevision 走原 Scene CAS，刚体字段与 native 原生材料分支互斥。原生分支由服务端保全源文档、大数组和其它组件，不需回传完整 components。先从 scene_inspect 读实体/版本，从 robot_state 读实际原生名称和值，只提交所需参数；再用同一场景/世界的 sim_sync 和 robot_state 核对已加载版本与实值。UPDATED/UNCHANGED 只代表声明保存，不能冒称已应用。Newton 水例 Young/Poisson 用于 MPM 压缩响应；原生本体固定仍沿专用接口处理。",operation:(operations,input)=>operations.updatePhysics(input)},
-    { name: "asset_verify", description: "Check whether the resource's current original and dependencies are missing or changed. Supply resourceId/version.", operation: (operations, input) => operations.resources.verify(input.resourceId, input.version) },
+    { name: "asset_verify", description: "Check original and dependency integrity. For USD, optionally run Isaac rules with isaacProfile and explicitly enable the isolated simulation rule with simulate.", operation: async (operations, input, signal) => {
+      if (!input.isaacProfile) return operations.resources.verify(input.resourceId, input.version)
+      const resource = await operations.resources.get(input.resourceId, input.version)
+      const { resourceId, version, original } = resource.ref
+      const integrity = await operations.resources.verify(resourceId, version)
+      const binding = { resourceId, version, profile: input.isaacProfile, simulate: input.simulate === true }
+      const skip = (reason: string) => ({ ...integrity, isaac: { ...binding, status: 'NOT_RUN', reason } })
+      if (!integrity.valid) return skip('ASSET_FILES_UNAVAILABLE')
+      if (original.mimeType !== 'model/vnd.usd' || !original.uri.startsWith('file:')) return skip('ISAAC_VALIDATION_REQUIRES_LOCAL_USD')
+      if (!config.isaacValidation) return skip('ISAAC_VALIDATOR_UNAVAILABLE')
+      try {
+        const report = await validateIsaacAsset(validationSubprocess, config.isaacValidation, { path: fileURLToPath(original.uri), profile: input.isaacProfile, simulate: input.simulate }, signal)
+        return { ...integrity, isaac: { ...report, ...binding } }
+      } catch (error) {
+        signal?.throwIfAborted()
+        return skip(error instanceof Error ? error.message : String(error))
+      }
+    } },
     { name: "asset_missing", description: "List resource refs whose originals could not be found during migration. Return BLOCKED without substitute files; restore the same source path and rerun migration.", operation: (operations) => operations.resources.listMissing() },
     { name: "asset_missing_rescan", description: "Read-only rescan of the same paths for BLOCKED originals. Finding an original only recommends rerunning the same migration; do not automatically import or replace it.", operation: (operations) => operations.resources.rescanMissing() },
   ]
