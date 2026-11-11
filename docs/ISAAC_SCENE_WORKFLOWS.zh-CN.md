@@ -62,6 +62,6 @@ Job 摘要报告配对数、PSNR、SSIM，目录中有原生渲染、评分和�
 /simfoundry_match_poses {"preparedSceneDir":"Data/my-table","objectIndex":0,"meshBackend":"hunyuan"}
 ```
 
-用 Job 报告中的 Z-up 位姿、`pre_scale_factor` 和配准尺度，与自摄素材的已知尺寸、人工标注落点和方向做对照。保留失败和跳过的候选。确认后用现有场景编辑工具应用选定结果。 [上游输入与阶段](https://github.com/NVlabs/SimFoundry/blob/9e34ebefcd020583fbb755a8b57268dce78eca26/scripts/pipeline/README.md#stages) · [上游 Stage 8](https://github.com/NVlabs/SimFoundry/blob/9e34ebefcd020583fbb755a8b57268dce78eca26/scripts/pipeline/A_reconstruction/stages/8_match_object_poses.py#L296)
+这是实验性的配准评估。Job 返回的位姿候选需要结合 Stage 4 的相机外参换到目标场景坐标。将 `pre_scale_factor × z_up.scale` 和候选中心、朝向与真值对照，审核后再通过现有场景工具应用。一次带已知真值的合成 RGB-D 验收得到 1 个候选，中心误差约 3.4 cm，尺度约为真值的 61%。 [上游输入与阶段](https://github.com/NVlabs/SimFoundry/blob/9e34ebefcd020583fbb755a8b57268dce78eca26/scripts/pipeline/README.md#stages) · [上游 Stage 8](https://github.com/NVlabs/SimFoundry/blob/9e34ebefcd020583fbb755a8b57268dce78eca26/scripts/pipeline/A_reconstruction/stages/8_match_object_poses.py#L296)
 
 用于试走输入流程的公开视频可选 [NVIDIA PutMarkerInCup.mp4](https://github.com/NVlabs/SimFoundry/blob/9e34ebefcd020583fbb755a8b57268dce78eca26/docs/assets/example_videos/PutMarkerInCup.mp4)。这段视频未提供可用于计算尺度误差的实测尺寸。

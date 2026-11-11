@@ -29,7 +29,7 @@ def main():
             f"s8_pose.object_indices=[{args.object_index}]", "s8_pose.use_foundationpose=false",
             "s8_pose.canonicalize_front=false", "s8_pose.front_refine=false"]
     with (output / "stage8.log").open("w") as log:
-        proc = subprocess.run(argv, cwd=output, env={**os.environ, "PYTHONPATH": str(upstream)},
+        proc = subprocess.run(argv, cwd=output, env={**os.environ, "PYTHONPATH": str(upstream), "ENFORCE_FAISS_GPU": "0"},
                               stdout=log, stderr=subprocess.STDOUT)
     if proc.returncode != 0:
         with (output / "stage8.log").open("rb") as log:
