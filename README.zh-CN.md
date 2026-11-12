@@ -44,8 +44,9 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前默认 — [0.2.3](docs/releases/0.2.3.md)：**Linux x64、macOS Apple Silicon 与 Windows/WSL2 安装路线，完善人群、退出恢复及平台兼容。
-- **上一版 — [0.2.2](docs/releases/0.2.2.md)：**保留人物与人群、USD 与 SimReady 一等资产及 NVIDIA 渲染的历史发行。
+- **当前发行版 [0.2.4.1](docs/releases/0.2.4.1.md)** 提供 Linux x64、Windows/WSL2 和 macOS Apple Silicon。Mac 便携包包含四段版本号的桌面启动修复。
+- **上一版 [0.2.3](docs/releases/0.2.3.md)** 首次提供 Apple Silicon 包，完善人群、退出恢复及平台兼容。
+- **[0.2.2](docs/releases/0.2.2.md)** 保留人物与人群、USD 与 SimReady 一等资产及 NVIDIA 渲染的历史发行。
   - **人物与人群：**随包 12 个 Rocketbox 真人角色，默认创建 20 人、四种外观混合；支持路线、遇障停步和固定平面自动绕障。
   - **两种控制方式：**右侧工具栏新增「人群」面板（按组或全部开始/停止，来回走、绕圈、原地站立预设），也可以直接用自然语言让智能体操作。
   - **USD 与 SimReady：**USD 作为一等资产入库，保留图层、材质与物理属性；按固定版本经 Hugging Face 镜像导入 SimReady 资产包，并核对许可与文件清单。
@@ -58,13 +59,16 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 在 Linux 上安装
 
-在图形桌面会话的普通终端中运行下面的默认命令；当前默认安装 **0.2.3**：
+在 Linux 或 WSL2 的图形桌面会话中打开终端。以下命令默认安装 **0.2.4.1**。
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 ```
 
-**直接下载（Vorynel OSS/CDN）：**[Linux / WSL2 0.2.3 安装包](https://vorynel.com/lyapunov/releases/0.2.3-20261102/lyapunov-linux-x64-0.2.3-20261102.tar.gz)（1,052,896,299 字节）· [Linux JSON 清单](https://vorynel.com/lyapunov/releases/latest/linux-x64.json) · [Mac Apple Silicon 安装包](https://vorynel.com/lyapunov/releases/0.2.3-macos-e17f03f259e9/lyapunov-darwin-arm64-0.2.3-macos-e17f03f259e9.tar.gz)（1,013,944,434 字节）· [Mac JSON 清单](https://vorynel.com/lyapunov/releases/latest/darwin-arm64.json)。各包 SHA-256 和实际源码提交以对应清单为准；[0.2.3 发布说明](https://vorynel.com/lyapunov/updates/0.2.3.html)。Mac 在系统终端运行同一安装命令，保留完整便携目录；当前为未公证的 arm64 版本。
+**直接下载**
+
+- Linux x64 / WSL2。[0.2.4.1 安装包](https://vorynel.com/lyapunov/releases/0.2.4.1-linux-6d7a0b16d885/lyapunov-linux-x64-0.2.4.1-linux-6d7a0b16d885.tar.gz) · [Linux JSON 清单](https://vorynel.com/lyapunov/releases/0.2.4.1-linux-6d7a0b16d885/linux-x64.json)
+- macOS Apple Silicon。解包后保留完整便携目录。应用采用 ad-hoc 签名，未经 Apple 公证。[0.2.4.1 便携包](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.1/lyapunov-darwin-arm64-0.2.4.1-macos-599fe12f206a.tar.gz) · [macOS JSON 清单](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.1/darwin-arm64.json)
 
 安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 

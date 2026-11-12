@@ -22,7 +22,8 @@
 
 | 入口 | 内容 |
 | --- | --- |
-| [0.2.3 发布说明](docs/releases/0.2.3.md) | 本版首次提供 macOS arm64（与 Linux 同一提交）、macOS 平台差异与已知问题 |
+| [0.2.4.1 发布说明](docs/releases/0.2.4.1.md) | Linux、Windows/WSL2 与 macOS Apple Silicon 下载及各平台源码来源 |
+| [0.2.3 发布说明](docs/releases/0.2.3.md) | 首次提供 macOS arm64，记录当时的平台差异与已知问题 |
 | [0.2.2 发布说明](docs/releases/0.2.2.md) | 完整 Linux x64 发行版的变化、能力范围与安装说明 |
 | [0.2.1 发布说明](docs/releases/0.2.1.md) | 上一完整 Linux x64 发行版 |
 | [发布说明目录](docs/releases) | 各历史版本的发布说明；旧版本记录只描述对应版本 |
