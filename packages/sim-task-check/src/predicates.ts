@@ -345,6 +345,19 @@ const optional = (v: unknown, test: (x: unknown) => boolean) => v === undefined 
 export function predicateExprProblems(expr: unknown, path = 'predicates'): string[] {
   if (expr === null || typeof expr !== 'object' || Array.isArray(expr)) return [`${path} 必须是谓词对象`]
   const node = expr as Record<string, unknown>
+  // 带 kind 的关节谓词即使混入组合字段，也必须校验自身字段。
+  if (node.kind === 'joint-in-range') {
+    const { min, max } = node
+    return [
+      ...isNonEmptyString(node.entityId) ? [] : [`${path}.entityId 必须是非空字符串`],
+      ...isNonEmptyString(node.jointName) ? [] : [`${path}.jointName 必须是非空字符串`],
+      ...Object.keys(node).filter(key => !['kind', 'entityId', 'jointName', 'min', 'max'].includes(key))
+        .map(key => `${path}.${key} 不是 joint-in-range 字段，范围使用 min/max`),
+      ...min !== undefined || max !== undefined ? [] : [`${path}.min/max 至少提供一个边界`],
+      ...optional(min, isFiniteNumber) && optional(max, isFiniteNumber) ? [] : [`${path}.min/max 必须是有限数`],
+      ...isFiniteNumber(min) && isFiniteNumber(max) && min > max ? [`${path}.min 不能大于 max`] : [],
+    ]
+  }
   if ('and' in node || 'or' in node) {
     const key = 'and' in node ? 'and' : 'or'
     const list = node[key]
@@ -372,12 +385,6 @@ export function predicateExprProblems(expr: unknown, path = 'predicates'): strin
       return [
         ...optional(node.entityA, isNonEmptyString) ? [] : [`${path}.entityA 必须是非空字符串`],
         ...optional(node.entityB, isNonEmptyString) ? [] : [`${path}.entityB 必须是非空字符串`],
-      ]
-    case 'joint-in-range':
-      return [
-        ...isNonEmptyString(node.entityId) ? [] : [`${path}.entityId 必须是非空字符串`],
-        ...isNonEmptyString(node.jointName) ? [] : [`${path}.jointName 必须是非空字符串`],
-        ...optional(node.min, isFiniteNumber) && optional(node.max, isFiniteNumber) ? [] : [`${path}.min/max 必须是有限数`],
       ]
     case 'settled':
       return [

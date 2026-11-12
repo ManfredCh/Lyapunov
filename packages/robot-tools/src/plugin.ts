@@ -165,7 +165,7 @@ const descriptions: Record<string, string> = {
   robot_walk: "Run an asset-supported planar quadruped gait. forward/turn are in [-1,1]. Return measured displacement without claiming that arbitrary robots can walk.",
   robot_gripper: "Specify gripper width in meters and drive the actual coupled actuator. Return measured width and contact; closing alone is not grasp success.",
   vehicle_drive: "Velocity uses m/s. Steering is the virtual front-axle angle in radians, with positive values turning left while moving forward. At zero speed, move only the steering mechanism.",
-  joint_move: "Execute a subset of joints or an absolute fork position. For lift motion, use positionM or velocityMps together with durationS.",
+  joint_move: 'Move one or more joints. For a hinge, pass {"input":{"worldId":"<actual world ID>","action":{"kind":"joint","actionId":"<new ID>","expectedGeneration":1,"entityId":"<actual robot ID>","jointNames":["j1"],"positions":[0.3],"durationS":0.5}}}. Use the actual world generation and read back the result. For fork/lift motion use action.kind="lift" and supply positionM or velocityMps with durationS.',
   sim_execute_batch: "Acquire multiple robots atomically and write every complete joint target at a shared start step.",
   robot_stop: "Cancel the target action immediately and confirm that control targets were withdrawn, without waiting for an LLM.",
   sim_stop: "Cancel actions in the whole world or selected entities immediately, without waiting for an LLM.",

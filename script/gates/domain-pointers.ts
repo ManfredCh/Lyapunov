@@ -194,6 +194,7 @@ const EXPECTATIONS: Expectation[] = [
   { text: '跑 libero 基准', stage: 'none', hit: ['benchmark-evaluation'], why: '评估环境域回归' },
   { text: '下载一个机器人', stage: 'none', hit: ['robot-provisioning'], why: '机器人准备域回归' },
   { text: '抓起来放到桌上', stage: 'none', hit: ['action-execution'], why: '动作执行域回归' },
+  { text: '把机器人 arm 的 j1 关节转到 0.30 弧度', stage: 'none', exact: ['action-execution'], why: '中文关节目标应发现控制和仿真读回契约' },
   { text: '打开浏览器访问一个网页', stage: 'none', hit: ['desktop-automation'], why: '桌面与浏览器域回归' },
 ]
 

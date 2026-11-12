@@ -45,7 +45,7 @@ export interface SimTaskCheckInput {
 const parameters: ParameterSchemaSpec = { input: { type: 'object', required: true, additionalProperties: false, properties: {
   worldId: { type: 'string', required: true },
   expectedGeneration: { type: 'integer', required: true, description: "Current worldGeneration reported by sim_open/sim_world_list; stale generations are refused." },
-  predicates: { type: 'json', required: true, description: "PredicateExpr JSON: atom kinds entity-in-box/distance-below/distance-above/contact-exists/joint-in-range/settled/reachable/no-penetration, composed with and/or/not." },
+  predicates: { type: 'json', required: true, description: 'PredicateExpr JSON. Joint example: {"kind":"joint-in-range","entityId":"arm","jointName":"j1","min":0.25,"max":0.35}. Give at least one finite min or max. When both are present, min must be at most max. Combine predicates with {"and":[...]}, {"or":[...]} or {"not":{...}}. Other atoms: entity-in-box/distance-below/distance-above/contact-exists/settled/reachable/no-penetration.' },
   checkSpec: { type: 'boolean', description: "Defaults to true: run spec-level gates (SPEC_ENTITY_MISSING/SPEC_UNREACHABLE/SPEC_ALREADY_SATISFIED) before frame evaluation." },
 } } }
 

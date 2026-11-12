@@ -228,7 +228,7 @@ const ASSET_WORD = /(树木|树|植物|绿植|灌木|石狮|狮子|雕塑|雕像
 // 已有机器人动作与本体准备分开：泛「机器人」不能把左转/行走重新路由为下载。
 // 明确下载/导入或建造环境的请求保留原路径；否定式「不要下载」不算准备授权。
 const ROBOT_SUBJECT = /(机器人|机器狗|机械臂|人形|叉车|无人机|灵巧手|\b(?:g1|go2|robot|quadruped|humanoid|forklift|drone)\b)/i
-const ROBOT_MOTION = /(左转|右转|转向|旋转|下降|下移|上升|上移|推(?:箱|物|动)|(?:向|往)(?:前|后|左|右)(?:走|行进|移动)|前进|后退|行走|走(?:路|两步|几步|到|过去|起来|[一二三四五六七八九十\d]+步)|移动|抓(?:取|起来)|搬(?:运|到)|抬起|起飞|降落|执行.{0,6}(?:动作|策略)|\b(?:walk|move|turn|drive|pick|grasp|lift|lower|descend|push|takeoff|land|execute)\b)/i
+const ROBOT_MOTION = /(左转|右转|转向|旋转|转动|转到|转至|下降|下移|上升|上移|推(?:箱|物|动)|(?:向|往)(?:前|后|左|右)(?:走|行进|移动)|前进|后退|行走|走(?:路|两步|几步|到|过去|起来|[一二三四五六七八九十\d]+步)|移动|抓(?:取|起来)|搬(?:运|到)|抬起|起飞|降落|执行.{0,6}(?:动作|策略)|\b(?:walk|move|turn|drive|pick|grasp|lift|lower|descend|push|takeoff|land|execute)\b)/i
 const ROBOT_PREPARATION = /(下载|导入|安装|获取|添加|加载|换一个|新建|创建|\b(?:download|import|install|fetch|load|add|spawn)\b)/i
 // 本入口没有当前目标行为回执；名单/目录/policy缓存不能授权自动加载站立或自起身流程。
 const ROBOT_POLICY_BEHAVIOR = /(站立|站起来|站起|起立|起身|翻身|自恢复|恢复站立|\b(?:stand|standing|rise|self[- ]right(?:ing)?|get[-\s]+up)\b)/i

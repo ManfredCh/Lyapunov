@@ -15,6 +15,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import * as taskCheck from '../src/plugin.ts'
+import { predicateExprProblems } from '../src/predicates.ts'
 import { writeProposal, recordVerify, promoteSkill } from '../../policy-registry/src/skill-library.ts'
 import { SCENE_COORDINATES, identityTransform, type EntityObservation, type Frame, type SceneSnapshot } from '../../lyapunov-contracts/src/types.ts'
 
@@ -27,7 +28,7 @@ const cube = (x: number): EntityObservation => ({ entityId: 'cube', transform: {
 
 const snapshot: SceneSnapshot = {
   sceneId: SCENE_ID, revision: 1, coordinates: SCENE_COORDINATES,
-  entities: [{ entityId: 'cube', name: 'cube', transform: identityTransform(), resources: [], components: {} }],
+  entities: ['cube', 'arm'].map(entityId => ({ entityId, name: entityId, transform: identityTransform(), resources: [], components: {} })),
 }
 
 let frame: Frame = observed([cube(0.03)])
@@ -75,6 +76,7 @@ afterEach(async () => {
 })
 
 const inBox = { kind: 'entity-in-box', entityId: 'cube', center: [0, 0, 0.03], halfExtents: [0.1, 0.1, 0.1] }
+const jointInRange = { kind: 'joint-in-range', entityId: 'arm', jointName: 'j1' }
 
 async function callTool(args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
   const result = await ctx.tools.execute({ callId: ToolCallId(`stc-${Math.random().toString(36).slice(2)}`), name: 'sim_task_check', arguments: args, signal: new AbortController().signal, agent })
@@ -106,6 +108,55 @@ describe('sim_task_check 工具/命令面', () => {
     expect(noWorld.text).toContain('TASK_CHECK_WORLD_REQUIRED')
     const stale = await callTool({ input: { worldId: WORLD_ID, expectedGeneration: 1, predicates: inBox } })
     expect(stale.text).toContain('TASK_CHECK_STALE_GENERATION')
+  })
+
+  test.each([
+    ['边界拼成 low/high', { low: 0.25, high: 0.35 }, 'predicates.low 不是 joint-in-range 字段，范围使用 min/max'],
+    ['合法边界混入拼错字段', { min: 0.25, high: 0.35 }, 'predicates.high 不是 joint-in-range 字段'],
+    ['缺少边界', {}, 'min/max 至少提供一个边界'],
+    ['非数值边界', { min: '0.25' }, 'min/max 必须是有限数'],
+    ['反向区间', { min: 0.35, max: 0.25 }, 'min 不能大于 max'],
+    ['混入组合字段', { min: 0.25, or: [inBox] }, 'predicates.or 不是 joint-in-range 字段'],
+  ] as const)('关节范围拒绝%s', async (_label, fields, diagnostic) => {
+    const input = { worldId: WORLD_ID, expectedGeneration: 2, predicates: { ...jointInRange, ...fields } }
+    const tool = await callTool({ input })
+    const command = await callCommand(JSON.stringify(input))
+    expect(tool.isError).toBe(true)
+    expect(command.kind).toBe('error')
+    for (const result of [tool, command]) {
+      expect(result.text).toContain('TASK_CHECK_PREDICATE_INVALID')
+      expect(result.text).toContain(diagnostic)
+    }
+  })
+
+  test('共享校验拒绝无穷大和 NaN 边界', () => {
+    expect(predicateExprProblems({ ...jointInRange, min: -Infinity })).toContain('predicates.min/max 必须是有限数')
+    expect(predicateExprProblems({ ...jointInRange, max: NaN })).toContain('predicates.min/max 必须是有限数')
+  })
+
+  test.each([
+    ['只有 min', { min: 0.25 }, 0],
+    ['只有 max', { max: 0.35 }, 0.5],
+    ['同时有 min/max', { min: 0.25, max: 0.35 }, 0],
+    ['两端相等', { min: 0.3, max: 0.3 }, 0],
+  ] as const)('关节范围按实测求值（%s）', async (_label, bounds, outside) => {
+    const input = { worldId: WORLD_ID, expectedGeneration: 2, predicates: { ...jointInRange, ...bounds } }
+    const arm = (position: number): EntityObservation => ({
+      entityId: 'arm', transform: identityTransform(),
+      joints: { names: ['j1'], positions: [position], velocities: [0] },
+    })
+    frame = observed([arm(0.3)])
+    const command = await callCommand(JSON.stringify(input))
+    expect(command.kind).toBe('success')
+    expect(JSON.parse(command.text)).toMatchObject({ taskAchieved: true, evaluated: true, failed: [] })
+
+    frame = observed([arm(outside)])
+    const tool = await callTool({ input })
+    expect(tool.isError).toBe(false)
+    expect(JSON.parse(tool.text)).toMatchObject({
+      taskAchieved: false, evaluated: true,
+      failed: [{ reasonCode: 'JOINT_OUT_OF_RANGE', measured: String(outside) }],
+    })
   })
 
   test('真值路径：谓词成立与失败都返回 TaskCheckResult 完整字段', async () => {
