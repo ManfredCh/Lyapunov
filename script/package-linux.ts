@@ -272,11 +272,7 @@ for(const node of nodes.values()){
 for(const [name,node] of rootLinks)await link(join(stage,'node_modules',name),join(stage,node.destination))
 // 使用原 SDK 插件构建器，将发布版本注入所有消费客户端版本的模块；只写 staging。
 await buildReleaseClientVersions(upstream,stage,lock.directory,product.version)
-// 欢迎页 `api.version` 走 Electron `app.getVersion()`，读的是**应用包** `packages/desktop/package.json`；
-// 发行清单 `RELEASE.json.version` 走根 `product.version`。两个字段不同源曾让真实安装包的欢迎页停在
-// 旧版本（源桌面包 `0.1.0-alpha.4`）而清单已写新版本。这里在**已复制的 staging** 上把应用清单
-// `version` 同步到开工时冻结读到的根 `product.version`，只改这一个字段；源桌面包与其余字段/依赖
-// 逐字保留，Electron 取值逻辑不动（不做运行时伪装）。归档前再由 desktopAppVersionViolations 核一次。
+// 欢迎页读产品根清单。同步 staging 的应用清单，让 Electron 版本和发行清单也对应同一产品版本。
 stampDesktopAppVersion(stage,product.version)
 // 发行根清单名必须是产品安装身份 `lyapunov-dsh`：`script/product-link.ts:42` 的归属判定要求
 // 既有安装根的 `package.json.name === 'lyapunov-dsh'`（悬空链接才走恢复分支）。写 worktree 的
@@ -480,9 +476,7 @@ const archive=join(publicOutput,`lyapunov-${platform}-${releaseId}.tar.gz`),pend
 const nativeProblems=nativeSystemRuntimeViolations(stage,lock.directory,runtimePlatform)
 if(nativeProblems.length)throw new Error(nativeProblems.join('；'))
 verifyLinuxNativeLoaders(stage,join(stage,'runtime/node/bin/node'))
-// 归档前显式核对：真实应用清单（欢迎页 `app.getVersion()` 的来源）的 version 必须与 `RELEASE.json`
-// 的 `release.version` 逐字一致。读不到或对不上都 fail-closed —— 宁可不出包，也不让"清单写新版本、
-// 欢迎页显示旧版本"的包流出去（错误无法显示假版本）。
+// 归档前确认 Electron 应用清单和发行清单使用同一个产品版本。
 const appVersionProblems=desktopAppVersionViolations(stage,release.version)
 if(appVersionProblems.length)throw new Error('desktop application manifest version contract violated: '+appVersionProblems.join('; '))
 const tar=spawnSync('tar',[...macOS?['--no-xattrs']:[],'-czf',pendingArchive,'-C',dirname(stage),name],{stdio:'inherit',env:{...process.env,...macOS?{COPYFILE_DISABLE:'1'}:{}}})

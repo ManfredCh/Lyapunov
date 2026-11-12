@@ -19,6 +19,7 @@ import {resolveAccountApiUrl} from '../../lyapunov-product-bundle/src/account/ur
 import {applySoftwareGlSwitches} from "./software-rendering.ts"
 import {applyNvidiaGlSwitches,nvidiaRenderingEnvironment,assertNvidiaRendering} from "./nvidia-rendering.ts"
 import {resolveDesktopDataRoot} from "./data-root.ts"
+import {readProductVersion} from "./product-version.ts"
 import {needsWslGpuBlocklistBypass,openOnWslHost,shouldOpenOnWslHost} from "./wsl-open.ts"
 import {classifyStartupFailure,planRestartRecovery,readWorkspaceRecords,resolveWorkspaceHostMode} from "./restart-recovery.ts"
 import {LOCAL_IMPORT_FILE_FILTERS} from "../../lyapunov-shell/src/local-file-import.ts"
@@ -280,7 +281,7 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
     const lazySessions={get:()=>accountSessions().get(),set:(value:string)=>accountSessions().set(value),delete:()=>accountSessions().delete()}
     controller=new DesktopAccountController({apiUrl:resolveAccountApiUrl({configured:readRuntimeEnv(process.env,"apiUrl"),dev:false}),store:lazySessions,openExternal,startHost:openWorkspace,startGuestHost:signal=>openWorkspace(undefined,signal,"guest"),stopHost:()=>owner.close(),changed:state=>{if(win&&!win.isDestroyed())win.webContents.send("lyapunov:account-changed",state);if(state.status==="signed-out"&&startupFinished&&!quitting)void showAccount().catch(error=>console.error("返回登录页失败：",error instanceof Error?error.message:String(error)))}})
   }
-  handle("mode",()=>workspaceMode??mode);handle("guest",()=>requireController().enterGuest());handle("version",()=>app.getVersion());handle("account-state",()=>controller?.view()??{status:"signed-out"})
+  handle("mode",()=>workspaceMode??mode);handle("guest",()=>requireController().enterGuest());handle("version",()=>readProductVersion(PRODUCT_ROOT));handle("account-state",()=>controller?.view()??{status:"signed-out"})
   handle("ui-locale",()=>localeMirror.getSnapshot())
   ipcMain.handle("lyapunov:set-ui-locale",(event,value,userChoice=false)=>{
     trusted(event)

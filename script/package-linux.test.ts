@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { prepareLinuxNativeSystem, verifyLinuxNativeLoaders } from './native-system.ts'
 import { DESKTOP_APP_MANIFEST_PATH, desktopAppManifestWithVersion, desktopAppVersionViolations, readDesktopAppVersion, stampDesktopAppVersion } from '../distribution/linux/payload-contract.ts'
+import { readProductVersion } from '../packages/desktop/src/product-version.ts'
 import {buildReleaseClientVersions} from './client-release-version.ts'
 
 const root = join(import.meta.dirname, '..')
@@ -501,14 +502,18 @@ describe('desktop app version stamp: welcome page and RELEASE share one source (
     } finally { rmSync(stage, { recursive: true, force: true }) }
   })
 
-  test('different root product.version values enter the real app manifest through the same stamp rule', () => {
+  test('welcome reads the root product version with a different Electron version or a stamped app manifest', async () => {
     const stage = mkdtempSync(join(realpathSync(tmpdir()), 'lyapunov-app-version-'))
     try {
       const file = stageDesktop(stage)
       const original = readStaged(file)
-      for (const version of ['0.1.0-alpha.6.1', '0.2.0-beta.2']) {
+      for (const version of ['0.1.0-alpha.6.1', '0.2.4.2']) {
+        writeFileSync(join(stage, 'package.json'), JSON.stringify({ version }))
+        expect(readDesktopAppVersion(stage)).not.toBe(version)
+        expect(await readProductVersion(stage)).toBe(version)
         stampDesktopAppVersion(stage, version)
         const stamped = readStaged(file)
+        expect(await readProductVersion(stage)).toBe(version)
         expect(stamped.version).toBe(version)
         expect(readDesktopAppVersion(stage)).toBe(version)
         expect(desktopAppVersionViolations(stage, version)).toEqual([])

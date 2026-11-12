@@ -290,17 +290,7 @@ export function payloadLinkTarget(input: { inside: string; destination: string; 
   return relative(dirname(input.dest), join(input.destination, input.inside))
 }
 
-/**
- * 应用包清单在载荷里的固定逻辑位置：Electron `app.getVersion()`（欢迎页 `api.version` 的来源）
- * 读的就是 `runtime/electron/resources/app/package.json` —— 它是指向 `packages/desktop` 的链接。
- *
- * 为什么需要这组函数（真实缺陷）：发行清单 `RELEASE.json.version` 取根 `package.json` 的
- * `product.version`，而欢迎页取应用包自己的 `version`；两者是**两个文件里的两个字段**。
- * 源桌面包停在 `0.1.0-alpha.4` 时，真实安装包的欢迎页就停在旧版本，而清单已写新版本 ——
- * 归档前没有任何判据会把两者对上。这里在**已复制的 staging** 上把应用清单 `version`
- * 同步为冻结来源（开工时读到的根 `product.version`），其余字段/依赖原样保留；源文件不动，
- * Electron 取值逻辑不动（不做运行时伪装）。
- */
+/** 应用包清单为 Electron 提供版本。打包时从产品根清单同步版本，欢迎页也直接读取产品根清单。 */
 export const DESKTOP_APP_MANIFEST_PATH = 'packages/desktop/package.json'
 
 /** 只替换 `version`、其余字段/依赖逐字保留的新清单对象；非对象或空版本 fail-closed。 */
