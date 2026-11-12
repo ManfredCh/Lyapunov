@@ -207,7 +207,7 @@ spctl --assess --type execute -vv "<产品目录>/runtime/electron/Lyapunov.app"
 
 ## 9. 更新（现状）
 
-- 更新走 `electron-updater` 的 generic feed：只有 `app.isPackaged` 且设置了 `LYAPUNOV_UPDATE_URL` 时可用（`main.ts:117-121`）；源码树运行永远返回"本机构建未配置更新源"。
+- 发行桌面在用户检查或安装更新时，才按 `LYAPUNOV_UPDATE_URL` 初始化 `electron-updater` 的 generic feed。四段产品版本（如 `0.2.4.1`）可以启动桌面，检查更新时会显示更新器的 SemVer 错误。源码树和未配置更新源的发行包会显示「本机构建未配置更新源」。
 - 计划 §7 的 Sparkle + EdDSA 签名 appcast **未实现**，也没有 appcast 文件。
 - Squirrel.Mac 要求更新包与当前 app 由同一团队签名，未签名构建下自动更新会失败；因此"自动更新可用"必须在签名流程落地后**真机验证**，目前没有任何验证记录。
 

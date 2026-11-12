@@ -53,6 +53,20 @@ const diagnostics=!app.isPackaged&&diagnosticsArg?resolve(diagnosticsArg.slice("
 let nvidiaRendererFacts:unknown
 const owner=new RuntimeOwner()
 const localeMirror=new DesktopLocaleMirror(accountLocale(app.getLocale())??"en")
+let desktopUpdater:typeof updater.autoUpdater|undefined
+function configuredUpdater(){
+  const updateUrl=readRuntimeEnv(process.env,"updateUrl")
+  if(!app.isPackaged||!updateUrl)return undefined
+  if(!desktopUpdater){
+    // Electron Updater validates SemVer on construction. Keep its version requirements out of desktop startup.
+    const client=updater.autoUpdater
+    client.autoDownload=false
+    client.autoInstallOnAppQuit=false
+    client.setFeedURL({provider:"generic",url:updateUrl})
+    desktopUpdater=client
+  }
+  return desktopUpdater
+}
 let workspaceView:WebContentsView|undefined,viewAttached=false,workspaceMode:"formal"|"developer"|"guest"|undefined
 let win:BrowserWindow|undefined,host:HostHandle|undefined,controller:DesktopAccountController|undefined,quitting=false,recovering=false,startupFinished=false
 const renderer=join(import.meta.dirname,"../renderer/index.html")
@@ -140,7 +154,7 @@ const exits=new ExitCoordinator({
   flush:async()=>{if(!host)return;await rendererExit("flush");exitOwnerContents()?.session.flushStorageData()},
   stop:async()=>{controller?.cancelLogin();if(host)await rendererExit("stop")},
   close:()=>owner.close(),
-  exit:(origin,force)=>{quitting=true;if(force){recordIncident("exit-forced",{origin,code:"EXIT_CLEANUP_UNCONFIRMED"});try{disposeWorkspaceView()}finally{app.exit(0)}return}disposeWorkspaceView();if(origin==="update")updater.autoUpdater.quitAndInstall();else app.quit()},
+  exit:(origin,force)=>{quitting=true;if(force){recordIncident("exit-forced",{origin,code:"EXIT_CLEANUP_UNCONFIRMED"});try{disposeWorkspaceView()}finally{app.exit(0)}return}disposeWorkspaceView();if(origin==="update"&&desktopUpdater)desktopUpdater.quitAndInstall();else app.quit()},
   failed:async(error,origin,forced)=>{
     const message=error instanceof Error?error.message:String(error)
     recordIncident("exit-failed",{origin,code:"EXIT_CLEANUP_UNCONFIRMED"})
@@ -283,11 +297,9 @@ if(!app.requestSingleInstanceLock()){app.quit()}else{
     await workspaceView.webContents.loadURL(host.origin+'/')
   })
   handle("select-files",async()=>{const result=await dialog.showOpenDialog({properties:["openFile","multiSelections"],filters:LOCAL_IMPORT_FILE_FILTERS});return result.canceled?[]:result.filePaths})
-  const {autoUpdater}=updater;autoUpdater.autoDownload=false;autoUpdater.autoInstallOnAppQuit=false
-  if(readRuntimeEnv(process.env,"updateUrl"))autoUpdater.setFeedURL({provider:"generic",url:readRuntimeEnv(process.env,"updateUrl")!})
   let downloaded=false
-  handle("check-updates",async()=>{if(!app.isPackaged||!readRuntimeEnv(process.env,"updateUrl"))return {available:false,reason:"本机构建未配置更新源"};const result=await autoUpdater.checkForUpdates();return {available:result?.isUpdateAvailable??false,version:result?.updateInfo.version}})
-  handle("install-update",async()=>{if(!app.isPackaged||!readRuntimeEnv(process.env,"updateUrl"))throw new Error("更新源未配置");if(!downloaded){await autoUpdater.downloadUpdate();downloaded=true}await exits.request("update")})
+  handle("check-updates",async()=>{const client=configuredUpdater();if(!client)return {available:false,reason:"本机构建未配置更新源"};const result=await client.checkForUpdates();return {available:result?.isUpdateAvailable??false,version:result?.updateInfo.version}})
+  handle("install-update",async()=>{const client=configuredUpdater();if(!client)throw new Error("更新源未配置");if(!downloaded){await client.downloadUpdate();downloaded=true}await exits.request("update")})
   // macOS 菜单位于系统顶栏；Linux／Windows 不再占用窗口内一行，快捷键由本窗口保留。
   syncApplicationMenu()
   app.on("second-instance",()=>{void ensureWindow().then(target=>{target.show();target.focus();(viewAttached?workspaceView?.webContents:target.webContents)?.focus()})})
