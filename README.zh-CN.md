@@ -44,7 +44,7 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前发行版 [0.2.4.1](docs/releases/0.2.4.1.md)** 提供 Linux x64、Windows/WSL2 和 macOS Apple Silicon。Mac 便携包包含四段版本号的桌面启动修复。
+- **当前发行版 [0.2.4.2](docs/releases/0.2.4.2.md)** 提供 Linux x64、Windows/WSL2 和 macOS Apple Silicon。本版修复关节范围判定，并补齐中文关节动作提示。
 - **上一版 [0.2.3](docs/releases/0.2.3.md)** 首次提供 Apple Silicon 包，完善人群、退出恢复及平台兼容。
 - **[0.2.2](docs/releases/0.2.2.md)** 保留人物与人群、USD 与 SimReady 一等资产及 NVIDIA 渲染的历史发行。
   - **人物与人群：**随包 12 个 Rocketbox 真人角色，默认创建 20 人、四种外观混合；支持路线、遇障停步和固定平面自动绕障。
@@ -59,7 +59,7 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 在 Linux 上安装
 
-在 Linux 或 WSL2 的图形桌面会话中打开终端。以下命令默认安装 **0.2.4.1**。
+在 Linux 或 WSL2 的图形桌面会话中打开终端。以下命令默认安装 **0.2.4.2**。
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -67,8 +67,8 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 **直接下载**
 
-- Linux x64 / WSL2。[0.2.4.1 安装包](https://vorynel.com/lyapunov/releases/0.2.4.1-linux-6d7a0b16d885/lyapunov-linux-x64-0.2.4.1-linux-6d7a0b16d885.tar.gz) · [Linux JSON 清单](https://vorynel.com/lyapunov/releases/0.2.4.1-linux-6d7a0b16d885/linux-x64.json)
-- macOS Apple Silicon。解包后保留完整便携目录。应用采用 ad-hoc 签名，未经 Apple 公证。[0.2.4.1 便携包](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.1/lyapunov-darwin-arm64-0.2.4.1-macos-599fe12f206a.tar.gz) · [macOS JSON 清单](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.1/darwin-arm64.json)
+- Linux x64 / WSL2。[0.2.4.2 安装包](https://vorynel.com/lyapunov/releases/0.2.4.2-linux-f25004fe8d8f/lyapunov-linux-x64-0.2.4.2-linux-f25004fe8d8f.tar.gz) · [Linux JSON 清单](https://vorynel.com/lyapunov/releases/0.2.4.2-linux-f25004fe8d8f/linux-x64.json)
+- macOS Apple Silicon。解包后保留完整便携目录。应用采用 ad-hoc 签名，未经 Apple 公证。[0.2.4.2 便携包](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/lyapunov-darwin-arm64-0.2.4.2-macos-20261113.tar.gz) · [macOS JSON 清单](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/darwin-arm64.json)
 
 安装成功并报告就绪后，由使用者单独启动 Lyapunov：
 

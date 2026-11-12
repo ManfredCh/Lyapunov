@@ -4,7 +4,7 @@
 
 > **当前发行**
 >
-> - 当前 Apple Silicon 便携版为 `0.2.4.1`。在 macOS 26.5.1 实测独立解包、desktop doctor、游客工作台、MuJoCo 及工程保存与重开。包内 `runtime/electron/Lyapunov.app` 依赖同根插件、Node 和资源，移动时须保留整个便携目录。包采用 ad-hoc 签名，未经 Apple 公证。[0.2.4.1 发布说明与下载](../../docs/releases/0.2.4.1.md)
+> - 当前 Apple Silicon 便携版为 `0.2.4.2`。发行清单要求 macOS 15 或以上。包内 `runtime/electron/Lyapunov.app` 依赖同根插件、Node 和资源，移动时须保留整个便携目录。包采用 ad-hoc 签名，未经 Apple 公证。[0.2.4.2 发布说明与下载](../../docs/releases/0.2.4.2.md)
 > - `bun run build:macos` 和 `build:linux` 调用**同一份**原打包器，按实际宿主选择 Darwin arm64 或 Linux x64 兼容叶；不复制第二套收闭或功能实现。`distribution/linux/` 中已有的通用 launcher、doctor、安装器及下载工具继续共用，Linux 沙箱只在 Linux 执行。
 > - 本仓库**没有任何 Apple 签名材料**：没有 Developer ID 证书、Team ID、公证用的 App 专用密码或 `notarytool` keychain profile，也不应该把这些放进仓库。
 > - 当前客户端是 Electron 43.5.1 + Chromium 渲染本地页面；本轮源码运行与交互证据见[历史交接日志（归档）](../../docs/receipts/MACOS_PORT_HANDOFF_20261031.md)。
@@ -30,7 +30,7 @@ bun run dev:desktop                # = node script/desktop.ts --mode formal
 
 ```sh
 bun run build:macos --node /绝对路径/node-v26.3.1-darwin-arm64/bin/node \
-  --release-id 0.2.4.1-macos-候选标识
+  --release-id 0.2.4.2-macos-候选标识
 # 模型及策略仍由原 stager 收取：
 # LYAPUNOV_ROBOT_STAGING_ROOT、LYAPUNOV_ROBOT_POLICY_STAGING_ROOT
 # 未提交工作树默认拒绝出包；明确本机候选可用 LYAPUNOV_PACKAGE_ALLOW_DIRTY=1，
@@ -209,7 +209,7 @@ spctl --assess --type execute -vv "<产品目录>/runtime/electron/Lyapunov.app"
 
 ## 9. 更新（现状）
 
-- 发行桌面在用户检查或安装更新时，才按 `LYAPUNOV_UPDATE_URL` 初始化 `electron-updater` 的 generic feed。更新器要求 SemVer，四段产品版本（如 `0.2.4.1`）可正常启动。当前 macOS 便携包从发布页手动更新，桌面会显示「本机构建未配置更新源」。
+- 发行桌面在用户检查或安装更新时，才按 `LYAPUNOV_UPDATE_URL` 初始化 `electron-updater` 的 generic feed。更新器要求 SemVer，四段产品版本（如 `0.2.4.2`）可正常启动。当前 macOS 便携包从发布页手动更新，桌面会显示「本机构建未配置更新源」。
 - 计划 §7 的 Sparkle + EdDSA 签名 appcast **未实现**，也没有 appcast 文件。
 - Squirrel.Mac 要求更新包与当前 app 由同一团队签名，未签名构建下自动更新会失败；因此"自动更新可用"必须在签名流程落地后**真机验证**，目前没有任何验证记录。
 
