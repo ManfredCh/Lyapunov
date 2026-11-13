@@ -81,8 +81,6 @@ export const libraryStyle = `
  .lya-wb-panel:is([data-tool=asset],[data-tool=environment]){flex:1;height:auto;max-height:none;border-top:0}
  .lya-wb-panel:is([data-tool=asset],[data-tool=environment])>.lya-wb-panel-body{padding:16px 20px 20px}
 }
-.lya-wb[data-global-panel=true] .lya-wb-header,.lya-wb[data-global-panel=true] .lya-wb-admin,.lya-wb[data-global-panel=true] .lya-wb-surface,.lya-wb[data-global-panel=true] .lya-rail,.lya-wb[data-global-panel=true] .lya-wb-splitter,.lya-wb[data-global-panel=true] .lya-wb-status{display:none}
-.lya-wb[data-global-panel=true] .lya-wb-conversation{display:flex;flex:1;max-width:none;width:auto!important;border:0}
 @media(max-height:650px){.lya-wb-drawer{max-height:38%}.lya-rail-item{min-height:38px!important;gap:3px!important}.lya-rail-item .lya-rail-label{display:none!important}.lya-rail-group[data-group-label]::before{margin-bottom:4px}}
 @media(prefers-reduced-motion:reduce){.lya-wb *{transition:none!important;scroll-behavior:auto!important}}
 `

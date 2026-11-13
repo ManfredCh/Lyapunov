@@ -33,7 +33,7 @@ test('打开拍摄面板会从当前世界读取相机清单',async()=>{
  const {createElement,act,Fragment}=await import('react'),{createRoot}=await import('react-dom/client'),{Workbench}=await import('../src/workbench.tsx'),{ToolRail}=await import('../src/tool-rail.tsx')
  const root=createRoot(document.getElementById('root')!),flush=()=>act(async()=>{await new Promise(done=>setTimeout(done,600))})
  try{
-  await act(async()=>root.render(createElement(Fragment,null,createElement(Workbench,{sessionId:'camera-fixture',nativeTab:true,t:()=> '场景工作台',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),createElement(ToolRail,{tr:(_zh:string,en:string)=>en,engine:'newton'}))))
+  await act(async()=>root.render(createElement(Fragment,null,createElement(Workbench,{sessionId:'camera-fixture',t:()=> '场景工作台',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),createElement(ToolRail,{tr:(_zh:string,en:string)=>en,engine:'newton'}))))
   await flush();await flush()
   const capture=[...document.querySelectorAll<HTMLButtonElement>('.lya-rail-item')].find(button=>button.getAttribute('aria-label')==='Capture')
   expect(capture).toBeTruthy();await act(async()=>capture!.click());await flush();await flush()

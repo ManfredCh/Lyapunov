@@ -15,7 +15,6 @@ test('CAS当前Scene30阻断world21的旧帧；新world同绑定首帧到达后�
  const after={...before,worldGeneration:2,appliedSceneRevision:30},fresh={...old,generation:2,sceneRevision:30,frameId:'fresh',stepIndex:0};projection.setWorld(after)
  expect(projection.push(fresh)).toBe(true);expect(projection.push(fresh)).toBe(false);expect(projection.acceptsBinding(fresh)).toBe(true);expect(projection.current()?.sceneRevision).toBe(30)
 })
-import {buildCollisionVisual} from "../src/collision.ts"
 import type {CollisionTopology,Frame,SceneSnapshot,WorldHandle} from "../../lyapunov-contracts/src/types.ts"
 
 const repo=resolve(import.meta.dir,"../../.."),python=process.env.LYAPUNOV_MUJOCO_PYTHON??resolve(repo,".runtime/sim-python/bin/python")
@@ -124,9 +123,8 @@ suite("真 MuJoCo 编译碰撞几何 → Three 世界米制线框",()=>{
 })
 
 describe("缺项不伪造碰撞体或源坐标",()=>{
- test("unsupported 与未知声明不回退成box，缺Source失败可定位",()=>{
+ test("unsupported 碰撞体不回退成 box，缺 Source 失败可定位",()=>{
   expect(compiledColliderGeometry({kind:"unsupported",sizeM:[1,1,1],reason:"no shape"})).toBeUndefined()
-  expect(buildCollisionVisual({components:{collision:{shape:"mesh",halfExtents:[1,1,1]}}} as any)).toBeUndefined()
   const value=Object.create(SceneViewer.prototype) as any
   expect(()=>value.wrapSourceCoordinates({resourceId:"missing-source"},{},new THREE.Group())).toThrow("VIEWER_RESOURCE_SOURCE_REQUIRED")
  })

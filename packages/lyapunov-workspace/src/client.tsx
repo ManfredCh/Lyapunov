@@ -3,7 +3,6 @@
  *
  * 业务状态只有一份，在 `workspace-session.tsx`；这里只做**座位登记**：
  * - `lyapunov.workbench.session`：会话级状态座位，把同一份状态包住工作台的中央视图与抽屉；
- * - `lyapunov.workbench.centre` key `file`：中央的文件编辑工作面。
  * 产品终端不再自建 PTY/渲染宿主：工作台 rail 的“终端”入口走原生 SceneTab 的
  * `tab.actions.openTab("terminal")`，工作区快捷键走
  * `sidebarRight.openTabIn(sessionId, "terminal")`；两者都由 DSH 原生侧栏终端持有
@@ -28,10 +27,10 @@ import type {SessionId} from "@deepseek-ai/dsh-session/types"
 import type {} from "../../lyapunov-contracts/src/workbench-slots.ts"
 import {WORKSPACE_PREFERENCES,type WorkspacePreferences} from "./preferences.ts"
 import {addSelectionToContext} from "./selection-context.ts"
-import {WorkspaceSession,WorkspaceSessionProvider,FileSurface} from "./workspace-session.tsx"
+import {WorkspaceSessionProvider} from "./workspace-session.tsx"
 import type {WorkspaceSurface} from "./workspace-session.tsx"
 export {WorkspaceSession} from "./workspace-session.tsx"
-declare module "@deepseek-ai/dsh-client-ui-slots"{interface LocaleNamespaceMap{lyapunovWorkspace:"open"|"unmounted"}}
+declare module "@deepseek-ai/dsh-client-ui-slots"{interface LocaleNamespaceMap{lyapunovWorkspace:"open"}}
 export const inject=["slots","locale","sidebarRightTabs","sidebarRight"]
 
 export function apply(ctx:Context){
@@ -39,8 +38,8 @@ export function apply(ctx:Context){
   // `open` 仍是自包含复合体（WorkspaceSession）自己的标题，也是本包判断当前语言的探针
   // （与其他插件同一套做法）；工作台里不再有输入区入口，dockHint/dockUnavailable 已撤掉。
   ctx.effect(()=>ctx.locale.register("lyapunovWorkspace",{
-    zh:{open:"文件与终端",unmounted:"工作区状态未挂载：请确认工作台插件已加载。"},
-    en:{open:"Files & terminal",unmounted:"Workspace state is not mounted; make sure the workbench plugin is loaded."},
+    zh:{open:"文件与终端"},
+    en:{open:"Files & terminal"},
   }))
   ctx.inject(["configForms","sessions","conversation"],owner=>{
     const scope=owner.configForms.get<WorkspacePreferences>(WORKSPACE_PREFERENCES),sessions=owner.get("sessions") as unknown as ISessions
@@ -50,8 +49,5 @@ export function apply(ctx:Context){
       name:"lyapunov.workbench.session",registrant:"lyapunov-workspace",locale:"lyapunovWorkspace",
       inject:()=>({surface}),
     },WorkspaceSessionProvider))
-    owner.slots.inject("lyapunov.workbench.centre",()=>owner.slots.register({
-      name:"lyapunov.workbench.centre",key:"file",registrant:"lyapunov-workspace",locale:"lyapunovWorkspace",
-    },FileSurface))
   })
 }

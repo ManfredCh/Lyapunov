@@ -423,10 +423,8 @@ export async function apply(ctx:Context,config:Config={}){
  })
  if(config.administrator&&config.modelBilling==="own-key")ctx.systemPrompt.context({name:"lyapunov-administrator",order:8400,text:()=>"Vorynel AdminService has verified this workbench operator as a super administrator. The model uses the existing own Key through the native Provider directly, without Lyapunov Credits reservation or settlement. This administrator identity does not create another consumer wallet; usage is metered by the Key provider.\n"+JSON.stringify(config.administrator)})
  const hostInstanceId=randomUUID(),dependencyCache=new Map<string,Set<string>>(),segmentationFiles=new Map<string,Set<string>>()
- let executionSnapshot:ReturnType<typeof applyExecutionGraph>|undefined
  ctx.inject(["sessionProjections"],child=>{
-  const read=applyExecutionGraph(child,hostInstanceId,config.graph);executionSnapshot=read
-  child.effect(()=>()=>{if(executionSnapshot===read)executionSnapshot=undefined},"执行图读口卸载")
+  applyExecutionGraph(child,hostInstanceId,config.graph)
  })
  /** 分割产物准入清单的键：**会话 + 场景**。同一个 sceneId 在别的会话里是另一份场景，清单不能互相放行。 */
  const segmentationKey=(sessionKey:string,sceneId:string)=>`${sessionKey}|${sceneId}`
@@ -1543,13 +1541,6 @@ const register=(path:string,methods:readonly ("GET"|"POST")[],handler:(request:R
   if(!reader)throw Error('FLIGHT_STATUS_UNAVAILABLE: 当前 Host 未装配原飞控状态服务')
   const result=await reader.read(resolved.agent,{worldId,entityId,expectedGeneration:number('expectedGeneration'),expectedSceneRevision:number('expectedSceneRevision')},request.signal)
   return Response.json(result,{headers:{'cache-control':'private, no-store'}})
- })
- register("execution-graph",["GET"],async request=>{
-  const sessionId=new URL(request.url).searchParams.get("sessionId")??""
-  const agent=ctx.agents.get(SessionId(sessionId))
-  if(!agent)throw Error("SESSION_NOT_LIVE: 执行图只读当前已打开的原生会话，不自动恢复或启动执行")
-  if(!executionSnapshot)throw Error("SESSION_PROJECTION_REQUIRED: 当前Host未装配原生执行图投影")
-  return Response.json(executionSnapshot(agent),{headers:{"cache-control":"private, no-store"}})
  })
  const OFFICIAL_ENGINE_ID="official-suite"
  /**

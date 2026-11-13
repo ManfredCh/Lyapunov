@@ -25,7 +25,7 @@ import { EDITOR_KIND, HTML_EDITOR_KIND } from "../../lyapunov-workspace/src/work
 const read = (relative: string) => readFileSync(join(import.meta.dirname, "..", ...relative.split("/")), "utf8")
 const plugin = read("src/plugin.ts")
 const workbench = read("src/workbench.tsx")
-const nativeWorkspace = read("src/native-workspace.tsx")
+const nativeNavigation = read("src/native-navigation.ts")
 const workspaceTabs = read("../lyapunov-workspace/src/native-workspace-tabs.tsx")
 
 const session = "session-a"
@@ -132,12 +132,12 @@ describe("openResource 接线契约", () => {
   })
 
   test("前端从真实激活标签回读 address/kind（不用请求参数当回执），无所有者时明确失败", () => {
-    expect(nativeWorkspace).toContain("openExpectationFor")
-    expect(nativeWorkspace).toContain("openReceiptVerdict")
-    expect(nativeWorkspace).toContain("active.contentId===address")
-    expect(nativeWorkspace).toContain("tab?.kind")
+    expect(nativeNavigation).toContain("openExpectationFor")
+    expect(nativeNavigation).toContain("openReceiptVerdict")
+    expect(nativeNavigation).toContain("active.contentId===address")
+    expect(nativeNavigation).toContain("tab?.kind")
     // 回执字段取标签自身，而不是把请求里的 kind 抄回去。
-    expect(nativeWorkspace).toContain("address:tab?.contentId??null,kind:tab?.kind??null")
+    expect(nativeNavigation).toContain("address:tab?.contentId??null,kind:tab?.kind??null")
     expect(workbench).toContain('item.action==="openResource"')
     expect(workbench).toContain("openReceiptVerdict")
     expect(workbench).toContain("UI_ACTION_OPEN_UNAVAILABLE")

@@ -3,13 +3,13 @@
  *
  * 为什么这样切：工作台要在中央视图里显示文件工作面，而"文件草稿/保存与冲突/目录/搜索"这摊业务
  * 只能有一份。于是状态集中在 `useWorkspaceSessionState`，由 `WorkspaceSessionProvider` 挂在
- * 工作台的会话座位上渲染一次；`FileSurface`（中央视图）从同一个 context 读它。
+ * 工作台的会话座位上，响应原生文件与终端标签的快捷键。
  * 终端不再由本包持有：产品入口统一打开 DSH 原生侧栏终端标签，生命周期归原生 owner。
  * `WorkspaceSession` 仍是自包含复合体（Provider + 文件呈现 + 一个开合按钮），供没有工作台外壳时直接使用。
  *
  * 保留读取身份、草稿纪元与自动保存；根槽位切会话时显式复位会话状态，并在异步结果落地时核对所属会话。
  */
-import {createContext,useContext,useEffect,useRef,useState,useSyncExternalStore} from "react"
+import {useEffect,useRef,useState,useSyncExternalStore} from "react"
 import type {ReactNode} from "react"
 import type {PropsLocale,PropsRuntime} from "@deepseek-ai/dsh-client-ui-slots"
 import type {ConfigForm} from "@deepseek-ai/dsh-client-ui-settings/client"
@@ -171,10 +171,6 @@ export function useWorkspaceSessionState(sessionId:string,t:(key:"open")=>string
 }
 export type WorkspaceSession=ReturnType<typeof useWorkspaceSessionState>
 
-const WorkspaceContext=createContext<WorkspaceSession|undefined>(undefined)
-/** 读取工作区状态：不在 Provider 里时返回 undefined，呈现层据实提示而不是自己再建一份。 */
-export function useWorkspaceSession():WorkspaceSession|undefined{return useContext(WorkspaceContext)}
-
 /** 会话级状态座位：工作台把中央视图与抽屉交给它包住，两者共享同一实例。 */
 export function WorkspaceSessionProvider({t,surface,sessionId,exposed,reveal,children}:PropsRuntime<"lyapunov.workbench.session">&PropsLocale<"lyapunovWorkspace">&WorkbenchSessionOwnerProps&{surface:WorkspaceSurface;reveal?:WorkbenchReveal}){
   // reveal 由工作台座位传进来（"新建终端后把抽屉露出来"这类会话内跳转）；不再有模块级
@@ -196,21 +192,14 @@ export function WorkspaceSessionProvider({t,surface,sessionId,exposed,reveal,chi
     }
     document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown)
   },[sessionId,surface,value.preferences,value.actions.shortcut])
-  return <><style>{workspaceStyle}</style><WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider></>
+  return <><style>{workspaceStyle}</style>{children}</>
 }
 
-/** 文件工作面（中央视图）：文件树 + 编辑器 + 搜索 + Git/Review 页签。 */
-export function FileSurface({t}:PropsRuntime<"lyapunov.workbench.centre">&PropsLocale<"lyapunovWorkspace">){
-  const session=useWorkspaceSession()
-  if(!session)return <p className="code-error" role="alert">{t("unmounted")}</p>
-  if(!session.sessionId)return <div className="lya-wb-missing" role="status"><div><strong>{session.tr("先选择工作区","Choose a workspace")}</strong><p>{session.tr("在左侧添加或选择工作区后，就可以浏览和编辑文件。","Add or choose a workspace on the left to browse and edit its files.")}</p></div></div>
-  return <FileSurfaceBody session={session}/>
-}
 /** 自包含复合体：Provider + 文件呈现 + 开合按钮（没有工作台外壳时使用）。 */
 export function WorkspaceSession({sessionId,t,surface,reveal}:{sessionId:string;t:(key:"open")=>string;surface:WorkspaceSurface;reveal?:WorkbenchReveal}){
   const session=useWorkspaceSessionState(sessionId,t,surface,false,reveal)
   const {tr,tab,open}=session
-  return <WorkspaceContext.Provider value={session}>
+  return <>
     <style>{workspaceStyle}</style>
     <button type="button" onClick={()=>session.setters.setLegacyOpen(!open)}>{t("open")}</button>
     {open&&<section ref={session.refs.section} className="lyapunov-code" aria-label={t("open")}>
@@ -218,7 +207,7 @@ export function WorkspaceSession({sessionId,t,surface,reveal}:{sessionId:string;
       <nav>{[["files","文件","Files"],["search","搜索","Search"],["review","Git / Review","Git / Review"]].map(([id,zh,en])=><button key={id} aria-pressed={tab===id} onClick={()=>session.setters.setTab(id!)}>{tr(zh!,en!)}</button>)}<button type="button" onClick={()=>session.actions.createTerminal()}>{tr("终端","Terminal")}</button></nav>
       {tab==="review"?<ReviewPanel key={sessionId} request={session.actions.call} worktreeRequest={session.worktreeRequest} english={t("open")==="Files & terminal"}/>:<FileSurfaceBody session={session} embedded={false}/>}
     </section>}
-  </WorkspaceContext.Provider>
+  </>
 }
 
 /** 文件工作面主体。embedded=false 用于自包含复合体（不在工作台中央时，样式退回浮层形态）。 */

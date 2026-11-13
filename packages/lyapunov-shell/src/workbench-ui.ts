@@ -1,5 +1,5 @@
 /**
- * 工作台展示状态：布局模式、中央视图、工具面板、产物抽屉。
+ * 工作台展示状态：工具面板与产物抽屉。
  *
  * 这里只有"怎么显示"。会话、消息、输入、权限属于原生 ui-conversation；场景/world/选择/资产
  * 属于既有 host 所有者；文件草稿属于 lyapunov-workspace，终端属于 DSH 原生侧栏。展示状态本身是**一台界面一份**
@@ -7,8 +7,8 @@
  * 既不是无界缓存，也不会出现同一会话两个 owner 各持一份、互相覆盖。
  * 跨会话/刷新保留靠 localStorage，字段逐个取白名单校验，坏值一律回默认。
  *
- * **可见性口径（DEV-005）**：本文件里的 `WorkbenchUIState` 六个字段就是"**页面共享、可共享**"的
- * 布局偏好（mode／tool／centre／drawer／drawerHeight／conversationWidth，一台界面一份、跨会话保留）；
+ * **可见性口径（DEV-005）**：本文件里的 `WorkbenchUIState` 三个字段就是"**页面共享、可共享**"的
+ * 布局偏好（tool／drawer／drawerHeight，一台界面一份、跨会话保留）；
  * 它们**不是**任何会话的私有视图。因此改动它们的界面动作只在发出请求的窗口就是当前可见工作面时
  * 才落地（判据见下面的 `surfaceDisposition`，调用点在 `workbench.tsx` 的 `drainUiActions`）：
  * 后台窗口的展示请求保持排队，等它自己被切到前台再执行，不会无提示改前台工作面。
@@ -16,8 +16,6 @@
 import {useSyncExternalStore} from "react"
 export {surfaceDisposition} from './ui-action-scope.ts'
 
-/** 三种展示模式：对话专注 / 协作 / 场景专注。 */
-export type LayoutMode="chat"|"collab"|"scene"
 /**
  * 工具面板条目：一次只开一个，位于工作面右侧。
  *
@@ -26,8 +24,6 @@ export type LayoutMode="chat"|"collab"|"scene"
  * Physics 是运行环境，独立成面板。旧 `asset`（泛用素材库）退出一级入口，见下方 `LEGACY_TOOL_MIGRATIONS` 迁移。
  */
 export type ToolId="scene"|"environment"|"robot"|"object"|"camera"|"capture"|"recording"|"annotation"|"physics"|"campaign"|"crowd"
-/** 中央视图：场景画布（固定入口）⟷ 文件工作面。 */
-export type CentreId="canvas"|"file"
 /**
  * 底部抽屉：只渲染运行产物。`terminal` 仅为旧版持久化状态的迁移值——工作台看到它会
  * 打开 DSH 原生侧栏终端标签并清掉抽屉，不再渲染第二套终端宿主。
@@ -35,18 +31,14 @@ export type CentreId="canvas"|"file"
 export type DrawerId="terminal"|"deliverable"
 
 export interface WorkbenchUIState {
-  readonly mode:LayoutMode
   /** null 表示工具面板关闭（画布收回整块空间）。 */
   readonly tool:ToolId|null
-  readonly centre:CentreId
   readonly drawer:DrawerId|null
   readonly drawerHeight:number
-  /** 协作模式下对话列宽（px）；拖拽与默认值都夹在 CONVERSATION_MIN/MAX 之间。 */
-  readonly conversationWidth:number
 }
 
 const STORAGE_KEY="lyapunov.workbench.ui"
-const DEFAULT_STATE:WorkbenchUIState={mode:"collab",tool:null,centre:"canvas",drawer:null,drawerHeight:240,conversationWidth:380}
+const DEFAULT_STATE:WorkbenchUIState={tool:null,drawer:null,drawerHeight:240}
 /** 抽屉高度夹取：太矮放不下提示，太高会把画布挤没。 */
 export const DRAWER_MIN_HEIGHT=140
 export const DRAWER_MAX_HEIGHT=520
@@ -58,23 +50,22 @@ export const TOOL_PANEL_WIDTH=264
  */
 export const MIN_VIEWER_WIDTH=200
 /**
- * 画布浮条工具（不占右列）：语义与 `work-surface.tsx` 的 `CANVAS_TOOLS` 相同（Notes）。
- * 放在这里让 workbench 的预留判据与面板渲染共用同一份“哪些工具占列”。
+ * 画布浮条工具（例如批注）不占右列。
  */
 export const CANVAS_TOOL_IDS:ReadonlySet<ToolId>=new Set<ToolId>(["annotation"])
 /**
- * Native 且当前有**真实 Inspector** 时，Viewer 容器要按同一 `TOOL_PANEL_WIDTH`/真实 portal 宽度让出的列宽。
+ * 当前有**真实 Inspector** 时，Viewer 容器要按同一 `TOOL_PANEL_WIDTH`/真实 portal 宽度让出的列宽。
  *
  * 返回 0（不占列，保持 SDK 原响应布局/覆盖）：
- *  · 非 Native、工作面不 active（文件/终端标签或全局面板）、临时模式 `panelSuppressed`；
+ *  · 场景标签不可见、临时模式 `panelSuppressed`；
  *  · 当前工具是 Notes 画布浮条或没有工具（无 Inspector）；
  *  · 工作台宽度还没量到，或窄到“portal 宽 + MIN_VIEWER_WIDTH”放不下。
  * 这就是 workbench.tsx 给 `.lya-wb-canvas` 设 padding-right 的唯一判据：不是伪造 canvas rect，
  * 而是真实把 Viewer 容器缩到 portal 左缘（坐标/拾取/resize 仍读实际 canvas 尺寸）。
  */
-export function viewerReservedWidth(input:{native:boolean;active:boolean;tool:string|null;panelSuppressed:boolean;fullWidth:number;panelWidth?:number}):number{
+export function viewerReservedWidth(input:{active:boolean;tool:string|null;panelSuppressed:boolean;fullWidth:number;panelWidth?:number}):number{
  const panelWidth=input.panelWidth??TOOL_PANEL_WIDTH
- if(!input.native||!input.active||input.panelSuppressed)return 0
+ if(!input.active||input.panelSuppressed)return 0
  const tool=input.tool
  if(!tool||CANVAS_TOOL_IDS.has(tool as ToolId))return 0
  const fullWidth=Math.max(0,Math.floor(input.fullWidth))
@@ -82,30 +73,6 @@ export function viewerReservedWidth(input:{native:boolean;active:boolean;tool:st
  if(fullWidth-panelWidth<MIN_VIEWER_WIDTH)return 0
  return Math.min(panelWidth,fullWidth)
 }
-/**
- * 协作模式对话列宽（PLAN §三.6：360–420，画布优先）。
- * 默认取区间中点偏小的一侧，拖拽也只在这个区间里走：对话够读，画布拿到其余全部宽度。
- */
-export const CONVERSATION_MIN_WIDTH=360
-export const CONVERSATION_MAX_WIDTH=420
-export const CONVERSATION_DEFAULT_WIDTH=380
-const clampConversationWidth=(value:number)=>Math.min(CONVERSATION_MAX_WIDTH,Math.max(CONVERSATION_MIN_WIDTH,Math.round(value)))
-
-/**
- * 会改**页面级工作面**的界面动作：四个改共享布局偏好的动作（openTool／showCanvas／selectEntity／focus）
- * 加三个改右侧栏可见标签的动作（openFiles／openTerminal／openResource —— "把前台切到文件/原生终端/指定资源"就是它们）。
- * 相机定位会切换画布和机器人面板，退出相机会恢复观察位并聚焦画布，也必须由前台执行。
- * 其余动作（selectScene／captureViewer／applyCameraViewer／renderCameraViewer／sampleCameraViewer）落在本会话自己的
- * 场景、选中与窗口上，不是页面共享偏好，不受这条规则限制。
- */
-
-/**
- * 展示请求的落地规则（DEV-005）：改页面级工作面的动作只允许**当前可见**的工作台窗口落地（`"apply"`），
- * 后台窗口一律 `"defer"`——调用方不确认出队，这条请求留在队列里，等它的窗口被切到前台再执行。
- * 于是后台会话的展示请求既不会无提示改前台工作面（共享布局偏好见文件头），也不会被丢掉。
- */
-
-const MODES:LayoutMode[]=["chat","collab","scene"]
 const TOOLS:ToolId[]=["scene","environment","robot","object","camera","capture","recording","annotation","physics","campaign","crowd"]
 /**
  * 旧存储/旧调用里的 `asset` 是泛用素材库（R-008 已把它并回业务类别）。存量 localStorage 没有
@@ -119,23 +86,18 @@ export function migrateToolId(value:unknown):ToolId|null{
   if(typeof value==="string"&&Object.hasOwn(LEGACY_TOOL_MIGRATIONS,value))return LEGACY_TOOL_MIGRATIONS[value]!
   return oneOfOrNull<ToolId>(TOOLS,value)
 }
-const CENTRES:CentreId[]=["canvas","file"]
 const DRAWERS:DrawerId[]=["terminal","deliverable"]
-const oneOf=<T extends string>(list:readonly T[],value:unknown,fallback:T):T=>list.includes(value as T)?value as T:fallback
 /** 可空字段：显式 null 保持 null（合法值），其余只接受白名单成员。 */
 const oneOfOrNull=<T extends string>(list:readonly T[],value:unknown):T|null=>value===null?null:list.includes(value as T)?value as T:null
 
 /** 白名单与旧值迁移的纯函数出口：测试直接驱动它，不必依赖模块级 store 的加载顺序。 */
 export function sanitizeWorkbenchUIState(value:Partial<WorkbenchUIState>|undefined):WorkbenchUIState{
   if(!value||typeof value!=="object")return DEFAULT_STATE
-  const height=Number(value.drawerHeight),width=Number(value.conversationWidth)
+  const height=Number(value.drawerHeight)
   return {
-    mode:oneOf(MODES,value.mode,DEFAULT_STATE.mode),
     tool:migrateToolId(value.tool),
-    centre:oneOf(CENTRES,value.centre,DEFAULT_STATE.centre),
     drawer:oneOfOrNull<DrawerId>(DRAWERS,value.drawer),
     drawerHeight:Number.isFinite(height)?Math.min(DRAWER_MAX_HEIGHT,Math.max(DRAWER_MIN_HEIGHT,Math.round(height))):DEFAULT_STATE.drawerHeight,
-    conversationWidth:Number.isFinite(width)?clampConversationWidth(width):DEFAULT_STATE.conversationWidth,
   }
 }
 function readStored():WorkbenchUIState{
@@ -157,24 +119,17 @@ function createStore(){
   return {
     getSnapshot:():WorkbenchUIState=>state,
     subscribe(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener)}},
-    /** 模式切换只改展示；协作/场景专注在窄屏下由布局自己收敛。 */
-    setMode:(mode:LayoutMode)=>set({mode}),
     /** 用户点击工具就显露工作面；只有工具已可见时，再点才收起。 */
-    toggleTool:(tool:ToolId)=>set({tool:state.mode!=="chat"&&state.centre==="canvas"&&state.tool===tool?null:tool,centre:"canvas",mode:state.mode==="chat"?"collab":state.mode}),
+    toggleTool:(tool:ToolId)=>set({tool:state.tool===tool?null:tool}),
     /** 打开指定工具面板（已经是它就不动，用于"动作后展示结果"这类跳转）。 */
-    openTool:(tool:ToolId)=>set({tool,centre:"canvas",mode:state.mode==="chat"?"collab":state.mode}),
+    openTool:(tool:ToolId)=>set({tool}),
     closeTool:()=>set({tool:null}),
-    /** 中央视图：点同一个视图＝回到画布（场景画布始终可达）。 */
-    showCentre:(centre:CentreId)=>set({centre,...centre==="file"?{tool:null}:{},mode:state.mode==="chat"?"collab":state.mode}),
-    toggleCentre:(centre:CentreId)=>set({centre:state.mode!=="chat"&&state.centre===centre&&centre!=="canvas"?"canvas":centre,tool:null,mode:state.mode==="chat"?"collab":state.mode}),
     /** 抽屉入口：显示指定抽屉；再点当前抽屉＝关闭。 */
-    toggleDrawer:(drawer:DrawerId)=>set({drawer:state.mode!=="chat"&&state.drawer===drawer?null:drawer,mode:state.mode==="chat"?"collab":state.mode}),
+    toggleDrawer:(drawer:DrawerId)=>set({drawer:state.drawer===drawer?null:drawer}),
     /** 来自界面动作的打开（已经是它就不动，用于"展示产物"这类跳转）。 */
-    showDrawer:(drawer:DrawerId)=>set({drawer,mode:state.mode==="chat"?"collab":state.mode}),
+    showDrawer:(drawer:DrawerId)=>set({drawer}),
     closeDrawer:()=>set({drawer:null}),
     setDrawerHeight:(height:number)=>set({drawerHeight:Math.min(DRAWER_MAX_HEIGHT,Math.max(DRAWER_MIN_HEIGHT,Math.round(height)))}),
-    /** 拖拽对话列：只改宽度，夹在 360–420 之间（画布优先）。 */
-    setConversationWidth:(width:number)=>set({conversationWidth:clampConversationWidth(width)}),
   }
 }
 export type WorkbenchUIStore=ReturnType<typeof createStore>

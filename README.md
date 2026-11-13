@@ -44,7 +44,8 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Current release — [0.2.4.2](docs/releases/0.2.4.2.md):** Linux x64, Windows/WSL2 and macOS Apple Silicon. This update fixes joint-range checks and improves Chinese joint-action prompts.
+- **Current Linux x64 / Windows WSL2 release — [0.2.5](docs/releases/0.2.5.md).** The workbench uses native scene, file and terminal tabs. Collision overlays use geometry reported by the physics engine.
+- **macOS Apple Silicon — [platform download](https://vorynel.com/lyapunov/).** See the installation page for the current Mac package.
 - **Previous release — [0.2.3](docs/releases/0.2.3.md):** first Apple Silicon release, with crowd, exit/recovery and platform compatibility updates.
 - **[0.2.2](docs/releases/0.2.2.md):** historical release with people/crowds, first-class USD/SimReady assets and NVIDIA rendering.
   - **People and crowds:** 12 bundled Rocketbox characters, a default 20-person crowd in four appearances, routes with obstacle stops and optional fixed-plane navigation.
@@ -59,7 +60,7 @@ Use the versioned release identifier with `--version` to install a previous rele
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session. On Linux and WSL2, the default command installs **0.2.4.2**.
+From a regular terminal in your graphical desktop session. On Linux and WSL2, the default command installs **0.2.5**.
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -67,7 +68,7 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 **Direct downloads**
 
-- Linux x64 / WSL2. [0.2.4.2 archive](https://vorynel.com/lyapunov/releases/0.2.4.2-linux-f25004fe8d8f/lyapunov-linux-x64-0.2.4.2-linux-f25004fe8d8f.tar.gz) · [Linux JSON manifest](https://vorynel.com/lyapunov/releases/0.2.4.2-linux-f25004fe8d8f/linux-x64.json)
+- Linux x64 / WSL2. [0.2.5 archive](https://vorynel.com/lyapunov/releases/0.2.5-linux-4a5f3b79/lyapunov-linux-x64-0.2.5-linux-4a5f3b79.tar.gz) · [Linux JSON manifest](https://vorynel.com/lyapunov/releases/0.2.5-linux-4a5f3b79/linux-x64.json)
 - macOS Apple Silicon. Keep the entire extracted directory. The package uses ad-hoc signing and is not Apple-notarized. [0.2.4.2 portable archive](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/lyapunov-darwin-arm64-0.2.4.2-macos-20261113.tar.gz) · [macOS JSON manifest](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/darwin-arm64.json)
 
 After installation succeeds and reports ready, start Lyapunov separately:

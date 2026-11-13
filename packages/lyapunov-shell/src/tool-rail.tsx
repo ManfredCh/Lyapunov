@@ -1,5 +1,5 @@
 /**
- * 右侧固定工具栏（PLAN §三.5）：工作台最右，宽屏 60px、窄屏 46px，三种模式都在。
+ * 右侧固定工具栏（PLAN §三.5）：工作台最右，宽屏 60px、窄屏 46px。
  *
  * 上组是内容/采集工具：Scene（场景与组成）、Objects（物件清单）、Environment（环境与光照）、
  * Robots（机器人）、Camera（机器人机位）、Capture（自由视角）、Recording（记录作业）、Notes（批注）。
@@ -63,10 +63,9 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         :tr(`物理引擎：${runningEngine}（点击切换偏好）`,`Physics engine: ${runningEngine} (click to change preference)`)
       :tr(entry.zh,entry.en)
     const shortLabel=entry.id==="engine"?runningEngine:tr(entry.zh,entry.shortEn)
-    const active=(nativeSceneActive??(state.mode!=="chat"))&&(
-      entry.behavior==="tool"?state.tool===entry.id&&state.centre==="canvas"
-      :entry.id==="file"?state.centre==="file"
-      :entry.id==="engine"?false
+    const active=(nativeSceneActive??true)&&(
+      entry.behavior==="tool"?state.tool===entry.id
+      :entry.id==="file"||entry.id==="engine"?false
       :state.drawer===entry.id)
     return <button
       key={entry.id}
@@ -80,15 +79,14 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
       data-rail-behavior={entry.behavior}
       onClick={()=>{
         if(entry.behavior==="engine"){const base=preference==="isaac"||preference==="mujoco"?preference:engine;onSwitchEngine?.(base==="isaac"?"mujoco":"isaac");return}
-        if(entry.id==="file"&&openFiles){openFiles();return}
+        if(entry.id==="file"){openFiles?.();return}
         // 终端只打开 DSH 原生侧栏标签；不再落到产品自建的底部终端抽屉。
         if(entry.id==="terminal"){openTerminal?.();return}
         revealScene?.()
         if(entry.behavior==="tool"){
           if(nativeSceneActive===false)ui.openTool(entry.id as ToolId)
           else ui.toggleTool(entry.id as ToolId)
-        }else if(entry.id==="file")ui.toggleCentre("file")
-        else if(nativeSceneActive===false)ui.showDrawer("deliverable")
+        }else if(nativeSceneActive===false)ui.showDrawer("deliverable")
         else ui.toggleDrawer("deliverable")
       }}
     >

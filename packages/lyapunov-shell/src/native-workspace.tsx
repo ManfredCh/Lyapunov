@@ -9,17 +9,14 @@ import type {} from "@deepseek-ai/dsh-client-ui-layout/client"
 import type {} from "@deepseek-ai/dsh-client-ui-workspace/client"
 import type {ISessions} from "@deepseek-ai/dsh-api-session-controller/client"
 import type {SessionId} from "@deepseek-ai/dsh-session/types"
-import {fileAddressFor} from "@deepseek-ai/dsh-util-workspace-path"
 import type {} from "../../lyapunov-contracts/src/workbench-slots.ts"
-// openResource 的期望与回执判据（与宿主 `plugin.ts` 共用同一份纯函数）。
-import {openExpectationFor,openReceiptVerdict} from "./ui-action-open.ts"
 import {Workbench} from "./workbench.tsx"
+import {createNativeNavigation} from "./native-navigation.ts"
 import {ToolRail} from "./tool-rail.tsx"
 import {workbenchStyle} from "./workbench-style.ts"
 import {useEnginePreference} from "./engine-preference-client.ts"
 import {WORKBENCH_CHILDREN} from "./hosting.ts"
 import {appSidePanelHost} from "./app-side.ts"
-import {openExistingHistorySession} from "./history-navigation.ts"
 import type {WorkbenchSlotKeys} from "./work-surface.tsx"
 
 export const SCENE_TAB_KIND="lyapunov.scene"
@@ -102,42 +99,9 @@ export function registerNativeWorkspace(ctx:Context){
  const tr=ctx.locale.bind("lyapunov")
  // 与原生ui-workspace同一client face；本仓同时检查Host同名SessionStore类型，不能当客户端目录用。
  const sessions=ctx.get('sessions') as unknown as ISessions
+ const {openResource,openHistorySession}=createNativeNavigation(ctx)
  const definition={id:SCENE_TAB_ID,kind:SCENE_TAB_KIND,title:()=>tr("sceneTab"),pinned:true,keepMounted:true}
  ctx.effect(()=>ctx.sidebarRightTabs.register(definition))
- /**
-  * `ui_action` 的 `openResource` 落点：**复用原生资源地址与标签所有者**（不另造 iframe/文件页）。
-  * path 按会话工作区解析成 `dsh-resource://file/...`；`source` 点名工作区包的源编辑器 kind
-  * （HTML→`HTML_EDITOR_KIND`，其余→`EDITOR_KIND`，方式确定才可核对），`preview` 交给注册表排名。
-  * 打开后**回读真实激活标签**：回执里的 address/kind 取标签自己的 `contentId`/`kind`，绝不把请求
-  * 参数当回执；再与请求期望逐项核对，错误文件/错误方式直接失败（不 ack 成功）。
-  */
- const settleActiveTab=async(address:string)=>{
-  const deadline=Date.now()+2000
-  for(;;){
-   const active=ctx.sidebarRight.active()
-   if(active&&active.contentId===address)return active
-   if(Date.now()>=deadline)return undefined
-   await new Promise(resolve=>setTimeout(resolve,16))
-  }
- }
- const openResource=async(sessionId:string|undefined,path:string,target:"preview"|"source")=>{
-  if(!sessionId)throw Error("UI_ACTION_OPEN_SESSION_REQUIRED: 没有会话，无法解析资源地址")
-  const response=await fetch("/api/lyapunov/workspace",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sessionId,action:"info",input:{}})})
-  const info=await response.json() as {cwd?:string;error?:string}
-  if(!response.ok)throw Error(info.error??response.statusText)
-  const address=fileAddressFor(sessionId,info.cwd,path)
-  const expectation=openExpectationFor({path,target,address})
-  // source 是点名打开（kind 确定）；preview 交给注册表排名。
-  const namedKind=target==="source"?expectation.expectedKind:undefined
-  if(namedKind)ctx.sidebarRight.openResourceIn(sessionId as SessionId,address,{kind:namedKind})
-  else ctx.sidebarRight.openResource(address)
-  // 打开后**当场回读**真实激活标签：标签列真的展开、且活动标签就是刚打开的那一个地址，才算 visible。
-  const tab=await settleActiveTab(address)
-  const receipt={opened:tab!==undefined,visible:tab!==undefined&&ctx.sidebarRight.isExpanded(),address:tab?.contentId??null,kind:tab?.kind??null}
-  const verdict=openReceiptVerdict(receipt,expectation)
-  if(!verdict.ok)throw Error(verdict.reason)
-  return receipt
- }
  function SceneTab({sessionId,t,renderSlot,useTabInfo}:SceneTabProps){
   const {tab,sidebar}=useTabInfo()
   // V10 窄窗 Scene 专注：只用公开 sidebarRight 的 fullscreen 动作；目标取被点击按钮所在的真实 dock 面板，
@@ -155,7 +119,7 @@ export function registerNativeWorkspace(ctx:Context){
    if(applied)input.focus()
    return applied
   }
-  return <Workbench insertViewerReference={insertViewerReference} key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} nativeTab visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={entry=>openExistingHistorySession(entry,{refresh:()=>sessions.refresh(),snapshot:()=>sessions.list.getSnapshot(),open:id=>ctx.uiWorkspace.openSession(id as SessionId)},ctx.layout.beginNavigation())} sceneFocus={sceneFocus} sceneFocusActive={sidebar.fullscreen}/>
+  return <Workbench insertViewerReference={insertViewerReference} key={sessionId} sessionId={sessionId} t={t} renderSlot={renderSlot} visible={tab.visible} revealScene={()=>tab.actions.openTab(SCENE_TAB_KIND)} openFiles={()=>tab.actions.openTab("files")} openTerminal={()=>tab.actions.openTab("terminal")} openResource={(path,target)=>openResource(sessionId,path,target)} openHistorySession={openHistorySession} sceneFocus={sceneFocus} sceneFocusActive={sidebar.fullscreen}/>
  }
  ctx.effect(()=>{
   // 宿主带 lya-wb：portal 过去的工具窗在 DOM 上脱离工作台，令牌（--lya-*）与按钮/输入皮肤

@@ -154,12 +154,10 @@ describe("R-009 引擎偏好往返：下一次动作按最新 preference，不�
     }
   })
 
-  test("两个挂载面都把运行 engine 与保存 preference 分开传给 ToolRail", () => {
-    for (const file of ["../src/workbench.tsx", "../src/native-workspace.tsx"]) {
-      const source = readFileSync(new URL(file, import.meta.url), "utf8")
-      expect(source).toMatch(/<ToolRail[^>]*preference=\{engineState\.preference\?\?undefined\}/)
-      expect(source).toMatch(/<ToolRail[^>]*engine=\{engineState\.engine\?\?undefined\}/)
-      expect(source).not.toMatch(/engine=\{engineState\.engine\?\?engineState\.preference/)
-    }
+  test("桌面原生工具轨分别传入运行引擎与保存偏好", () => {
+    const source = readFileSync(new URL("../src/native-workspace.tsx", import.meta.url), "utf8")
+    expect(source).toMatch(/<ToolRail[^>]*preference=\{engineState\.preference\?\?undefined\}/)
+    expect(source).toMatch(/<ToolRail[^>]*engine=\{engineState\.engine\?\?undefined\}/)
+    expect(source).not.toMatch(/engine=\{engineState\.engine\?\?engineState\.preference/)
   })
 })

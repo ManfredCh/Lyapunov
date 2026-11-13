@@ -1,7 +1,6 @@
 import {describe,expect,test} from "bun:test"
 import {appSidePanelGeometry} from "../src/app-side.ts"
 import {createRequire} from 'node:module'
-import type {Context} from '@deepseek-ai/cordis'
 
 describe("应用层工具面板的工作台边界",()=>{
  test("1070×863 窗口内的已知 Camera 点击点位于面板右侧",()=>{
@@ -41,23 +40,6 @@ describe("应用层工具面板的工作台边界",()=>{
   expect(appSidePanelGeometry({left:-20,right:920,top:-10,bottom:900},{width:1070,height:863},300)).toEqual({top:0,right:150,width:300,height:863})
   expect(appSidePanelGeometry({left:1070,right:1250,top:0,bottom:0},{width:1070,height:863},300)).toEqual({top:0,right:0,width:0,height:0})
  })
-})
-
-test('执行图只注册原生标签，不新增整高 surface action 或默认打开',async()=>{
- const {applyExecutionGraphClient,EXECUTION_GRAPH_KIND}=await import('../src/execution-graph-client.tsx')
- type Tab={id:string;kind:string;priority?:string;title:()=>string;pinned?:boolean}
- const slots:string[]=[],tabs:Tab[]=[]
- let opened=0
- const ctx={
-  effect:(fn:()=>unknown)=>fn(),locale:{register:()=>()=>{},bind:()=>((key:string)=>key)},
-  sidebarRightTabs:{register:(value:Tab)=>{tabs.push(value);return()=>{}}},
-  sidebarRight:{openTab:()=>{opened++}},
-  slots:{inject:(name:string,fn:()=>unknown)=>{slots.push(name);return fn()},register:()=>()=>{}},
- } as unknown as Context
- applyExecutionGraphClient(ctx)
- expect(tabs).toEqual([{id:'@lyapunov/shell/execution-graph',kind:EXECUTION_GRAPH_KIND,priority:'builtin',title:expect.any(Function)}])
- expect(slots).toEqual(['sidebar.right.pane.tab'])
- expect(opened).toBe(0)
 })
 
 test('默认保留一个原产品rail且没有执行图按钮；文件页只在用户确认目录后请求切工作区',async()=>{

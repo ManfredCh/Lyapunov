@@ -206,7 +206,7 @@ describe('A08统一观察模式与全部出口',()=>{
     const previous=new Map<string,PropertyDescriptor|undefined>()
     for(const key of ['window','document','navigator','HTMLElement','Event','MouseEvent','Node','IS_REACT_ACT_ENVIRONMENT']){previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key],configurable:true,writable:true})}
     const React=await import('react'),{createRoot}=await import('react-dom/client'),{act,Simulate}=await import('react-dom/test-utils'),host=document.getElementById('camera-panel')!,root=createRoot(host)
-    const exit=()=>applyCameraNavigation({action:'exitCameraView'},{clientId:'fixture',ownsSurface:()=>true,viewerVisible:()=>true,scene:()=>live.snapshot,viewer:()=>live,ui:{showCentre(){},openTool(){throw Error('返回不应打开其它面板')}},selectEntity(){throw Error('返回不应切换机器人')}})
+    const exit=()=>applyCameraNavigation({action:'exitCameraView'},{clientId:'fixture',ownsSurface:()=>true,viewerVisible:()=>true,scene:()=>live.snapshot,viewer:()=>live,ui:{openTool(){throw Error('返回不应打开其它面板')}},selectEntity(){throw Error('返回不应切换机器人')}})
     function Panel({owner}:{owner?:typeof live}){
       const subscribe=React.useCallback((listener:()=>void)=>owner?.subscribeObserverState(listener)??(()=>{}),[owner]),snapshot=React.useCallback(()=>owner?.observerState(),[owner])
       const observer=React.useSyncExternalStore(subscribe,snapshot,()=>undefined),props={mode:observer?.mode,cameraId:observer?.cameraId,cameraSpecs:projected,returnView:exit,tr:(cn:string)=>cn}

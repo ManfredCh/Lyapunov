@@ -5,7 +5,7 @@
  *    `ctx.layout.toggleSidebar()` 折起；宽视口只折一次（用户本页再展开/拖拽不被抢）；<1024 不调用
  *    （SDK 已自动折叠，toggle 会反向展开）；DOM 已折叠（HMR/二次求值）不重复 toggle。
  *    `registerNativeWorkspace` 的真实调用顺序用 stub ctx 记录：`compact-sidebar` 必须早于 `register-scene-tab`。
- * 2. `viewerReservedWidth`：Native 且有真实 Inspector 才按 TOOL_PANEL_WIDTH 让列；Notes/无工具/非 Native/
+ * 2. `viewerReservedWidth`：有真实 Inspector 才按 TOOL_PANEL_WIDTH 让列；Notes/无工具/
  *    临时模式/窄到放不下都为 0（不占空白、不引入横向滚动）。
  *
  * 边界：这里不渲染 React、不测 CSS 像素；DOM 端的样式接线在 `p21-viewer-reserve.test.tsx` 里验证。
@@ -142,7 +142,7 @@ test("V10 真实 Layout store：预置 alongside 后首开保持 984px，不再�
 })
 
 describe("P21 Viewer 给 Inspector 让列的判据（Native 且有真实 Inspector 才占列）",()=>{
- const base={native:true,active:true,tool:"object",panelSuppressed:false,fullWidth:984}
+ const base={active:true,tool:"object",panelSuppressed:false,fullWidth:984}
  test("1440 宽屏右工作区 984：让出 264，可见画布约 720",()=>{
   expect(viewerReservedWidth(base)).toBe(TOOL_PANEL_WIDTH)
   expect(base.fullWidth-viewerReservedWidth(base)).toBe(720)
@@ -150,7 +150,6 @@ describe("P21 Viewer 给 Inspector 让列的判据（Native 且有真实 Inspect
  test("Notes 画布浮条 / 无工具 / 非 Native / 临时模式：0 空白",()=>{
   expect(viewerReservedWidth({...base,tool:"annotation"})).toBe(0)
   expect(viewerReservedWidth({...base,tool:null})).toBe(0)
-  expect(viewerReservedWidth({...base,native:false})).toBe(0)
   expect(viewerReservedWidth({...base,active:false})).toBe(0)
   expect(viewerReservedWidth({...base,panelSuppressed:true})).toBe(0)
  })

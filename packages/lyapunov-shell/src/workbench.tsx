@@ -60,7 +60,6 @@ import {captureRoutesOfScene,parseCaptureRoutes,type CaptureRoute} from "./captu
 import type {CaptureVideoRecord} from "./capture-video.ts"
 import {AnnotationPanel,type AnnotatedCapture} from "./annotation-panel.tsx"
 import {annotationPromptText,annotationRows,createAnnotation,readAnnotations,writeAnnotations} from "./annotation-store.ts"
-import {ToolRail} from "./tool-rail.tsx"
 import {WorkbenchIcon} from "./vendor/tabler/icons.tsx"
 import {AssetLibraryPanel,AssetPlacementBar,assetPlacementInput,assetPlacementOf,DomainAssetList,inAssetDomain,type AssetDomain,type AssetPlacement} from "./asset-library-panel.tsx"
 import {SceneNodeLock,sceneNodeName,infiniteGround,lockCommit,SceneNodeVisibility,SceneRemovalConfirmation,assetSceneInstances,removeSceneNodeCommit,sceneSubtreeIds,visibilityCommit,type SceneRemovalTarget} from "./scene-node-controls.tsx"
@@ -459,22 +458,18 @@ function useViewportWidth(){
  return width
 }
 /** 窄窗自动 Scene focus 的纯判据：只在此轮尚未尝试、未因自动全屏覆盖、且用户未手动退出时进入。 */
-export function shouldAutoFocusScene(input:{nativeTab:boolean;visible:boolean;hasScene:boolean;focusAvailable:boolean;focusActive:boolean;width:number;attempted:boolean}):boolean{
- return input.nativeTab&&input.visible&&input.hasScene&&input.focusAvailable&&!input.focusActive&&!input.attempted&&input.width>=768&&input.width<=1100
+export function shouldAutoFocusScene(input:{visible:boolean;hasScene:boolean;focusAvailable:boolean;focusActive:boolean;width:number;attempted:boolean}):boolean{
+ return input.visible&&input.hasScene&&input.focusAvailable&&!input.focusActive&&!input.attempted&&input.width>=768&&input.width<=1100
 }
-export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeTab=false,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession,insertViewerReference,sceneFocus,sceneFocusActive=false}:{
+export function Workbench({sessionId,t,renderSlot,visible=true,revealScene,openFiles,openTerminal,openResource,openHistorySession,insertViewerReference,sceneFocus,sceneFocusActive=false}:{
  sessionId?:string
  insertViewerReference?:InsertViewerReference
  /** 原生公开分栏全屏动作；只由 SceneTab 用 ctx.sidebarRight.toggleFullscreen 接线。 */
  sceneFocus?:()=>void
  sceneFocusActive?:boolean
  t:(key:"open")=>string
- /** 原生中央内容（`main.surface` 座位交过来的原生对话节点）。 */
- main?:ReactNode
- globalPanel?:boolean
- nativeTab?:boolean
  revealScene?:()=>void
- /** nativeTab 下打开原生文件标签；非 nativeTab 回退到中央文件工作面。 */
+ /** 打开原生文件标签。 */
  openFiles?:()=>void
  /** 打开官方侧边栏终端（0.1.6 原生 ui-sidebar-terminal）。 */
  openTerminal?:()=>void
@@ -493,35 +488,23 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
 }){
  const tr:Translate=(cn,en)=>t("open")==="Scene workbench"?en:cn,api=useMemo(()=>workbenchAPI(sessionId??""),[sessionId]),cacheKey="lyapunov.workbench."+sessionId
  const cameraTranslateRef=useRef(tr);cameraTranslateRef.current=tr
- // 物理引擎状态：**从 Host 读运行中的值**（`runtime-info.engine` 由启动参数回写），不是客户端猜的。
- // 切换只写偏好文件（唯一 owner：`script/engine-preference.ts`），**不重启 Host**——
- // 引擎在启动时装配 Provider，运行中换不了；重启会打断活动会话与运行中的动作。
- // 引擎状态与切换命令由共用 hook 提供（同一份逻辑同时服务 Workbench 与 WorkspaceTools 两处工具轨）。
- const {state:engineState,switchEngine:applyEnginePreference}=useEnginePreference(sessionId)
- const switchEngine=useCallback((next:"isaac"|"mujoco")=>{
-  const label=next==="isaac"?"Isaac":"MuJoCo"
-  setError("");setNotice("")
-  void applyEnginePreference(next)
-   .then(()=>setNotice(tr(`${label} · 下次启动生效\n引擎在启动时装配；当前运行中的会话与动作不受影响，按回执提示重启工作台后生效。`,`${label} · next start\nComposed at startup; the running session and actions are unaffected. Restart the workbench as the receipt explains.`)))
-   .catch(value=>setError(value instanceof Error?value.message:String(value)))
- },[applyEnginePreference,tr])
+ const {state:engineState}=useEnginePreference(sessionId)
  const ui=useWorkbenchUI(),uiState=ui.getSnapshot()
  // 旧版本把终端放在底部抽屉；升级后把同一状态平稳转成 DSH 原生侧栏终端标签，不再渲染空白抽屉。
  // 后台窗口保留迁移值，等它成为可见工作面时再打开自己的原生标签，避免替前台会话抢终端。
  useEffect(()=>{
   if(uiState.drawer!=="terminal")return
-  if(!nativeTab){ui.closeDrawer();return}
   if(!visible)return
   openTerminal?.()
   ui.closeDrawer()
- },[uiState.drawer,nativeTab,visible,openTerminal,ui])
+ },[uiState.drawer,visible,openTerminal,ui])
  const frameRoot=useRef<HTMLDivElement>(null),[availableWidth,setAvailableWidth]=useState(0)
  useLayoutEffect(()=>{
   const node=frameRoot.current;if(!node)return
   let positionedHost:HTMLElement|null=null
   const update=()=>{
    setAvailableWidth(node.clientWidth)
-   if(!nativeTab||!visible||globalPanel)return
+   if(!visible)return
    const host=appSidePanelHost.current;if(!host)return
    const bounds=appSidePanelGeometry(node.getBoundingClientRect(),{width:window.innerWidth,height:window.innerHeight},TOOL_PANEL_WIDTH)
    Object.assign(host.style,{top:`${bounds.top}px`,right:`${bounds.right}px`,width:`${bounds.width}px`,height:`${bounds.height}px`,visibility:bounds.width>0&&bounds.height>0?"visible":"hidden"})
@@ -535,7 +518,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    // 另一个可见工作台已接管共享宿主时，旧 effect 不得把它隐藏。
    if(positionedHost?.dataset.workbenchPanelClient===api.clientId){positionedHost.style.visibility="hidden";delete positionedHost.dataset.workbenchPanelClient}
   }
- },[nativeTab,visible,globalPanel,uiState.tool,api.clientId])
+ },[visible,uiState.tool,api.clientId])
  const [replayActive,setReplayActive]=useState(false)
  const [replayHost,setReplayHost]=useState<HTMLDivElement|null>(null)
  // V10：资源详情的只读模型预览挂到主画布宿主（Main Viewer 的兄弟），右栏只留身份/详情/Add。
@@ -564,10 +547,10 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    return
   }
   if(sceneFocusAttempt.current.key!==key)sceneFocusAttempt.current={key,done:false}
-  if(!shouldAutoFocusScene({nativeTab,visible,hasScene:Boolean(scene),focusAvailable:Boolean(sceneFocus),focusActive:sceneFocusActive,width:viewportWidth,attempted:sceneFocusAttempt.current.done}))return
+  if(!shouldAutoFocusScene({visible,hasScene:Boolean(scene),focusAvailable:Boolean(sceneFocus),focusActive:sceneFocusActive,width:viewportWidth,attempted:sceneFocusAttempt.current.done}))return
   sceneFocusAttempt.current={key,done:true}
   sceneFocus?.()
- },[nativeTab,visible,scene?.sceneId,sceneFocus,sceneFocusActive,viewportWidth,sessionId])
+ },[visible,scene?.sceneId,sceneFocus,sceneFocusActive,viewportWidth,sessionId])
  const [worldLifecycle,setWorldLifecycle]=useState<SceneWorldState>({phase:'idle'}),[worldHostEpoch,setWorldHostEpoch]=useState('')
  const automaticWorld=useMemo(()=>new SceneWorldLifecycle(setWorldLifecycle),[sessionId])
  const [versions,setVersions]=useState<SceneVersion[]>([]),[historyLoading,setHistoryLoading]=useState(false)
@@ -732,19 +715,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  const [materialStatus,setMaterialStatus]=useState<MaterialStatus>(),[materialBusy,setMaterialBusy]=useState(false)
  const [environmentStatus,setEnvironmentStatus]=useState<EnvironmentStatus>(),[hdriAssets,setHdriAssets]=useState<Array<{ref:ResourceRef;name:string}>>([]),[hdriBusy,setHdriBusy]=useState(false)
  const hdriMimeRef=useRef<string[]>([])
- // main 就是原生对话；万一没有可容纳的中央（座位异常）也不允许"对话专注"，否则会剩一块空中央。
- const canCollaborate=availableWidth===0||availableWidth>=960
- const preferredMode=main?uiState.mode:uiState.mode==="chat"?"collab":uiState.mode
- const mode=nativeTab?"scene":preferredMode==="collab"&&!canCollaborate?"scene":preferredMode
- // 场景机制按需启动：从没看过画布就完全不轮询；一旦看过就保持（切模式不重建 viewer，也不丢相机）。
- const [everLive,setEverLive]=useState(!globalPanel&&mode!=="chat")
- useEffect(()=>{if(!globalPanel&&mode!=="chat"&&!everLive)setEverLive(true)},[mode,everLive,globalPanel])
- const open=everLive
- // DEV-005：本窗口此刻是不是**当前可见的工作面**（可见的 3D 场景标签、且不是页面级面板）。
- // 用 ref 读最新值：state 轮询的 effect 只依赖 open/sessionId，切标签不会重建它的闭包，
- // 直接捕 visible 会让后台窗口一直以为自己是前台。
- const ownsSurface=visible&&!globalPanel
- const ownsSurfaceRef=useRef(ownsSurface);ownsSurfaceRef.current=ownsSurface
+ // 隐藏标签保留场景和轮询。界面动作通过 ref 检查当前可见性。
+ const ownsSurfaceRef=useRef(visible);ownsSurfaceRef.current=visible
  // `openResource` 的接线随挂载/注册项变化，但与 state 轮询的闭包解耦（同 ownsSurfaceRef 的理由）。
  const openResourceRef=useRef(openResource);openResourceRef.current=openResource
  // 窗口身份由 api 持有（`api.clientId`，按会话 memo）：选择上报、UI 动作目标与主动观察的目标窗口共用同一个 id。
@@ -811,9 +783,9 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 场景清单此前只在挂载/重开面板时读一次：agent 用 scene_create/scene_open 建出的场景，或命令面
  // 建出的场景，在下拉里永远不出现（用户建完选不中，工作台停在空画布）。面板开着时按既有 refreshScenes 轮询，
  // 不新增状态库/第二套缓存；面板切走即停。
- useEffect(()=>{if(!open||!sessionId||uiState.tool!=="scene")return;let alive=true
+ useEffect(()=>{if(!sessionId||uiState.tool!=="scene")return;let alive=true
   const read=()=>{if(alive)void refreshScenes().catch(()=>undefined)}
-  read();const timer=setInterval(read,3000);return()=>{alive=false;clearInterval(timer)}},[open,sessionId,uiState.tool])
+  read();const timer=setInterval(read,3000);return()=>{alive=false;clearInterval(timer)}},[sessionId,uiState.tool])
  // 日常工作台不拉取/显示内部路由诊断；Host实际判定与system/skill注入保持。
  const refreshHistory=async(sceneId=sceneRef.current?.sceneId):Promise<SceneVersion[]>=>{
   // 官方世界的派生 Scene 没有普通版本历史；活动官方世界期间不查 scene-history。
@@ -920,7 +892,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
     const directedClient=typeof item.args.clientId==="string"?item.args.clientId:undefined
     if(directedClient&&directedClient!==api.clientId)continue
     const tool=item.args.tool as ToolId|undefined,entityId=item.args.entityId as string|undefined,sceneId=item.args.sceneId as string|undefined
-    if(item.action==="openTool"&&tool){const migrated=migrateToolId(tool);if(migrated){if(migrated==="object")setObjectInspector(false);ui.openTool(migrated);ui.showCentre("canvas")}}
+    if(item.action==="openTool"&&tool){const migrated=migrateToolId(tool);if(migrated){if(migrated==="object")setObjectInspector(false);ui.openTool(migrated)}}
     else if(item.action==="openFiles")openFiles?.()
     else if(item.action==="openTerminal")openTerminal?.()
     else if(item.action==="openResource"){
@@ -943,10 +915,10 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
      }catch(error){failed(item.id,error);done.push(item.id)}
      continue
     }
-    else if(item.action==="showCanvas")ui.showCentre("canvas")
-    else if(item.action==="selectEntity"&&entityId){setSelected(entityId);ui.showCentre("canvas")}
-    else if(item.action==="focus"){ui.showCentre("canvas");if(entityId)viewer.current?.focus(entityId);else viewer.current?.frameAll()}
-    else if(item.action==="enterSceneCenter"){ui.showCentre("canvas");viewer.current?.enterSceneCenter(entityId)}
+    else if(item.action==="showCanvas")revealScene?.()
+    else if(item.action==="selectEntity"&&entityId)setSelected(entityId)
+    else if(item.action==="focus"){if(entityId)viewer.current?.focus(entityId);else viewer.current?.frameAll()}
+    else if(item.action==="enterSceneCenter")viewer.current?.enterSceneCenter(entityId)
     else if(isCameraNavigationAction(item.action)){
      try{
       const receipt=cameraNavigation({action:item.action,...typeof item.args?.cameraId==='string'?{cameraId:item.args.cameraId}:{},...directedClient?{clientId:directedClient}:{},...sceneId?{sceneId}:{},...entityId?{entityId}:{}})
@@ -1003,8 +975,6 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
      }catch(error){done.push(item.id);failed(item.id,error);continue}
      // 成功行带 value：服务端把它当作这次等待的结果（它没有图，交付物就是这份读数）。
      done.push(item.id);results.push({id:item.id,ok:true,clientId:api.clientId,value:receipt})
-     // 相机应用本身作用在本窗口自己的 Viewer 上（不抢工作面）；只有"把中央视图切回画布"是页面共享布局。
-     if(ownsSurfaceRef.current)ui.showCentre("canvas")
     }
     else if(item.action==="renderCameraViewer"){
      const target=item.args.clientId as string|undefined
@@ -1113,15 +1083,15 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  }
  // 选择事实必须与工作台当前可见状态一致：场景关闭/取消选择时同样发显式清除（无 sceneId），
  // 否则服务端的旧 scene/world/entity 会继续进入模型上下文。序号单调递增，迟到旧请求写不回。
- useEffect(()=>{if(!open||!sessionId)return;let alive=true
+ useEffect(()=>{if(!sessionId)return;let alive=true
   // 当前选择只保存在该会话的视图缓存；Scene/Sim事实仍由Host拥有。
   if(scene)persist(scene,world)
   const assert=scene
    ?api.selection({sceneId:scene.sceneId,entityId:selected,worldId:world?.worldId,sequence:++selectionSequence.current})
    :api.selection({sequence:++selectionSequence.current})
   void assert.catch(value=>{if(alive)setError(String(value))});return()=>{alive=false;api.clearControlSelection()}
- },[open,scene?.sceneId,scene?.revision,selected,world?.worldId,world?.worldGeneration,sessionId])
- useEffect(()=>{if(!open||!sessionId)return;let alive=true,busy=false
+ },[scene?.sceneId,scene?.revision,selected,world?.worldId,world?.worldGeneration,sessionId])
+ useEffect(()=>{if(!sessionId)return;let alive=true,busy=false
   perform(async()=>{const list=await refreshScenes();if(!alive||!currentAPI())return;const initial=await api.state();if(alive&&currentAPI()){
    const saved=sceneRef.current?.sceneId??readCache(cacheKey).sceneId??initial.lastSceneId
    const id=saved?(list.some(item=>item.sceneId===saved)||initial.worlds.some(item=>item.sceneId===saved)?saved:undefined):list[0]?.sceneId
@@ -1131,8 +1101,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   // 因此 Agent 用 scene_edit 改了环境、或场景版本回退时，面板会跟着变——面板不自己算一套。
   const timer=setInterval(async()=>{if(busy)return;busy=true;try{await refreshState(sceneRef.current?.sceneId);if(alive&&currentAPI())readEnvironmentStatus()}catch(value){if(alive&&currentAPI()){setReconnecting(true);setError(String(value))}}finally{busy=false}},WORKBENCH_STATE_POLL_MS)
   return()=>{alive=false;clearInterval(timer)}
- },[open,sessionId])
- useEffect(()=>{if(!open||!viewerVisible)return
+ },[sessionId])
+ useEffect(()=>{if(!viewerVisible)return
   setRenderFailure(undefined)
   // 容器可能在这一提交里还没挂上（例如世界打开后布局换了一棵子树）：按帧等到它出现，
   // 而不是 return 之后再无依赖变化可触发（旧实现就是这样留下永久空白画布的）。
@@ -1164,9 +1134,9 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   }
   boot()
   return()=>{disposed=true;cancelAnimationFrame(raf);setObserverOwner(undefined);const current=instance??viewer.current;if(!current)return;readyScene.current=undefined;viewState.current=current.getViewState();const id=presentedScene.current?.sceneId;if(id)savedCameraViews.set(cacheKey+"\0"+id,viewState.current);current.dispose();viewer.current=undefined}
- },[open,viewerVisible,Boolean(scene),renderRetry,sessionId,hostId.current])
+ },[viewerVisible,Boolean(scene),renderRetry,sessionId,hostId.current])
  // 权限变化只切提交能力，不重建 viewer。注意这条依赖里**没有** renderRetry——重试要重建。
- useEffect(()=>{const instance=viewer.current;if(!instance)return;instance.setEditCommit(readOnly?undefined:commitEditRef.current)},[readOnly,open,viewerVisible])
+ useEffect(()=>{const instance=viewer.current;if(!instance)return;instance.setEditCommit(readOnly?undefined:commitEditRef.current)},[readOnly,viewerVisible])
  useEffect(()=>{const instance=viewer.current;if(!scene||!instance||observerOwner!==(instance as unknown as CameraAuthoringViewer))return;const version=++loadVersion.current
   // 同一场景的编辑只更新内容；自动取景会打断用户刚调整好的观察视角。
   const sameScene=presentedScene.current?.viewer===instance&&presentedScene.current.sceneId===scene.sceneId
@@ -1187,7 +1157,7 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 这一版 setScene 落定（含 HDRI 加载）之后再读一次环境读数：面板显示的是画面真正生效的那一份。
  void loaded.then(()=>{if(isCurrent())readEnvironmentStatus()}).catch(()=>undefined)
  return()=>{active=false}
- },[open,viewerVisible,scene,readOnly,observerOwner])
+ },[viewerVisible,scene,readOnly,observerOwner])
  // 批注按场景装载/落盘：换场景换一份，刷新/重开工作台后回来；只在 sceneId 变化时重读，编辑不反复读盘。
  useEffect(()=>{setAnnotations(readAnnotations(scene?.sceneId));setActiveAnnotation(undefined)},[scene?.sceneId])
  useEffect(()=>{if(!scene?.sceneId)return;writeAnnotations(scene.sceneId,annotations)},[annotations,scene?.sceneId])
@@ -1197,8 +1167,8 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
  // 交给编辑器回调读的"当前场景"也以同一判据为准（它同样不能等快照）。
  annotationScene.current=annotationSceneId
  // 每次批注或模式变化都把最新一份推给 viewer：锚点与世界位置的重算只发生在 viewer 内部。
- useEffect(()=>{viewer.current?.setAnnotations(annotations)},[annotations,open,viewerVisible,annotationSceneId])
- useEffect(()=>{viewer.current?.setAnnotationMode(annotating);viewer.current?.selectAnnotation(activeAnnotation)},[annotating,activeAnnotation,open,viewerVisible,annotationSceneId])
+ useEffect(()=>{viewer.current?.setAnnotations(annotations)},[annotations,viewerVisible,annotationSceneId])
+ useEffect(()=>{viewer.current?.setAnnotationMode(annotating);viewer.current?.selectAnnotation(activeAnnotation)},[annotating,activeAnnotation,viewerVisible,annotationSceneId])
  // Notes 的"进入落点模式"由工具入口唯一决定：点 Notes / 右键 Annotate 打开工具即进入，
  // 关闭工具就停止落点；已写内容仍留在 annotations 里，切工具/Session/Scene 都不重建 Chat/Viewer/草稿/PTY。
  useEffect(()=>{setAnnotating(uiState.tool==='annotation'&&viewerVisible&&!readOnly&&!replayActive)},[uiState.tool,viewerVisible,readOnly,replayActive])
@@ -1221,10 +1191,10 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    assetLocators:()=>assetRewiring.current}
   const timer=setInterval(publish,500)
   return()=>{clearInterval(timer);(window as unknown as {__lyaAnnotationProbe?:unknown}).__lyaAnnotationProbe=[]}
- },[open,viewerVisible,Boolean(scene)])
+ },[viewerVisible,Boolean(scene)])
  const frameWorldReady=Boolean(world&&['ready','running','paused'].includes(world.status))
- useEffect(()=>{if(viewer.current)try{viewer.current.setWorld(world);setCollisionStatus(viewer.current.collisionStatus())}catch(value){setError(String(value))}},[open,viewerVisible,world?.worldId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady])
- useEffect(()=>{if(!open||!world||!frameWorldReady)return;let alive=true,busy=false,geometryReceived=false
+ useEffect(()=>{if(viewer.current)try{viewer.current.setWorld(world);setCollisionStatus(viewer.current.collisionStatus())}catch(value){setError(String(value))}},[viewerVisible,world?.worldId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady])
+ useEffect(()=>{if(!world||!frameWorldReady)return;let alive=true,busy=false,geometryReceived=false
   const ids=selected&&scene?collisionRequestSelection(scene,selected).entityIds:[]
   const wantsTopology=viewerVisible&&display.collision===true&&['mujoco','isaac'].includes(world.engineId)&&ids.length>0&&scene?.sceneId===world.sceneId&&scene?.revision===world.appliedSceneRevision
   const poll=async()=>{if(busy)return;busy=true;try{
@@ -1240,31 +1210,30 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
    if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())
   }catch(value){if(alive&&currentAPI()&&worldRef.current?.worldId===world.worldId){setReconnecting(true);setError(String(value));try{const refreshed=await refreshState(sceneRef.current?.sceneId);if(!alive||apiRef.current!==api||worldRef.current?.worldId!==world.worldId)return;if(!refreshed.worlds.some(item=>item.worldId===world.worldId)){setReconnecting(false);setError("")}}catch{}}}finally{busy=false}}
   void poll();const timer=setInterval(poll,120);return()=>{alive=false;clearInterval(timer)}
- },[open,viewerVisible,renderRetry,world?.worldId,world?.engineId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady,sessionId,selected,scene?.sceneId,scene?.revision,display.collision,uiState.tool,annotating,observerState?.mode])
+ },[viewerVisible,renderRetry,world?.worldId,world?.engineId,world?.worldGeneration,world?.appliedSceneRevision,frameWorldReady,sessionId,selected,scene?.sceneId,scene?.revision,display.collision,uiState.tool,annotating,observerState?.mode])
  // 未装配世界的派生件只读加载也要更新状态；不发送 Frame、Commands 或另一份物理状态。
- useEffect(()=>{if(!open||!viewerVisible||!selected||frameWorldReady)return
+ useEffect(()=>{if(!viewerVisible||!selected||frameWorldReady)return
   const read=()=>{const current=viewer.current?.collisionStatus();if(current)setCollisionStatus(previous=>JSON.stringify(previous)===JSON.stringify(current)?previous:current)}
   read();const timer=setInterval(read,250);return()=>clearInterval(timer)
- },[open,viewerVisible,selected,scene?.sceneId,scene?.revision,display.collision,frameWorldReady])
+ },[viewerVisible,selected,scene?.sceneId,scene?.revision,display.collision,frameWorldReady])
   useEffect(()=>{viewer.current?.select(selected);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus());const e=sceneRef.current?.entities.find(e=>e.entityId===selected);if(selected&&world&&e&&robotEntity(e))perform(()=>describe(selected))},[selected,world?.worldId,world?.worldGeneration,world?.appliedSceneRevision])
  useEffect(()=>{viewer.current?.setDisplaySettings(display);if(viewer.current)setCollisionStatus(viewer.current.collisionStatus())},[display]);useEffect(()=>{viewer.current?.setSceneLights(sceneLights)},[sceneLights]);useEffect(()=>{if(viewer.current)setAnimationSummary(applyAnimationDisplay(viewer.current,animationsPlaying))},[animationsPlaying]);useEffect(()=>{viewer.current?.setGizmoMode(gizmo)},[gizmo]);useEffect(()=>{viewer.current?.setTransformEditing(transformEditing)},[transformEditing]);useEffect(()=>{setTransformEditing(false)},[selected])
  // 同一 Viewer 的只读回执；异步载入/世界变化清授权后，控件不能仍假显示为播放中。
- useEffect(()=>{if(!open||!viewerVisible){setAnimationSummary(undefined);return}
+ useEffect(()=>{if(!viewerVisible){setAnimationSummary(undefined);return}
   const read=()=>{const instance=viewer.current;if(!instance)return;const next=instance.animationSummary();setAnimationSummary(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next)}
   read();const timer=setInterval(read,250);return()=>clearInterval(timer)
- },[open,viewerVisible,renderRetry,scene?.sceneId,world?.worldId,world?.worldGeneration])
+ },[viewerVisible,renderRetry,scene?.sceneId,world?.worldId,world?.worldGeneration])
  // 活动官方世界自带只读 Scene 投影：把它设为当前场景（同一 world 的 sceneId），
  // 不注册进场景列表，也不经过任何持久 Scene owner。
  useEffect(()=>{
-  if(!open||!official||!world)return
+  if(!official||!world)return
   const id=world.sceneId
   if(!id||sceneRef.current?.sceneId===id)return
   projectedScene.current=id;sceneIntent.current=id
   void refreshState(id).catch(value=>setError(String(value)))
- },[open,official,world?.worldId,world?.sceneId])
+ },[official,world?.worldId,world?.sceneId])
  // 官方世界关闭后它的投影 Scene 也不存在了：退回普通场景，别让轮询继续打一个失效的 sceneId。
  useEffect(()=>{
-  if(!open)return
   const id=projectedScene.current
   if(!id)return
   if(worlds.some(item=>item.sceneId===id&&item.engineId==="official-suite"&&item.status!=="closed"))return
@@ -1273,13 +1242,13 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   setError("");setReconnecting(false);setOfficialCamera(false)
   const fallback=scenes.find(item=>item.sceneId!==id)?.sceneId
   if(fallback)void loadScene(fallback).catch(value=>setError(String(value)))
- },[open,worlds,scenes])
- useEffect(()=>{if(!open||readOnly||!sessionId||!scene)return;void refreshHistory(scene.sceneId).catch(value=>{if(sceneRef.current?.sceneId===scene.sceneId)setError(String(value))})},[open,readOnly,sessionId,scene?.sceneId,scene?.revision])
+ },[worlds,scenes])
+ useEffect(()=>{if(readOnly||!sessionId||!scene)return;void refreshHistory(scene.sceneId).catch(value=>{if(sceneRef.current?.sceneId===scene.sceneId)setError(String(value))})},[readOnly,sessionId,scene?.sceneId,scene?.revision])
  // Include-deleted is a native asset_list query boundary; search remains explicit.
  // 素材与内置库是四个域面板（机器人/物件/环境/素材）的共同数据源：任一面板打开都刷新同一份状态，
  // 域面板不另取一份。素材面板按自己的搜索词取列表；机器人/物件/环境面板始终取未过滤列表，
  // 否则素材面板的一次搜索会把域面板切成同一个子集。
- useEffect(()=>{if(!open||!sessionId)return;const tool=uiState.tool;if(tool!=="environment"&&tool!=="robot"&&tool!=="object"&&tool!=="scene")return;void Promise.all([refreshAssets(""),refreshMissingAssets(),refreshBuiltinAssets()]).catch(value=>setError(String(value)))},[open,sessionId,uiState.tool,includeDeleted])
+ useEffect(()=>{if(!sessionId)return;const tool=uiState.tool;if(tool!=="environment"&&tool!=="robot"&&tool!=="object"&&tool!=="scene")return;void Promise.all([refreshAssets(""),refreshMissingAssets(),refreshBuiltinAssets()]).catch(value=>setError(String(value)))},[sessionId,uiState.tool,includeDeleted])
  const updateScene=async(input:SceneCommit)=>{
   // 官方派生 Scene 只读：不把编辑写进任何 Scene owner。
   if(worldRef.current?.engineId==="official-suite")throw new Error(tr("官方世界的场景是只读投影，不能编辑。","The official world's scene is a read-only projection and cannot be edited."))
@@ -1721,10 +1690,10 @@ export function Workbench({sessionId,t,main,renderSlot,globalPanel=false,nativeT
   return result
  }
  useEffect(()=>{
-  if(!open||!sessionId||!scene||!providerAvailable||readOnly){automaticWorld.leave();if(scene&&!providerAvailable)setWorldLifecycle(sceneWorldWithoutProvider(scene,worldRef.current,tr('当前Host未装配可用物理引擎；请检查已保存偏好与运行依赖。','The current Host has no physics provider; check the saved preference and runtime dependencies.')));return}
+  if(!sessionId||!scene||!providerAvailable||readOnly){automaticWorld.leave();if(scene&&!providerAvailable)setWorldLifecycle(sceneWorldWithoutProvider(scene,worldRef.current,tr('当前Host未装配可用物理引擎；请检查已保存偏好与运行依赖。','The current Host has no physics provider; check the saved preference and runtime dependencies.')));return}
   void ensureSceneWorld().catch(value=>setError(String(value)))
- },[open,sessionId,scene?.sceneId,scene?.revision,providerAvailable,readOnly,worldHostEpoch])
- useEffect(()=>()=>automaticWorld.leave(),[open,sessionId,scene?.sceneId,providerAvailable,readOnly,worldHostEpoch])
+ },[sessionId,scene?.sceneId,scene?.revision,providerAvailable,readOnly,worldHostEpoch])
+ useEffect(()=>()=>automaticWorld.leave(),[sessionId,scene?.sceneId,providerAvailable,readOnly,worldHostEpoch])
  const resetPhysicalTest=async()=>{
   const current=sceneRef.current
   if(!current||!physicalTestSpaceOf(current))return
@@ -1917,10 +1886,10 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  // 浮条的发送按钮要能显示"正在等待真实回执"并区分失败：这里把同一 capture 链包成可 await 的函数，
  // 失败原因仍写进状态栏；草稿（annotations）不动，浮条据此收起 loading。
  const captureAnnotations=async()=>{setError("");try{return await annotationActions.capture()}catch(value){if(apiRef.current===api)setError(value instanceof Error?value.message:String(value));throw value}}
- const chooseSceneEntity=(id:string)=>{const current=sceneRef.current;if(!current)return;if(!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);ui.showCentre('canvas')}
+ const chooseSceneEntity=(id:string)=>{const current=sceneRef.current;if(!current)return;if(!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);}
  /** 进入 Objects 的同栏二级 Inspector（R-002）：选中目标 + 打开 Objects 面板，不新建第二个选择 owner。 */
- const openObjectInspector=(id?:string)=>{if(id){const current=sceneRef.current;if(!current||!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id)}setObjectAdd(false);setObjectInspector(true);ui.openTool('object');ui.showCentre('canvas')}
- const openObjectAdd=()=>{setObjectInspector(false);setObjectAdd(true);ui.openTool('object');ui.showCentre('canvas')}
+ const openObjectInspector=(id?:string)=>{if(id){const current=sceneRef.current;if(!current||!current.entities.some(entity=>entity.entityId===id))return;nativeControlCancel.current?.();selectedRef.current=id;setSelected(id)}setObjectAdd(false);setObjectInspector(true);ui.openTool('object')}
+ const openObjectAdd=()=>{setObjectInspector(false);setObjectAdd(true);ui.openTool('object')}
  const backToObjectList=()=>{setObjectInspector(false);setObjectAdd(false)}
  // 从对象/机器人二级详情进入 Components（R-011）：选中的实体仍是同一个 owner，只切子视图；关闭时显式合拢展开。
  const openComponents=(id?:string)=>{if(id){const current=sceneRef.current;if(!current||!current.entities.some(entity=>entity.entityId===id))return;selectedRef.current=id;setSelected(id)}setComponentsView(true)}
@@ -1951,7 +1920,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    if(targetSceneId&&sceneRef.current?.sceneId===targetSceneId){
     if(value?.entityId)pendingFocus.current={sceneId:targetSceneId,entityId:value.entityId}
     await refreshState(targetSceneId)
-    if(value?.entityId&&sceneRef.current?.sceneId===targetSceneId){setSelected(value.entityId);ui.showCentre("canvas");ui.closeTool()}
+    if(value?.entityId&&sceneRef.current?.sceneId===targetSceneId){setSelected(value.entityId);ui.closeTool()}
    }
    return value
   }finally{setEnvBusy(false)}
@@ -2141,7 +2110,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   placingAssetRef.current=placement;placingPointRef.current=undefined;placingPreviewRef.current={status:'idle'}
   setPlacingAsset(placement);setPlacingPoint(undefined);setPlacingPreview({status:'idle'})
   viewer.current?.clearPlacementPreview()
-  ui.showCentre("canvas");viewer.current?.setPlacementMode(true)
+viewer.current?.setPlacementMode(true)
  }
  const confirmPlacement=async()=>{
   const current=sceneRef.current,asset=placingAssetRef.current,point=placingPointRef.current,preview=placingPreviewRef.current
@@ -2155,7 +2124,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    const adoption=applySceneIfCurrent(sceneWritePort,current.sceneId,value.snapshot)
    if(adoption!=="applied"){setNotice(adoption==="superseded"?tr("加入操作已完成，场景随后又有更新；继续显示当前版本。","The asset was added, then the scene changed again. Keeping the current version."):tr(`素材已加入场景 ${current.sceneId}。`, `Asset added to scene ${current.sceneId}.`));return}
    pendingFocus.current={sceneId:current.sceneId,entityId:value.entityId}
-   setSelected(value.entityId);ui.showCentre("canvas");ui.closeTool()
+   setSelected(value.entityId);ui.closeTool()
    setNotice(tr(`「${asset.name}」已加入当前场景。`,`${asset.name} added to this scene.`))
   }finally{placingBusyRef.current=false;setPlacingConfirming(false)}
  }
@@ -2174,16 +2143,16 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  const openRobotDetail=(id:string)=>{
   const current=sceneRef.current
   if(!current||!current.entities.some(item=>item.entityId===id))return
-  nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);setRobotView('detail');setRobotSection('root');ui.showCentre('canvas');ui.openTool('robot')
+  nativeControlCancel.current?.();selectedRef.current=id;setSelected(id);setRobotView('detail');setRobotSection('root');ui.openTool('robot')
  }
  const backToRobotLibrary=()=>{setRobotView('library');setRobotHomeTab('library');setRobotSection('root')}
  /** Recording 无 Robot 的下一步：直达 Robot Library（不经过 Camera 的“先加机器人”空态）。 */
  const openRobotLibrary=()=>{setRobotView('library');setRobotHomeTab('library');setRobotSection('root');ui.openTool('robot')}
  // 放置模式只在画布可见且仍处于能发起放置的域面板时成立；切场景/会话/面板或离开画布即退出。
  // 能发起「加入当前场景」的面板是四个域面板：素材（聚合）与机器人/物件/环境（各自域列表）。
- useEffect(()=>{viewer.current?.setPlacementMode(Boolean(placingAsset))},[open,viewerVisible,readOnly,Boolean(scene),placingAsset])
+ useEffect(()=>{viewer.current?.setPlacementMode(Boolean(placingAsset))},[viewerVisible,readOnly,Boolean(scene),placingAsset])
  useEffect(()=>{exitPlacement()},[sessionId,scene?.sceneId])
- useEffect(()=>{if(placingAsset&&(uiState.tool!=="robot"&&uiState.tool!=="object"&&uiState.tool!=="environment"||uiState.centre!=="canvas"||mode==="chat"||!viewerVisible))exitPlacement()},[placingAsset,uiState.tool,uiState.centre,mode,viewerVisible])
+ useEffect(()=>{if(placingAsset&&(uiState.tool!=="robot"&&uiState.tool!=="object"&&uiState.tool!=="environment"||!viewerVisible))exitPlacement()},[placingAsset,uiState.tool,viewerVisible])
  const status=replayActive?tr("录制回放","Recorded replay"):official?tr("官方环境","Official environment"):world?sceneWorldPhaseLabel(worldLifecycle.phase,tr):tr("场景视图","Scene view")
  // 运行状态只表达状态：点开场景面板的动作归场景按钮，不在顶栏重复铺第二个入口。
  const statusState=replayActive?"replay":official?"official":world?worldLifecycle.phase:"idle"
@@ -2262,7 +2231,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
      if(snapshot.sceneId!==targetScene){++sceneLoadSeq.current;sequence=sceneLoadSeq.current;setWorld(undefined);worldRef.current=undefined;setFrame(undefined);selectedRef.current=undefined;setSelected(undefined);setBatchIds([])}
      targetScene=snapshot.sceneId;sceneIntent.current=undefined;sceneRef.current=snapshot;setScene(snapshot)
      if(entityId){selectedRef.current=entityId;setSelected(entityId);pendingFocus.current={sceneId:snapshot.sceneId,entityId}}
-     setViewerVisible(true);ui.showCentre("canvas");ui.closeTool();revealScene?.()
+     setViewerVisible(true);ui.closeTool();revealScene?.()
    }},paths,target,targetScene)
    if(!current())return
    if(result.policyFiles.length>0&&result.imported.length===0&&result.sources.length===0){
@@ -2384,8 +2353,8 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    if(!instance)return
    nativeControlCancel.current?.();selectedRef.current=instance.entityId;setSelected(instance.entityId);openObjectInspector(instance.entityId)
   },
-  selectInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId);ui.showCentre("canvas")},
-  focusInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId);ui.showCentre("canvas");viewer.current?.focus(entityId)},
+  selectInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId)},
+  focusInstance:(entityId:string)=>{nativeControlCancel.current?.();selectedRef.current=entityId;setSelected(entityId);viewer.current?.focus(entityId)},
   setInstanceVisible:(entityId:string,visible:boolean)=>perform(()=>setNodeVisibility(entityId,visible)),removeInstance:requestRemoval}
  /**
   * 类别内的资源管理（R-008）：来源/版本/检查文件/回收恢复仍可从具名二级入口发现。
@@ -2738,7 +2707,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  // 或者用 scene_edit 直接改文档的，界面里立刻就是同一个列表；模型侧按名字应用它们走同一个读函数。
  const [rigSpec,setRigSpec]=useState<any>(),[rigVisible,setRigVisible]=useState(false),[lensFocal,setLensFocal]=useState("24"),[lensSensor,setLensSensor]=useState("36"),[recordCameraKey,setRecordCameraKey]=useState<string|undefined>()
  const rigSpecRef=useRef<any>()
- const nativeCameras=useNativeCameraList({api,scene,world,active:open&&!replayActive&&(uiState.tool==="camera"||uiState.tool==="capture"||uiState.tool==="recording")})
+ const nativeCameras=useNativeCameraList({api,scene,world,active:!replayActive&&(uiState.tool==="camera"||uiState.tool==="capture"||uiState.tool==="recording")})
  const unavailableCameraNames:string[]=(nativeCameras.receipt?.cameras??[]).filter((row:any)=>row.available===false).map((row:any)=>row.cameraName)
  const cameraSpecs=projectSceneCameraRigs(scene,world,frame,cameraRigSpecs(nativeCameras.receipt?.cameras),unavailableCameraNames)
  useEffect(()=>{setRigSpec(undefined);rigSpecRef.current=undefined},[nativeCameras.key,api])
@@ -2762,7 +2731,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   perform(async()=>{try{await writeNamedCameras(current.sceneId,current.revision,withNamedCamera(currentCameras,saved));setNotice(tr(`已保存机位「${name}」。`,`Saved view "${name}".`))}finally{savingViewRef.current=false;setSavingView(false)}})}
  /** 进入文档机位并保存主视图返程；姿态仍沿统一normalize/write路径。 */
  const restoreCameraView=(name:string)=>{const instance=viewer.current,current=sceneRef.current,row=sceneNamedCameras.find(item=>item.name===name);if(!instance||!current||!row)return
-  perform(async()=>{enterSavedCameraView(instance,current,name);ui.showCentre("canvas")})}
+  perform(async()=>{enterSavedCameraView(instance,current,name)})}
  /** 删除一台（也是一次 scene_edit：与保存同一条写路径，不"本地删掉、文档还留着"）。 */
  const deleteCameraView=(name:string)=>{const current=sceneRef.current;if(!current)return
   perform(async()=>{await writeNamedCameras(current.sceneId,current.revision,withoutNamedCamera(sceneNamedCameras,name))})}
@@ -2815,7 +2784,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   * 都走 `applyCameraView`（写入＋当场核对，VIEWER_CAMERA.md §3 的同一份）；核对不过如实抛错，不装成功。
   * 取景框只给"透过该相机看"这一支（线框＝整块视口，与投影同一份映射，见 viewer `captureGateRect`）；
   * Viewer 侧在相机被导航/预设/换相机后自动收起，这里不重复存门状态。 */
- const pilotRig=(spec:any,lens:boolean)=>{const instance=viewer.current;if(!instance)return;perform(async()=>{instance.pilotCameraRig(spec.key,lens);ui.showCentre("canvas")})}
+ const pilotRig=(spec:any,lens:boolean)=>{const instance=viewer.current;if(!instance)return;perform(async()=>{instance.pilotCameraRig(spec.key,lens)})}
  const cameraPanel=<PanelPage title={tr("相机","Camera")}>
   {replayActive&&<p className="lya-help">{tr("录制回放为只读，返回实时视图后才能采集。","Recorded replay is read-only; return to the live view before capturing.")}</p>}
   <SceneCameraPanel api={api} scene={scene} world={world} receipt={nativeCameras.receipt} error={nativeCameras.error} readOnly={readOnly||replayActive} tr={tr} perform={perform} commit={updateScene} sampleCurrent={()=>{const current=sceneRef.current;if(!current)throw Error('CAMERA_SCENE_REQUIRED');return sampleCameraForAuthoring(viewer.current,current)}} saveInstallation={saveCameraInstallation} pilot={key=>{const spec=cameraSpecs.find(row=>row.key===key);if(spec)pilotRig(spec,true)}} aim={key=>cameraNavigation({action:'aimCameraView',sceneId:scene?.sceneId,cameraId:key})} returnView={()=>{exitCameraView();}} piloted={observerState?.mode!=='free'?observerState?.cameraId:undefined} selectCamera={key=>viewer.current?.selectCameraRig(key)} selectedCameraEntityId={rigSpec?.entityId} selectedRobotEntityId={robotSelected?entity?.entityId:undefined} prepareWorld={prepareCameraWorld} worldState={worldLifecycle} sceneSpecs={cameraSpecs} refresh={nativeCameras.refresh} exitBridge={cameraExitBridge} scope="mounted" compareOverlayHost={compareOverlayHost} recordCamera={key=>{setRecordCameraKey(key);ui.openTool('recording')}}/>
@@ -2879,7 +2848,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  </PanelPage>
  const recordingPanel=<>
   {/* Recording：固定机器人机位。来源从 Scene 挂载与现有 camera_list 投影接入，不新建第二份机位 owner。 */}
-  <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} embedded visible={visible&&!globalPanel&&mode!=="chat"&&uiState.tool==="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeTool()}/>
+  <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} embedded visible={visible&&uiState.tool==="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeTool()}/>
  </>
 
  const physicsPanel=<>
@@ -3013,7 +2982,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   </PanelPage>
  </div>
  const deliverables=<>
-   <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} visible={visible&&!globalPanel&&mode!=="chat"&&uiState.drawer==="deliverable"&&uiState.tool!=="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeDrawer()}/>
+   <RecordingPanel key={recordingPanelSeatKey(sessionId,scene?.sceneId)} visible={visible&&uiState.drawer==="deliverable"&&uiState.tool!=="recording"} api={api} sceneId={scene?.sceneId} scene={scene} world={world} nativeReceipt={nativeCameras.receipt} nativeError={nativeCameras.error} openCamera={()=>ui.openTool("camera")} openRobotLibrary={openRobotLibrary} hasRobot={robotInstances.length>0} preferredCameraName={recordCameraKey} tr={tr} perform={perform} onReplayChange={setReplayActive} replayHost={replayHost} close={()=>ui.closeDrawer()}/>
    <div className="lya-row"><strong>{tr("图像","Images")} {captures.length}</strong><button disabled={replayActive||!viewerVisible||!scene} onClick={()=>perform(takeCapture)}>{tr("采集图像","Capture")}</button></div>
    <div className="lya-captures">{captures.slice(0,12).map(record=><figure key={record.captureId}><img src={api.captureURL(record.captureId)} alt={record.captureId} width={record.attachment.width} height={record.attachment.height}/><figcaption className="lya-help">{record.capturedAt} · rev {record.sceneRevision}{record.worldId?` · ${record.worldId.slice(0,8)}`:""}</figcaption></figure>)}</div>
    {videos.length>0&&<><div className="lya-row"><strong>{tr("连续视频","Continuous videos")} {videos.length}</strong></div><div>{videos.slice(0,6).map(record=><div key={record.videoId}><video controls preload="metadata" style={{width:"100%",height:"auto"}} src={api.videoURL(record.videoId)} aria-label={tr("连续视频回放","Continuous video playback")}/><p className="lya-help">{record.source==="route"?tr("路线","Route"):tr("自由视角","Free view")} · {record.container}/{record.codec} · {(record.durationMs/1000).toFixed(2)} s · {record.bytes} B</p><a href={api.videoURL(record.videoId)} download={`${record.videoId}.${record.container==="unknown"?"bin":record.container}`}>{tr("下载视频","Download video")}</a></div>)}</div></>}
@@ -3041,7 +3010,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
  // 这里只缩真实 Viewer 容器（padding-right 作用于 `.lya-wb-canvas` 内容盒，`.lya-canvas` width:100%
  // 随之变窄），坐标/拾取/ContextMenu/Notes 锚点/resize 仍从实际 canvas 尺寸读；无 Inspector/Notes/
  // 文件/终端标签/窄到放不下时返回 0，不占一分空白，也不引入横向滚动。
- const reservedViewerWidth=viewerReservedWidth({native:nativeTab,active:visible&&!globalPanel&&mode!=="chat",tool:uiState.tool,panelSuppressed:Boolean(placingAsset)||attachPick||parkingPickActive,fullWidth:availableWidth})
+ const reservedViewerWidth=viewerReservedWidth({active:visible,tool:uiState.tool,panelSuppressed:Boolean(placingAsset)||attachPick||parkingPickActive,fullWidth:availableWidth})
  // V10：Controls 与 Frame/Scene focus 合成同一行自然 flex；不再各自绝对定位到左上角。
  // 只在实时场景显示，回放/放置确认期间不叠在回放宿主或确认条上。
  const canvasToolbar=scene&&!replayActive?<div className="lya-frame-actions" role="group" aria-label={tr('画布取景','Canvas framing')}>
@@ -3054,7 +3023,7 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
    {placingAsset&&<button type="button" data-testid="frame-placement" aria-label={tr('框选放置预览','Frame placement preview')} title={tr('只把已加载的真实放置 ghost 框进视图；不改 Scene、物理或落点','Frame only the loaded placement ghost; Scene, physics and the drop point are unchanged')} disabled={!viewerVisible||placingPreview.status!=='ready'} onClick={()=>viewer.current?.framePlacementPreview()}>
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" focusable="false" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 16l8-8"/><path d="M13 8h3v3"/></svg>
    </button>}
-   {nativeTab&&sceneFocus&&<button type="button" className="lya-scene-focus" data-testid="scene-focus" aria-pressed={sceneFocusActive||undefined} aria-label={sceneFocusActive?tr('退出 Scene 专注','Exit Scene focus'):tr('Scene 专注','Scene focus')} title={sceneFocusActive?tr('返回对话与场景','Return to chat and scene'):tr('全宽查看场景','Show scene at full width')} onClick={sceneFocus}><span aria-hidden="true">⛶</span></button>}
+   {sceneFocus&&<button type="button" className="lya-scene-focus" data-testid="scene-focus" aria-pressed={sceneFocusActive||undefined} aria-label={sceneFocusActive?tr('退出 Scene 专注','Exit Scene focus'):tr('Scene 专注','Scene focus')} title={sceneFocusActive?tr('返回对话与场景','Return to chat and scene'):tr('全宽查看场景','Show scene at full width')} onClick={sceneFocus}><span aria-hidden="true">⛶</span></button>}
   </div>:undefined
  const canvas=<div className="lya-wb-canvas" style={reservedViewerWidth?{paddingRight:reservedViewerWidth}:undefined} aria-busy={renderLoading||Boolean(sceneCreating)} data-drop-target={dropTarget==="scene"||undefined} data-notes-open={uiState.tool==="annotation"||undefined}>
   <ViewerSurfaceState visible={viewerVisible} failure={renderFailure} hasScene={Boolean(scene)} available={!readOnly&&Boolean(sessionId)} creating={sceneCreating} stop={world&&sessionId&&!replayActive?()=>perform(()=>stop(true)):undefined} tr={tr} create={template=>perform(()=>createScene(template))} retry={()=>{setRenderFailure(undefined);setRenderRetry(value=>value+1)}} reopen={()=>{setRenderFailure(undefined);setViewerVisible(true)}}>
@@ -3079,23 +3048,12 @@ const takeCapture=async()=>{if(replayActive)throw new Error("RECORDED_REPLAY_IS_
   {uiState.tool==="annotation"&&annotationBar}
  </div>
 
- return <div ref={frameRoot} onDragEnterCapture={event=>{if(event.dataTransfer.types.includes("Files")){event.stopPropagation();fileDragOver(event)}}} onDragOverCapture={fileDragOver} onDropCapture={fileDrop} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDropTarget(undefined)}} className="lya-wb" data-mode={mode} data-global-panel={globalPanel||undefined} aria-label={t("open")}>
+ return <div ref={frameRoot} onDragEnterCapture={event=>{if(event.dataTransfer.types.includes("Files")){event.stopPropagation();fileDragOver(event)}}} onDragOverCapture={fileDragOver} onDropCapture={fileDrop} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDropTarget(undefined)}} className="lya-wb" aria-label={t("open")}>
   <style>{workbenchStyle}</style>
   {dropTarget&&<div className="lya-file-drop-hint" role="status">{dropTarget==="library"?"松开以导入素材库":"松开以导入并加入场景"}</div>}
   {administrator&&<div className="lya-help lya-wb-admin" aria-label={tr("超级管理员模型调用","Super administrator model billing")}>{administrator.username} · {tr("超级管理员 · 自有 Key 直连，不扣平台积分","Super administrator · own key, no platform points")}</div>}
   <div className="lya-wb-body">
-   {main?<><section className="lya-wb-conversation" style={{width:uiState.conversationWidth}} aria-label={tr("对话","Conversation")}>{main}</section>
-    <div className="lya-wb-splitter" role="separator" aria-orientation="vertical" aria-label={tr("调整对话宽度","Resize conversation")} title={tr("拖动调整对话宽度（360–420）","Drag to resize the conversation (360–420)")}
-      onPointerDown={event=>{
-        const startX=event.clientX,startWidth=uiState.conversationWidth
-        const node=event.currentTarget
-        node.setPointerCapture(event.pointerId);node.dataset.dragging="1"
-        const move=(moveEvent:PointerEvent)=>{if(moveEvent.buttons!==1)return;ui.setConversationWidth(startWidth+(moveEvent.clientX-startX))}
-        const up=()=>{delete node.dataset.dragging;node.removeEventListener("pointermove",move);node.removeEventListener("pointerup",up)}
-        node.addEventListener("pointermove",move);node.addEventListener("pointerup",up)
-      }}/></>:null}
-   <WorkSurface revealScene={revealScene} nativeTab={nativeTab} openTerminal={openTerminal} active={visible&&!globalPanel&&mode!=="chat"} panelSuppressed={Boolean(placingAsset)||attachPick||parkingPickActive} sessionId={sessionId} tr={tr} renderSlot={renderSlot} centre={canvas} panel={uiState.tool?panels[uiState.tool]:null} retainedPanel={(objectInspector||objectAdd)&&objectEditor?{tool:'object',hidden:!objectInspector||componentsView,children:<div className="lya-panel-seat" hidden={componentsView} style={componentsView?{display:'none'}:undefined}>{objectEditor}</div>}:undefined} deliverables={deliverables}/>
-   {!nativeTab&&<ToolRail tr={tr} engine={engineState.engine??undefined} preference={engineState.preference??undefined} onSwitchEngine={switchEngine}/>}
+   <WorkSurface revealScene={revealScene} openTerminal={openTerminal} active={visible} panelSuppressed={Boolean(placingAsset)||attachPick||parkingPickActive} sessionId={sessionId} tr={tr} renderSlot={renderSlot} centre={canvas} panel={uiState.tool?panels[uiState.tool]:null} retainedPanel={(objectInspector||objectAdd)&&objectEditor?{tool:'object',hidden:!objectInspector||componentsView,children:<div className="lya-panel-seat" hidden={componentsView} style={componentsView?{display:'none'}:undefined}>{objectEditor}</div>}:undefined} deliverables={deliverables}/>
   </div>
   {importTextureWarnings.length>0&&<div className="lya-wb-status" role="status" aria-label={tr("现有材质导入损失","Available material import losses")}><WorkbenchMessage kind="warning" summary={importTextureWarnings.length===1?importTextureWarnings[0]:tr(`${importTextureWarnings.length} 个文件已导入，部分材质依赖缺失。`,`${importTextureWarnings.length} files imported with missing material dependencies.`)} message={(importTextureDetails.length?importTextureDetails:importTextureWarnings).join('\n')} tr={tr} onDismiss={()=>{setImportTextureWarnings([]);setImportTextureDetails([])}}/></div>}
   {(scene||error||notice||replayActive||orientationStopTarget)&&<footer className="lya-wb-status" role="status">{scene&&!replayActive&&<SceneWorldStatus compact state={worldLifecycle} tr={tr} retry={()=>perform(startWorld)} cancel={()=>automaticWorld.cancel()} disabled={readOnly||!providerAvailable}/>}<WorkbenchMessage key={error?'error':replayActive?'replay':'notice'} kind={error?'error':'notice'} message={error||(replayActive?tr("回放只读取录制帧、不发送动作，也不暂停实时世界。","Replay only reads recorded frames and sends no actions; it does not pause the live world."):notice)} tr={tr} onDismiss={error?()=>setError(""):!replayActive&&notice?()=>setNotice(""):undefined}/><span className="lya-spacer"/>{orientationStopTarget&&<button type="button" className="lya-stop" data-testid="orientation-stop" disabled={orientationStopRef.current?.requested} onClick={()=>void stopOrientationCheck()}>{tr("停止方向检查","Stop orientation check")}</button>}{(scene||frame)&&!replayActive&&<details className="lya-status-meta" data-testid="workbench-status-meta"><summary title={tr("场景版本与运行步进","Scene revision and runtime step")}>{tr("运行信息","Runtime")}</summary><div className="lya-status-meta-body">{scene&&<span className="lya-revision">rev {scene.revision}</span>}{frame&&<span data-testid="world-step">{frame.simTime.toFixed(2)} s · {frame.stepIndex}</span>}</div></details>}</footer>}

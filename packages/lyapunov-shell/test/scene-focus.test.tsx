@@ -59,7 +59,7 @@ test("宽窗有 Scene focus 入口；窄窗首次自动进入；手动退出后�
   function Host() {
     const [active, setActive] = useState(false)
     return createElement(Workbench, {
-      sessionId: "focus-flow", nativeTab: true, t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台",
+      sessionId: "focus-flow", t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台",
       renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null,
       sceneFocus: () => { calls.push(active ? "exit" : "focus"); setActive(value => !value) },
       sceneFocusActive: active,

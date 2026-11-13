@@ -66,9 +66,9 @@ test("Native 有 Inspector 才给 Viewer 让列；Notes/关闭工具不占空白
  const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => (element as HTMLElement).click()) }
  try {
   await act(async () => root.render(createElement(FixtureUI)))
-   await act(async () => { fixtureUI!.showCentre('canvas'); fixtureUI!.setMode('collab'); fixtureUI!.closeDrawer(); fixtureUI!.closeTool() })
+   await act(async () => { fixtureUI!.closeDrawer(); fixtureUI!.closeTool() })
    await act(async () => root.render(createElement(Fragment, null,
-   createElement(Workbench, {sessionId: "p21-flow", nativeTab: true, t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+   createElement(Workbench, {sessionId: "p21-flow", t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
    createElement(ToolRail, {tr, engine: "mujoco"}),
   )))
   await flush(); await flush()
@@ -199,8 +199,8 @@ test("旧Viewer加载失败不覆盖新版本；卸载后的state响应不写缓
  const flush=()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,100))})
  try{
   await act(async()=>root.render(createElement(FixtureUI)))
-  await act(async()=>{ui!.showCentre('canvas');ui!.setMode('collab');ui!.closeDrawer();ui!.closeTool()})
-  await act(async()=>root.render(createElement(Workbench,{sessionId:'shell-unmount',nativeTab:true,t:()=> 'Scene workbench',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any)))
+  await act(async()=>{ui!.closeDrawer();ui!.closeTool()})
+  await act(async()=>root.render(createElement(Workbench,{sessionId:'shell-unmount',t:()=> 'Scene workbench',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any)))
   for(let i=0;i<12&&!loads.some(load=>load.revision===1);i++)await flush()
   expect(loads.some(load=>load.revision===1)).toBe(true)
   revision=2
@@ -288,9 +288,9 @@ test("Record this camera 预选真实 native source，且不调用 pilotCameraRi
  const rail = (label: string) => [...document.querySelectorAll<HTMLButtonElement>(".lya-rail-item")].find(button => button.getAttribute("aria-label") === label)
  try {
   await act(async () => root.render(createElement(FixtureUI)))
-   await act(async () => { fixtureUI!.showCentre('canvas'); fixtureUI!.setMode('collab'); fixtureUI!.closeDrawer(); fixtureUI!.closeTool() })
+   await act(async () => { fixtureUI!.closeDrawer(); fixtureUI!.closeTool() })
    await act(async () => root.render(createElement(Fragment, null,
-   createElement(Workbench, {sessionId: "cam-record", nativeTab: true, t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+   createElement(Workbench, {sessionId: "cam-record", t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
    createElement(ToolRail, {tr, engine: "mujoco"}),
   )))
   await flush(); await flush()
@@ -365,11 +365,11 @@ async function withP21Workbench(run:(ctx:any)=>Promise<void>,options:{openTermin
  const click=async(element:Element|undefined|null)=>{expect(element).toBeTruthy();await act(async()=>(element as HTMLElement).click())}
  let booted=false
  const mount=async(sessionId:string)=>{
-  if(!booted){await act(async()=>root.render(createElement(FixtureUI)));await act(async()=>{fixtureUI!.showCentre("canvas");fixtureUI!.setMode("collab");fixtureUI!.closeDrawer();fixtureUI!.closeTool()});booted=true}
-  else await act(async()=>{fixtureUI!.closeTool();fixtureUI!.setMode("collab");fixtureUI!.showCentre("canvas")})
+  if(!booted){await act(async()=>root.render(createElement(FixtureUI)));await act(async()=>{fixtureUI!.closeDrawer();fixtureUI!.closeTool()});booted=true}
+  else await act(async()=>{fixtureUI!.closeTool();})
   await act(async()=>root.render(createElement(Fragment,null,
    createElement(FixtureUI),
-   createElement(Workbench,{key:sessionId,sessionId,nativeTab:true,openTerminal:options.openTerminal,openFiles:options.openFiles,t:(key:string)=>key==="open"?"Scene workbench":"场景工作台",renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),
+   createElement(Workbench,{key:sessionId,sessionId,openTerminal:options.openTerminal,openFiles:options.openFiles,t:(key:string)=>key==="open"?"Scene workbench":"场景工作台",renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),
    createElement(ToolRail,{tr,engine:"mujoco",openTerminal:options.openTerminal,openFiles:options.openFiles}),
   )))
   await flush(140);await flush(180)

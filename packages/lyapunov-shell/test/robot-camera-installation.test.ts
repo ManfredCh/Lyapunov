@@ -119,7 +119,7 @@ describe('010 单一Viewer编辑会话的原点锁位',()=>{
  })
  test('NL入口解析真实cameraId/Scene实体，前台/只读/过期Scene和不存在key拒绝',()=>{
   const {viewer}=viewerFixture(),calls:string[]=[]
-  const ports={clientId:'window',ownsSurface:()=>true,viewerVisible:()=>true,scene:()=>scene,viewer:()=>viewer,ui:{showCentre:()=>{},openTool:(value:string)=>calls.push(value)},selectEntity:()=>{}}
+  const ports={clientId:'window',ownsSurface:()=>true,viewerVisible:()=>true,scene:()=>scene,viewer:()=>viewer,ui:{openTool:(value:string)=>calls.push(value)},selectEntity:()=>{}}
   expect(applyCameraNavigation({action:'aimCameraView',cameraId:'eye',sceneId:'010'},ports).applied).toBe(true);expect(calls).toEqual(['camera'])
   expect(applyCameraNavigation({action:'aimCameraView',cameraId:'eye',clientId:'other'},ports).disposition).toBe('foreign')
   expect(()=>applyCameraNavigation({action:'aimCameraView',cameraId:'guess'},ports)).toThrow('UNAVAILABLE')

@@ -65,7 +65,7 @@ test("原Workbench同Scene重建与旧promise隔离；右键当帧批注跨布�
  const {createElement,act}=await import('react'),{createRoot}=await import('react-dom/client'),{Workbench}=await import('../src/workbench.tsx'),root=createRoot(document.getElementById('root')!)
  const flush=()=>act(async()=>{await new Promise(done=>setTimeout(done,320))})
  try{
-  await act(async()=>root.render(createElement(Workbench,{sessionId:'rebuild-session',nativeTab:true,t:()=> '场景工作台',renderSlot:(_name:any,_props:any,options:any)=>options?.fallback??null} as any)));await flush();await flush()
+  await act(async()=>root.render(createElement(Workbench,{sessionId:'rebuild-session',t:()=> '场景工作台',renderSlot:(_name:any,_props:any,options:any)=>options?.fallback??null} as any)));await flush();await flush()
   const original=instances.at(-1);expect(original).toBeDefined();expect(original.calls.filter((call:any[])=>call[0]==='setScene').length).toBe(1)
   host='host-b';await flush();await flush();const rebuilt=instances.at(-1);expect(rebuilt).not.toBe(original)
   expect(rebuilt.calls.filter((call:any[])=>call[0]==='setScene').length).toBe(1)
@@ -290,7 +290,7 @@ test("放置确认单飞：双击 Place 只提交一次 scene_mount，确认中�
   const flush = (ms = 320) => act(async () => { await new Promise(done => setTimeout(done, ms)) })
   try {
     await act(async () => root.render(createElement(Fragment, null,
-      createElement(Workbench, {sessionId: 'place-flow', nativeTab: true, t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+      createElement(Workbench, {sessionId: 'place-flow', t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
       createElement(ToolRail, {tr: (_zh: string, en: string) => en, engine: 'mujoco'}),
     )))
     await flush(); await flush()

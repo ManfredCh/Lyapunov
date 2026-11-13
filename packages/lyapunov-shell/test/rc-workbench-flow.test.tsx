@@ -105,9 +105,9 @@ test("真实 Workbench：工具轨、Objects 清单/二级 Inspector 与草稿�
   const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)
   const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => (element as HTMLElement).click()) }
   try {
-    // 真渲染同一个 store 的 Workbench 与 ToolRail；nativeTab 只关掉 Workbench 内再渲染一次 rail（避免重复 nav）。
+    // 真渲染同一个 store 的 Workbench 与 ToolRail；原生场景标签默认由外部工具轨驱动。
     await act(async () => root.render(createElement(Fragment, null,
-      createElement(Workbench, {sessionId: "rc-flow", nativeTab: true, t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+      createElement(Workbench, {sessionId: "rc-flow", t: (key: string) => key === "open" ? "Scene workbench" : "场景工作台", renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
       createElement(ToolRail, {tr, engine: "mujoco"}),
     )))
     await flush(); await flush()

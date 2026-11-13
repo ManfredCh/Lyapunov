@@ -262,15 +262,6 @@
       "reason": "真实Blender导出/重载验收，需要BLENDER_EXECUTABLE；默认离线CI不运行。人工/VM受影响测试使用同一原生入口运行，不把skip记通过。"
     },
     {
-      "path": "packages/blender/test/photo-registration.test.ts",
-      "declaredRunner": "node:test",
-      "markers": [
-        "blender"
-      ],
-      "decision": "exclude",
-      "reason": "not-run：需要 Blender 可执行与实例（blender）"
-    },
-    {
       "path": "packages/blender/test/test_action_fcurves_compat.py",
       "declaredRunner": "python",
       "markers": [

@@ -44,7 +44,8 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 版本通道
 
-- **当前发行版 [0.2.4.2](docs/releases/0.2.4.2.md)** 提供 Linux x64、Windows/WSL2 和 macOS Apple Silicon。本版修复关节范围判定，并补齐中文关节动作提示。
+- **Linux x64 / Windows WSL2 当前发行版为 [0.2.5](docs/releases/0.2.5.md)。** 工作台使用原生场景、文件与终端标签，碰撞显示沿用物理引擎拓扑。
+- **macOS Apple Silicon** 的当前版本见[官网安装页](https://vorynel.com/lyapunov/)。
 - **上一版 [0.2.3](docs/releases/0.2.3.md)** 首次提供 Apple Silicon 包，完善人群、退出恢复及平台兼容。
 - **[0.2.2](docs/releases/0.2.2.md)** 保留人物与人群、USD 与 SimReady 一等资产及 NVIDIA 渲染的历史发行。
   - **人物与人群：**随包 12 个 Rocketbox 真人角色，默认创建 20 人、四种外观混合；支持路线、遇障停步和固定平面自动绕障。
@@ -59,7 +60,7 @@ Lyapunov 基于 [DSH](https://github.com/deepseek-ai/deepseek-harness) 的“万
 
 ## 在 Linux 上安装
 
-在 Linux 或 WSL2 的图形桌面会话中打开终端。以下命令默认安装 **0.2.4.2**。
+在 Linux 或 WSL2 的图形桌面会话中打开终端。以下命令默认安装 **0.2.5**。
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh

@@ -63,7 +63,7 @@ describe('相机导航人工/NL同入口与前台归属',()=>{
  function fixture(){
   const calls:any[]=[],state={front:true,visible:true,viewer:undefined as Partial<CameraAuthoringViewer>|undefined,current:scene}
   state.viewer={exitCameraMode:options=>calls.push(['exit',options]),focusRobotAnchor:(entityId,kind)=>calls.push(['anchor',entityId,kind])}
-  const ports:CameraNavigationPorts={clientId:'window-a',ownsSurface:()=>state.front,viewerVisible:()=>state.visible,viewer:()=>state.viewer,scene:()=>state.current,ui:{showCentre:value=>calls.push(['centre',value]),openTool:value=>calls.push(['tool',value])},selectEntity:value=>calls.push(['select',value])}
+  const ports:CameraNavigationPorts={clientId:'window-a',ownsSurface:()=>state.front,viewerVisible:()=>state.visible,viewer:()=>state.viewer,scene:()=>state.current,ui:{openTool:value=>calls.push(['tool',value])},selectEntity:value=>calls.push(['select',value])}
   return {calls,state,ports}
  }
  test('三个动作在后台不恢复/定位/抢焦点或改共享UI，前台之后仍能消费',()=>{
@@ -79,8 +79,8 @@ describe('相机导航人工/NL同入口与前台归属',()=>{
    applyCameraNavigation({action,sceneId:'scene',entityId:'arm'},manual.ports)
    applyCameraNavigation({action,clientId:'window-a',sceneId:'scene',entityId:'arm'},natural.ports)
    expect(natural.calls).toEqual(manual.calls)
-   if(action==='exitCameraView')expect(manual.calls).toEqual([['centre','canvas'],['exit',{restoreView:true,focus:true}]])
-   else expect(manual.calls).toEqual([['centre','canvas'],['tool','robot'],['select','arm'],['anchor','arm',action==='locateTcp'?'tcp':'base']])
+   if(action==='exitCameraView')expect(manual.calls).toEqual([['exit',{restoreView:true,focus:true}]])
+   else expect(manual.calls).toEqual([['tool','robot'],['select','arm'],['anchor','arm',action==='locateTcp'?'tcp':'base']])
   }
  })
  test('前台也不能替另一个client消费，Scene错/未知实例/缺Viewer均拒绝',()=>{
@@ -96,6 +96,6 @@ describe('相机导航人工/NL同入口与前台归属',()=>{
   state.visible=true;state.viewer={};expect(()=>applyCameraNavigation({action:'exitCameraView'},ports)).toThrow('EXIT_UNSUPPORTED');expect(calls).toEqual([])
   state.viewer={focusRobotAnchor:()=>{throw Error('VIEWER_ROBOT_ANCHOR_UNAVAILABLE')}}
   expect(()=>applyCameraNavigation({action:'locateBase',entityId:'arm'},ports)).toThrow('ROBOT_ANCHOR_UNAVAILABLE')
-  expect(calls).toEqual([['centre','canvas'],['tool','robot'],['select','arm']])
+  expect(calls).toEqual([['tool','robot'],['select','arm']])
  })
 })

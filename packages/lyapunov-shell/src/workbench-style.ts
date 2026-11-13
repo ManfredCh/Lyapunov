@@ -71,19 +71,9 @@ const frameStyle = `
 .lya-wb-header .lya-status[data-state=running] .lya-status-dot{background:var(--lya-ok)}
 .lya-wb-header .lya-status[data-state=sync] .lya-status-dot{background:var(--lya-warn)}
 .lya-wb-admin{padding:5px 10px;margin:0;border-bottom:1px solid var(--lya-line);background:var(--lya-chrome)}
-/* 主体：对话列（360–420，画布优先）｜ 拖拽条 ｜ 工作面 ｜ 最右工具栏。 */
+/* 原生场景标签内的工作面与可选工具栏。 */
 .lya-wb-body{flex:1;min-height:0;display:flex;align-items:stretch;min-width:0;container-type:inline-size;container-name:workbench-body}
-.lya-wb-conversation{flex:0 0 auto;min-width:360px;max-width:420px;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--lya-line);overflow:hidden}
-/* 拖拽条：8px 命中区，跨在列边界上，常态不可见，悬停/拖动时才出一条强调线。 */
-.lya-wb-splitter{flex:0 0 8px;margin:0 -4px;cursor:col-resize;touch-action:none;position:relative;z-index:4}
-.lya-wb-splitter::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:2px;background:transparent}
-.lya-wb-splitter:hover::after,.lya-wb-splitter[data-dragging]::after{background:var(--lya-emphasis)}
-.lya-wb-surface{container-type:inline-size;container-name:workbench-surface;flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--lya-bg)}
-.lya-wb[data-mode=chat] .lya-wb-surface,.lya-wb[data-mode=chat] .lya-wb-splitter{display:none}
-.lya-wb[data-mode=chat] .lya-wb-conversation{flex:1 1 100%;max-width:none;border-right:0}
-.lya-wb[data-mode=scene] .lya-wb-conversation,.lya-wb[data-mode=scene] .lya-wb-splitter{display:none}
-.lya-wb[data-mode=scene] .lya-wb-surface{flex:1 1 100%}
-/* 双栏太窄就不再硬塞：协作模式在窄视口自动收成单工作面（对话专注仍可一键切回）。 */
+.lya-wb-surface{container-type:inline-size;container-name:workbench-surface;flex:1 1 100%;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--lya-bg)}
 .lya-wb-main{flex:1;min-height:0;display:flex;align-items:stretch;min-width:0;position:relative}
 .lya-wb-centre{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative;overflow:hidden}
 /* 常驻 layer：可见性只改 display，React 位置不变（Viewer/草稿/PTY 宿主因此不被重建）。 */
@@ -96,7 +86,6 @@ const frameStyle = `
 .lya-wb-panel{position:absolute;top:0;bottom:0;right:0;z-index:30;min-width:230px;max-width:52%;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--lya-line);background:var(--lya-chrome);box-shadow:-14px 0 36px rgba(0,0,0,.38);animation:lya-panel-in .18s ease-out}
 @keyframes lya-panel-in{from{transform:translateX(48px);opacity:0}to{transform:none;opacity:1}}
 .lya-wb-panel-body{flex:1;min-height:0;overflow:auto;padding:10px 12px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--lya-line-3) transparent}
-.lya-wb-missing{display:grid;place-items:center;flex:1;padding:20px;text-align:center;color:var(--lya-muted)}
 .lya-wb-drawer{flex:0 0 auto;display:flex;flex-direction:column;border-top:1px solid var(--lya-line);background:var(--lya-chrome);min-height:0}
 .lya-wb-drawer[hidden]{display:none}
 .lya-wb-drawer-handle{height:7px;cursor:row-resize;touch-action:none;background:transparent}

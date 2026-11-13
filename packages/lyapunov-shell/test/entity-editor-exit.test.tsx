@@ -191,7 +191,7 @@ test('两个Session真实同Portal仅active面板可见，隐藏稿不丢且非�
  function Surface({owner,active}:{owner:'a'|'b';active:boolean}){
   const ui=useWorkbenchUI(),snapshot=snapshots[owner]
   const commit=async(input:SceneCommit)=>{writes.push({owner,input:structuredClone(input)});snapshots[owner]=await stores[owner].scene.commit(input);draw();return snapshots[owner]}
-  return React.createElement(WorkSurface,{sessionId:'session-'+owner,active,nativeTab:true,tr:(_zh:string,en:string)=>en,renderSlot:((name:string,props:any)=>name==='lyapunov.workbench.session'?props.children:null) as any,centre:null,panel:React.createElement(CurrentPanel,{owner}),retainedPanel:{tool:'object',children:React.createElement(EntityEditor,{sceneId:snapshot.sceneId,revision:snapshot.revision,entity:snapshot.entities[0]!,entities:snapshot.entities,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'entity-editor:'+owner})},deliverables:null})
+  return React.createElement(WorkSurface,{sessionId:'session-'+owner,active,tr:(_zh:string,en:string)=>en,renderSlot:((name:string,props:any)=>name==='lyapunov.workbench.session'?props.children:null) as any,centre:null,panel:React.createElement(CurrentPanel,{owner}),retainedPanel:{tool:'object',children:React.createElement(EntityEditor,{sceneId:snapshot.sceneId,revision:snapshot.revision,entity:snapshot.entities[0]!,entities:snapshot.entities,tr:(_zh:string,en:string)=>en,commit,exitBridge:bridge,exitId:'entity-editor:'+owner})},deliverables:null})
  }
  let current:'a'|'b'='a'
  function Harness(){const ui=useWorkbenchUI();return React.createElement(React.Fragment,null,

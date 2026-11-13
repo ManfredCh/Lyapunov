@@ -541,7 +541,7 @@ test('真实 Workbench：Robots 首屏 → 实例详情 → 返回，无策略�
     const {Workbench} = await import('../src/workbench.tsx')
     const {ToolRail} = await import('../src/tool-rail.tsx')
     await act(async () => root.render(createElement(Fragment, null,
-      createElement(Workbench, {sessionId: 'rc-p4', nativeTab: true, t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+      createElement(Workbench, {sessionId: 'rc-p4', t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
       createElement(ToolRail, {tr, engine: 'mujoco'}),
     )))
     await flush(320); await flush(320)
@@ -652,7 +652,7 @@ test('真实 Workbench：无机器人实例时先显示目录与真实空态，�
     const {Workbench} = await import('../src/workbench.tsx')
     const {ToolRail} = await import('../src/tool-rail.tsx')
     await act(async () => root.render(createElement(Fragment, null,
-      createElement(Workbench, {sessionId: 'rc-p4-empty', nativeTab: true, t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
+      createElement(Workbench, {sessionId: 'rc-p4-empty', t: (key: string) => key === 'open' ? 'Scene workbench' : '场景工作台', renderSlot: (_n: any, _p: any, options: any) => options?.fallback ?? null} as any),
       createElement(ToolRail, {tr, engine: 'mujoco'}),
     )))
     await flush(320); await flush(320)

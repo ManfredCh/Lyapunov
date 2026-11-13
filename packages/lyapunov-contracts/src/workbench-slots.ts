@@ -1,11 +1,7 @@
 /**
  * 工作台自身的槽位契约（声明者是 Lyapunov 工作台，不是 DSH 平台）。
  *
- * 中央工作区分成两块内容：画布（固定入口，属于 lyapunov-shell）与文件编辑工作面
- * （属于 lyapunov-workspace）。产品终端统一使用 DSH 原生侧栏终端标签，不再经过工作台槽位。
- * 两个客户端插件各自打包，跨插件复用同一份呈现只能用槽位，不能互相 import 源码
- * （那会把同一份业务打进两个 bundle，等于复制）。
- *
+ * 场景画布由工作台呈现，文件与终端由 DSH 原生侧栏标签承载。
  * 槽位由工作台的注册项声明（与原生 ui-conversation 用 `main` key `conversation` 声明
  * `main.conversation` 的做法一致），工作台在自己的布局里渲染它们；注册方只贡献呈现，
  * 会话/草稿/终端等状态仍由各自现有所有者持有。
@@ -56,15 +52,6 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
       kind: "single"
       scope: "session"
       owner: WorkbenchSessionOwnerProps
-    }
-    /**
-     * 中央工作区的主视图，按 key 派发：`file` 是文件编辑工作面（lyapunov-workspace 提供）。
-     * 场景画布不走这里——它是工作台自己的固定入口。
-     */
-    "lyapunov.workbench.centre": {
-      kind: "keyed"
-      scope: "session"
-      owner: WorkbenchSurfaceOwnerProps
     }
   }
 }

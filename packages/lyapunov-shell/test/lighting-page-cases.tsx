@@ -227,10 +227,10 @@ test("Lighting 写值经 Workbench 的 scene_edit 命令提交并在回读后更
  const rail=(label:string)=>[...document.querySelectorAll<HTMLButtonElement>(".lya-rail-item")].find(button=>button.getAttribute("aria-label")===label)
  try{
   await act(async()=>root.render(reactCreate(FixtureUI)))
-  await act(async()=>{fixtureUI.showCentre("canvas");fixtureUI.setMode("collab");fixtureUI.closeDrawer();fixtureUI.closeTool()})
+  await act(async()=>{fixtureUI.closeDrawer();fixtureUI.closeTool()})
   await act(async()=>root.render(reactCreate(Fragment,null,
    reactCreate(FixtureUI),
-   reactCreate(Workbench,{sessionId:"lighting-api-session",nativeTab:true,t:()=>"Scene workbench",renderSlot:(_name:any,_props:any,options:any)=>options?.fallback??null} as any),
+   reactCreate(Workbench,{sessionId:"lighting-api-session",t:()=>"Scene workbench",renderSlot:(_name:any,_props:any,options:any)=>options?.fallback??null} as any),
    reactCreate(ToolRail,{tr:(_zh:string,en:string)=>en,engine:"mujoco"} as any)
   )))
   await flush();await flush()

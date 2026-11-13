@@ -34,7 +34,7 @@ test.each(['拒绝关闭','正常关闭','关闭回执前轮询已移除世界']
  const root=createRoot(document.getElementById('root')!)
  const flush=()=>act(async()=>{await new Promise(done=>setTimeout(done,600))})
  try{
-  await act(async()=>root.render(createElement(Fragment,null,createElement(Workbench,{sessionId:'fault-fixture',nativeTab:true,t:()=> '场景工作台',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),createElement(ToolRail,{tr:(_zh:string,en:string)=>en,engine:'newton'}))))
+  await act(async()=>root.render(createElement(Fragment,null,createElement(Workbench,{sessionId:'fault-fixture',t:()=> '场景工作台',renderSlot:(_n:any,_p:any,options:any)=>options?.fallback??null} as any),createElement(ToolRail,{tr:(_zh:string,en:string)=>en,engine:'newton'}))))
   await flush();await flush();expect(frameCalls).toBeGreaterThan(0);expect(document.querySelector('[data-testid="scene-world-lifecycle"]')?.getAttribute('data-world-phase')).toBe('running')
   failed=true;await flush();await flush()
   const status=document.querySelector('[data-testid="scene-world-lifecycle"]')!;expect(status.getAttribute('data-world-phase')).toBe('failed');expect(status.textContent).toContain('Newton nonfinite body state');expect(status.textContent).not.toContain('物理世界运行中')
