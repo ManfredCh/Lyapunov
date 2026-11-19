@@ -26,8 +26,8 @@ import {existsSync} from 'node:fs'
 import {join,resolve,basename,isAbsolute} from 'node:path'
 import {execFile} from 'node:child_process'
 import {createHash} from 'node:crypto'
-import {ensureUnityMcp,unityMcpSupplyPaths} from '../../../script/unity-mcp-supply.ts'
-import {blenderMcpPaths,blenderMcpStatus,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
+import {ensureUnityMcp,unityMcpSupplyPaths,UNITY_MCP_VERSION} from '../../../script/unity-mcp-supply.ts'
+import {blenderMcpLock,blenderMcpPaths,blenderMcpStatus,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
 import {resolveBlenderExecutable} from '../../../script/runtime-patch.ts'
 import {CREATIVE_TOOLS_CATALOG,downloadPlan,HF_DEFAULT_MIRROR,type CreativeToolId} from '../../../script/creative-tools-catalog.ts'
 
@@ -36,6 +36,7 @@ import {canonicalTargetPath,pathWithin,isForeignSessionTarget} from '../../lyapu
 import type {ExternalToolsState,ExternalMcpInput,ExternalMcpRow,ExternalToolReading} from './external-tools-state.ts'
 import {integrationAssociations,classifyMcpIntegration,type ExternalSkillRow} from './plugin-marketplace.ts'
 import {discoverIntegrations} from './integration-discovery.ts'
+import {discoverExtensions} from './extension-discovery.ts'
 
 declare module '@deepseek-ai/dsh-jobs' {interface JobKindMap {'external-install':'external-install'}}
 const MCP_PLUGIN='@deepseek-ai/dsh-mcp-client'
@@ -197,7 +198,7 @@ export async function externalToolsState(ctx:Context,sessionId?:string,signal:Ab
  const installJobs=ctx.get('jobs')?.list(agent?.id).filter(j=>j.kind==='external-install'||j.kind==='fastgs-external').map(j=>({jobId:String(j.id),registryId:j.registryId??null,status:j.status,label:j.label,progress:j.progress??null,detail:j.detail??null}))??[]
  const skillOwner=ctx.get('skills'),skills:ExternalSkillRow[]=[];let skillsComplete=false,skillsDetail:string|null=null
  if(skillOwner){try{const snapshot=await skillOwner.snapshot({scope:agent as unknown as ScopeKey|undefined,cwd:agent?.session.header.cwd??profile?.cwd,signal});skillsComplete=snapshot.complete;for(const row of snapshot.skills)skills.push({name:row.name,description:row.description,provider:row.provider,source:row.source,path:row.path??null,modelInvocable:row.invocation.modelInvocable,userInvocable:row.invocation.userInvocable,toolVisible:tools.includes('skill'),currentScope:agent!==undefined});if(!snapshot.complete)skillsDetail='技能来源探测未完整；保留原生不完整读数。 / Native skill discovery is incomplete.'}catch(error){skillsDetail=errorText(error)}}else skillsDetail='原生技能目录未装配。 / Native skill catalog is unavailable.'
- return {capturedAt:Date.now(),writable:!!settings?.writable,software,mcp,skills,skillsComplete,skillsDetail,scopeSessionId:sessionId??null,candidates,associations:integrationAssociations(mcp),blenderSupply:{ready:supply.ready,command:paths.command,existingCommand,addon:paths.addon,detail:supply.detail},installJobs}
+ return {capturedAt:Date.now(),writable:!!settings?.writable,software,mcp,skills,skillsComplete,skillsDetail,scopeSessionId:sessionId??null,candidates,associations:integrationAssociations(mcp),blenderSupply:{ready:supply.ready,command:paths.command,existingCommand,addon:paths.addon,detail:supply.detail},bridgeVersions:{'blender-mcp':blenderMcpLock().version,'unity-mcp':UNITY_MCP_VERSION},installJobs}
 }
 
 /** 安装仅在显式点击后起原生 Jobs；目录、版本与HF端点来自现有 owner。 */
@@ -339,6 +340,7 @@ export function applyExternalToolsHost(ctx:Context,defaults:readonly import('../
  ctx.on('agent/created',async()=>{await associateKnownBlender(ctx).catch(error=>ctx.logger.warn('Existing Blender association failed: '+errorText(error)))})
  const register=(path:string,methods:readonly ('GET'|'POST')[],handler:(r:Request)=>Promise<Response>)=>ctx.effect(()=>ctx.connection.fetch.register({path:'/api/lyapunov/external-tools/'+path,methods,requestBody:'buffered',fetch:async r=>{try{return await handler(r)}catch(e){return Response.json({error:errorText(e)},{status:400})}}}))
  register('state',['GET'],async r=>Response.json(await externalToolsState(ctx,new URL(r.url).searchParams.get('sessionId')??undefined,r.signal),{headers:{'cache-control':'private, no-store'}}))
+ register('discover',['GET'],async r=>Response.json(await discoverExtensions(r.signal),{headers:{'cache-control':'private, no-store'}}))
  register('mcp',['POST'],async r=>{await saveExternalMcp(ctx,await r.json() as ExternalMcpInput);return Response.json({saved:true,handshake:'Read the native server state and tool list separately.'})})
  register('enable',['POST'],async r=>Response.json(await setExternalMcpEnabled(ctx,await r.json() as {id:string;enabled:boolean})))
  register('acquire',['POST'],async r=>Response.json({jobId:await startExternalAcquisition(ctx,await r.json() as {id:string;localDir?:string;sessionId?:string},{manual:true})}))

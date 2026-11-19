@@ -299,6 +299,7 @@ Shell 另注册 `viewer_annotation_send_ui`、`viewer_capture`、`sensor_capture
 | `/api/lyapunov/workspace` | POST | `{sessionId,action,input}` 文件、搜索、Git 等操作；交互终端改走原生 `ctx.terminalController`／`ctx.webTerminals`，不再经此 PTY 流 |
 | `/api/lyapunov/model-preview` | GET | 预览文件字节；另有解码器资源路由 |
 | `/api/lyapunov/history-draft` | POST | 会话历史草稿恢复接口；详见对应插件 |
+| `/api/lyapunov/external-tools/discover` | GET | 右侧标签和设置中的扩展市场读取固定上游目录，逐源返回元数据、检查时间和错误。卡片和加号只进入详情。市场确认后复用现有 `external-tools` 安装和下载动作 |
 
 `command` 只允许 `scene_`、`asset_`、`policy_`、`sim_`、`robot_`、`joint_`、`vehicle_`、`viewer_`、`sensor_`、`camera_`、`segment_`、`recording_`、`ui_` 前缀。不能把 `generate_*`、`motion_*`、`bench_*` 或 `share_*` 直接塞进这个代理。
 

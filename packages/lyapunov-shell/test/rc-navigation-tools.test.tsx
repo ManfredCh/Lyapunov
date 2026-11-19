@@ -19,9 +19,9 @@ const upper = RAIL_ENTRIES.filter(entry => entry.group === "tool").map(entry => 
 const lower = RAIL_ENTRIES.filter(entry => entry.group === "work").map(entry => entry.id)
 
 describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
-  test("上组依次 Scene/Objects/Env/Robots/Camera/Capture/Recording/Notes；下组 Physics/Campaigns/引擎/Files/Terminal/Outputs", () => {
+  test("扩展市场放在右侧工具轨的运行与工作面末尾", () => {
     expect(upper).toEqual(["scene", "object", "environment", "robot", "crowd", "camera", "capture", "recording", "annotation"])
-    expect(lower).toEqual(["physics", "campaign", "engine", "file", "terminal", "deliverable"])
+    expect(lower).toEqual(["physics", "campaign", "engine", "file", "terminal", "deliverable", "market"])
     // 泛用 Library 退出一级轨（R-008）；Physics 在下组但行为是工具面板，不是抽屉/偏好。
     expect(RAIL_ENTRIES.some(entry => (entry.id as string) === "asset")).toBe(false)
     expect(RAIL_ENTRIES.find(entry => entry.id === "physics")!.behavior).toBe("tool")
@@ -33,12 +33,11 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
     }
   })
 
-  test("P17 视觉减法：工具轨 15 入口原顺序不变，宽屏也图标化，名称全部走 aria-label/title", () => {
-    // 15 项入口是产品契约（人群双通道控制新增「人群」，紧随 Robots），不减项、不换序；可见文字不再常驻（CSS 由 .lya-rail-item .lya-rail-label 隐藏）。
-    expect(RAIL_ENTRIES.length).toBe(15)
+  test("工具轨保持原有入口顺序，扩展市场有完整可访问名称", () => {
+    expect(RAIL_ENTRIES.length).toBe(16)
     expect(RAIL_ENTRIES.map(entry => entry.id)).toEqual([
       "scene", "object", "environment", "robot", "crowd", "camera", "capture", "recording", "annotation",
-      "physics", "campaign", "engine", "file", "terminal", "deliverable",
+      "physics", "campaign", "engine", "file", "terminal", "deliverable", "market",
     ])
     for (const entry of RAIL_ENTRIES) expect(entry.en.trim().length).toBeGreaterThan(0)
   })
@@ -111,6 +110,20 @@ describe("RC 工具轨顺序与独立 Physics（R-001/R-009）", () => {
       expect(switched).toEqual(["isaac"])
       // 引擎切换只写偏好，不改当前工具面板事实：Physics 仍处于打开态。
       expect(physics.getAttribute("aria-pressed")).toBe("true")
+      let marketOpens = 0, sceneReveals = 0
+      const renderNativeRail = async (marketActive: boolean) => act(async () => root.render(createElement(ToolRail, {
+        tr: (_zh: string, en: string) => en, nativeSceneActive: false, marketActive,
+        openMarket: () => {marketOpens++}, revealScene: () => {sceneReveals++},
+      })))
+      await renderNativeRail(false)
+      const market = document.querySelector<HTMLButtonElement>('button[aria-label="Extension market"]')!
+      expect(market.getAttribute('aria-pressed')).toBe('false')
+      await act(async () => market.click())
+      expect(marketOpens).toBe(1)
+      expect(sceneReveals).toBe(0)
+      expect(JSON.parse(localStorage.getItem("lyapunov.workbench.ui")!).tool).toBe("physics")
+      await renderNativeRail(true)
+      expect(market.getAttribute('aria-pressed')).toBe('true')
     } finally {
       await act(async () => root.unmount())
       dom.window.close()

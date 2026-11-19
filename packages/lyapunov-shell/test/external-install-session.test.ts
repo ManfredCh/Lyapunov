@@ -1,5 +1,6 @@
 import {describe,expect,test,afterEach} from 'bun:test'
 import type {Context} from '@deepseek-ai/cordis'
+import type {SessionId} from '@deepseek-ai/dsh-session/types'
 import {startExternalInstallSession,startExternalMcpRegistrationSession} from '../src/external-install-session.ts'
 import {externalMcpConfig,externalMcpRevision,saveExternalMcp,requireExternalWrite,startExternalAcquisition,externalToolsState,setExternalMcpEnabled,associateKnownBlender,externalToolManagement,applyExternalToolsHost} from '../src/external-tools-host.ts'
 import {runBlenderMcpSupplyCommand,ensureBlenderMcp} from '../../../script/blender-mcp.ts'
@@ -22,7 +23,7 @@ function fixture(ok=true,wait?:Promise<void>){
   },
  }
 
- const workspaces={list:{getSnapshot:()=>({items:[{workspaceId:'workspace',sessionIds:['existing']}]})}}
+ const workspaces={list:{getSnapshot:()=>({items:[{workspaceId:'workspace',sessionIds:['existing']},{workspaceId:'sidebar-workspace',sessionIds:['sidebar-session']}]})}}
  const ctx={get:(name:string)=>name==='sessions'?sessions:name==='workspaces'?workspaces:undefined,uiWorkspace:{openSession:(id:string)=>{calls.push({kind:'open',value:id});calls.push({kind:'panel',value:null})}}} as unknown as Context
  return {ctx,calls,close:()=>calls.push({kind:'close',value:true})}
 }
@@ -39,6 +40,10 @@ describe('外部工具从设置进入新会话',()=>{
   const prompt=JSON.stringify(f.calls.find(row=>row.kind==='prompt')!.value)
   expect(prompt).toContain('cannot by itself claim that the editor is installed or running')
   expect(prompt).toContain('third-party integration')
+ })
+ test('右侧标签发起安装时，新会话沿用该标签所属工作区',async()=>{
+  const f=fixture();await startExternalInstallSession(f.ctx,'blender',f.close,'sidebar-session' as SessionId)
+  expect(f.calls[0]!.value).toEqual({workspaceId:'sidebar-workspace'})
  })
  test('显式登记MCP把用户值带进英文请求，不硬编码服务名',async()=>{
   const f=fixture();await startExternalMcpRegistrationSession(f.ctx,'  my-server --stdio  ',f.close)

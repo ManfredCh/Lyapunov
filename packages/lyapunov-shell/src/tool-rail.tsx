@@ -3,7 +3,7 @@
  *
  * 上组是内容/采集工具：Scene（场景与组成）、Objects（物件清单）、Environment（环境与光照）、
  * Robots（机器人）、Camera（机器人机位）、Capture（自由视角）、Recording（记录作业）、Notes（批注）。
- * 下组是运行与工作面：Physics（物理世界独立配置）、当前引擎（单击切换偏好）、Files、Terminal、Outputs。
+ * 下组是运行与工作面：Physics（物理世界独立配置）、当前引擎（单击切换偏好）、Files、Terminal、Outputs、扩展市场。
  * Physics 与其余工具一样开工作面上的面板；它放在下组是因为它描述**运行环境**而不是内容编辑。
  *
  * 窄屏收成紧凑图标列：短标签隐藏，可访问名称（aria-label）与 tooltip（title）保留。
@@ -13,6 +13,7 @@
  * 这里只发展示状态命令；面板内容由 work-surface 负责，场景/world 数据仍属于既有 host 所有者。
  */
 import {WorkbenchIcon,type WorkbenchIconId} from "./vendor/tabler/icons.tsx"
+import {IconPluginPinwheelOutlineRegular} from "@deepseek-ai/dsh-client-ui-primitives"
 import type {Translate} from "./entity-editor.tsx"
 import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
 
@@ -27,7 +28,7 @@ import {useWorkbenchUI,type ToolId} from "./workbench-ui.ts"
  * 环境资源归 Environment，导入/复用从各域进入。
  */
 export type RailBehavior="tool"|"engine"|"surface"
-export interface RailEntry{id:ToolId|"engine"|"file"|"terminal"|"deliverable";zh:string;en:string;shortEn:string;group:"tool"|"work";behavior:RailBehavior;/** id 不在 WorkbenchIconId 白名单内时才给：图标沿用既有 id 而不是为单个入口扩图标库。 */ icon?:WorkbenchIconId}
+export interface RailEntry{id:ToolId|"engine"|"file"|"terminal"|"deliverable"|"market";zh:string;en:string;shortEn:string;group:"tool"|"work";behavior:RailBehavior;icon?:WorkbenchIconId}
 
 export const RAIL_ENTRIES:readonly RailEntry[]=[
   {id:"scene",zh:"场景",en:"Scene",shortEn:"Scene",group:"tool",behavior:"tool"},
@@ -47,10 +48,11 @@ export const RAIL_ENTRIES:readonly RailEntry[]=[
   {id:"file",zh:"文件",en:"Files",shortEn:"Files",group:"work",behavior:"surface"},
   {id:"terminal",zh:"终端",en:"Terminal",shortEn:"Terminal",group:"work",behavior:"surface"},
   {id:"deliverable",zh:"产物",en:"Outputs",shortEn:"Outputs",group:"work",behavior:"surface"},
+  {id:"market",zh:"扩展市场",en:"Extension market",shortEn:"Market",group:"work",behavior:"surface"},
 ]
 
 
-export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,engine,preference,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;engine?:string;preference?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
+export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFiles,openTerminal,openMarket,marketActive,engine,preference,onSwitchEngine}:{tr:Translate;compact?:boolean;nativeSceneActive?:boolean;revealScene?:()=>void;openFiles?:()=>void;openTerminal?:()=>void;openMarket?:()=>void;marketActive?:boolean;engine?:string;preference?:string;onSwitchEngine?:(next:"isaac"|"mujoco")=>void}){
   const ui=useWorkbenchUI()
   const state=ui.getSnapshot()
   const render=(entry:RailEntry)=>{
@@ -63,7 +65,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         :tr(`物理引擎：${runningEngine}（点击切换偏好）`,`Physics engine: ${runningEngine} (click to change preference)`)
       :tr(entry.zh,entry.en)
     const shortLabel=entry.id==="engine"?runningEngine:tr(entry.zh,entry.shortEn)
-    const active=(nativeSceneActive??true)&&(
+    const active=entry.id==='market'?marketActive===true:(nativeSceneActive??true)&&(
       entry.behavior==="tool"?state.tool===entry.id
       :entry.id==="file"||entry.id==="engine"?false
       :state.drawer===entry.id)
@@ -78,6 +80,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
       data-engine-preference={entry.id==="engine"?preference:undefined}
       data-rail-behavior={entry.behavior}
       onClick={()=>{
+        if(entry.id==="market"){openMarket?.();return}
         if(entry.behavior==="engine"){const base=preference==="isaac"||preference==="mujoco"?preference:engine;onSwitchEngine?.(base==="isaac"?"mujoco":"isaac");return}
         if(entry.id==="file"){openFiles?.();return}
         // 终端只打开 DSH 原生侧栏标签；不再落到产品自建的底部终端抽屉。
@@ -90,7 +93,7 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
         else ui.toggleDrawer("deliverable")
       }}
     >
-      <WorkbenchIcon id={entry.icon??(entry.id as WorkbenchIconId)} size={16}/>
+      {entry.id==="market"?<IconPluginPinwheelOutlineRegular size={16}/>:<WorkbenchIcon id={entry.icon??(entry.id as WorkbenchIconId)} size={16}/>}
       <span className="lya-rail-label">{shortLabel}</span>
     </button>
   }
@@ -100,6 +103,6 @@ export function ToolRail({tr,compact=false,nativeSceneActive,revealScene,openFil
   // 分组、按钮顺序与每个入口自己的 aria-label/title/aria-pressed 不变。
   return <nav className="lya-rail" data-compact={compact?"compact":"icon"} aria-label={tr("工作台工具","Workbench tools")}>
     <div className="lya-rail-group" data-group-label={tr("工具","Tools")}>{RAIL_ENTRIES.filter(item=>item.group==="tool").map(render)}</div>
-    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("运行与工作面","Runtime and surfaces")}>{RAIL_ENTRIES.filter(item=>item.group==="work").map(render)}</div>
+    <div className="lya-rail-group lya-rail-bottom" data-group-label={tr("运行与工作面","Runtime and surfaces")}>{RAIL_ENTRIES.filter(item=>item.group==="work"&&(item.id!=="market"||openMarket)).map(render)}</div>
   </nav>
 }

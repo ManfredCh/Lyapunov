@@ -1,6 +1,7 @@
 import type {Context} from '@deepseek-ai/cordis'
 import type {ISessions} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {IWorkspaces} from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type {SessionId} from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import {mainSessionId} from './history-navigation.ts'
 import {externalToolOption} from './external-tools.ts'
@@ -14,10 +15,10 @@ import {externalToolOption} from './external-tools.ts'
  * 这里走 `sessions.using` 的原生生命周期：retain → await ready → 回调 → finally 释放临时引用。
  * `openSession` 会以 `mainView` 引用持有会话，所以临时引用释放后会话仍存活。
  */
-async function startExternalSession(ctx:Context,prompt:string,close:()=>void):Promise<string>{
+async function startExternalSession(ctx:Context,prompt:string,close:()=>void,sourceSessionId?:SessionId):Promise<string>{
  const sessions=ctx.get('sessions') as unknown as ISessions|undefined
  if(!sessions)throw new Error('会话服务尚未就绪，请稍后重试。 / The native session service is not ready.')
- const snapshot=sessions.list.getSnapshot(),current=mainSessionId(snapshot)
+ const snapshot=sessions.list.getSnapshot(),current=sourceSessionId??mainSessionId(snapshot)
  const workspaces=ctx.get('workspaces') as unknown as IWorkspaces|undefined
  const workspace=workspaces?.list.getSnapshot().items.find(row=>current&&row.sessionIds.includes(current))
  const sessionId=await sessions.create(workspace?{workspaceId:workspace.workspaceId}:current&&snapshot.byId[current]?.cwd?{cwd:snapshot.byId[current]!.cwd}:{})
@@ -33,9 +34,9 @@ async function startExternalSession(ctx:Context,prompt:string,close:()=>void):Pr
 }
 
 /** 每次显式选择创建新的原生会话，不复用当前空白会话，也不向当前任务追加安装请求。 */
-export async function startExternalInstallSession(ctx:Context,id:string,close:()=>void):Promise<string> {
+export async function startExternalInstallSession(ctx:Context,id:string,close:()=>void,sourceSessionId?:SessionId):Promise<string> {
  const option=externalToolOption(id)
- return await startExternalSession(ctx,option.prompt,close)
+ return await startExternalSession(ctx,option.prompt,close,sourceSessionId)
 }
 
 /**

@@ -311,6 +311,8 @@ Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机�
 
 完整中文步骤见[安装、升级、回滚与卸载手册](https://vorynel.com/lyapunov/guide.html)，各引擎与机器人差异见[能力总表](docs/CAPABILITY_MATRIX.md)。
 
+开发版可从工作台右侧工具栏打开「扩展市场」，也可从「设置 → 集成 → 发现扩展」进入。顶部可按 MCP、Skill、软件、模型、DSH 插件和人物筛选；「全部」按同样的类别分组。点卡片或加号查看说明、来源和本机状态，确认后提交安装或下载。公开目录候选提供来源详情。
+
 人体创建、合法蒙皮角色导入与物理时间动作见 [人体创建与运动](docs/HUMAN_CROWD.md)。MuJoCo支持运动学分段碰撞、有界固定Z平面绕障、拥堵解除与原生ragdoll受力；Isaac CPU/none支持同世界原生USD资产+运动学人体、基础路径、原生停障与停止。稳定平衡/恢复控制器、Isaac高级ragdoll/A*与RTX人体成像尚未完成。
 
 原生 USD/USDA/USDC/USDZ 与 SimReady 来源接入、运行时准备、工具示例和显示/引擎边界见 [SimReady 与 USD 资产](docs/SIMREADY_USD.md)。

@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os'
 import {join,dirname} from 'node:path'
 import {integrationAssociations,classifyMcpIntegration,marketplaceEntries,filterMarketplace} from '../src/plugin-marketplace.ts'
 import {validExistingExecutable} from '../src/integration-discovery.ts'
+import {discoverExtensions} from '../src/extension-discovery.ts'
 // 产品与固定SDK各有自己的依赖树；测试按客户端的单React合同编译真实组件。
 const settingsUiDir=await realpath(await mkdtemp(join(tmpdir(),'product-native-settings-ui-')))
 const productRootForUi=fileURLToPath(new URL('../../../',import.meta.url))
@@ -28,6 +29,40 @@ import {Context} from '@deepseek-ai/cordis'
 
 const mcp=(name:string,over:Partial<ExternalMcpRow>={}):ExternalMcpRow=>({id:'native-'+name,serverName:name,transport:'stdio',command:'mcp-for-blender',url:null,argsCount:0,envNames:['PRIVATE_TOKEN'],headerNames:[],status:'configured',tools:[],revision:123,detail:'Await native connection',enabled:true,currentScope:false,owner:'Native profile',configLocation:'/owned/profile/cordis.patch.yml',commandLocation:'/tools/mcp-for-blender',integration:'blender',...over})
 const state=():ExternalToolsState=>({capturedAt:1791430000000,writable:true,scopeSessionId:'current',software:[{id:'blender',installed:true,detail:'Installed software only',location:'/tools/blender',adapter:'blender_run'},{id:'unity',installed:null,detail:'Editor not selected; Hub discovered',location:'/tools/unityhub',adapter:'MCP'}],mcp:[mcp('customBlender',{status:'connected',currentScope:true,tools:['mcp__customBlender__get_scene_info']})],skills:[{name:'robot-provisioning',description:'Acquire a robot',provider:'filesystem',source:'bundled',path:'/product/skills/robot-provisioning/SKILL.md',modelInvocable:true,userInvocable:true,toolVisible:true,currentScope:true}],skillsComplete:true,candidates:[{id:'blender:/tools/mcp-for-blender',kind:'blender',path:'/tools/mcp-for-blender',source:'PATH',modifiedAt:0,executable:true,addonPath:'/product/addon.py',addonExists:false}],associations:integrationAssociations([mcp('customBlender')]),blenderSupply:{ready:false,command:'/product/bin/mcp-for-blender',existingCommand:'/tools/mcp-for-blender',addon:'/product/addon.py',detail:'Addon not installed'},installJobs:[]})
+
+const marketTime = 1791430000000
+const commit = '079a6586ae8b409df3ac4f103b1de2981c805061'
+const reportedCask = {id: 'software:blender', name: 'Blender', kind: 'software', catalogId: 'blender', version: '5.3.0'} as const
+const communityCandidate = {id: 'dsh:fixture-tools', name: 'Fixture tools', kind: 'bundle', version: '1.2.0', description: 'Read-only fixture search'}
+
+test('固定来源独立回报，已登记软件关联，第三方安装参数不进入目录', async () => {
+  const requests: string[] = []
+  const activeMcp = {server: {name: 'io.github.fixture/blender', version: '2.0.0', packages: [{command: 'untrusted-program'}]}, _meta: {'io.modelcontextprotocol.registry/official': {status: 'active'}}}
+  const fetcher = (async (input, options) => {
+    const host = new URL(String(input)).hostname
+    requests.push(host)
+    expect(options).toMatchObject({redirect: 'error', credentials: 'omit'})
+    if (host === 'formulae.brew.sh') return Response.json({token: 'blender', version: '5.3.0', url: 'https://untrusted.invalid'})
+    if (host === 'registry.modelcontextprotocol.io') return Response.json({servers: [activeMcp, activeMcp, {...activeMcp, server: {name: 'io.github.fixture/deleted', version: '2.0.0'}, _meta: {'io.modelcontextprotocol.registry/official': {status: 'deleted'}}}]})
+    if (host === 'silentforfar.github.io') return Response.json({format: 1, plugins: [
+      {name: 'fixture-tools', title: {en: 'Fixture tools'}, versions: [
+        {version: '1.2.0', publishTimestamp: 20, source: {type: 'git', url: 'https://github.com/team/tools.git', commit}},
+        {version: '1.1.0', publishTimestamp: 10, source: {type: 'git', url: 'https://untrusted.invalid/skip/this', commit}},
+      ]},
+      {name: 'bad name', versions: [{version: '1.2.0', publishTimestamp: 20}]},
+    ]})
+    return new Response(null, {status: 503})
+  }) as typeof fetch
+  const readings = await discoverExtensions(new AbortController().signal, fetcher)
+  expect(requests).toEqual(['formulae.brew.sh', 'registry.modelcontextprotocol.io', 'silentforfar.github.io', 'api.github.com'])
+  expect(readings[0]?.entries).toEqual([reportedCask])
+  expect(readings[1]?.entries).toHaveLength(1)
+  expect(readings[1]?.entries[0]).toMatchObject({id: 'mcp:io.github.fixture/blender', kind: 'mcp', version: '2.0.0'})
+  expect(readings[2]?.entries).toHaveLength(1)
+  expect(readings[2]?.entries[0]).toMatchObject({id: communityCandidate.id, version: communityCandidate.version, url: `https://github.com/team/tools/tree/${commit}`})
+  expect(readings[3]).toMatchObject({id: 'unity-releases', entries: [], error: 'HTTP 503'})
+  expect(JSON.stringify(readings)).not.toMatch(/untrusted-program|untrusted\.invalid/)
+})
 
 describe('插件市场原生读数的薄投影',()=>{
  test('已有软件不能变成MCP连接；config没有scope tools不表示可用',()=>{
@@ -136,8 +171,16 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
  const dom=new JSDOM('<div id="root"></div>',{url:'http://fixture.invalid',pretendToBeVisual:true}),saved=new Map<string,PropertyDescriptor|undefined>()
  const names=['window','document','navigator','HTMLElement','Event','MouseEvent','Node','Element','MutationObserver','getComputedStyle','requestAnimationFrame','cancelAnimationFrame','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch']
  for(const name of names){saved.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{value:name==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[name],configurable:true,writable:true})}
- let current=state();const calls:any[]=[];let nativeDocumentCalls=0
- globalThis.fetch=(async(input:any,init?:RequestInit)=>{calls.push({path:String(input),method:init?.method??'GET',body:init?.body});return Response.json(String(input).includes('/mcp')?{saved:true}:current)}) as typeof fetch
+ let current={...state(),bridgeVersions:{'unity-mcp':'10.2.0'}};const calls:any[]=[];let nativeDocumentCalls=0,marketFails=false
+ globalThis.fetch=(async(input:any,init?:RequestInit)=>{
+  const path=String(input);calls.push({path,method:init?.method??'GET',body:init?.body})
+  if(path.endsWith('/discover'))return Response.json([
+   {id:'homebrew',name:'Homebrew Cask',url:'https://formulae.brew.sh/cask/blender',checkedAt:marketTime,entries:[reportedCask]},
+   {id:'fixture',name:'DSH fixtures',url:'https://fixture.invalid/',checkedAt:marketTime,entries:marketFails?[]:[communityCandidate],...marketFails?{error:'HTTP 503'}:{}},
+  ])
+  if(path.endsWith('/acquire'))return Response.json({jobId:'fixture-market-job'})
+  return Response.json(path.includes('/mcp')?{saved:true}:current)
+ }) as typeof fetch
  const {createRoot}=await import('react-dom/client'),root=createRoot(document.getElementById('root')!),{act}=React
  const click=async(node:HTMLElement)=>{if(!node)throw Error('UI target missing; buttons='+[...document.querySelectorAll('button')].map(x=>x.textContent).join('|'));await act(async()=>{node.click();await new Promise(r=>setTimeout(r,0))})}
  const button=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(v=>v.textContent===text)!
@@ -145,6 +188,10 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
  const tab=(text:string)=>[...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(v=>v.textContent===text)!
  const back=()=>click(button('Integrations'))
  const openRow=(text:string)=>click([...document.querySelectorAll<HTMLButtonElement>('.lya-settings-list-row')].find(v=>v.querySelector('.lya-settings-row-name')?.textContent===text)!)
+ const marketButton=(label:string)=>document.querySelector<HTMLButtonElement>(`[aria-label="Extension results"] button[aria-label="${label}"]`)!
+ const marketTab=(label:string)=>[...document.querySelectorAll<HTMLButtonElement>('[aria-label="Extension categories"] [role="tab"]')].find(v=>v.textContent===label)!
+ const marketGroups=()=>[...document.querySelectorAll('[aria-label="Extension results"] .lya-market-group > h3')].map(heading=>heading.textContent)
+ const posted=()=>calls.filter(row=>row.method==='POST')
  const change=async(value:string)=>{const input=document.querySelector<HTMLInputElement>('input[type="search"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})}
  try{
   await act(async()=>{root.render(<ExternalToolsSettings tr={(_zh,en)=>en} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{nativeDocumentCalls++}}/>);await new Promise(r=>setTimeout(r,0))})
@@ -159,8 +206,39 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
   const choose=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(v=>v.textContent?.includes(text))!
   await click(choose('first'));expect(nativeDocumentCalls).toBe(2);await click(chooser);await click(choose('second'));expect(nativeDocumentCalls).toBe(3);expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
   current.writable=false;await refresh();expect(document.querySelector('input[value="customBlender"]')).toBeNull();expect(document.body.textContent).not.toContain('Save and connect');expect(document.body.textContent).not.toContain('Unity addon registry directory (absolute path)')
+  expect(calls.some(row=>row.path.endsWith('/discover'))).toBe(false)
+  await click(button('Discover extensions'));expect(document.querySelector('h2')?.textContent).toBe('Extension market')
+  expect(calls.filter(row=>row.path.endsWith('/discover'))).toHaveLength(1)
+  expect(marketGroups()).toEqual(['MCP','Skill','Software','Models','DSH plugins','Character assets'])
+  await click(marketTab('MCP'));expect(marketGroups()).toEqual(['MCP']);expect(marketButton('Blender MCP')).not.toBeNull();expect(marketButton('Blender')).toBeNull()
+  await click(marketTab('Software'));expect(marketGroups()).toEqual(['Software']);expect(marketButton('FastGS')).not.toBeNull();expect(marketButton('SAM 3')).toBeNull()
+  await click(marketTab('Models'));expect(marketGroups()).toEqual(['Models']);expect(marketButton('SAM 3')).not.toBeNull();expect(marketButton('Blender MCP')).toBeNull()
+  await change('blender');expect(marketGroups()).toEqual([]);expect(document.body.textContent).toContain('No matching extensions in this category.')
+  await click(marketTab('Software'));expect(marketGroups()).toEqual(['Software']);expect(marketButton('Blender')).not.toBeNull()
+  await change('');await click(marketTab('Skill'));expect(marketGroups()).toEqual(['Skill']);expect(marketButton('robot-provisioning')).not.toBeNull()
+  await click(marketTab('All'))
+  expect(document.querySelector('[aria-label="Extension results"]')?.textContent).toContain('Fixture tools')
+  expect(marketButton('Fixture tools').querySelector('.lya-market-icon')).not.toBeNull()
+  expect(marketButton('Add Fixture tools')).toBeNull()
+  await click(marketButton('Fixture tools'));expect(document.body.textContent).toContain('awaiting compatibility and installation review');expect(button('Confirm installation')).toBeUndefined()
+  await click(button('Back to results'));marketFails=true;await click(button('Refresh upstream catalogs'));expect(document.body.textContent).toContain('Showing previous results')
+  await change('blender');expect(marketButton('Add Blender')).toBeNull()
+  await click(marketButton('Blender'));expect(document.body.textContent).toContain('5.3.0');expect(document.body.textContent).toContain('Installed');expect(document.body.textContent).toContain('Homebrew Cask')
+  expect(document.querySelector('h2')?.textContent).toBe('Blender');expect(button('Open official installer').closest('details')?.open).toBe(true)
+  await click(button('Extension market'))
+  expect(document.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('blender')
+  await change('unity mcp');await click(marketTab('MCP'));await click(marketButton('Add Unity MCP'))
+  expect(document.querySelector('h2')?.textContent).toBe('Unity MCP');expect(document.body.textContent).toContain('Third-party CoplayDev bridge');expect(posted()).toHaveLength(0)
+  await click(button('Install or repair MCP'));expect(document.querySelector('[role="dialog"]')?.textContent).toContain('10.2.0');expect(posted()).toHaveLength(0)
+  await click(button('Cancel'));expect(document.querySelector('[role="dialog"]')).toBeNull();expect(posted()).toHaveLength(0)
+  await click(button('Install or repair MCP'));await click(button('Confirm installation'))
+  expect(posted()).toHaveLength(1);expect(JSON.parse(posted()[0].body)).toEqual({id:'unity-mcp',sessionId:'current'})
+  expect(document.body.textContent).toContain('fixture-market-job')
+  await click(button('Extension market'))
+  expect(marketTab('MCP').getAttribute('aria-selected')).toBe('true')
+  await back()
   await act(async()=>{root.render(<ExternalToolsSettings tr={zh=>zh} start={async()=>{throw Error('Model must not be called')}} close={()=>{}} sessionId={()=> 'current'} openDocument={async()=>{nativeDocumentCalls++}}/>);await new Promise(r=>setTimeout(r,0))})
-  expect(document.body.textContent).toContain('集成');expect(document.body.textContent).toContain('原生 MCP 配置');expect(document.body.textContent).not.toContain('保存并连接');expect(calls.filter(v=>v.method==='POST')).toHaveLength(0)
+  expect(document.body.textContent).toContain('集成');expect(document.body.textContent).toContain('原生 MCP 配置');expect(document.body.textContent).not.toContain('保存并连接');expect(posted()).toHaveLength(1)
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name)}}
 })
 
