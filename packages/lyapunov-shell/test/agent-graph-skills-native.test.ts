@@ -25,6 +25,24 @@ describe('Agent Graph 原角色协议随插件交付',()=>{
    const catalog=await ctx.skills.snapshot({cwd,scope:agent})
    expect(catalog.complete).toBe(true)
    expect(catalog.skills.some(skill=>skill.name==='scene-construction')).toBe(true)
+   const robotics = [
+    'robotics-composition', 'blender-creation', 'fr3-duo-control', 'i2rt-yam-bringup',
+    'i2rt-yam-ik', 'iteration', 'motion-planning', 'mujoco-audit', 'mujoco-playground',
+    'mujoco-playground-rl', 'mujoco-showcase-shot', 'mujoco-studio-sidecar',
+    'rgb-object-localization', 'share-example', 'sim2real-gauntlet', 'sim2real-iteration',
+    'so101-bringup', 'so101-calibration', 'visual-servoing', 'mujoco-python',
+    'mujoco-spec-editing', 'mujoco-rendering', 'mujoco-accelerated', 'mujoco-parity',
+    'mujoco-studio', 'mujoco-gui',
+   ]
+   for (const name of robotics) {
+    const entry = catalog.skills.find(skill => skill.name === name)
+    expect(entry).toBeDefined()
+    const result = await ctx.tools.execute({name:'skill',arguments:{name},callId:ToolCallId(`load-${name}`),signal:new AbortController().signal,agent})
+    expect(result.isError).toBe(false)
+    const loaded = result.value as {name:string;resourceBase:{kind:string;path:string}}
+    expect(loaded.name).toBe(name)
+    expect(await realpath(loaded.resourceBase.path)).toBe(await realpath(join(skillRoot,name)))
+   }
    for(const name of ['skill-campaign','skill-debug','skill-verify']){
     const result=await ctx.tools.execute({name:'skill',arguments:{name},callId:ToolCallId(`load-${name}`),signal:new AbortController().signal,agent})
     expect(result.isError).toBe(false)

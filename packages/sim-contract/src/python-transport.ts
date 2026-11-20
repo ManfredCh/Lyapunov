@@ -504,7 +504,7 @@ export class ProcessSimProvider implements SimWorlds {
       child.once('exit', (code, signal) => failed(new SimError('PROVIDER_EXITED', `${this.config.engineName} worker 退出 (${code ?? signal}) ${this.diagnostics}`)))
     })
   }
-  private async request<T>(method: string, args: Record<string, unknown>, expectedChild?: ChildProcessWithoutNullStreams, allowStart = false): Promise<T> {
+  protected async request<T>(method: string, args: Record<string, unknown>, expectedChild?: ChildProcessWithoutNullStreams, allowStart = false): Promise<T> {
     if (this.closed && method !== 'shutdown') throw new SimError('PROVIDER_CLOSED', 'Provider 已释放')
     if (allowStart) await this.start()
     else if (!this.process) throw new SimError('PROVIDER_UNAVAILABLE', `${this.config.engineName} worker 未启动；仅显式 open 可以启动`)
@@ -878,7 +878,7 @@ export class ProcessSimProvider implements SimWorlds {
    * @param action - 出现在错误里的动作名（哪个落盘请求被拒）。
    * @param phase - 派发或发布边界；发布前拒绝不能声称 worker 尚未写过内部暂存。
    */
-  private async requireUserFacingWrite(action: string, phase: 'dispatch' | 'publish' = 'dispatch'): Promise<void> {
+  protected async requireUserFacingWrite(action: string, phase: 'dispatch' | 'publish' = 'dispatch'): Promise<void> {
     const facts = this.launchFacts
     const check = this.policyCheck
     if (facts === undefined || check === undefined) return

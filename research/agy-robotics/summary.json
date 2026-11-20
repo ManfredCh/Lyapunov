@@ -1,0 +1,217 @@
+{
+  "nativeJobCompletions": 19,
+  "domainSkillsDiscovered": 41,
+  "campaignCallCount": 35,
+  "mcapDecodedMessages": 35,
+  "perceptionErrorMm": 1.78513428073599,
+  "exactPlanWaypoints": 5,
+  "visionPlanWaypoints": 5,
+  "straightPathFirstBreachM": -0.004,
+  "sampledClearanceMm": {
+    "exactPlan": 11.0,
+    "visionPlan": 10.34
+  },
+  "auditScenarios": {
+    "PASS": 3,
+    "INFO": 7
+  },
+  "YamIK": {
+    "outputJoints": [
+      0.17850330873267284,
+      0.6382655691234198,
+      0.39885607342228446,
+      0.1993910753672904,
+      0.34839071373631486,
+      -0.12009941657699458
+    ],
+    "positionErrorM": 0.00039497617861001605,
+    "orientationErrorRad": 0.0001297069486378301,
+    "solved": true,
+    "executed": false
+  },
+  "Fr3": {
+    "sampledPathValid": true,
+    "sampleCount": 5,
+    "distanceCapM": 0.1,
+    "closestPair": {
+      "distanceM": 0.0007822680672398595,
+      "leftGeomId": 12,
+      "rightGeomId": 64,
+      "sample": 0
+    },
+    "scope": "sampled-inter-arm-geometry",
+    "executed": false
+  },
+  "hardware": {
+    "platform": "linux",
+    "serialCandidates": [],
+    "videoCandidates": [
+      "/dev/video0",
+      "/dev/video1",
+      "/dev/video2",
+      "/dev/video3"
+    ],
+    "canInterfaces": [],
+    "sdkModules": {
+      "lerobot": false,
+      "i2rt": false,
+      "pylibfranka": false,
+      "pyrealsense2": false
+    },
+    "robotIdentityVerified": false,
+    "devicesOpened": false,
+    "commandsSent": false
+  },
+  "optionalDependencies": {
+    "cv2": true,
+    "mujoco_playground": false,
+    "reaf": false,
+    "torch": false,
+    "mink": true,
+    "daqp": true
+  },
+  "scheduleCases": 20,
+  "physicalSort": {
+    "completePairs": 12,
+    "statistics": {
+      "discordantPairs": 1,
+      "baselineRate": 0.5833333333333334,
+      "candidateRate": 0.5,
+      "exactMcNemarP": 1
+    },
+    "safety": {
+      "complete": 12,
+      "baselineSafePass": 7,
+      "candidateSafePass": 6,
+      "candidateNewViolations": 0
+    },
+    "grouped": {
+      "historical": {
+        "baseline": {
+          "passed": 0,
+          "total": 3,
+          "openingContacts": 3,
+          "openingPrevented": 0
+        },
+        "candidate": {
+          "passed": 0,
+          "total": 3,
+          "openingContacts": 0,
+          "openingPrevented": 1
+        }
+      },
+      "new": {
+        "baseline": {
+          "passed": 7,
+          "total": 9,
+          "openingContacts": 1,
+          "openingPrevented": 0
+        },
+        "candidate": {
+          "passed": 6,
+          "total": 9,
+          "openingContacts": 0,
+          "openingPrevented": 1
+        }
+      }
+    },
+    "videos": 27,
+    "forks": 4,
+    "faultStops": 2,
+    "carriedClearanceCount": 13,
+    "minimumCarryClearanceM": 0.0189840285990063,
+    "historicalOpening": [
+      {
+        "id": "stress-6151",
+        "baseline": {
+          "opened": true,
+          "openContactSteps": 14,
+          "beforePickShiftMm": 4.810591622658013e-11,
+          "finalShiftMm": 208.9868817465697,
+          "notes": [
+            "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=d1f94413-f316-4785-938a-c3cc3630b717, pixels=0, bounds=256,192,-1,-1",
+            "POSE_OUTSIDE_BOX position=[0.4417,-0.0761,0.0105]，x 轴超出 0.1957m",
+            "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+          ]
+        },
+        "candidate": {
+          "opened": true,
+          "openContactSteps": 0,
+          "beforePickShiftMm": 0.0,
+          "finalShiftMm": 0.00015090391573724482,
+          "notes": [
+            "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=a7f80576-46d2-4fa1-878e-144e74b820c7, pixels=1948, bounds=125,0,169,56",
+            "POSE_OUTSIDE_BOX position=[0.2431,-0.0110,0.0105]，y 轴超出 0.0480m",
+            "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+          ]
+        }
+      },
+      {
+        "id": "stress-7129",
+        "baseline": {
+          "opened": true,
+          "openContactSteps": 9,
+          "beforePickShiftMm": 8.876580026573322e-12,
+          "finalShiftMm": 62.20743479895374,
+          "notes": [
+            "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=ab4b510f-7ac4-44fe-b464-eb2e348017ff, pixels=944, bounds=229,9,255,67",
+            "POSE_OUTSIDE_BOX position=[0.3010,-0.0277,0.0105]，y 轴超出 0.0647m",
+            "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+          ]
+        },
+        "candidate": {
+          "opened": true,
+          "openContactSteps": 0,
+          "beforePickShiftMm": 0.0,
+          "finalShiftMm": 2.774967954016577e-05,
+          "notes": [
+            "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=11670343-18ca-49a0-9c25-15336cca029a, pixels=1944, bounds=121,1,164,62",
+            "POSE_OUTSIDE_BOX position=[0.2405,-0.0133,0.0105]，y 轴超出 0.0503m",
+            "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+          ]
+        }
+      },
+      {
+        "id": "stress-7919",
+        "baseline": {
+          "opened": true,
+          "openContactSteps": 28,
+          "beforePickShiftMm": 1.8427150926643538,
+          "finalShiftMm": 52.02529129141733,
+          "notes": [
+            "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=c4953454-efac-4bf5-aa54-0857fbecdb66, pixels=1950, bounds=158,0,211,58",
+            "POSE_OUTSIDE_BOX position=[0.2633,-0.0133,0.0105]，y 轴超出 0.0503m",
+            "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+          ]
+        },
+        "candidate": {
+          "opened": false,
+          "openContactSteps": 0,
+          "beforePickShiftMm": 0.0,
+          "finalShiftMm": 0.0,
+          "notes": [
+            "抓取 Error: SAFE_OPEN_TARGET_CONTACT",
+            "POSE_OUTSIDE_BOX position=[0.2113,-0.0114,0.0106]，y 轴超出 0.0484m",
+            "CONTACT_MISSING contacts 共 7 对，匹配 0 对",
+            "CONTACT_MISSING 内层谓词已成立"
+          ]
+        }
+      }
+    ]
+  },
+  "playgroundPpo": {
+    "environment": "SO101PickCube",
+    "device": "cpu",
+    "iterations": 1,
+    "steps": 16,
+    "worlds": 2,
+    "seed": 42,
+    "log": "training.log",
+    "checkpoint": "checkpoints/model_0.pt",
+    "checkpointSha256": "5c3605ffb35f943acdb814e23cac71eb887d29e4d909ee9c75adba89989ef969",
+    "inputMjcfSha256": "982c02c027ec0c62d3459d0a6eb00dfb7dc13a451992e72ce99addc71f209805",
+    "playgroundVersion": "1.0.1",
+    "mujocoVersion": "4.0.1.dev1016247317",
+    "policyEvaluated": false
+  }
+}

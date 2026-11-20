@@ -98,6 +98,10 @@ export function createRobotOperations(sim: SimWorlds, scene: SceneReader, hooks:
       signal?.throwIfAborted()
       return sim.open(snapshot,input.options,signal)
     },
+    sim_evaluation: (input: { worldId: string; request: import('../../sim-contract/src/index.ts').WorldEvaluation }) => {
+      if (!sim.assess) throw new SimError('WORLD_EVALUATION_UNSUPPORTED', '当前引擎未装配原生评估')
+      return sim.assess(input.worldId, input.request)
+    },
     sim_world_list: () => sim.listWorlds(),
     sim_set_paused: async(input:{worldId:string;paused:boolean;expectedGeneration:number})=>{
       if(!sim.setPaused)throw new SimError('CLOCK_CONTROL_UNSUPPORTED','当前Provider未提供暂停/继续接口')

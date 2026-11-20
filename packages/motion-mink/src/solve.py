@@ -40,24 +40,74 @@ def solve(request):
       if int(model.jnt_type[jid]) not in SCALAR_JOINT_TYPES: raise ValueError('UNSUPPORTED_CAPABILITY: fixedJoints 仅支持单自由度关节: '+name)
       if isinstance(value,bool) or not isinstance(value,(int,float)) or not np.isfinite(value): raise ValueError('INVALID_JOINT_VECTOR: fixedJoints 值必须为有限数值: '+name)
       fixed.append((int(model.jnt_qposadr[jid]),float(value)))
-    best=None
-    for seed_index,seed in enumerate(request.get('seeds',[request['startPositions']])):
-      if len(seed)!=len(names) or not np.isfinite(seed).all(): raise ValueError('INVALID_JOINT_VECTOR')
-      q0=model.qpos0.copy(); q0[qids]=seed
-      for adr,value in fixed: q0[adr]=value
-      cfg=mink.Configuration(model,q=q0); task=mink.FrameTask(frame_name=site_name,frame_type='site',position_cost=1.,orientation_cost=.5); task.set_target(pose)
-      frozen=[i for i in range(model.nv) if i not in dids]; constraints=[mink.DofFreezingTask(model=model,dof_indices=frozen)] if frozen else []
-      for step in range(request.get('maxIterations',160)):
-        vel=mink.solve_ik(cfg,[task],dt=1.,solver='daqp',damping=.001,constraints=constraints); cfg.integrate_inplace(vel,1.)
-        error=task.compute_error(cfg); pe=float(np.linalg.norm(error[:3])); oe=float(np.linalg.norm(error[3:]))
-        if pe<request.get('positionToleranceM',.003) and oe<request.get('orientationToleranceRad',.0872664626): break
-      result={'positions':cfg.q[qids].tolist(),'positionErrorM':pe,'orientationErrorRad':oe,'iterations':step+1,'seedIndex':seed_index,'converged':pe<request.get('positionToleranceM',.003) and oe<request.get('orientationToleranceRad',.0872664626)}
-      if best is None or (not best['converged'] and result['converged']) or (result['converged']==best['converged'] and pe+oe<best['positionErrorM']+best['orientationErrorRad']): best=result
-      if result['converged']: break
-    plan=None
+    segments = request.get('cartesianSegments', 1)
+    if type(segments) is not int or not 1 <= segments <= 8:
+        raise ValueError('INVALID_CARTESIAN_SEGMENTS: expected an integer from 1 to 8')
+    position_tolerance = request.get('positionToleranceM', .003)
+    orientation_tolerance = request.get('orientationToleranceRad', .0872664626)
+    iterations = request.get('maxIterations', 160)
+    frozen = [i for i in range(model.nv) if i not in dids]
+    constraints = [mink.DofFreezingTask(model=model, dof_indices=frozen)] if frozen else []
+
+    def configuration(positions):
+        if len(positions) != len(names) or not np.isfinite(positions).all():
+            raise ValueError('INVALID_JOINT_VECTOR')
+        q0 = model.qpos0.copy()
+        q0[qids] = positions
+        for adr, value in fixed:
+            q0[adr] = value
+        return mink.Configuration(model, q=q0)
+
+    def ik(target_pose, seeds):
+        best = None
+        task = mink.FrameTask(frame_name=site_name, frame_type='site', position_cost=1., orientation_cost=.5)
+        task.set_target(target_pose)
+        for seed_index, seed in enumerate(seeds):
+            cfg = configuration(seed)
+            for step in range(iterations):
+                vel = mink.solve_ik(cfg, [task], dt=1., solver='daqp', damping=.001, constraints=constraints)
+                cfg.integrate_inplace(vel, 1.)
+                error = task.compute_error(cfg)
+                pe, oe = float(np.linalg.norm(error[:3])), float(np.linalg.norm(error[3:]))
+                if pe < position_tolerance and oe < orientation_tolerance:
+                    break
+            result = {'positions':cfg.q[qids].tolist(), 'positionErrorM':pe, 'orientationErrorRad':oe,
+                      'iterations':step+1, 'seedIndex':seed_index, 'converged':pe < position_tolerance and oe < orientation_tolerance}
+            if best is None or pe + oe < best['positionErrorM'] + best['orientationErrorRad'] or result['converged']:
+                best = result
+            if result['converged']:
+                break
+        return best
+
+    start = request['startPositions']
+    best = ik(pose, request.get('seeds', [start]))
+    plan = None
     if best['converged']:
-      duration=request.get('durationS',2.); start=request['startPositions']; goal=best['positions']; steps=max(2,int(max(abs(a-b) for a,b in zip(start,goal))/.08)+1)
-      plan={'planId':str(uuid.uuid4()),'entityId':request['entityId'],'modelVersion':request['modelVersion'],'jointNames':names,'points':[{'timeS':duration*i/(steps-1),'positions':[(1-i/(steps-1))*a+i/(steps-1)*b for a,b in zip(start,goal)]} for i in range(steps)],'collisionContextVersion':request['collisionContextVersion'],'expectedGeneration':request['expectedGeneration']}
+        duration = request.get('durationS', 2.)
+        goal = best['positions']
+        if segments == 1:
+            steps = max(2, int(max(abs(a-b) for a,b in zip(start, goal))/.08)+1)
+            points = [{'timeS':duration*i/(steps-1), 'positions':[(1-i/(steps-1))*a+i/(steps-1)*b for a,b in zip(start,goal)]} for i in range(steps)]
+        else:
+            # 两种路径共用从相同初态求得的终点逆解。中间路点按 TCP 直线细分，保持目标姿态。
+            origin = configuration(start).data.site_xpos[model.site(site_name).id].copy()
+            target_xyz = np.asarray(target['position'], dtype=float)
+            points = [{'timeS':0., 'positions':start}]
+            seed = start
+            for step in range(1, segments):
+                alpha = step / segments
+                waypoint = mink.SE3.from_rotation_and_translation(mink.SO3(q), (1-alpha)*origin + alpha*target_xyz)
+                intermediate = ik(waypoint, [seed])
+                if not intermediate['converged']:
+                    return {'provider':'mink','mujocoVersion':mujoco.__version__,'result':intermediate,'failedWaypoint':step,'plan':None,'collisionChecked':False}
+                seed = intermediate['positions']
+                points.append({'timeS':duration*alpha, 'positions':seed})
+            points.append({'timeS':duration, 'positions':goal})
+        plan = {'planId':str(uuid.uuid4()),'entityId':request['entityId'],'modelVersion':request['modelVersion'],
+                'jointNames':names,'points':points,'collisionContextVersion':request['collisionContextVersion'],
+                'expectedGeneration':request['expectedGeneration']}
+        if segments > 1:
+            plan['cartesianSegments'] = segments
     return {'provider':'mink','mujocoVersion':mujoco.__version__,'result':best,'plan':plan,'collisionChecked':False}
 
 if __name__=='__main__':

@@ -22,6 +22,7 @@ export function macOSDesktopBootstrap(version: string): { manifest: string; sour
 
 /** Linux x64 glibc 发行进程首次获取文件锁时加载的固定 SDK addon。 */
 export const NATIVE_SYSTEM_GLIBC_ADDON = 'native/system/packages/linux-x64/bin/glibc/system.node'
+export const NATIVE_SYSTEM_LANDLOCK = 'native/system/packages/linux-x64/bin/landlock-run'
 
 /** 与上游 prepack 同口径核验必需 addon 的普通文件、ELF 架构及 Node-API 入口。 */
 export function nativeSystemRuntimeViolations(stage: string, upstreamDirectory: string, platform: 'linux'|'darwin' = 'linux'): string[] {
@@ -50,7 +51,17 @@ export function nativeSystemRuntimeViolations(stage: string, upstreamDirectory: 
     return [`发行载荷文件锁原生模块缺少 Node-API 入口：${file}`]
   const unsupported = [...new Set([...data.toString('latin1').matchAll(/GLIBC_(\d+)\.(\d+)(?:\.\d+)?/g)]
     .filter(row => Number(row[1]) > 2 || Number(row[1]) === 2 && Number(row[2]) > 28).map(row => row[0]))]
-  return unsupported.length ? [`发行载荷文件锁原生模块超过最低 glibc 2.28：${file}（${unsupported.join('、')}）`] : []
+  if (unsupported.length) return [`发行载荷文件锁原生模块超过最低 glibc 2.28：${file}（${unsupported.join('、')}）`]
+  const launcher = join(upstreamDirectory, NATIVE_SYSTEM_LANDLOCK)
+  try {
+    const path = join(stage, launcher)
+    const info = lstatSync(path)
+    if (!info.isFile() || (info.mode & 0o111) === 0) throw new Error('不是可执行普通文件')
+    const binary = readFileSync(path)
+    if (binary.length >= 64 && binary.readUInt32LE(0) === 0x464c457f && binary[4] === 2 && binary[5] === 1
+      && binary.readUInt16LE(16) === 2 && binary.readUInt16LE(18) === 62) return []
+  } catch { /* 缺失与不可执行均由下面的归档守卫阻止。 */ }
+  return [`发行载荷缺少有效的 Linux x64 会话沙箱执行器：${launcher}`]
 }
 
 /** 原生工作台首页与它直接引用的本地启动资源必须是真正构建的非空文件。 */

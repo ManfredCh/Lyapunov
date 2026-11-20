@@ -302,12 +302,12 @@ describe("审计面本身不完整（验收队 VERIFY2 ② 的正对照）", () 
       expect(row?.kind).toBe('目录级门禁');expect(row?.scripts).toContain(script);expect(row?.command).toBe('bun run '+script)
       expect(readFileSync(join(ROOT,'package.json'),'utf8')).toContain('script/gates/'+file)
     }
-    // 人群实时验收、USD标准库登记与托盘现场门是独立现场驱动；其说明文档与Python探针按非脚本登记，同样不能只改数字。
-    for(const [file,kind]of [['human-realtime-acceptance.ts','独立现场驱动'],['register-usd-standard-library.ts','独立现场驱动'],['run-warehouse-pallet.ts','独立现场驱动'],['human-realtime-acceptance.md','非脚本'],['probe-usd-sdf-native.py','非脚本']] as const)
+    // 人群实时验收、USD 标准库登记、托盘现场门与 SO-101 配对评测是独立现场驱动；其说明文档与Python探针按非脚本登记，同样不能只改数字。
+    for(const [file,kind]of [['human-realtime-acceptance.ts','独立现场驱动'],['register-usd-standard-library.ts','独立现场驱动'],['run-warehouse-pallet.ts','独立现场驱动'],['run-so101-paired.ts','独立现场驱动'],['human-realtime-acceptance.md','非脚本'],['probe-usd-sdf-native.py','非脚本']] as const)
       expect(d.ledger.find(row=>row.file==='script/gates/'+file)?.kind).toBe(kind)
     // 本次的真实分布（改动前这些文件里有一批根本不在输出里）。
     expect(d.totals.byKind).toEqual({
-      实现: 15, 驱动: 16, 子探针: 5, 目录级门禁: 4, 共享谓词: 4, 独立现场驱动: 4, 测试: 8, 非脚本: 2, 未知: 0,
+      实现: 15, 驱动: 16, 子探针: 5, 目录级门禁: 4, 共享谓词: 4, 独立现场驱动: 5, 测试: 8, 非脚本: 2, 未知: 0,
     })
   })
 

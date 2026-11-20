@@ -407,13 +407,15 @@ test('场景准备工具复用原生 Jobs 与 campaign 留痕', async () => {
       return { done: Promise.resolve({ exitCode: 0 }) }
     } } as never)
     writeFileSync(join(workDir, 'object.glb'), 'fixture input')
-    applyOfflineSceneWorkflows(host.ctx, { offlineUsdPython: process.execPath })
+    applyOfflineSceneWorkflows(host.ctx, { offlineUsdPython: process.execPath, roboticsLabPython: process.execPath })
     for (const name of ['asset_prepare_usd', 'nurec_evaluate', 'lab_mimic_run', 'simfoundry_match_poses']) {
       expect(host.ctx.tools.get(name)).toBeDefined()
     }
     const capabilities = await host.ctx.tools.execute({ name: 'scene_workflow_capabilities', arguments: {}, callId: ToolCallId('offline-capabilities'), signal: AbortSignal.timeout(5000), agent: host.agent })
     expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'asset_prepare_usd', interpreter: true })
     expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'nurec_evaluate', interpreter: false })
+    expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'robotics_lab', interpreter: true })
+    expect(valueOf<{ workflows: unknown[] }>(capabilities).workflows).toContainEqual({ tool: 'playground_train_so101', interpreter: false })
     const campaignId = 'offline-tools'
     valueOf(await host.call('campaign_init', { campaignId, tasks: TASKS, budget: BUDGET }))
     valueOf(await host.call('campaign_transition', { campaignId, taskId: 'dev-1', to: 'exploring', role: 'worker' }))
@@ -425,6 +427,11 @@ test('场景准备工具复用原生 Jobs 与 campaign 留痕', async () => {
     expect(JSON.parse(output.text)).toMatchObject({ outputDir: started.outputDir, usdPath: join(started.outputDir, 'usd', 'asset.usd'), summary: { mass: 0.25 } })
     const missingRuntime = await host.call('nurec_evaluate', { stagePath: 'scene.usdz', referenceDir: 'refs', camera: 'cam' })
     expect(missingRuntime.isError && missingRuntime.error.message).toContain('OFFLINE_RUNTIME_UNAVAILABLE')
+    const privatePath = join('.lyapunov', 'campaigns', campaignId, 'campaign.json')
+    const privateInput = await host.call('robotics_lab', { operation: 'mcap-export', sourcePath: privatePath })
+    expect(privateInput.isError && privateInput.error.message).toContain('ROBOTICS_PRIVATE_CAMPAIGN_INPUT')
+    const missingRobotInput = await host.call('robotics_lab', { operation: 'arm-plan', sourcePath: 'missing.xml', requestPath: 'plan.json' })
+    expect(missingRobotInput.isError && missingRobotInput.error.message).toContain('OFFLINE_INPUT_MISSING')
     valueOf(await host.call('campaign_record_run', { campaignId, taskId: 'dev-1', role: 'worker', summary: { outcome: 'success' } }))
     const runs = campaignOf(campaignId).tasks[0]!.workerRunIds
     expect(runs).toHaveLength(1)
@@ -433,4 +440,162 @@ test('场景准备工具复用原生 Jobs 与 campaign 留痕', async () => {
     expect(calls).toContain('job_output')
     expect(calls).toContain('OFFLINE_RUNTIME_UNAVAILABLE')
   } finally { await host.close() }
+})
+
+describe('配对评测沿用 campaign、原生判定与录制回执', () => {
+  const campaignId = 'paired-campaign'
+  const goal = { kind: 'entity-in-box', entityId: 'target', center: [0, 0, 0], halfExtents: [1, 1, 1] }
+  const condition = { id: 'shift-17', seed: 17, tier: 'shift', sceneSha256: 'c'.repeat(64) }
+  const tasks = (['baseline', 'candidate'] as const).map(variant => ({
+    taskId: variant, sceneId: 'table', partition: 'heldout', goal, pair: { ...condition, variant },
+  }))
+
+  test('拒绝不同扰动摘要、不同种子或缺失的对照成员', async () => {
+    const host = await boot()
+    try {
+      const [a, b] = tasks
+      for (const altered of [[a], [a, { ...b, pair: { ...b!.pair, seed: 18 } }], [a, { ...b, pair: { ...b!.pair, sceneSha256: 'b'.repeat(64) } }]]) {
+        expect(errorOf(await host.call('campaign_init', { campaignId, tasks: altered, budget: BUDGET }))).toContain('CAMPAIGN_PAIR_MISMATCH')
+      }
+    } finally { await host.close() }
+  })
+
+  test('用终态谓词和同一世界的完成录制判分，初态调用和自报结果不进入配对计数', async () => {
+    const host = await boot()
+    const register = (name: string, execute: (input: any) => Record<string, any>) => host.ctx.tools.register(defineTool({
+      name, description: '证据入口夹具', parameters: { input: { type: 'json', required: true } },
+      output: { schema: { type: 'json' }, render: () => [] }, execute: async args => execute(args.input),
+    }))
+    register('sim_open', input => ({ worldId: input.worldId, sceneId: 'table', worldGeneration: 1, appliedSceneRevision: 3 }))
+    register('recording_start', input => ({ recordingId: `rec-${input.worldId}`, sceneId: 'table', status: 'recording' }))
+    register('recording_stop', input => ({ recordingId: input.recordingId, sceneId: 'table', status: 'completed', frameCount: 7 }))
+    register('sim_task_check', input => ({ worldId: input.worldId, generation: 1, sceneRevision: input.sceneRevision ?? 3,
+      taskAchieved: input.worldId === 'candidate', evaluated: true, failed: [], stepIndex: 125, frameId: `frame-${input.worldId}` }))
+    try {
+      const call = async (name: string, input: unknown) => valueOf<any>(await host.call(name, input))
+      await call('campaign_init', { campaignId, tasks, budget: BUDGET })
+      for (const taskId of ['baseline', 'candidate']) {
+        const scope = { campaignId, taskId, role: 'coordinator' }
+        await call('campaign_transition', { ...scope, to: 'heldout-eval' })
+        const input = { worldId: taskId, expectedGeneration: 1, predicates: goal }
+        await call('sim_open', input)
+        await call('recording_start', input)
+        await call('sim_task_check', input)
+        await call('sim_task_check', { ...input, checkSpec: false })
+        await call('sim_task_check', { ...input, checkSpec: false, sceneRevision: 4 })
+        await call('recording_stop', { recordingId: `rec-${taskId}` })
+        const result = await call('campaign_record_run', { ...scope, summary: { outcome: taskId === 'baseline' ? 'success' : 'failed' } })
+        expect(result.summary.outcome).toBe(taskId === 'baseline' ? 'failed' : 'success')
+        expect(result.pairResult).toMatchObject({ frameId: `frame-${taskId}`, sceneRevision: 3, frameCount: 7 })
+        await call('campaign_transition', { ...scope, to: 'done' })
+      }
+      const report = await call('campaign_status', { campaignId })
+      expect(report.comparison).toMatchObject({ complete: 1, incomplete: 0, candidateOnly: 1, baselineOnly: 0 })
+    } finally { await host.close() }
+  })
+
+  for (const scenario of ['qualified', 'assisted', 'different-initial-state', 'missing-preflight', 'safety-violation', 'unequal-safety-limits', 'verified-safety'] as const) {
+    test(`严格配对资格 ${scenario}`, async () => {
+      const host = await boot()
+      const register = (name: string, execute: (input: any) => Record<string, any>) => host.ctx.tools.register(defineTool({
+        name, description: '原生评估证据通路夹具', parameters: { input: { type: 'json', required: true } },
+        output: { schema: { type: 'json' }, render: () => [] }, execute: async args => execute(args.input),
+      }))
+      const frame = (worldId: string, stepIndex: number) => ({ worldId, generation: 1, sceneRevision: 3, stepIndex, frameId: `${worldId}:${stepIndex}` })
+      const motion = { executionMode: 'physical-contact', assistAdvanceCount: 0 }
+      register('sim_open', input => ({ worldId: input.worldId, sceneId: 'table', worldGeneration: 1, appliedSceneRevision: 3 }))
+      register('robot_state', input => ({ ...frame(input.worldId, 0), ...motion, entities: [{ entityId: 'target',
+        transform: { position: [scenario === 'different-initial-state' && input.worldId === 'candidate' ? 2 : 1, 0, 0] } }] }))
+      register('recording_start', input => ({ recordingId: `rec-${input.worldId}`, sceneId: 'table', status: 'recording' }))
+      register('recording_stop', input => ({ recordingId: input.recordingId, sceneId: 'table', status: 'completed', frameCount: 7 }))
+      register('sim_task_check', input => {
+        const terminal = input.checkSpec === false
+        const achieved = terminal && input.worldId === 'candidate'
+        return { ...frame(input.worldId, terminal ? 125 : 0), ...motion,
+          assistAdvanceCount: terminal && scenario === 'assisted' && input.worldId === 'candidate' ? 1 : 0,
+          evaluated: true, taskAchieved: achieved, failed: achieved ? [] : [{ reasonCode: 'POSE_OUTSIDE_BOX' }] }
+      })
+      register('sim_evaluation', input => {
+        const violated = scenario === 'safety-violation' && input.worldId === 'candidate'
+        const graspForceN = scenario === 'unequal-safety-limits' && input.worldId === 'candidate' ? 59 : 60
+        return { ...frame(input.worldId, 126), source: 'mujoco-native-step-peak', passed: !violated, startStep: 0, endStep: 126,
+          samples: 126, peaks: { graspForceN: violated ? 61 : 1, otherForceN: 1, jointSpeedRps: 1 },
+          limits: { graspForceN, otherForceN: 100, jointSpeedRps: 10 }, violations: violated ? ['graspForceN'] : [] }
+      })
+      register('robot_pick', input => ({ effect: { phaseCheckpoints: { beforeDescend: { ...frame(input.worldId, 80), checkpointId: 'cp', stateSha256: 'd'.repeat(64) } } }, after: frame(input.worldId, 123), afterSource: 'fresh', taskAchieved: false, reason: 'LIFT_NOT_ACHIEVED',
+        actions: [{ worldId: input.worldId, generation: 1, actionId: `${input.worldId}-descend`, status: 'completed', startStep: 81, endStep: 101, effect: { motions: [{ targetReached: false, sampledClearance: { source: 'mujoco-sampled-rigid-geometry', sampleCount: 4, distanceCapM: .08, robot: { distanceM: .01, geom1: 'arm', geom2: 'bin', timeS: .3 }, payload: null }, payload: { objects: [{ objectId: 'target', contactSteps: 9, displacementM: [.045, 0, 0], maxLiftM: 0 }] } }] } }] }))
+      try {
+        const call = async (name: string, input: unknown) => valueOf<any>(await host.call(name, input))
+        const rated = scenario === 'safety-violation' || scenario === 'unequal-safety-limits' || scenario === 'verified-safety'
+        await call('campaign_init', { campaignId, tasks: tasks.map(task => ({ ...task, pair: { ...task.pair, requirePreflight: true, ...(rated ? { requireSafety: true } : {}) } })), budget: BUDGET })
+        for (const taskId of ['baseline', 'candidate']) {
+          const scope = { campaignId, taskId, role: rated && taskId === 'candidate' ? 'verifier' : 'coordinator' }
+          await call('campaign_transition', { ...scope, to: 'heldout-eval' })
+          const input = { worldId: taskId, expectedGeneration: 1, predicates: goal }
+          await call('sim_open', input)
+          await call('robot_state', input)
+          await call('recording_start', input)
+          const missing = scenario === 'missing-preflight' && taskId === 'candidate'
+          if (!missing) await call('sim_task_check', input)
+          await call('robot_pick', { ...input, objectId: 'target' })
+          await call('sim_task_check', { ...input, checkSpec: false })
+          if (rated) await call('sim_evaluation', { ...input, request: { kind: 'monitor-stop' } })
+          await call('recording_stop', { recordingId: `rec-${taskId}` })
+          const run = await call('campaign_record_run', { ...scope, summary: { outcome: 'success' } })
+          const excluded = taskId === 'candidate' && (scenario === 'assisted' || missing)
+          if (excluded) {
+            expect(run.summary.outcome).toBe('aborted')
+            expect(run.pairResult).toBeUndefined()
+          } else {
+            expect(run.pairResult.initialStateSha256).toMatch(/^[0-9a-f]{64}$/)
+            expect(run.pairResult.workflows).toMatchObject([{ tool: 'robot_pick', reason: 'LIFT_NOT_ACHIEVED', checkpoints: [{ phase: 'beforeDescend', checkpointId: 'cp', stepIndex: 80 }], actions: [{ startStep: 81, endStep: 101, targetReached: false, sampledClearance: { sampleCount: 4, robot: { distanceM: .01 } }, targetContact: { objectId: 'target', contactSteps: 9, displacementM: [.045, 0, 0], maxLiftM: 0 } }] }])
+          }
+          await call('campaign_transition', { ...scope, to: excluded ? 'blocked' : 'done' })
+        }
+        const { campaign, comparison } = await call('campaign_status', { campaignId })
+        if (scenario === 'qualified' || scenario === 'safety-violation' || scenario === 'verified-safety') {
+          expect(campaign.status).toBe('completed')
+          expect(comparison.statistics).toMatchObject({ discordantPairs: 1, baselineRate: 0, candidateRate: 1, exactMcNemarP: 1 })
+          expect(comparison.tiers).toMatchObject([{ tier: 'shift', complete: 1, candidateOnly: 1 }])
+          if (scenario === 'safety-violation') {
+            expect(comparison.safety).toEqual({ complete: 1, baselineSafePass: 0, candidateSafePass: 0, candidateNewViolations: 1 })
+          }
+        } else {
+          expect(campaign.status).toBe('blocked')
+          expect(comparison.pairs[0].incompleteReason).toBe(scenario === 'different-initial-state' ? 'INITIAL_STATE_MISMATCH' : scenario === 'unequal-safety-limits' ? 'SAFETY_LIMITS_MISMATCH' : 'EVIDENCE_MISSING')
+          expect(comparison.statistics.exactMcNemarP).toBeNull()
+        }
+        if (scenario === 'safety-violation' || scenario === 'verified-safety') {
+          const packId = 'safety-pack', skillId = 'native-safe-pick'
+          mkdirSync(join(packsRoot, packId))
+          await call('skill_propose', { packId, proposal: { skillId, packId, requireSafetyEvaluation: true,
+            failureSignature: { reasonCodes: [], description: '接触夹持' }, applicableWhen: { description: '实体抓放' },
+            fixStrategy: '验收实测动作', program: [], devEvidence: { runIds: [], checkedAt: new Date().toISOString() } } })
+          const verifierRunId = comparison.pairs[0].candidate.result.runId
+          const verify = { skillId, packId, verifierRunId, reproducedTaskIds: ['candidate'], attempts: 1, passed: true, safetyCampaignId: campaignId }
+          if (scenario === 'safety-violation') {
+            expect(errorOf(await host.call('skill_verify_record', verify))).toContain('SKILL_SAFETY_NOT_VERIFIED')
+          } else {
+            expect((await call('skill_verify_record', verify)).record.safetyCampaignId).toBe(campaignId)
+            expect((await call('skill_promote', { skillId, packId })).status).toBe('PROMOTED')
+          }
+        }
+      } finally { await host.close() }
+    })
+  }
+
+  test('缺少匹配的物理判定和录制时保留未完成，不将 run 自报记为成功', async () => {
+    const host = await boot()
+    try {
+      const call = async (name: string, input: unknown) => valueOf<any>(await host.call(name, input))
+      const scope = { campaignId, taskId: 'baseline', role: 'coordinator' }
+      await call('campaign_init', { campaignId, tasks, budget: BUDGET })
+      await call('campaign_transition', { ...scope, to: 'heldout-eval' })
+      await call('e2e_probe', {})
+      const result = await call('campaign_record_run', { ...scope, summary: { outcome: 'success' } })
+      expect(result.summary.outcome).toBe('aborted')
+      expect(errorOf(await host.call('campaign_transition', { ...scope, to: 'done' }))).toContain('CAMPAIGN_PAIR_EVIDENCE_REQUIRED')
+      expect((await call('campaign_status', { campaignId })).comparison).toMatchObject({ complete: 0, incomplete: 1 })
+    } finally { await host.close() }
+  })
 })

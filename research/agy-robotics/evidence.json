@@ -1,0 +1,237 @@
+[
+  {
+    "path": "final-v4/native-jobs.json",
+    "bytes": 27994,
+    "sha256": "3241819c276423c067c09749bfa8e8175ac95728ff84f9cddb870ff08a1f2838"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-fc85a968-514e-4751-88fc-c2f4b52e13bb/trajectory.json",
+    "bytes": 6913,
+    "sha256": "21070977abd8913a9b45c4ca657cc859587a0aee5c2cde02cdbdb6fd7d896071"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-5743e608-4851-426c-b91d-21b983fe6a9d/trajectory.json",
+    "bytes": 7029,
+    "sha256": "5229232f2f7cc576e2a5e3b5801c5a188a79ae9de2cc081492d3967874301c07"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-5743e608-4851-426c-b91d-21b983fe6a9d/localization.json",
+    "bytes": 285,
+    "sha256": "d85c5d0cad54d1b3e5051cbcfbb15e3e116cfa8a4ffc0daff4fda6a912575307"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-389e7c42-236f-45ac-afe4-837461558852/calls.mcap",
+    "bytes": 3314,
+    "sha256": "1021feaae1109fafeb2d8ea310b0ada23d2e1b7a86845c87f06cb8a4d71e1bc4"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-24ec7793-7818-4f58-98df-4c84efa76fd9/asset_scenarios.png",
+    "bytes": 112146,
+    "sha256": "61268ea4ced44d5018e3b6faa15bbfdd5e09e3a83dc24e5b75a58c71dfbadcba"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-09610fbd-143a-4839-ad13-ded7952a070d/showcase.png",
+    "bytes": 157140,
+    "sha256": "6e455a72d9a133e5e5881f355f21f6b60f226473e7a83d764d4c30df0a0b6c03"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/robotics_lab-24ec7793-7818-4f58-98df-4c84efa76fd9/asset_scenarios.json",
+    "bytes": 10410,
+    "sha256": "13f945d5e047c81cbe95269bcf00b0a1ce1b1e96d1ae9dca59888beb09c1033b"
+  },
+  {
+    "path": "final-v4/blender-prop/source.blend",
+    "bytes": 111096,
+    "sha256": "e0c4bef643418ffe1bd3aee1662522e7088377e1a46977f453a33e3900510eb7"
+  },
+  {
+    "path": "final-v4/blender-prop/visuals/ae6c01f5-d0a9-4ebf-8b1b-bad390b9dc23-mesh-sorter_handle-c7a324ac-mesh-v1.glb",
+    "bytes": 28976,
+    "sha256": "bc1b732d78023e2b50557d2e6d8daa82cef6b8740de1730849e987aa8e0b535c"
+  },
+  {
+    "path": "final-v4/camera-0.png",
+    "bytes": 722,
+    "sha256": "d087da98ab22384dce5f005641f6899c36bc5f01dd07e93daf4600ddfbe04cdc"
+  },
+  {
+    "path": "final-v4/camera-1.png",
+    "bytes": 766,
+    "sha256": "6eef846c0347ee54c647c31d2fb57c9f086a2b364ef4eea4fd2c65defab602a9"
+  },
+  {
+    "path": "final-v4/menagerie-supply.json",
+    "bytes": 20159,
+    "sha256": "1c83218cf7e2c372d6918ab3a42f932561a5e32161d8a8e69641c4670c74f107"
+  },
+  {
+    "path": "so101/summary.json",
+    "bytes": 3989,
+    "sha256": "33b88fd579fa139d068f81545a3f27107f19d868d6959448178f75fb28aaf3e0"
+  },
+  {
+    "path": "so101/paired/comparison.json",
+    "bytes": 412469,
+    "sha256": "c4d6b5b13107176f63e55d38aba23e977a91abb6f956548300e6901ce4a10dde"
+  },
+  {
+    "path": "so101/paired/checkpoint-replay.json",
+    "bytes": 225879,
+    "sha256": "afc75698d9f32b15f575cdf9eeb28bd1715cf29e6dca8a7f2fed9ca13b79e72b"
+  },
+  {
+    "path": "so101/paired/fault-results.json",
+    "bytes": 766899,
+    "sha256": "4efc58818e486c87fd657727a9f9637c76c00c5cc844d62fc4052acc57bc7f11"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9011-baseline/replay.mp4",
+    "bytes": 42706,
+    "sha256": "fd404766d8f5172a6514bf655ac743deaa469863c699b8664a81d60671b8d18f"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9011-candidate/replay.mp4",
+    "bytes": 40486,
+    "sha256": "4c9e4b21e46db49447581c1828e19de5445cf95bac5b15217e6d599c9b9dfd1f"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9049-baseline/replay.mp4",
+    "bytes": 40252,
+    "sha256": "e372db9c77992db5093c13234a893277d41a85867f9c6416adcfe046316edda1"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9049-candidate/replay.mp4",
+    "bytes": 40474,
+    "sha256": "3a8c252d1b578c603ad9dd47aaff3bd8105573a4b1b79db791dc5e6619cf1557"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9181-baseline/replay.mp4",
+    "bytes": 40309,
+    "sha256": "07d8d55053602a28be883796e797e6cf509de465c8926b927af6658248a44e58"
+  },
+  {
+    "path": "so101/paired/episodes/nominal-9181-candidate/replay.mp4",
+    "bytes": 42397,
+    "sha256": "309a88160146f4301d5842b98251c834007fd8b0f99918398452fa8c31daceb8"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9011-baseline/replay.mp4",
+    "bytes": 41625,
+    "sha256": "4aac3886c1548e15d93def88f77ad7deed0744f1451bf7cc5b5128ed88a2c2cd"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9011-candidate/replay.mp4",
+    "bytes": 43885,
+    "sha256": "140ffddb8da889fee68d5d894e6c76359cc5f2c431957517a2990fef597f2b94"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9049-baseline/replay.mp4",
+    "bytes": 40526,
+    "sha256": "dc39b666fa8ba0476954380e4c7aab0222791a6c6557fbd1c42288364f5f1c56"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9049-candidate/replay.mp4",
+    "bytes": 42457,
+    "sha256": "b1e245e84b33fc9d2e800f56fb116dc4abe110b6b0ae7a212036a2b6ea635d2e"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9181-baseline/replay.mp4",
+    "bytes": 40507,
+    "sha256": "ad6add1f41c147f84fb69b7be45042fcc2ae4204f2f9d04c4f409356328339f9"
+  },
+  {
+    "path": "so101/paired/episodes/shift-9181-candidate/replay.mp4",
+    "bytes": 40052,
+    "sha256": "5a3d43f12acc483436b0a0d742ab9c6afb721bbf512fe4a3a4fa9d0a7c983843"
+  },
+  {
+    "path": "so101/paired/episodes/stress-6151-baseline/replay.mp4",
+    "bytes": 13226,
+    "sha256": "8d5def3183c4170928aecde3643cd63af4f58aeff80a1476f35c6d8037e80435"
+  },
+  {
+    "path": "so101/paired/episodes/stress-6151-candidate/replay.mp4",
+    "bytes": 12675,
+    "sha256": "2937f7e23e1be0dd2110d57f774e6f6dda5c2f90cd3ef482ed71c3d33d106670"
+  },
+  {
+    "path": "so101/paired/episodes/stress-7129-baseline/replay.mp4",
+    "bytes": 13129,
+    "sha256": "dfe640c62c096627dec5c4e7444718326884cc690daa17ce3e5a1ac1e9b17292"
+  },
+  {
+    "path": "so101/paired/episodes/stress-7129-candidate/replay.mp4",
+    "bytes": 12716,
+    "sha256": "77aeb8d329c0a9522e96ea86bf8db0cb01c22ed9b03cd6c3d43102c417c28460"
+  },
+  {
+    "path": "so101/paired/episodes/stress-7919-baseline/replay.mp4",
+    "bytes": 12917,
+    "sha256": "96194f8979372097253891477c66098cc57cd6d82f8e0cf71557a27c638262d9"
+  },
+  {
+    "path": "so101/paired/episodes/stress-7919-candidate/replay.mp4",
+    "bytes": 4401,
+    "sha256": "eb76ac7187475bf741edc21738a2648fc3b00fbf7fb7d1b65ea6ae6493dd21bf"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9011-baseline/replay.mp4",
+    "bytes": 25971,
+    "sha256": "5aa79bf854c66531a4cf2fcc329502ba89b34f7699354f694af88b7be067379c"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9011-candidate/replay.mp4",
+    "bytes": 27398,
+    "sha256": "13c14d916765e370648cabc1089f9c2c7de77f7f5a08dae0d47b780459416013"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9049-baseline/replay.mp4",
+    "bytes": 41800,
+    "sha256": "7ef87bb96b73295d8f4f8d92aead7246adfdd0d4f75b317c5a1f32c8757c64a5"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9049-candidate/replay.mp4",
+    "bytes": 4398,
+    "sha256": "e5270618478c8f87ba511c06cd0dc1aba464ba3fdf71e2209e51f49c950d6ffc"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9181-baseline/replay.mp4",
+    "bytes": 25934,
+    "sha256": "794b414bef1d7d8418dfe710ea47b84a90b17a56ce7aa060ac24c4b5e2fe9ddc"
+  },
+  {
+    "path": "so101/paired/episodes/stress-9181-candidate/replay.mp4",
+    "bytes": 26280,
+    "sha256": "4b04de8aebeae253a83f76df4660a18ebfcbb1987ae9f52e2fef1008757083cc"
+  },
+  {
+    "path": "so101/paired/faults/arm-contact-limit/replay.mp4",
+    "bytes": 23072,
+    "sha256": "599ba8faf7ad9079d0e30d373cb8e374848afedfb865d41fa657d6cacaf08741"
+  },
+  {
+    "path": "so101/paired/faults/camera-freeze/replay.mp4",
+    "bytes": 12728,
+    "sha256": "5b77f98b5ea0c67a6962d0c9c12fb838fd762b0eff33786885e85f78ee7e2e64"
+  },
+  {
+    "path": "so101/paired/faults/gripper-stall/replay.mp4",
+    "bytes": 19950,
+    "sha256": "ed37efb28938456a76d4225870a325e0745ff36094e42b7b98c68b2f7233c1eb"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/playground_train_so101-d5a6dfa1-651e-4fce-8ac9-e0032d2f6f6c/result.json",
+    "bytes": 452,
+    "sha256": "571b38bc6911208b6ea754653e8ffc7d1ca13fc93959928af22775122bfeaf49"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/playground_train_so101-d5a6dfa1-651e-4fce-8ac9-e0032d2f6f6c/checkpoints/model_0.pt",
+    "bytes": 4281983,
+    "sha256": "5c3605ffb35f943acdb814e23cac71eb887d29e4d909ee9c75adba89989ef969"
+  },
+  {
+    "path": "final-v4/.lyapunov/sessions/agy-lab-acceptance/offline-scene/playground_train_so101-d5a6dfa1-651e-4fce-8ac9-e0032d2f6f6c/training.log",
+    "bytes": 8476,
+    "sha256": "4157b4c44220e25988a3a3b62c3fde0032d0a424cc4f33e28e045b258a678c24"
+  }
+]

@@ -12,6 +12,7 @@ import { defineTool, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { requireSessionId, sessionNamespace } from '../../lyapunov-contracts/src/session-scope.ts'
 import { isForeignSessionTarget, pathWithin } from '../../lyapunov-contracts/src/writable-boundary.ts'
 import { requireWritableTarget } from '../../scene-kit/src/plugin.ts'
+import { resolveMuJoCoGlBackend, type MuJoCoGlBackend } from '../../sim-contract/src/mujoco-gl.ts'
 
 const labRevision = 'e3f7d9ff1f5d7f8280de3ece9000b7117f66bcf4'
 const foundryRevision = '9e34ebefcd020583fbb755a8b57268dce78eca26'
@@ -28,6 +29,9 @@ export interface OfflineSceneConfig {
   labSourceRoot?: string
   simfoundryPython?: string
   simfoundryRoot?: string
+  roboticsLabPython?: string
+  roboticsLabRenderBackend?: MuJoCoGlBackend
+  playgroundPython?: string
 }
 
 type Arguments = Record<string, unknown>
@@ -36,8 +40,15 @@ type Workflow = {
   description: string
   properties: ParameterSchemaSpec
   python?: string
-  prepare(input: Arguments, file: (value: unknown, kind?: 'directory') => Promise<string>): Promise<(output: string) => ProcessSpec>
+  prepare(input: Arguments, file: (value: unknown, kind?: 'directory') => Promise<string>, workspace: string): Promise<(output: string) => ProcessSpec>
 }
+
+const roboticsOperations = [
+  'probe', 'mjcf-audit', 'showcase', 'object-plan', 'arm-plan', 'rgb-localize', 'vision-transfer-plan', 'ibvs-step', 'yam-ibvs',
+  'handeye-fit', 'yam-ik', 'fr3-duo-check', 'playground-camera', 'gauntlet-schedule', 'rl-audit', 'mcap-export', 'hardware-inventory',
+]
+const roboticsSourceRequired = new Set(['mjcf-audit', 'showcase', 'arm-plan', 'yam-ik', 'yam-ibvs', 'fr3-duo-check', 'playground-camera', 'rl-audit', 'mcap-export'])
+const roboticsRequiresRequest = new Set(['object-plan', 'arm-plan', 'rgb-localize', 'vision-transfer-plan', 'ibvs-step', 'handeye-fit', 'yam-ik', 'fr3-duo-check', 'playground-camera', 'gauntlet-schedule'])
 
 const text = (description: string) => ({ type: 'string' as const, required: true as const, description })
 const number = (description: string) => ({ type: 'number' as const, description })
@@ -131,6 +142,81 @@ export function applyOfflineSceneWorkflows(ctx: Context, config: OfflineSceneCon
         return output => ({ script: join(pythonDir, 'match_simfoundry_pose.py'), args: ['--source', scene, '--output', output, '--stage-script', upstream, '--object-index', index, '--mesh-backend', backend] })
       },
     },
+    robotics_lab: {
+      description: 'Run an offline robotics operation as a native Job. Start with probe for package availability. The named operations audit/render MJCF, plan motion, calculate camera geometry or visual servo steps, fit calibration, solve YAM IK, sample Gauntlet conditions, lint RL tasks, convert exported call artifacts to MCAP, or inventory device candidates. Read job_output for actual results; this tool never actuates hardware or changes a live world.',
+      python: config.roboticsLabPython,
+      properties: {
+        operation: choice('Offline robotics operation.', roboticsOperations),
+        sourcePath: { type: 'string', description: 'Task workspace input file (MJCF, mask PNG, Python source or exported calls JSONL).' },
+        requestPath: { type: 'string', description: 'Task workspace JSON parameters. Load the corresponding native skill for the input format.' },
+      },
+      async prepare(input, file, workspace) {
+        const operation = checkedText(input.operation, 'operation')
+        if (!roboticsOperations.includes(operation)) throw new Error(`OFFLINE_INPUT_INVALID: ${operation}`)
+        const load = async (argument: unknown) => {
+          const path = await file(argument)
+          if (pathWithin(join(workspace, '.lyapunov', 'campaigns'), path)) throw new Error('ROBOTICS_PRIVATE_CAMPAIGN_INPUT: 使用已导出的工作区副本')
+          return path
+        }
+        const source = roboticsSourceRequired.has(operation) || input.sourcePath !== undefined ? await load(input.sourcePath) : undefined
+        const request = roboticsRequiresRequest.has(operation) || input.requestPath !== undefined ? await load(input.requestPath) : undefined
+        return output => ({
+          script: join(pythonDir, 'robotics_lab.py'),
+          args: [operation, '--workspace', workspace, '--output', output, ...(source ? ['--source', source] : []), ...(request ? ['--request', request] : [])],
+          env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.roboticsLabRenderBackend) },
+        })
+      },
+    },
+    playground_train_so101: {
+      description: 'Train the upstream SO101PickCube task on CPU in a separate Playground Python environment. Supply a local SO-101 MJCF and explicit budget. Read job_output for the run log and checkpoint. Task success and real deployment require separate evaluation.',
+      python: config.playgroundPython,
+      properties: {
+        sourcePath: text('SO-101 MJCF and its assets in the task workspace.'),
+        iterations: { ...integer('PPO iterations, at most 1000.'), required: true },
+        worlds: integer('Parallel simulation worlds, default 2, maximum 64.'),
+        steps: integer('Rollout steps per world per iteration, default 8, maximum 256.'),
+        seed: integer('RNG seed, default 0.'),
+      },
+      async prepare(input, file, workspace) {
+        const source = await file(input.sourcePath)
+        if (pathWithin(join(workspace, '.lyapunov', 'campaigns'), source)) throw new Error('ROBOTICS_PRIVATE_CAMPAIGN_INPUT: 使用已导出的工作区副本')
+        const iterations = checkedNumber(input.iterations, 'iterations', 1, 1000, true)
+        const worlds = checkedNumber(input.worlds ?? 2, 'worlds', 2, 64, true)
+        const steps = checkedNumber(input.steps ?? 8, 'steps', 4, 256, true)
+        const seed = checkedNumber(input.seed ?? 0, 'seed', 0, 2 ** 31 - 1, true)
+        return output => ({
+          script: join(pythonDir, 'train_playground_so101.py'),
+          args: ['--source', source, '--workspace', workspace, '--output', output, '--iterations', iterations, '--worlds', worlds, '--steps', steps, '--seed', seed],
+          env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.roboticsLabRenderBackend), OMP_NUM_THREADS: '2' },
+        })
+      },
+    },
+    playground_eval_so101: {
+      description: 'Evaluate a local SO101PickCube checkpoint against zero-action in paired independent CPU simulation episodes. Requires the training receipt and matching MJCF. Preserves upstream task scores, reasons and actual rendered rollouts.',
+      python: config.playgroundPython,
+      properties: {
+        sourcePath: text('SO-101 MJCF matching the training receipt.'),
+        checkpointPath: text('Checkpoint in the task workspace.'),
+        trainingReceiptPath: text('result.json written by playground_train_so101.'),
+        episodes: { ...integer('Independent paired seeds, from 1 to 20.'), required: true },
+        steps: { ...integer('Per-episode control-step budget, from 1 to 500.'), required: true },
+        seed: { ...integer('First evaluation seed. The training seed must be outside this range.'), required: true },
+      },
+      async prepare(input, file, workspace) {
+        const [source, checkpoint, receipt] = await Promise.all([file(input.sourcePath), file(input.checkpointPath), file(input.trainingReceiptPath)])
+        if ([source, checkpoint, receipt].some(path => pathWithin(join(workspace, '.lyapunov', 'campaigns'), path))) {
+          throw new Error('ROBOTICS_PRIVATE_CAMPAIGN_INPUT: 使用已导出的工作区副本')
+        }
+        const episodes = checkedNumber(input.episodes, 'episodes', 1, 20, true)
+        const steps = checkedNumber(input.steps, 'steps', 1, 500, true)
+        const seed = checkedNumber(input.seed, 'seed', 0, 2 ** 31 - 20, true)
+        return output => ({
+          script: join(pythonDir, 'eval_playground_so101.py'),
+          args: ['--source', source!, '--checkpoint', checkpoint!, '--training-receipt', receipt!, '--workspace', workspace, '--output', output, '--episodes', episodes, '--steps', steps, '--seed', seed],
+          env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.roboticsLabRenderBackend), OMP_NUM_THREADS: '2' },
+        })
+      },
+    },
   }
 
   const capabilityDescription = 'List scene and Isaac workflows visible in this session and the local dependencies configured for each. Use when users ask what this workbench can do. A configured interpreter does not establish that the input or GPU will pass a real job.'
@@ -166,7 +252,7 @@ export function applyOfflineSceneWorkflows(ctx: Context, config: OfflineSceneCon
         if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) throw new Error(`OFFLINE_INPUT_INVALID: ${raw}`)
         return path
       }
-      const prepare = await workflow.prepare(input, file)
+      const prepare = await workflow.prepare(input, file, workspace)
       const parent = join(sessionNamespace(join(workspace, '.lyapunov'), sessionId), 'offline-scene')
       requireWritableTarget(ctx, agent, parent, name)
       await mkdir(parent, { recursive: true, mode: 0o700 })

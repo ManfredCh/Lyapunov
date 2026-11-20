@@ -112,7 +112,7 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
   const fixture = (provider:'mujoco'|'isaac'|'newton',geometryFails=false,pipFails=false,gpuBaseFails=false,gpuCheckFails=false) => {
     const directory=mkdtempSync(join(realpathSync(tmpdir()),'lyapunov-geometry-install-')),product=join(directory,'product')
     const put=(file:string,text:string,executable=false)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,text);if(executable)chmodSync(file,0o755)}
-    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt','packages/sim-newton/requirements.txt','packages/sim-mujoco/python/human_gpu.py','packages/sim-mujoco/python/check_human_cuda.py','packages/sim-mujoco/requirements-human-cuda.txt','packages/sim-mujoco/warp-source.json','packages/sim-mujoco/WARP-LICENSE.md']){
+    for(const file of ['distribution/linux/install-provider','distribution/linux/register-managed-sdk.mjs','distribution/linux/fetch-extscache-kit.mjs','distribution/linux/extscache-kit-wheel.json','packages/asset-bake/requirements.txt','packages/asset-bake/requirements-isaac.txt','packages/asset-bake/requirements-common.txt','packages/robot-workflows/python/requirements-robotics-lab.txt','packages/sim-newton/requirements.txt','packages/sim-mujoco/python/human_gpu.py','packages/sim-mujoco/python/check_human_cuda.py','packages/sim-mujoco/requirements-human-cuda.txt','packages/sim-mujoco/warp-source.json','packages/sim-mujoco/WARP-LICENSE.md']){
       mkdirSync(dirname(join(product,file)),{recursive:true});copyFileSync(join(root,file),join(product,file))
     }
     // 通用 Kit 大 wheel 的固定 pin 在测试里替换为本地夹具：预置一个长度/SHA 已匹配的 wheel，
@@ -185,6 +185,9 @@ describe('发行安装器的几何依赖与包内前缀复用', () => {
         expect(argv[argv.indexOf('--index-url')+1]).toBe('https://pypi.org/simple')
         expect(argv).not.toContain('warp-lang==1.13.0')
         expect(argv.some(value=>value.includes('requirements-human-cuda'))).toBe(false)
+        const roboticsRequirements=join(f.product,'packages/robot-workflows/python/requirements-robotics-lab.txt')
+        expect(argv.includes(roboticsRequirements)).toBe(provider==='mujoco')
+        if(provider==='mujoco')expect(argv[argv.indexOf(roboticsRequirements)-1]).toBe('-r')
         if(provider==='isaac'){
           // 通用大 Kit 缓存由固定 pin 的 helper 分段续传并按长度/SHA256 校验后，以本地已验证 wheel
           // 交给正常 pip；仍不请求整个 [extscache] 组，也不把未验证的通用缓存名直接交给 pip。

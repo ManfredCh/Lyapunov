@@ -1,0 +1,314 @@
+[
+  {
+    "sceneId": "so101-nominal-4019",
+    "condition": {
+      "id": "nominal-4019",
+      "tier": "nominal",
+      "seed": 4019,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.228,
+        -0.04,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.083,
+        0.0106
+      ],
+      "mass": 0.022,
+      "friction": 1,
+      "dx": 0,
+      "dy": 0,
+      "sceneSha256": "578b7856841388653f095aceb30214bafc7ad6ae2753bf72ddbf264d2c811178"
+    }
+  },
+  {
+    "sceneId": "so101-nominal-4561",
+    "condition": {
+      "id": "nominal-4561",
+      "tier": "nominal",
+      "seed": 4561,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.228,
+        -0.04,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.083,
+        0.0106
+      ],
+      "mass": 0.022,
+      "friction": 1,
+      "dx": 0,
+      "dy": 0,
+      "sceneSha256": "578b7856841388653f095aceb30214bafc7ad6ae2753bf72ddbf264d2c811178"
+    }
+  },
+  {
+    "sceneId": "so101-nominal-5039",
+    "condition": {
+      "id": "nominal-5039",
+      "tier": "nominal",
+      "seed": 5039,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.228,
+        -0.04,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.083,
+        0.0106
+      ],
+      "mass": 0.022,
+      "friction": 1,
+      "dx": 0,
+      "dy": 0,
+      "sceneSha256": "578b7856841388653f095aceb30214bafc7ad6ae2753bf72ddbf264d2c811178"
+    }
+  },
+  {
+    "sceneId": "so101-nominal-5851",
+    "condition": {
+      "id": "nominal-5851",
+      "tier": "nominal",
+      "seed": 5851,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.228,
+        -0.04,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.083,
+        0.0106
+      ],
+      "mass": 0.022,
+      "friction": 1,
+      "dx": 0,
+      "dy": 0,
+      "sceneSha256": "578b7856841388653f095aceb30214bafc7ad6ae2753bf72ddbf264d2c811178"
+    }
+  },
+  {
+    "sceneId": "so101-shift-4019",
+    "condition": {
+      "id": "shift-4019",
+      "tier": "shift",
+      "seed": 4019,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.2185376974135958,
+        -0.05840711070420386,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.08900000000000001,
+        0.0106
+      ],
+      "mass": 0.02727269398031586,
+      "friction": 0.9063721675440605,
+      "dx": -0.009462302586404212,
+      "dy": -0.01840711070420386,
+      "sceneSha256": "480b6928bb824dbbf19de54fdfe4e24271d29b9349ca7d02e6b20fac7bfd5dd0"
+    }
+  },
+  {
+    "sceneId": "so101-shift-4561",
+    "condition": {
+      "id": "shift-4561",
+      "tier": "shift",
+      "seed": 4561,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.21857624170290685,
+        -0.05274840924696727,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.08900000000000001,
+        0.0106
+      ],
+      "mass": 0.029778439002059967,
+      "friction": 0.9751705195696956,
+      "dx": -0.009423758297093156,
+      "dy": -0.012748409246967268,
+      "sceneSha256": "991e783c64592a5b9d79919603537b4ebcbd1bf66d6948920ef28f81240939cb"
+    }
+  },
+  {
+    "sceneId": "so101-shift-5039",
+    "condition": {
+      "id": "shift-5039",
+      "tier": "shift",
+      "seed": 5039,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.23436887159533074,
+        -0.05248354314488441,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.08900000000000001,
+        0.0106
+      ],
+      "mass": 0.03356383611810483,
+      "friction": 0.8224444953078508,
+      "dx": 0.0063688715953307395,
+      "dy": -0.012483543144884411,
+      "sceneSha256": "db12798fd1ff203621024943c59d1dec864ad5995e045bf446a5a9bc9a04b402"
+    }
+  },
+  {
+    "sceneId": "so101-shift-5851",
+    "condition": {
+      "id": "shift-5851",
+      "tier": "shift",
+      "seed": 5851,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.23642389562829025,
+        -0.02176292057679103,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.077,
+        0.0106
+      ],
+      "mass": 0.03293376058594644,
+      "friction": 0.7219272144655527,
+      "dx": 0.008423895628290226,
+      "dy": 0.01823707942320897,
+      "sceneSha256": "af093d70fc4c4ef18ebbe4fe9cf89061abf2d1f36699b209c84203a048c4f397"
+    }
+  },
+  {
+    "sceneId": "so101-stress-4019",
+    "condition": {
+      "id": "stress-4019",
+      "tier": "stress",
+      "seed": 4019,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.21762186312657358,
+        -0.024469636072327765,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.0734,
+        0.0106
+      ],
+      "mass": 0.050661130693522544,
+      "friction": 0.6681272602426185,
+      "dx": -0.010378136873426414,
+      "dy": 0.015530363927672236,
+      "sceneSha256": "43b87e4b17e73da556f33caa1eac7a3edec90df554070283660379765e9d3b39"
+    }
+  },
+  {
+    "sceneId": "so101-stress-4561",
+    "condition": {
+      "id": "stress-4561",
+      "tier": "stress",
+      "seed": 4561,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.21533183794918748,
+        -0.01544955214770733,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.0734,
+        0.0106
+      ],
+      "mass": 0.04320349736781872,
+      "friction": 0.6554927901121538,
+      "dx": -0.012668162050812544,
+      "dy": 0.02455044785229267,
+      "sceneSha256": "2081ac2cd6dff357062fa4532175d9e5bd6b5e62e03d7ae35d3c4edf421f5f27"
+    }
+  },
+  {
+    "sceneId": "so101-stress-5039",
+    "condition": {
+      "id": "stress-5039",
+      "tier": "stress",
+      "seed": 5039,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.21054582742046235,
+        -0.058911519035629814,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.0734,
+        0.0106
+      ],
+      "mass": 0.035649622339208056,
+      "friction": 0.9197399862668802,
+      "dx": -0.017454172579537654,
+      "dy": -0.018911519035629817,
+      "sceneSha256": "b72da1cad63c16f989c643947501d1fc29a72f84c005cf97730ef231e28434d3"
+    }
+  },
+  {
+    "sceneId": "so101-stress-5851",
+    "condition": {
+      "id": "stress-5851",
+      "tier": "stress",
+      "seed": 5851,
+      "sourceSha256": "5ad49f2b45c083baac9ffe5d4d3213a5da7eac8039095bb2df177a697aae8308",
+      "sourceBundleSha256": "04659e508338b0881c654ab480a85b28cbb500cfca98aa3ec7c7fee0b985ffc0",
+      "sceneRevision": 2,
+      "targetPosition": [
+        0.21469506065461205,
+        -0.06154634927901122,
+        0.0106
+      ],
+      "distractorPosition": [
+        0.287,
+        -0.0734,
+        0.0106
+      ],
+      "mass": 0.04173482261387045,
+      "friction": 0.8411572442206454,
+      "dx": -0.013304939345387963,
+      "dy": -0.021546349279011213,
+      "sceneSha256": "ed5cb3899a156dffdd4f5e77d1f9016131da2db76fc1a81fa64cc427b75d0010"
+    }
+  }
+]

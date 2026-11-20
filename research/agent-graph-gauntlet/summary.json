@@ -1,0 +1,194 @@
+{
+  "heldout": {
+    "complete": 12,
+    "incomplete": 0,
+    "both": 9,
+    "baselineOnly": 0,
+    "candidateOnly": 0,
+    "neither": 3,
+    "statistics": {
+      "discordantPairs": 0,
+      "baselineRate": 0.75,
+      "candidateRate": 0.75,
+      "exactMcNemarP": 1
+    },
+    "tiers": [
+      {
+        "tier": "nominal",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 4,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 1,
+          "candidateRate": 1,
+          "exactMcNemarP": 1
+        }
+      },
+      {
+        "tier": "shift",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 4,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 1,
+          "candidateRate": 1,
+          "exactMcNemarP": 1
+        }
+      },
+      {
+        "tier": "stress",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 1,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 3,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 0.25,
+          "candidateRate": 0.25,
+          "exactMcNemarP": 1
+        }
+      }
+    ],
+    "validatedVideos": 24,
+    "goalControls": 4,
+    "reacquisitions": 0
+  },
+  "crossSeed": {
+    "complete": 12,
+    "incomplete": 0,
+    "both": 8,
+    "baselineOnly": 0,
+    "candidateOnly": 3,
+    "neither": 1,
+    "statistics": {
+      "discordantPairs": 3,
+      "baselineRate": 0.6666666666666666,
+      "candidateRate": 0.9166666666666666,
+      "exactMcNemarP": 0.25000000000000006
+    },
+    "tiers": [
+      {
+        "tier": "nominal",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 4,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 1,
+          "candidateRate": 1,
+          "exactMcNemarP": 1
+        }
+      },
+      {
+        "tier": "shift",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 2,
+        "baselineOnly": 0,
+        "candidateOnly": 2,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 2,
+          "baselineRate": 0.5,
+          "candidateRate": 1,
+          "exactMcNemarP": 0.5
+        }
+      },
+      {
+        "tier": "stress",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 2,
+        "baselineOnly": 0,
+        "candidateOnly": 1,
+        "neither": 1,
+        "statistics": {
+          "discordantPairs": 1,
+          "baselineRate": 0.5,
+          "candidateRate": 0.75,
+          "exactMcNemarP": 1
+        }
+      }
+    ],
+    "validatedVideos": 24,
+    "goalControls": 4,
+    "reacquisitions": 0
+  },
+  "reacquire": {
+    "complete": 12,
+    "incomplete": 0,
+    "both": 9,
+    "baselineOnly": 0,
+    "candidateOnly": 0,
+    "neither": 3,
+    "statistics": {
+      "discordantPairs": 0,
+      "baselineRate": 0.75,
+      "candidateRate": 0.75,
+      "exactMcNemarP": 1
+    },
+    "tiers": [
+      {
+        "tier": "nominal",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 4,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 1,
+          "candidateRate": 1,
+          "exactMcNemarP": 1
+        }
+      },
+      {
+        "tier": "shift",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 4,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 0,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 1,
+          "candidateRate": 1,
+          "exactMcNemarP": 1
+        }
+      },
+      {
+        "tier": "stress",
+        "complete": 4,
+        "incomplete": 0,
+        "both": 1,
+        "baselineOnly": 0,
+        "candidateOnly": 0,
+        "neither": 3,
+        "statistics": {
+          "discordantPairs": 0,
+          "baselineRate": 0.25,
+          "candidateRate": 0.25,
+          "exactMcNemarP": 1
+        }
+      }
+    ],
+    "validatedVideos": 24,
+    "goalControls": 4,
+    "reacquisitions": 3
+  }
+}

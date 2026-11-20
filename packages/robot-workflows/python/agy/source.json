@@ -1,0 +1,65 @@
+{
+  "repository": "https://github.com/google-deepmind/robotics-antigravity-plugin",
+  "revision": "9cb7f624c4d7c50859a39f1d49d088990429a83d",
+  "license": "Apache-2.0",
+  "files": {
+    "blender_mesh_utils.py": {
+      "upstreamPath": "plugins/robotics/skills/blender-creation/scripts/blender_mesh_utils.py",
+      "upstreamSha256": "fbd0ba4a1c1b65540c7fce012b9ae19a815745e6b375a4579d3831e45272173d",
+      "vendoredSha256": "fbd0ba4a1c1b65540c7fce012b9ae19a815745e6b375a4579d3831e45272173d"
+    },
+    "motion_planner.py": {
+      "upstreamPath": "plugins/robotics/skills/motion-planning/scripts/motion_planner.py",
+      "upstreamSha256": "21d7bc904022a899192e6c4c4c3287eb1c054dc1c39e22b598a14bdcf32a3032",
+      "vendoredSha256": "21d7bc904022a899192e6c4c4c3287eb1c054dc1c39e22b598a14bdcf32a3032"
+    },
+    "rgb_localization.py": {
+      "upstreamPath": "plugins/robotics/skills/rgb-object-localization/scripts/rgb_localization.py",
+      "upstreamSha256": "5cd4286df7d1b36e5d5e60225e39742663878a864ee87768ac7d9e12a28bfa7a",
+      "vendoredSha256": "5cd4286df7d1b36e5d5e60225e39742663878a864ee87768ac7d9e12a28bfa7a"
+    },
+    "ibvs.py": {
+      "upstreamPath": "plugins/robotics/skills/visual-servoing/scripts/ibvs.py",
+      "upstreamSha256": "7e47e3edd94577380201a01fa7068052ec162b722054c92154703582b6632632",
+      "vendoredSha256": "7e47e3edd94577380201a01fa7068052ec162b722054c92154703582b6632632"
+    },
+    "audit_scenarios.py": {
+      "upstreamPath": "plugins/robotics/skills/mujoco-audit/scripts/audit_scenarios.py",
+      "upstreamSha256": "6a0660ed45826efab75fbfbedab1c64f6975dd00777270c51e73b404a470eb8f",
+      "vendoredSha256": "6a0660ed45826efab75fbfbedab1c64f6975dd00777270c51e73b404a470eb8f"
+    },
+    "render_showcase_shot.py": {
+      "upstreamPath": "plugins/robotics/skills/mujoco-showcase-shot/scripts/render_showcase_shot.py",
+      "upstreamSha256": "3c435b54a6d20773b59ab675fd00da1ef0ef12dd2a4dc22b526666bddf430873",
+      "vendoredSha256": "3c435b54a6d20773b59ab675fd00da1ef0ef12dd2a4dc22b526666bddf430873"
+    },
+    "rl_task_check.py": {
+      "upstreamPath": "plugins/robotics/skills/mujoco-playground-rl/scripts/rl_task_check.py",
+      "upstreamSha256": "f6e8a45cb14f74685811604ebdf0b2dd787f3d8530e8e0eba6c5ad8a6163a3e9",
+      "vendoredSha256": "f6e8a45cb14f74685811604ebdf0b2dd787f3d8530e8e0eba6c5ad8a6163a3e9"
+    },
+    "yam_ik.py": {
+      "upstreamPath": "plugins/robotics/skills/i2rt-yam-ik/scripts/yam_ik.py",
+      "upstreamSha256": "35d7ed880db93f5c67320574779575d6f13d476336bc08a19ad42f9c0a28d15f",
+      "vendoredSha256": "35d7ed880db93f5c67320574779575d6f13d476336bc08a19ad42f9c0a28d15f"
+    },
+    "projective_handeye.py": {
+      "upstreamPath": "plugins/robotics/skills/so101-calibration/scripts/calibrate_handeye.py",
+      "upstreamSha256": "096e15f7cf0dbacbe0f35c3614d73b948854b7b344da8b149763854e908db85b",
+      "vendoredSha256": "2482e25e99158f58e30697c88f0ed654882916b6fc9ce55d2575fc1636a7afc5",
+      "adaptation": "仅保留标定数学，去掉真机驱动和命令入口"
+    },
+    "perturb_spec.py": {
+      "upstreamPath": "plugins/robotics/skills/sim2real-gauntlet/src/robosim_gauntlet/perturb.py",
+      "upstreamSha256": "cbfe3ae437d7af5e4c3d4bce2ba2f10b68706c13efa8082cbf09c8dc64894dba",
+      "vendoredSha256": "62ed08143ae35a1181c424fcc22c6338a166788d76331963895023bb0d6144a2",
+      "adaptation": "提取配对扰动采样算法，去掉引擎和控制器适配"
+    },
+    "playground_camera.py": {
+      "upstreamPath": "plugins/robotics/skills/mujoco-playground/scripts/playground_sim2real.py",
+      "upstreamSha256": "95a7a25ef14ec0e46480bd254f871981675e7c17168e4d2458048311f6a20961",
+      "vendoredSha256": "708c7d49db8c421944fad7fa18679d1a6e872ae3efb66af182d1158f7d891155",
+      "adaptation": "提取 MuJoCo 光学内参与坐标系，设备层与训练依赖保持可选"
+    }
+  }
+}

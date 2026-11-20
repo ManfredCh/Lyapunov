@@ -50,3 +50,7 @@ Bundled DSH, Node.js, Electron, Python/MuJoCo environments, individual
 packages, robot assets, model weights, and external tools retain their
 respective licenses and notices. Their supplied license files remain
 part of the corresponding distribution; this NOTICE does not change them.
+
+Selected Robotics plugin algorithms from Google DeepMind are included in
+packages/robot-workflows/python/agy under Apache-2.0. Their original copyright
+headers, license and source revision are retained with the files.

@@ -20,6 +20,7 @@ import { sessionIdOf } from '../../lyapunov-contracts/src/session-scope.ts'
 import type { Campaign, CampaignRun, CampaignTask, RunCallArtifact } from '../../lyapunov-contracts/src/agent-graph.ts'
 import { CampaignStore } from './campaign-store.ts'
 import { CAMPAIGN_PARTITION_VIOLATION, type RunRole } from './state-machine.ts'
+import { attachPairEvidence } from './paired-evaluation.ts'
 
 export const CAMPAIGN_BUDGET_EXCEEDED = 'CAMPAIGN_BUDGET_EXCEEDED'
 export const CAMPAIGN_VERIFIER_ISOLATION = 'CAMPAIGN_VERIFIER_ISOLATION'
@@ -241,6 +242,8 @@ function buildArtifact(run: ActiveRun, exec: ToolDispatchExecution, settled: { r
   else {
     const receipt = extractReceipt(settled.result?.value)
     if (receipt) artifact.receipt = receipt
+    const task = run.handle.campaign.tasks.find(row => row.taskId === run.taskId)
+    if (task?.pair) attachPairEvidence(task, artifact, exec.arguments, settled.result?.value)
   }
   return artifact
 }

@@ -1,0 +1,112 @@
+{
+  "gauntlet": {
+    "validPairs": 10,
+    "tiers": {
+      "T0": {
+        "baseline": 1,
+        "candidate": 1,
+        "pairs": 1
+      },
+      "T1": {
+        "baseline": 1,
+        "candidate": 1,
+        "pairs": 1
+      },
+      "T2": {
+        "baseline": 0,
+        "candidate": 0,
+        "pairs": 2
+      },
+      "T3": {
+        "baseline": 2,
+        "candidate": 2,
+        "pairs": 3
+      },
+      "T4": {
+        "baseline": 1,
+        "candidate": 1,
+        "pairs": 3
+      }
+    },
+    "coverage": {
+      "frame-delay": 2,
+      "slip": 2,
+      "push": 2,
+      "knockout": 2,
+      "camera_freeze": 2,
+      "camera-restamp": 2,
+      "dead_gripper": 2
+    },
+    "safety": {
+      "complete": 10,
+      "baselineSafePass": 5,
+      "candidateSafePass": 5,
+      "candidateNewViolations": 0
+    },
+    "recordings": 20
+  },
+  "yam": {
+    "robot": "YAM",
+    "model": "yam_linear_4310.xml",
+    "simulation": "mujoco-native-actuator",
+    "gravityCompensation": true,
+    "modes": {
+      "hold": {
+        "reason": "iteration-budget",
+        "commands": 0,
+        "initialErrorPx": 39.60331109965852,
+        "finalErrorPx": 39.60331109965852,
+        "simStepTimeS": 8.399999999999475,
+        "peakContactN": 0.0,
+        "trace": "hold.json",
+        "recording": "hold.gif"
+      },
+      "feedback": {
+        "reason": "converged",
+        "commands": 25,
+        "initialErrorPx": 39.60331109965852,
+        "finalErrorPx": 0.9197786263769598,
+        "simStepTimeS": 5.999999999999561,
+        "peakContactN": 0.0,
+        "trace": "feedback.json",
+        "recording": "feedback.gif"
+      },
+      "freeze": {
+        "reason": "stale-frame",
+        "commands": 1,
+        "initialErrorPx": 39.60331109965852,
+        "finalErrorPx": 39.60331109965852,
+        "simStepTimeS": 0.24000000000000019,
+        "peakContactN": 0.0,
+        "trace": "freeze.json",
+        "recording": "freeze.gif"
+      },
+      "unreachable": {
+        "reason": "ik-unreachable",
+        "commands": 0,
+        "initialErrorPx": 39.60331109965852,
+        "finalErrorPx": 39.60331109965852,
+        "simStepTimeS": 0.0,
+        "peakContactN": 0.0,
+        "trace": "unreachable.json",
+        "recording": "unreachable.gif"
+      }
+    },
+    "reference": "reference.png"
+  },
+  "playground": {
+    "environment": "SO101PickCube",
+    "deployment": "independent-mujoco-cpu",
+    "seedStart": 7100,
+    "episodesPerVariant": 6,
+    "checkpointSha256": "b208d2d74c9b256c40f824c5dc2663d36352556827ee73af51ddc82a7fd68328",
+    "mjcfSha256": "982c02c027ec0c62d3459d0a6eb00dfb7dc13a451992e72ce99addc71f209805",
+    "trainingSeed": 42,
+    "officialSuccesses": {
+      "zero-action": 0,
+      "checkpoint": 0
+    },
+    "recordings": 12,
+    "artifact": "episodes.json"
+  }
+}

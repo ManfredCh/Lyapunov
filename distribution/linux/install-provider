@@ -37,12 +37,16 @@ json_blocked() {
 }
 [ -x "$micromamba" ] || json_blocked runtime PROVIDER_ENV_TOOL_MISSING "找不到 micromamba：${micromamba}（发行布局应自带 runtime/micromamba；开发检出可用 LYAPUNOV_MICROMAMBA 指向 .runtime/bin/micromamba）"
 assetbake_requirements="$root/packages/asset-bake/requirements.txt"
+robotics_requirements="$root/packages/robot-workflows/python/requirements-robotics-lab.txt"
 if [ "$provider" = isaac ]; then assetbake_requirements="$root/packages/asset-bake/requirements-isaac.txt"; fi
 case "$provider" in
   mujoco|isaac) for file in "$assetbake_requirements" "$root/packages/asset-bake/requirements-common.txt"; do
     [ -f "$file" ] || json_blocked "$provider" RELEASE_PAYLOAD_MISSING "缺少 ${file}；请重新完整解包。"
   done ;;
 esac
+if [ "$provider" = mujoco ] && [ ! -s "$robotics_requirements" ]; then
+  json_blocked mujoco RELEASE_PAYLOAD_MISSING "缺少 $robotics_requirements；请重新完整解包。"
+fi
 if [ "$human_cuda" = true ]; then
   for file in packages/sim-mujoco/python/human_gpu.py packages/sim-mujoco/python/check_human_cuda.py packages/sim-mujoco/requirements-human-cuda.txt packages/sim-mujoco/warp-source.json packages/sim-mujoco/WARP-LICENSE.md; do
     [ -s "$root/$file" ] || json_blocked mujoco RELEASE_PAYLOAD_MISSING "缺少非空 $file；请重新完整解包。"
@@ -142,7 +146,7 @@ print(json.dumps(result,sort_keys=True,separators=(",",":")))'
 }
 if [ "$provider" = mujoco ]; then
   if [ "$human_cuda" != true ] || [ "$reuse_prefix" != true ]; then
-    pip_install --index-url https://pypi.org/simple $physics_pins $transport_pins -r "$assetbake_requirements"
+    pip_install --index-url https://pypi.org/simple $physics_pins $transport_pins -r "$assetbake_requirements" -r "$robotics_requirements"
   fi
   if [ "$human_cuda" = true ]; then
     runtime_before=$(human_runtime_identity) || json_blocked mujoco HUMAN_GPU_BASE_RUNTIME_UNSUPPORTED '当前Mu/NumPy基础运行时不匹配或不完整，未自动升级；先核对标准MuJoCo安装。'

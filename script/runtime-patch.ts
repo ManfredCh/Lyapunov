@@ -124,6 +124,7 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   // Mink/OMPL/非 AnyGrasp 抓取仍共用这一前缀；几何烘焙在 Isaac 模式下复用
   // install-provider isaac 已安装的 requirements-isaac，不要求额外安装 MuJoCo。
   const mujocoPython=resolveSdkPython(PRODUCT_ROOT,"mujoco",sdkEnvironment).python
+  const mujocoRenderBackend=process.env.LYAPUNOV_MUJOCO_RENDER_BACKEND
   // 一次读取同一 SDK 选择，几何派生与 Isaac worker 使用完全相同的解释器。
   const isaacPython=resolveSdkPython(PRODUCT_ROOT,"isaac",sdkEnvironment).python
   const algorithmPython=input.engine==="isaac"?isaacPython:mujocoPython
@@ -182,14 +183,14 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   }
   if(input.engine&&input.engine!=="none"){
     if(input.engine==="mujoco"){
-      const renderBackend=process.env.LYAPUNOV_MUJOCO_RENDER_BACKEND
+      const renderBackend=mujocoRenderBackend
       // 校验用 MuJoCo 文档化的后端全集：Linux egl/osmesa/glfw、macOS cgl、Windows wgl。
       // 平台是否真的支持由 MuJoCo 自己判定；这里只拒绝未登记的值。
       if(renderBackend&&!isMuJoCoGlBackend(renderBackend))throw new Error('未知 MuJoCo 渲染后端：'+renderBackend)
       // productRoots：Shell 与 robot-workflows 按 `<根>/sessions/<会话键>` 写截图与录像的父根
       // （唯一规则是 lyapunov-contracts 的 sessionNamespace）。会话内部的采集/录制目录落在原生
       // 工作区授权根之外，所以这两处是 sim-mujoco 媒体中转的唯一边界，必须与实际写盘用的根逐字相同。
-      add("sim-mujoco",{pythonPath:mujocoPython,workerPath:join(PRODUCT_ROOT,"packages/sim-mujoco/python/worker.py"),readOnlyRoots:[...runtimeReadRoots(mujocoPython),...resourceReadRoots()],productRoots:[captureRoot,recordingRoot],...(renderBackend?{renderBackend}:{})})
+      add("sim-mujoco",{pythonPath:mujocoPython,workerPath:join(PRODUCT_ROOT,"packages/sim-mujoco/python/worker.py"),readOnlyRoots:[...runtimeReadRoots(mujocoPython),...resourceReadRoots()],productRoots:[captureRoot,recordingRoot],...(renderBackend?{renderBackend}:{}),...(input.mode==="developer"&&sdkEnvironment.LYAPUNOV_SIM_LAB_FAULTS==="1"?{labFaults:true}:{})})
     }
     // Newton：独立环境（自带 mujoco~=3.12.0 pin，与产品 mujoco 3.13.0 冲突），provider 走 Warp；
     // 无 NVIDIA GPU 的机器由 provider 内部退回 cpu（见 packages/sim-newton/README.md）。
@@ -213,6 +214,9 @@ export function runtimePluginInsert(input:RuntimePatchInput):RuntimePluginInsert
   add("robot-workflows",{
     recordingRoot, labExportPython: sdkEnvironment.LYAPUNOV_LAB_EXPORT_PYTHON,
     offlineUsdPython: sdkEnvironment.LYAPUNOV_OFFLINE_USD_PYTHON,
+    roboticsLabPython: readRuntimeEnv(sdkEnvironment, 'roboticsLabPython')?.trim() || mujocoPython,
+    playgroundPython: readRuntimeEnv(sdkEnvironment, 'playgroundPython')?.trim(),
+    ...(mujocoRenderBackend && isMuJoCoGlBackend(mujocoRenderBackend) ? { roboticsLabRenderBackend: mujocoRenderBackend } : {}),
     nurecPython: isaacPython,
     labMimicPython: sdkEnvironment.LYAPUNOV_LAB_MIMIC_PYTHON,
     labSourceRoot: sdkEnvironment.LYAPUNOV_LAB_SOURCE_ROOT,

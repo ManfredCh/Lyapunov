@@ -1,0 +1,142 @@
+{
+  "baseCommit": "0373d9a3eb3b2eef9a888e7701e97bca71e181c6",
+  "upstreamCommit": "9cb7f624c4d7c50859a39f1d49d088990429a83d",
+  "upstreamArchiveSha256": "6569b60ef79b9867d2119e8da6740335e9985d3effa9d69c4210c431f4e8b380",
+  "files": [
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-pilot/comparison.json",
+      "bytes": 61490,
+      "sha256": "292c350ea10d74f473aa381d23820858f001347550a141e3d2f1d8375d41a0f7"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/results.json",
+      "bytes": 4262,
+      "sha256": "37b870c865803863a053b8b96edf216011b6a90ef04269212582780a8aafe060"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/comparison.json",
+      "bytes": 232535,
+      "sha256": "9ee8501bfcf763a3b94439e370bbdd28dbdc5d96c7f16e4fcb28c364ede09f77"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-cross-seed/comparison.json",
+      "bytes": 243812,
+      "sha256": "bb957be7e36393a1cfa432247df372f50e8128c30c63ed273292590531b8982d"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-reacquire/comparison.json",
+      "bytes": 234001,
+      "sha256": "e97907364b7295c89a4979d2e0f50ef2be184cf2fe7f1fe37bb024280faea3fe"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-contact/comparison.json",
+      "bytes": 53175,
+      "sha256": "96e5205f74f6e5151e06cd7efd769ed773880d6e5a57550deeb431a85148aefa"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/goal-controls.json",
+      "bytes": 6890,
+      "sha256": "5ecb5b3c79ad7bf4e0ee98475e7b6134b0dedb562f9affd2c4d12fe07347912d"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-cross-seed/goal-controls.json",
+      "bytes": 6890,
+      "sha256": "c8b38275809707b2ab26ff7486845f33c8325d9a228ce6a8b39b566054a58d7a"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-reacquire/goal-controls.json",
+      "bytes": 6890,
+      "sha256": "1809bc2161bfcda3d7f9bafee73891535cb97e4bb6314bf742ae36f3fa645958"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/index.html",
+      "bytes": 79292,
+      "sha256": "a4eee1ee991e68e5ec41223966e5fca4112d031ce38ae39cf9a1c7360d3a10ed"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/STAGE_SUMMARY.md",
+      "bytes": 3637,
+      "sha256": "ed271da8a70fe4de4c93f44c1516675f5c13b3ff94448dc8f93782c49e9a18d3"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/browser.json",
+      "bytes": 390,
+      "sha256": "7a1300401228e90a1ffdad69661cdcfb0a8d11b23a7689676aae19e2de73faf6"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/open-stage-contact.json",
+      "bytes": 1531,
+      "sha256": "ce640abdaf0d6b609ce04bf50f81efcdf4548c7d2690b48d6ca4264346bf8b05"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-logs/pilot.log",
+      "bytes": 1542,
+      "sha256": "42ec08c18c61e45c545a132108de2777000952da681860b8df4207d79d42191f"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-logs/heldout.log",
+      "bytes": 6498,
+      "sha256": "6cfcece0771f74804e631811c4dabe62e9ac79ad512e21aa82db4bd170d2374a"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-logs/cross-seed.log",
+      "bytes": 5781,
+      "sha256": "5f65e6d97963cabdb9b38763d2862217e0a5c71f6f51e0d8545b963eb2f05f23"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-logs/reacquire.log",
+      "bytes": 6499,
+      "sha256": "0cccbd69ec58ed102dc00c1b19adb73bb48dd2f98acfb2c2568db702e3061e4a"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120-logs/contact.log",
+      "bytes": 2872,
+      "sha256": "50b436a9388c298d0be94b5386689639fe0c47a3e47d5359f8c318ab155f0532"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/agent-graph.json",
+      "bytes": 245320,
+      "sha256": "8375a6c0cbb78fa41ed7cad4d54a1544ac299d447738143d5263d12b65f55e0b"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/robot-workflows.json",
+      "bytes": 250015,
+      "sha256": "3b38888a4536a97484fba211cd735edf0a738230999f8181fec0d97b1d61e10e"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/sim-task-check.json",
+      "bytes": 246437,
+      "sha256": "d3503a0b45a7465bfa80f4de2f94003565e6501de5a5c296d75c97efd7fd509e"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/motion-mink.json",
+      "bytes": 243312,
+      "sha256": "377b1a597e2101ca7e84736956c8436a024edf2bf1525464b1c5a38f2bcff02e"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/gate-drivers.json",
+      "bytes": 246513,
+      "sha256": "56b3e9b8f6a79dc37eaf7150a28598c37ba88aeedc4ab0c4e125f5087a86382c"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/gate-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/build.log",
+      "bytes": 135,
+      "sha256": "7de65cf20112ada9db45873a0c469e4c3f2e95264161883a71b1445d1c599b0d"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-agent-graph-20261120/validation/python-syntax.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

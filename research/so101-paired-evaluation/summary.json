@@ -1,0 +1,104 @@
+{
+  "v1": {
+    "counts": {
+      "complete": 12,
+      "incomplete": 0,
+      "both": 4,
+      "baselineOnly": 0,
+      "candidateOnly": 3,
+      "neither": 5
+    },
+    "tiers": {
+      "nominal": [
+        4,
+        4,
+        4
+      ],
+      "shift": [
+        4,
+        0,
+        1
+      ],
+      "stress": [
+        4,
+        0,
+        2
+      ]
+    },
+    "p": 0.25,
+    "failures": {
+      "baseline/LIFT_NOT_ACHIEVED": 8,
+      "candidate/LIFT_NOT_ACHIEVED": 5
+    },
+    "medianLocalizationMm": 5.0095550158105775,
+    "localizations": 12
+  },
+  "v2": {
+    "counts": {
+      "complete": 12,
+      "incomplete": 0,
+      "both": 4,
+      "baselineOnly": 0,
+      "candidateOnly": 6,
+      "neither": 2
+    },
+    "tiers": {
+      "nominal": [
+        4,
+        4,
+        4
+      ],
+      "shift": [
+        4,
+        0,
+        4
+      ],
+      "stress": [
+        4,
+        0,
+        2
+      ]
+    },
+    "p": 0.03125,
+    "failures": {
+      "baseline/LIFT_NOT_ACHIEVED": 8,
+      "candidate/LIFT_NOT_ACHIEVED": 2
+    },
+    "medianLocalizationMm": 1.1813209484480214,
+    "localizations": 12
+  },
+  "heldout": {
+    "counts": {
+      "complete": 12,
+      "incomplete": 0,
+      "both": 4,
+      "baselineOnly": 0,
+      "candidateOnly": 4,
+      "neither": 4
+    },
+    "tiers": {
+      "nominal": [
+        4,
+        4,
+        4
+      ],
+      "shift": [
+        4,
+        0,
+        2
+      ],
+      "stress": [
+        4,
+        0,
+        2
+      ]
+    },
+    "p": 0.125,
+    "failures": {
+      "baseline/LIFT_NOT_ACHIEVED": 8,
+      "candidate/LIFT_NOT_ACHIEVED": 4
+    },
+    "medianLocalizationMm": 1.2589785571002259,
+    "localizations": 12
+  }
+}

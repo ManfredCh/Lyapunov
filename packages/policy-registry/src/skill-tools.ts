@@ -14,8 +14,10 @@
  *   skill_promote        {skillId, packId?}                         → 验证通过才转正，未过 ⇒ SKILL_NOT_VERIFIED
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-commands'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { PairResult } from '../../lyapunov-contracts/src/agent-graph.ts'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compatibleToolInput } from '../../lyapunov-contracts/src/tool-input.ts'
@@ -36,7 +38,7 @@ const skillInput = (value: unknown): Record<string, any> => {
   throw skillError('SKILL_INPUT_MUST_BE_OBJECT', 'input 需为对象或对象形状的 JSON 字符串')
 }
 
-interface SkillOperation { description: string; execute: (input: Record<string, any>) => Promise<any> }
+interface SkillOperation { description: string; execute: (input: Record<string, any>, execution?: ToolExecution) => Promise<any> }
 
 /** 注册五个冻结名工具 + 同名 commands。options.packsRoot 仅供测试注入。 */
 export function applySkillTools(ctx: Context, options: { packsRoot?: string } = {}) {
@@ -68,14 +70,27 @@ export function applySkillTools(ctx: Context, options: { packsRoot?: string } = 
       },
     },
     skill_verify_record: {
-      description: 'Record one verifier verdict for a pending proposal (proposals/<skillId>.verify.json, latest record wins). Only passed=true unlocks skill_promote. skillId unique across packs resolves the pack; pass packId to disambiguate.',
-      execute: async (input) => {
+      description: 'Record one verifier verdict for a pending proposal (proposals/<skillId>.verify.json, latest record wins). Only passed=true unlocks skill_promote. skillId unique across packs resolves the pack; pass packId to disambiguate. For proposals requiring safety, supply safetyCampaignId from a completed native campaign with this verifier run.',
+      execute: async (input, execution) => {
         const record = await recordVerify(packsRoot, input.skillId, {
           verifierRunId: input.verifierRunId,
           reproducedTaskIds: input.reproducedTaskIds,
           attempts: input.attempts,
           passed: input.passed,
-        }, input.packId)
+        }, input.packId, async () => {
+          if (!execution?.agent || typeof input.safetyCampaignId !== 'string') return undefined
+          const result = await ctx.tools.execute({ name: 'campaign_status', arguments: { input: { campaignId: input.safetyCampaignId } },
+            agent: execution.agent, signal: execution.signal, callId: ToolCallId(`${execution.callId}:safety-campaign`) })
+          if (result.isError) return undefined
+          const found = result.value as { campaign?: { status?: string }; comparison?: {
+            complete: number; safety?: { complete: number; candidateNewViolations: number }; pairs?: Array<{ candidate: { taskId: string; result: PairResult | null } }> } }
+          const comparison = found.comparison, safety = comparison?.safety
+          if (found.campaign?.status !== 'completed' || !comparison?.complete || safety?.complete !== comparison.complete || safety.candidateNewViolations !== 0) return undefined
+          const witnessed = comparison.pairs?.some(({ candidate }) => candidate.result && candidate.result.runId === input.verifierRunId
+            && candidate.result.verifier === true && candidate.result.taskAchieved && candidate.result.safety?.passed
+            && Array.isArray(input.reproducedTaskIds) && input.reproducedTaskIds.includes(candidate.taskId))
+          return witnessed ? input.safetyCampaignId : undefined
+        })
         return { status: 'VERIFICATION_RECORDED', record }
       },
     },
@@ -93,7 +108,7 @@ export function applySkillTools(ctx: Context, options: { packsRoot?: string } = 
       description: definition.description,
       parameters: { input: { type: 'json', required: true, description: 'JSON arguments per docs/AGENT_GRAPH_CONTRACT.md §4.' } },
       output: { schema: { type: 'json' }, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }] },
-      execute: (args: any, exec: any) => definition.execute(skillInput(args?.input)),
+      execute: (args: any, exec: any) => definition.execute(skillInput(args?.input), exec),
     })
     ctx.tools.register(compatibleToolInput(tool))
     ctx.commands.register({

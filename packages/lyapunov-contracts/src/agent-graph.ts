@@ -9,7 +9,7 @@
  *  - ActionReceipt.taskAchieved 的真实来源之一（benchmark worker 之外的第一条真值通道）。
  *  - 全部 JSON 可序列化（落 run artifacts / pack skills / session 事件都要求可重建）。
  */
-import type { Quaternion, Vec3 } from './types.ts'
+import type { Frame, Quaternion, Vec3 } from './types.ts'
 
 // ---------- 任务谓词（sim_task_check 求值对象） ----------
 
@@ -52,6 +52,8 @@ export type TaskCheckResult = {
   rejectedBy?: 'SPEC_UNREACHABLE' | 'SPEC_ALREADY_SATISFIED' | 'SPEC_ENTITY_MISSING'
   frameId?: string
   stepIndex?: number
+  executionMode?: Frame['executionMode']
+  assistAdvanceCount?: number
   /** 失败时按 reasonCode 从 packs/<id>/skills/ 自动召回的已准入技能摘要（无匹配时省略）。 */
   matchedSkills?: Array<{ packId: string; skillId: string; fixStrategy: string; reasonCodes: string[] }>
 }
@@ -62,6 +64,35 @@ export type TaskPartition = 'dev' | 'heldout'
 export type TaskStatus =
   | 'pending' | 'exploring' | 'debugging' | 'verifying' | 'heldout-eval' | 'done' | 'blocked' | 'rejected'
 
+export type PairMember = { id: string; variant: 'baseline' | 'candidate'; seed: number; tier: string; sceneSha256: string; requirePreflight?: true; requireSafety?: true }
+export type SampledClearanceEvidence = {
+  source: 'mujoco-sampled-rigid-geometry'; sampleCount: number; distanceCapM: number
+  robot: { distanceM: number; geom1: string; geom2: string; timeS: number }
+  payload: { distanceM: number; geom1: string; geom2: string; timeS: number } | null
+}
+export type PairWorkflowEvidence = {
+  kind: 'workflow'; tool: 'robot_pick' | 'robot_place'; worldId: string; generation: number; sceneRevision: number
+  frameId: string; stepIndex: number; taskAchieved: boolean; reason?: string
+  checkpoints?: Array<{ phase: string; checkpointId: string; stepIndex: number; stateSha256: string }>
+  actions: Array<{ actionId: string; status: string; startStep?: number; endStep?: number; targetReached?: boolean;
+    sampledClearance?: SampledClearanceEvidence;
+    targetContact?: { objectId: string; contactSteps: number; displacementM: Vec3; maxLiftM: number } }>
+}
+export type PairSafetyEvidence = {
+  kind: 'safety'; worldId: string; generation: number; sceneRevision: number; startStep: number; endStep: number
+  samples: number; passed: boolean; violations: string[]; peaks: Record<string, number>; limits: Record<string, number>
+}
+export type PairEvidence =
+  | { kind: 'world'; worldId: string; generation: number; sceneRevision: number }
+  | { kind: 'recording-start'; worldId: string; generation: number; recordingId: string }
+  | { kind: 'recording-stop'; recordingId: string; frameCount: number }
+  | { kind: 'initial'; worldId: string; generation: number; sceneRevision: number; frameId: string; stateSha256: string; assistAdvanceCount: number }
+  | { kind: 'preflight'; worldId: string; generation: number; sceneRevision: number; frameId: string }
+  | PairWorkflowEvidence
+  | PairSafetyEvidence
+  | { kind: 'verdict'; worldId: string; generation: number; sceneRevision: number; frameId: string; stepIndex: number; taskAchieved: boolean; failed: PredicateFailure[]; executionMode?: Frame['executionMode']; assistAdvanceCount?: number }
+export type PairResult = Omit<Extract<PairEvidence, { kind: 'verdict' }>, 'kind'> & { runId: string; recordingId: string; frameCount: number; initialStateSha256?: string; workflows?: PairWorkflowEvidence[]; safety?: PairSafetyEvidence; verifier?: true }
+
 export type CampaignTask = {
   taskId: string
   sceneId: string
@@ -71,6 +102,8 @@ export type CampaignTask = {
   workerRunIds: string[]
   heldoutResult?: { taskAchieved: boolean; checkedAt: string; runId: string }
   blockedReason?: string
+  pair?: PairMember
+  pairResult?: PairResult
 }
 
 export type CampaignBudget = {
@@ -101,6 +134,7 @@ export type RunCallArtifact = {
   /** 工具返回里有的回执字段原样转录；没有则省略。 */
   receipt?: { generation?: number; sceneRevision?: number; startStep?: number; endStep?: number; simSteps?: number; status?: string; taskAchieved?: boolean; reason?: string
     motion?: { clip: string; provider: 'soma-local'; modelRevision: string; modelSha256: string } }
+  pairEvidence?: PairEvidence
   keyframe?: string
   error?: string
   at: string
@@ -120,6 +154,7 @@ export type CampaignRun = {
 /** ASPIRE 同构：失败签名 + 适用条件 + 修复策略 + 程序草图 + 我们的回执证据。 */
 export type SkillProposal = {
   skillId: string
+  requireSafetyEvaluation?: true
   packId: string
   /** 触发本技能的失败签名（reasonCode 集合 + 场景特征描述）。 */
   failureSignature: { reasonCodes: string[]; description: string }

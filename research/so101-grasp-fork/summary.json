@@ -1,0 +1,70 @@
+{
+  "diagnostic": {
+    "counts": {
+      "reference": {
+        "passed": 8,
+        "rescued": 0,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "raised": {
+        "passed": 10,
+        "rescued": 2,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "segmented": {
+        "passed": 11,
+        "rescued": 3,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "raised-segmented": {
+        "passed": 11,
+        "rescued": 3,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      }
+    },
+    "historicalAgreements": 12,
+    "validatedVideos": 48
+  },
+  "crossSeed": {
+    "counts": {
+      "reference": {
+        "passed": 10,
+        "rescued": 0,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "raised": {
+        "passed": 11,
+        "rescued": 1,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "segmented": {
+        "passed": 11,
+        "rescued": 1,
+        "regressed": 0,
+        "probed": 12,
+        "probeAgreed": 12
+      },
+      "raised-segmented": {
+        "passed": 10,
+        "rescued": 1,
+        "regressed": 1,
+        "probed": 12,
+        "probeAgreed": 11
+      }
+    },
+    "historicalAgreements": 12,
+    "validatedVideos": 48
+  }
+}

@@ -41,6 +41,7 @@ const plan={type:'object' as const,additionalProperties:false,description:"Struc
     targetPose,
     fixedJoints:{type:'object' as const,additionalProperties:true,description:"Optional joints held at specified values without participating in optimization, as joint-name-to-value mappings. They must not overlap jointNames."},
     seeds:{type:'array' as const,items:numberVector("One IK seed vector with the same length as jointNames."),description:"Optional multiple IK seeds; omission uses only startPositions."},
+    cartesianSegments:integer("Optionally solve 2–8 equal-time Cartesian waypoint segments from the measured start. Default 1. No collision guarantee."),
     durationS:number("Total duration of the returned trajectory in seconds. Defaults to 2 and must be greater than 0."),
     maxIterations:integer("Maximum iteration count per seed; defaults to 160."),
     positionToleranceM:number("Position convergence tolerance in meters; defaults to 0.003."),

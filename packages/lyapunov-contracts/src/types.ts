@@ -236,6 +236,8 @@ export interface MotionPlan {
   planId: string; entityId: string; modelVersion: string; jointNames: string[]
   points: Array<{ timeS: number; positions: number[] }>
   collisionContextVersion: string; expectedGeneration: number
+  /** Number of TCP line segments verified at the planner waypoints. The joint interpolation itself is not a collision check. */
+  cartesianSegments?: number
 }
 export interface GraspCandidate {
   candidateId: string; provider: string; entityId: string; frameId: string

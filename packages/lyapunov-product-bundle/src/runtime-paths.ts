@@ -37,6 +37,8 @@ export const RUNTIME_ENV = {
   labExportPython: "LYAPUNOV_LAB_EXPORT_PYTHON",
   capturePython: "LYAPUNOV_CAPTURE_PYTHON",
   offlineUsdPython: "LYAPUNOV_OFFLINE_USD_PYTHON",
+  roboticsLabPython: "LYAPUNOV_ROBOTICS_LAB_PYTHON",
+  playgroundPython: "LYAPUNOV_PLAYGROUND_PYTHON",
   labMimicPython: "LYAPUNOV_LAB_MIMIC_PYTHON",
   labSourceRoot: "LYAPUNOV_LAB_SOURCE_ROOT",
   simfoundryPython: "LYAPUNOV_SIMFOUNDRY_PYTHON",

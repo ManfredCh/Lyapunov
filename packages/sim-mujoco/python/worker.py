@@ -32,6 +32,8 @@ try:
     from triangle_surface import validate_exact_triangle_surfaces
     import gait
     import native_deformable
+    import evaluation
+    import gauntlet
 except ImportError as exc:
     print(json.dumps({'event': 'fatal', 'error': {'code': 'PROVIDER_UNAVAILABLE', 'message': str(exc)}}), flush=True)
     sys.exit(2)
@@ -1029,6 +1031,7 @@ class World:
         self.frame_hz = positive(options.get('frameRateHz', 30), 'frameRateHz')
         self.next_tick = time.monotonic()
         self.sync(scene, initial=True, collision_patches=collision_patches)
+        self.evaluation_collision_patches = collision_patches
 
     def handle(self):
         return {'worldId': self.id, 'sceneId': self.scene['sceneId'], 'engineId': 'mujoco', 'engineVersion': mj.__version__, 'worldGeneration': self.generation, 'appliedSceneRevision': self.applied_revision, 'status': self.run_status(), 'clock': self.clock, 'timestepS': float(self.model.opt.timestep) if self.model is not None else self.options.get('timestepS', .002),
@@ -2463,6 +2466,48 @@ class World:
             limits.append({'name': name, 'gain': gain, 'ctrlrange': None if lo is None else (lo, hi), 'forcerange': None if flo is None else (flo, fhi)})
         return ordered, ids, np.column_stack(columns), limits
 
+    def gripper_width_calibration(self, info, cfg):
+        rows = cfg.get('widthCalibration')
+        names = cfg['jointNames']
+        if rows is None:
+            return None
+        if len(names) != 1 or not isinstance(rows, list) or len(rows) < 2:
+            raise SimError('INVALID_CONTROL_MAPPING', 'widthCalibration 需要单一夹爪关节及至少两组样本')
+        samples = np.array([self.gripper_calibration_row(row, index) for index, row in enumerate(rows)])
+        joint = info['joints'][names[0]]
+        actuator = self.actuator(info, cfg['actuator'])
+        jid, aid = joint['id'], actuator['id']
+        gear = float(self.model.actuator_gear[aid, 0])
+        ctrl = samples[:, 0] * gear
+        if (joint['actuator'] != cfg['actuator'] or actuator['mode'] != 'position' or not gear
+                or not np.all(np.diff(samples, axis=0) > 0) or samples[0, 1] < 0
+                or abs(samples[-1, 1] - cfg['maxWidthM']) > 1e-6
+                or self.model.jnt_limited[jid] and (samples[0, 0] < self.model.jnt_range[jid, 0] or samples[-1, 0] > self.model.jnt_range[jid, 1])
+                or self.model.actuator_ctrllimited[aid] and (min(ctrl) < self.model.actuator_ctrlrange[aid, 0] or max(ctrl) > self.model.actuator_ctrlrange[aid, 1])):
+            raise SimError('INVALID_CONTROL_MAPPING', 'widthCalibration 必须在源关节和位置执行器范围内，角度和宽度严格递增')
+        return samples
+
+    @staticmethod
+    def gripper_calibration_row(row, index):
+        if not isinstance(row, list) or len(row) != 2:
+            raise SimError('INVALID_CONTROL_MAPPING', 'widthCalibration 样本应为 [jointPosition, widthM]')
+        return [finite(value, f'widthCalibration[{index}]') for value in row]
+
+    def gripper_width(self, info, cfg, calibration):
+        position = sum(float(self.data.qpos[info['joints'][name]['qpos']]) for name in cfg['jointNames'])
+        if calibration is not None:
+            return float(np.interp(position, calibration[:, 0], calibration[:, 1]))
+        return position
+
+    def set_gripper_width(self, info, cfg, width, calibration):
+        aid = self.actuator(info, cfg['actuator'])['id']
+        if calibration is not None:
+            joint_target = np.interp(width, calibration[:, 1], calibration[:, 0])
+            self.data.ctrl[aid] = joint_target * self.model.actuator_gear[aid, 0]
+        else:
+            lo, hi = cfg.get('controlRange', [0, cfg['maxWidthM']])
+            self.data.ctrl[aid] = lo + width / cfg['maxWidthM'] * (hi - lo)
+
     def prepare_motion(self, motion):
         m = copy.deepcopy(motion)
         info = self.info(m['entityId'])
@@ -2568,10 +2613,11 @@ class World:
             if not cfg:
                 raise SimError('MISSING_CONTROL_CONFIG', '夹爪需要 actuator/jointNames/maxWidthM/controlRange 映射')
             self.actuator(info, cfg['actuator'])
+            m['_widthCalibration'] = self.gripper_width_calibration(info, cfg)
             width = finite(m['widthM'], 'widthM')
             if not 0 <= width <= cfg['maxWidthM']:
                 raise SimError('OUT_OF_RANGE', '夹爪宽度超范围')
-            m['_startWidth'] = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in cfg['jointNames'])
+            m['_startWidth'] = self.gripper_width(info, cfg, m['_widthCalibration'])
             m['_duration'] = positive(m['durationS'], 'durationS')
             m['_end'] = m['_duration'] + max(0, finite(m.get('settleTimeS', .3), 'settleTimeS'))
             m['_tolerance'] = positive(m.get('tolerance', .005), 'tolerance')
@@ -2720,7 +2766,24 @@ class World:
             raise SimError('ROBOT_FROZEN', '目标实体处于原生 Freeze 保持中；先 robot_restore 再执行：' + ', '.join(frozen))
         if any(m['entityId'] in occupied for m in motions):
             raise SimError('ENTITY_BUSY', '目标实体已有活动或已排队动作')
+        resume = any(m.get('clearance',{}).get('resumeFromPause') for m in motions)
+        if resume and (not self.paused or len(motions)!=1 or motions[0].get('clearance',{}).get('minimumDistanceM') is None):
+            raise SimError('CLEARANCE_RESUME_REQUIRES_PAUSED_WORLD','净空放行后只允许单条受约束轨迹解除暂停')
         prepared = [self.prepare_motion(m) for m in motions]
+        for motion in prepared:
+            if motion['kind'] == 'gripper':
+                motion['_evaluationActionId'] = aid
+            constraints = motion.get('clearance')
+            if constraints is not None:
+                if motion['kind'] != 'trajectory':
+                    raise SimError('CLEARANCE_REQUIRES_TRAJECTORY', '净空验收仅对关节轨迹有效')
+                minimum = constraints.get('minimumDistanceM')
+                if minimum is not None:
+                    minimum = finite(minimum, 'minimumDistanceM')
+                result = evaluation.clearance(self,motion,constraints,SimError)
+                if minimum is not None and any(result[k] and result[k]['distanceM']<minimum for k in ('robot','payload')):
+                    raise SimError('SAMPLED_CLEARANCE_REJECTED', json.dumps(result,ensure_ascii=False))
+                motion['_evaluationClearance'] = result
         self.control_sampler.validate(action)
         # 载荷事实基线：动作开始前记录全部已加载实体的实测世界位置；finish 只在此基础上报真实位移，
         # 不为没有基线（排队中未开始）的动作编造起点。
@@ -2759,6 +2822,8 @@ class World:
         gc.unfreeze()
         gc.collect()
         gc.freeze()
+        if resume:
+            self.set_paused(False,self.generation)
         return copy.deepcopy(receipt)
 
     def _actuator_static(self, actuator_id):
@@ -2845,11 +2910,12 @@ class World:
             for name,target in gait.targets(info['gaitLegs'],elapsed,m['forward'],m.get('turn',0),cfg.get('frequencyHz',1.8),cfg.get('strideM',.12),cfg.get('liftM',.05)).items():
                 self.set_joint(info,name,target,self.model.opt.timestep)
         elif m['kind'] == 'gripper':
+            if evaluation.stalls_gripper(self,m):
+                return
             cfg = info['controller']['gripper']
             ratio = max(0, min(1, elapsed / m['_duration']))
             width = m['_startWidth'] + (m['widthM'] - m['_startWidth']) * ratio
-            lo, hi = cfg.get('controlRange', [0, cfg['maxWidthM']])
-            self.data.ctrl[self.actuator(info, cfg['actuator'])['id']] = lo + width / cfg['maxWidthM'] * (hi - lo)
+            self.set_gripper_width(info, cfg, width, m['_widthCalibration'])
         elif m['kind'] == 'vehicle':
             cfg = info['controller']
             # 动作结束后必须撤销轮速/差速角速度目标。之前只把 speed 置零，
@@ -2949,10 +3015,9 @@ class World:
                     else:
                         info['heldTargets'].pop(name,None)
         gripper = info['controller'].get('gripper')
-        if gripper:
-            width = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in gripper['jointNames'])
-            lo, hi = gripper.get('controlRange', [0, gripper['maxWidthM']])
-            self.data.ctrl[self.actuator(info, gripper['actuator'])['id']] = lo + width / gripper['maxWidthM'] * (hi - lo)
+        if gripper and gripper.get('widthCalibration') is None:
+            # 保留旧资产映射。已标定夹爪以上方位置执行器的实际 qpos 保持，无须二次换算。
+            self.set_gripper_width(info, gripper, self.gripper_width(info, gripper, None), None)
 
     def entity_of_geom(self, name):
         """geom 名 → 实体 ID。实体前缀由 MjSpec.attach 写入，而实体 ID 自身可能含分隔符，
@@ -3058,6 +3123,8 @@ class World:
         info = self.info(motion['entityId'])
         displacement = (self.data.xpos[info['body']] - motion['_startPositions']).tolist()
         effect = {'entityId': motion['entityId'], 'kind': motion['kind'], 'displacementM': displacement}
+        if '_evaluationClearance' in motion:
+            effect['sampledClearance'] = motion['_evaluationClearance']
         if motion['kind'] == 'human':
             effect.update({'mode': info['human']['mode'], 'nativePose': human.observe(self, info), 'targetReached': None, 'controller': 'kinematic-path' if info['human']['mode'] == 'kinematic' else 'uncontrolled-ragdoll'})
         elif motion['kind'] == 'thrust':
@@ -3103,7 +3170,7 @@ class World:
             for name,target in gait.targets(info['gaitLegs'],0,0,0).items():self.set_joint(info,name,target,self.model.opt.timestep)
         elif motion['kind'] == 'gripper':
             cfg = info['controller']['gripper']
-            width = sum(float(self.data.qpos[info['joints'][n]['qpos']]) for n in cfg['jointNames'])
+            width = self.gripper_width(info, cfg, motion['_widthCalibration'])
             effect.update({'actualWidthM': width, 'targetWidthM': motion['widthM'], 'targetReached': abs(width - motion['widthM']) <= motion['_tolerance']})
         elif motion['kind'] == 'tendon':
             # 回执必须区分三类值，不能把终点计划值冒充实际控制：
@@ -3497,7 +3564,13 @@ class World:
         # 重置后窗口永远到不了终点 → 动作永久 active、手动时钟被永久持有、后续动作被 WORLD_BUSY 拒绝。
         time_before = float(self.data.time)
         unstable = self.instability_evidence() if self.active else None
-        mj.mj_step(self.model, self.data)
+        force = gauntlet.before_step(self)
+        try:
+            mj.mj_step(self.model, self.data)
+        finally:
+            if force is not None:
+                body, previous_force = force
+                self.data.xfrc_applied[body, :3] = previous_force
         self.step_index += 1
         if self.active and not self.clock_advanced(time_before, dt):
             self.fail_unstable(dt, time_before, unstable)
@@ -3519,6 +3592,7 @@ class World:
                 motion['_measuredActuatorForce'] = {name: float(self.data.actuator_force[aid]) for name, (aid, _) in zip(motion['_wrenchNames'], motion['_actuatorControls'])}
         # 在本步实际施力快照之后刷新观测派生量；重算力不能覆盖刚记录的实际施力。
         self.refresh_derived()
+        evaluation.sample(self)
         # 载荷事实逐步采样：接触/位置取刚积分完成的这一步（与 observe 同源）；无活动动作或世界上
         # 没有其他实体时不做任何采样，不产生额外开销。
         if self.active and len(self.entities) > 1:
@@ -4256,6 +4330,7 @@ class World:
             cameras = []
             for name, resolved_name in resolved_names:
                 rgb, depth = self._render_named_camera(renderer, resolved_name, scene_option)
+                rgb, depth = gauntlet.image(self, resolved_name, rgb, depth)
                 cameras.append(self._capture_entry(name, resolved_name, rgb, depth, width, height, root))
         finally:
             renderer.close()
@@ -4781,9 +4856,50 @@ def main():
                         raise SimError('WORLD_NOT_FOUND', 'worldId 不存在')
                     world = worlds[args['worldId']]
                     if method == 'sync':
+                        if getattr(world, 'gauntlet_profile', None):
+                            raise SimError('GAUNTLET_PROFILE_LOCKED', '扰动世界需关闭后用新模型启动')
                         # collisionPatches 是可选的场景碰撞补丁（splat 环境的不可见碰撞几何），
                         # 缺省/为 null 时保持旧行为；契约见 check_collision_patches。
                         result = world.sync(args['snapshot'], args.get('options', {}).get('forceRebuild', False), collision_patches=args.get('collisionPatches'))
+                        world.evaluation_collision_patches = args.get('collisionPatches')
+                        world.evaluation_checkpoints = {}
+                        world.evaluation_monitor = None
+                        world.evaluation_fault = None
+                    elif method == 'evaluation':
+                        op = args['request']
+                        evaluation.current(world, op['expectedGeneration'], SimError)
+                        kind = op['kind']
+                        if kind == 'checkpoint':
+                            result = evaluation.checkpoint(world, SimError)
+                        elif kind == 'fork':
+                            fork_id = op.get('forkWorldId')
+                            if not isinstance(fork_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',fork_id) or fork_id in worlds:
+                                raise SimError('EVALUATION_FORK_ID_INVALID', '需要新的世界 ID')
+                            child,result = evaluation.fork(world,op,World,SimError)
+                            worlds[fork_id] = child
+                        elif kind == 'monitor-start':
+                            result = evaluation.start_monitor(world,op,SimError)
+                        elif kind == 'monitor-stop':
+                            result = evaluation.finish_monitor(world,SimError)
+                        elif kind == 'gripper-stall':
+                            result = evaluation.configure_fault(world,op,SimError)
+                        elif kind == 'gauntlet-configure':
+                            result = gauntlet.configure(world, op, SimError)
+                        elif kind == 'gauntlet-status':
+                            result = gauntlet.status(world, SimError)
+                        elif kind == 'gauntlet-joints':
+                            result = gauntlet.joints(world, op, SimError)
+                        elif kind == 'command':
+                            aid = op['actionId']
+                            receipt = world.receipts.get(aid)
+                            if receipt is None or receipt['generation']!=world.generation or 'endStep' not in receipt:
+                                raise SimError('EVALUATION_COMMAND_UNAVAILABLE','需要当前代次的动作终态')
+                            result = {'action':json.loads(world.requests[aid]),'startStep':receipt.get('startStep'),'endStep':receipt['endStep']}
+                        elif kind == 'fault-status':
+                            fault = getattr(world,'evaluation_fault',None)
+                            result = dict(fault) if fault else None
+                        else:
+                            raise SimError('EVALUATION_OPERATION_INVALID', '未知仿真评估操作')
                     elif method == 'observe':
                         result = world.observe(args.get('selection'))
                     elif method == 'set_paused':

@@ -1,0 +1,82 @@
+{
+  "baseBranchCommit": "f726f7779be98a7a38d603a9614e063d92d0fb57",
+  "runnerSha256": "e71ae7f6484cb51739aabbc9e1c24f2b4a5b08295005b8381a4284cbac15b666",
+  "reporterSha256": "81b5a3fccd42669516c4411acbed8806141ff795faee431910f54fe5beb859d9",
+  "files": [
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120-pilot/summary.json",
+      "bytes": 2371,
+      "sha256": "d81c54fda13e3519076fd9ca6b3c60df7988699f58a2ec19fc277bc687a79d7d"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/summary.json",
+      "bytes": 27311,
+      "sha256": "28a8b20b96a69927cae311b61086e53e6ab31f2501fa06a5e33a1540e4b50899"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120-cross-seed/summary.json",
+      "bytes": 27340,
+      "sha256": "64aa21069fceeb0d1984ae83f2d00c4a8e5b7c273582cf7343a9e536a31897e4"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/results.json",
+      "bytes": 62321,
+      "sha256": "edf72e178f2cd883a0bdaf2c9a2ca770f89543c43aa8c973770930713c45e061"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/index.html",
+      "bytes": 59983,
+      "sha256": "1cc6abe396bb9c005c8c2610f3f56c9a208645e4585e69a33ab4cccc65c88883"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/STAGE_SUMMARY.md",
+      "bytes": 4642,
+      "sha256": "56eac095433b958cdd68307897cab31b7bcc7d7990cacf0a6baad3999fa489bf"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/validation/browser.json",
+      "bytes": 385,
+      "sha256": "9630d830e3b42ba9aca33557d79ed7f63271411b2417a1d340fe427c1dbf58b5"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/segmented-preview.png",
+      "bytes": 56084,
+      "sha256": "c69fccc89190adf99bb7033341071aeeecda329065f8a3d50b86c63fc3f2732e"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/shift-4019/reference/replay.mp4",
+      "bytes": 35854,
+      "sha256": "d53c804264cb5b254a6c4ebcddf980c21b4879f18eb452f2882c78aa68476823"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/shift-4019/segmented/replay.mp4",
+      "bytes": 30080,
+      "sha256": "e58324994fe20c0fdb8ed1e643ded080bcbe3409631f85066e13ccddd3344529"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/shift-4019/reference/contact-trace.jsonl",
+      "bytes": 2289094,
+      "sha256": "57df016b61590312bd5ab20e8a1bcf8140de8acc5ce61b1608f27a39e3268421"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/shift-4019/segmented/contact-trace.jsonl",
+      "bytes": 3204853,
+      "sha256": "37782f553ef5e9a4c38f1bd54528508ba3729b2cf06c0be71554fdd0397300a1"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120-logs/full.log",
+      "bytes": 70009,
+      "sha256": "80f8ebaffbe81cc7219d6838e402166fd57f92ff07254a3f0329aee443c78a0d"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120-logs/cross-seed.log",
+      "bytes": 70043,
+      "sha256": "8109562f80ba08f9f4c93b1f6c099784b642de62bed5512bb239bb2dc2a581c7"
+    },
+    {
+      "path": "/home/s18/WS/Lyapunov/E/so101-grasp-fork-20261120/validation/gate-drivers.json",
+      "bytes": 246512,
+      "sha256": "4a4e2ad6e70a65b365d62fdc718c28ea3e001e1e0146da70f02cd4fe5ea92600"
+    }
+  ]
+}

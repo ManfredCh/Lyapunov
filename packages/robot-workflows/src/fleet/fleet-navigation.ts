@@ -1,5 +1,5 @@
-import { planFleetPath, type FleetPathObstacle, type FleetPoint } from "./fleet-path"
-import { FORK_INSERTION_TERMINAL_TOLERANCE_M } from "./fleet-load-interface"
+import { planFleetPath, type FleetPathObstacle, type FleetPoint } from "./fleet-path.ts"
+import { FORK_INSERTION_TERMINAL_TOLERANCE_M } from "./fleet-load-interface.ts"
 
 export interface FleetNavigationRequest {
   start: FleetPoint

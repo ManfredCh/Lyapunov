@@ -1,12 +1,21 @@
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProcessSimProvider, type SimWorkerLaunchHook } from '../../sim-contract/src/python-transport.ts'
-import type { WorldOptions } from '../../sim-contract/src/index.ts'
+import type { CaptureOptions, WorldEvaluation, WorldOptions } from '../../sim-contract/src/index.ts'
 import { resolveMuJoCoGlBackend, type MuJoCoGlBackend } from '../../sim-contract/src/mujoco-gl.ts'
 import type { SceneSnapshot, WorldHandle, WorldWarning } from '../../lyapunov-contracts/src/types.ts'
 import { SceneCollisionBuilder, type SceneCollisionBuildResult, type SceneCollisionCompilation } from './scene-collision/index.ts'
+interface LabCamera {
+  cameraName: string
+  generation: number
+  profile: Record<string, unknown>
+  queued?: Record<string, unknown>
+  deliveries: Record<string, unknown>[]
+  chain: Promise<unknown>
+}
 export interface MuJoCoConfig {
   pythonPath?: string; workerPath?: string; renderBackend?: MuJoCoGlBackend
+  labFaults?: boolean
   /** 人体原始clip/FK的显式计算设备；物理仍由同一MuJoCo World拥有。 */
   humanComputeDevice?: 'cpu' | 'cuda:0'
   /** 直连Provider的私有GPU内核缓存；产品会话优先沿既有运行根的scratch解析。 */
@@ -30,12 +39,13 @@ export class MuJoCoProvider extends ProcessSimProvider {
    */
   private readonly collisionBuilder = new SceneCollisionBuilder()
   private readonly collisionWorlds = new Map<string, { key: string; result: SceneCollisionBuildResult }>()
+  private readonly labCameras = new Map<string, LabCamera>()
   constructor(config: MuJoCoConfig = {}) {
     const here = dirname(fileURLToPath(import.meta.url))
     const humanComputeDevice = resolveHumanComputeDevice(config.humanComputeDevice)
     const humanGpuCacheRoot = config.humanGpuCacheRoot ?? process.env.LYAPUNOV_HUMAN_GPU_CACHE_ROOT
     if (humanGpuCacheRoot !== undefined && !isAbsolute(humanGpuCacheRoot)) throw new RangeError('HUMAN_GPU_CACHE_INVALID: GPU缓存须为明确的绝对私有路径')
-    super({ pythonPath: config.pythonPath ?? process.env.LYAPUNOV_MUJOCO_PYTHON ?? resolve(here, '../../../.runtime/sim-python/bin/python'), workerPath: config.workerPath ?? resolve(here, '../python/worker.py'), engineName: 'MuJoCo', env: { MUJOCO_GL: resolveMuJoCoGlBackend(config.renderBackend), LYAPUNOV_HUMAN_COMPUTE_DEVICE: humanComputeDevice, ...(humanGpuCacheRoot === undefined ? {} : { LYAPUNOV_HUMAN_GPU_CACHE_ROOT: humanGpuCacheRoot }) }, ...(config.launch === undefined ? {} : { launch: config.launch }) })
+    super({ pythonPath: config.pythonPath ?? process.env.LYAPUNOV_MUJOCO_PYTHON ?? resolve(here, '../../../.runtime/sim-python/bin/python'), workerPath: config.workerPath ?? resolve(here, '../python/worker.py'), engineName: 'MuJoCo', env: { LYAPUNOV_SIM_LAB_FAULTS: config.labFaults === true ? '1' : '0', MUJOCO_GL: resolveMuJoCoGlBackend(config.renderBackend), LYAPUNOV_HUMAN_COMPUTE_DEVICE: humanComputeDevice, ...(humanGpuCacheRoot === undefined ? {} : { LYAPUNOV_HUMAN_GPU_CACHE_ROOT: humanGpuCacheRoot }) }, ...(config.launch === undefined ? {} : { launch: config.launch }) })
   }
   /**
    * open 期碰撞缓存以占位键登记（此时 worldId 未定），open 返回后迁到真实 worldId。
@@ -109,9 +119,52 @@ export class MuJoCoProvider extends ProcessSimProvider {
   }
   protected override clearClosedWorldExtras(worldId: string): void {
     this.collisionWorlds.delete(worldId)
+    this.labCameras.delete(worldId)
+  }
+  override async capture(worldId: string, options: CaptureOptions) {
+    const lab = this.labCameras.get(worldId)
+    if (!lab || options.cameraName !== lab.cameraName || (lab.profile.frame_delay !== 1 && lab.profile.fault !== 'camera_freeze')) {
+      return super.capture(worldId, options)
+    }
+    // 缓存帧仍走原用户文件权限。并行采集按同一测量通道串行交付。
+    await this.requireUserFacingWrite('sensor_capture')
+    const operation = lab.chain.then(async () => {
+      if (this.labCameras.get(worldId) !== lab) throw new Error('GAUNTLET_CAMERA_GENERATION_CHANGED')
+      const status = await this.request<{ stepIndex: number; faultStep: number | null }>('evaluation', {
+        worldId, request: { kind: 'gauntlet-status', expectedGeneration: lab.generation },
+      })
+      const frozen = lab.profile.fault === 'camera_freeze' && status.faultStep !== null
+      const delayed = lab.profile.frame_delay === 1 && lab.queued !== undefined
+      const previous = lab.queued
+      const latest = frozen ? undefined : await super.capture(worldId, options)
+      if (this.labCameras.get(worldId) !== lab) throw new Error('GAUNTLET_CAMERA_GENERATION_CHANGED')
+      if (latest) lab.queued = latest
+      const selected = frozen || delayed ? previous : latest
+      if (!selected) throw new Error('GAUNTLET_CAMERA_PRIME_REQUIRED')
+      const delivery = { captureId: selected.captureId, originalStep: selected.stepIndex, requestedStep: status.stepIndex,
+        frozen, delayed, ...(frozen && lab.profile.fault_restamp === true ? { faultyReportedStep: status.stepIndex } : {}) }
+      if (lab.deliveries.length >= 256) lab.deliveries.shift()
+      lab.deliveries.push(delivery)
+      // 原帧步号、captureId 与文件均保持关联。被损坏的报送时钟只作为故障元数据。
+      return structuredClone({ ...selected, gauntletDelivery: delivery })
+    })
+    lab.chain = operation.catch(() => undefined)
+    return operation
+  }
+  async assess(worldId: string, request: WorldEvaluation) {
+    const value = await this.request('evaluation', { worldId, request })
+    if (request.kind === 'fork') await this.listWorlds()
+    if (request.kind === 'gauntlet-configure') this.labCameras.set(worldId, {
+      cameraName: request.cameraName, generation: request.expectedGeneration, profile: { ...request.profile }, deliveries: [], chain: Promise.resolve(),
+    })
+    if (request.kind === 'gauntlet-status' && value && typeof value === 'object') {
+      return { ...value, cameraDeliveries: structuredClone(this.labCameras.get(worldId)?.deliveries ?? []) }
+    }
+    return value
   }
   override async dispose(): Promise<void> {
     this.collisionWorlds.clear()
+    this.labCameras.clear()
     await super.dispose()
   }
 }

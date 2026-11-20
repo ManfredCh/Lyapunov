@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import { nativeSystemRuntimeViolations } from '../distribution/linux/payload-contract.ts'
+import { dirname, join } from 'node:path'
+import { NATIVE_SYSTEM_LANDLOCK, nativeSystemRuntimeViolations } from '../distribution/linux/payload-contract.ts'
 
 /** 发行 Node 与其原生构建的实际命令；固定 SDK 的源码不在此修改。 */
 export interface NativeSystemPreparation {
@@ -56,6 +56,24 @@ function prepareHostNativeSystem(upstream: string, node: string, platform:'linux
   const build = spawnSync(command[0]!, command.slice(1), { cwd: upstream, stdio: 'inherit', env: { ...process.env, HF_ENDPOINT: 'https://hf-mirror.com' } })
   if (build.error) throw build.error
   if (build.status !== 0) throw new Error(`${platform} 原生构建失败（退出 ${build.status}），停止打包`)
+  if (platform === 'linux') {
+    // SDK 的 host-addon-only 路径只生成 flock。用发行构建已经依赖的 cc
+    // 静态编译同一固定 SDK 的 Landlock，供 Bubblewrap 不可用的 Linux 安装使用。
+    const launcher = join(upstream, NATIVE_SYSTEM_LANDLOCK)
+    const temporary = mkdtempSync(join(dirname(launcher), '.landlock-build-'))
+    try {
+      const pending = join(temporary, 'landlock-run')
+      const compile = spawnSync('cc', [
+        '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-static', '-s', '-o', pending,
+        join(upstream, 'native/system/packages/entry/src/main.c'),
+      ], { cwd: upstream, stdio: 'inherit' })
+      if (compile.error) throw compile.error
+      if (compile.status !== 0) throw new Error(`Landlock 原生构建失败（退出 ${compile.status}），停止打包`)
+      renameSync(pending, launcher)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  }
   const problems = nativeSystemRuntimeViolations(upstream, '',platform)
   if (problems.length) throw new Error(problems.join('；'))
   return { executable: runtime.executable, version: runtime.version, command }

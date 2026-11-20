@@ -14,6 +14,7 @@ import { actionSummary, frameSource, workflowPresentationMeta } from './workflow
 import { sceneOperationsFor } from '../../scene-kit/src/plugin.ts'
 import { moveTcp, type TcpMoveInput } from './move-tcp.ts'
 import { applyFlight } from './flight-tools.ts'
+import { wristCorrection } from './wrist-refinement.ts'
 export const name = 'lyapunov-robot-workflows'
 export const inject = ['tools', 'commands', 'jobs', 'scene']
 /**
@@ -81,12 +82,19 @@ export function apply(ctx: Context, config: RecordingConfig & OfflineSceneConfig
       // IK 起点必须落在关节真实 range 内：实测值可能越界（合爪后实测 finger_joint1=−0.0066），直接下发会让
       // 计划的首个路点越界；无 range（无界关节）的关节不钳。
       const jointRanges = new Map(description.joints.map(joint => [joint.name, joint.range]))
+      let disturbed: Record<string, number> | undefined
+      if (input.gauntletProprio === true) {
+        if (!sim.assess) throw new Error('GAUNTLET_PROPRIO_UNAVAILABLE')
+        const receipt = await sim.assess(request.worldId, { kind: 'gauntlet-joints', robotId: request.entityId, expectedGeneration: request.start.generation }) as { positions: Record<string, number> }
+        if (!jointNames.every(name => Number.isFinite(receipt.positions?.[name]))) throw new Error('GAUNTLET_PROPRIO_INCOMPLETE')
+        disturbed = receipt.positions
+      }
       const startPositionOf = (n: string) => {
-        const value = observed.positions[observed.names.indexOf(n)]
+        const value = disturbed ? disturbed[n] : observed.positions[observed.names.indexOf(n)]
         const range = jointRanges.get(n)
         return range && typeof value === 'number' ? Math.min(range[1], Math.max(range[0], value)) : value
       }
-      const requestInput = { ...input.planning, targetPose: request.targetPose, entityId: request.entityId, jointNames, startPositions: jointNames.map(startPositionOf), modelVersion: description.modelVersion, collisionContextVersion: description.collisionContextVersion, expectedGeneration: request.start.generation }
+      const requestInput = { ...input.planning, targetPose: request.targetPose, ...(request.cartesianSegments === undefined ? {} : { cartesianSegments: request.cartesianSegments }), entityId: request.entityId, jointNames, startPositions: jointNames.map(startPositionOf), modelVersion: description.modelVersion, collisionContextVersion: description.collisionContextVersion, expectedGeneration: request.start.generation }
       const result = await ctx.tools.execute({ name: 'motion_plan', arguments: { request_json: JSON.stringify(requestInput) }, callId: ToolCallId(`${parent?.callId ?? input.actionPrefix ?? name}:motion:${++counter}`), rootCallId: parent?.rootCallId ?? parent?.callId, parent: parent?.token, agent: parent?.agent, signal })
       if (result.isError) throw new Error(result.content.filter(c => c.type === 'text').map(c => c.text).join('\n'))
       const value = result.value as any
@@ -94,7 +102,20 @@ export function apply(ctx: Context, config: RecordingConfig & OfflineSceneConfig
       if (!parsed.plan) throw new Error('MOTION_NO_SOLUTION')
       return parsed.plan
     }
-    return name === 'robot_pick' ? pick(sim, planner, input as PickInput, signal) : place(sim, planner, input as PlaceInput, signal)
+    if (name === 'robot_place') return place(sim, planner, input as PlaceInput, signal)
+    const request = input as PickInput
+    const vision = request.wristRefinement
+    const capture = vision ? async (identity: Parameters<typeof wristCorrection>[1], attempt = 1, minimumStep?: number) => {
+      const result = await ctx.tools.execute({ name: 'sensor_capture',
+        arguments: { input: { worldId: request.worldId, cameraName: vision.cameraName, outputDir: vision.outputDir, width: 256, height: 192, geomGroups: [0, 1, 2, 5] } },
+        callId: ToolCallId(`${parent?.callId ?? request.actionPrefix ?? name}:wrist${attempt > 1 ? ':' + attempt : ''}`), rootCallId: parent?.rootCallId ?? parent?.callId,
+        parent: parent?.token, agent: parent?.agent, signal })
+      if (result.isError) throw new Error(`WRIST_CAPTURE_FAILED: ${result.error.message}`)
+      const frame = result.value as { stepIndex?: number }
+      if (minimumStep !== undefined && (typeof frame.stepIndex !== 'number' || frame.stepIndex < minimumStep)) throw new Error('WRIST_STALE_FRAME')
+      return wristCorrection(result.value, identity, request.robotId, vision)
+    } : undefined
+    return pick(sim, planner, request, signal, capture)
   }
   for (const operation of ['robot_pick', 'robot_place'] as const) {
     const description = operation === 'robot_pick' ? "Perform one bounded contact grasp using existing candidates and the current motion_plan: complete trajectory, close, then lift and hold. Determine taskAchieved from actual object displacement/support. Input includes PickInput and the planning model/TCP configuration." : "Perform one bounded placement using the existing motion_plan: descend, release the gripper, then withdraw. Actual support height and velocity determine success."

@@ -17,6 +17,16 @@ import { runtimePaths } from "../packages/lyapunov-product-bundle/src/runtime-pa
 import { backendEnvironment } from "./profile.ts"
 import { PRODUCT_LINK_SWITCH_AUDIT, INSTALLATION_MIRROR_AUDIT, censusModuleLinkScope, isaacRuntimeOptions, linkProductBundleSlot, migrateLegacyProfileAndReport, productLinkSwitchNotice, reconcileAndReportInstallationMirror, reconcileAndReportProductLinks, runtimePatch, runtimePluginInsert, publicChooserHome, hostDesktopAvailable } from "./runtime-patch.ts"
 
+test('Gauntlet 仿真扰动只在显式开发装配启用', () => {
+  const base = { surface: 'web', sceneRoot: '/tmp/gauntlet-dev-fixture', engine: 'mujoco' as const }
+  const granted = { LYAPUNOV_SIM_LAB_FAULTS: '1' }
+  const config = (mode: 'developer' | 'formal' | 'guest' | 'local', sdkEnvironment = {}) =>
+    runtimePluginInsert({ ...base, mode, sdkEnvironment }).find(entry => entry.id === 'lyapunov-sim-mujoco')?.config
+  expect(config('developer', granted)?.labFaults).toBe(true)
+  expect(config('developer')?.labFaults).toBeUndefined()
+  for (const mode of ['formal', 'guest', 'local'] as const) expect(config(mode, granted)?.labFaults).toBeUndefined()
+})
+
 const root = join(import.meta.dirname, "..")
 const source = readFileSync(join(root, "script/runtime-patch.ts"), "utf8")
 const modelSection = source.slice(source.indexOf("const plugins=runtimePluginInsert(input)"))

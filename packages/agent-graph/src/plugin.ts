@@ -20,9 +20,10 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-session-query'
 import { randomUUID } from 'node:crypto'
 import { compatibleToolInput } from '../../lyapunov-contracts/src/tool-input.ts'
-import type { Campaign, CampaignTask, PredicateExpr, TaskPartition, TaskStatus } from '../../lyapunov-contracts/src/agent-graph.ts'
+import type { Campaign, CampaignTask, PairMember, PredicateExpr, TaskPartition, TaskStatus } from '../../lyapunov-contracts/src/agent-graph.ts'
 import { CampaignStore, defaultSessionWorkDir, assertSafeId } from './campaign-store.ts'
 import { CampaignRuntime, applyArtifactCollector } from './artifacts.ts'
+import { pairResult, pairedReport, readPair, validatePairs } from './paired-evaluation.ts'
 import { ACTIVE_STATUSES, TERMINAL_STATUSES, assertRunPartition, assertTransition, defaultRoleFor, RUN_ROLES, type RunRole } from './state-machine.ts'
 
 export const name = 'lyapunov-agent-graph'
@@ -45,7 +46,7 @@ const TASK_STATUSES: readonly TaskStatus[] = ['pending', 'exploring', 'debugging
 const RUN_OUTCOMES = ['success', 'failed', 'budget-exceeded', 'aborted'] as const
 type RunOutcome = typeof RUN_OUTCOMES[number]
 
-interface TaskInput { taskId: string; sceneId: string; partition: TaskPartition; goal: PredicateExpr }
+interface TaskInput { taskId: string; sceneId: string; partition: TaskPartition; goal: PredicateExpr; pair?: PairMember }
 
 function requireTask(raw: unknown): TaskInput {
   const task = raw as Partial<TaskInput> | undefined
@@ -54,7 +55,7 @@ function requireTask(raw: unknown): TaskInput {
   if (!taskId || !sceneId) throw new Error(`${CAMPAIGN_INVALID_TASK}: 每个任务需要非空 taskId 与 sceneId（收到 ${JSON.stringify(raw)}）`)
   if (task?.partition !== 'dev' && task?.partition !== 'heldout') throw new Error(`${CAMPAIGN_INVALID_TASK}: 任务 ${taskId} 的 partition 必须是 dev|heldout（收到 ${JSON.stringify(task?.partition)}）`)
   if (!task?.goal || typeof task.goal !== 'object' || Array.isArray(task.goal)) throw new Error(`${CAMPAIGN_INVALID_TASK}: 任务 ${taskId} 需要 goal 谓词对象（PredicateExpr）`)
-  return { taskId, sceneId, partition: task.partition, goal: task.goal as PredicateExpr }
+  return { taskId, sceneId, partition: task.partition, goal: task.goal as PredicateExpr, ...(task.pair === undefined ? {} : { pair: readPair(task.pair) }) }
 }
 
 function requireBudget(raw: unknown): Campaign['budget'] {
@@ -87,7 +88,7 @@ function requireOutcome(raw: unknown): RunOutcome {
 /** 全部任务进终局时收拢 campaign.status：全 done → completed，否则 blocked；未收拢保持 running。 */
 function refreshCampaignStatus(campaign: Campaign): void {
   if (!campaign.tasks.every(task => TERMINAL_STATUSES.includes(task.status))) return
-  campaign.status = campaign.tasks.every(task => task.status === 'done') ? 'completed' : 'blocked'
+  campaign.status = campaign.tasks.every(task => task.status === 'done') && !pairedReport(campaign)?.incomplete ? 'completed' : 'blocked'
 }
 
 export function apply(ctx: Context, config: Config = {}) {
@@ -130,6 +131,7 @@ export function apply(ctx: Context, config: Config = {}) {
     async campaign_init(input: { campaignId?: string; tasks?: unknown[]; budget?: unknown }, owner: unknown) {
       if (!Array.isArray(input.tasks) || input.tasks.length === 0) throw new Error(`${CAMPAIGN_INVALID_TASK}: tasks 必须是非空数组`)
       const tasks = input.tasks.map(requireTask)
+      validatePairs(tasks)
       if (new Set(tasks.map(task => task.taskId)).size !== tasks.length) throw new Error(`${CAMPAIGN_INVALID_TASK}: taskId 重复`)
       const campaignId = input.campaignId === undefined ? `campaign-${randomUUID()}` : assertSafeId(input.campaignId, 'campaignId')
       const campaign: Campaign = {
@@ -148,7 +150,9 @@ export function apply(ctx: Context, config: Config = {}) {
     async campaign_status(input: { campaignId?: string }, owner: unknown) {
       const handle = await runtime.handleFor(owner, assertSafeId(input.campaignId, 'campaignId'))
       const nextTaskId = recommendedNextTaskId(handle.campaign)
+      const comparison = pairedReport(handle.campaign)
       return {
+        ...(comparison ? { comparison } : {}),
         campaign: handle.campaign,
         openRunIds: runtime.openRunIds(owner, handle.campaign.campaignId),
         ...(nextTaskId ? { recommendedNextTaskId: nextTaskId } : {}),
@@ -160,6 +164,7 @@ export function apply(ctx: Context, config: Config = {}) {
       const task = findTask(handle.campaign, input.taskId)
       const to = requireStatus(input.to)
       const from = assertTransition(task, to)
+      if (task.pair && to === 'done' && !task.pairResult) throw new Error('CAMPAIGN_PAIR_EVIDENCE_REQUIRED: 缺少判定或录制回执')
       let runId: string | undefined
       if (ACTIVE_STATUSES.includes(to)) {
         const role = normalizeRole(input.role) ?? defaultRoleFor(to)
@@ -185,9 +190,16 @@ export function apply(ctx: Context, config: Config = {}) {
       const role = normalizeRole(input.role)
       if (role === undefined) throw new Error(`${CAMPAIGN_INVALID_ROLE}: record_run 需要显式 role（${RUN_ROLES.join('|')}）`)
       assertRunPartition(task, role)
-      const outcome = requireOutcome(input.summary?.outcome)
+      const declaredOutcome = requireOutcome(input.summary?.outcome)
       const active = runtime.currentRunFor(owner, handle.campaign.campaignId, task.taskId)
       if (!active) throw new Error(`CAMPAIGN_NO_ACTIVE_RUN: 本会话没有 (campaign=${handle.campaign.campaignId}, task=${task.taskId}) 的活动 run 可关闭`)
+      let outcome = declaredOutcome
+      const observed = task.pair ? pairResult((await store.loadRunAt(active.runDir))?.calls ?? [], active.runId, task.pair.requirePreflight, task.pair.requireSafety) : undefined
+      const decision = observed && active.role === 'verifier' ? { ...observed, verifier: true as const } : observed
+      if (task.pair) {
+        if (role !== active.role) throw new Error('CAMPAIGN_INVALID_ROLE: 配对回执须由活动角色关闭')
+        outcome = decision ? decision.taskAchieved ? 'success' : 'failed' : 'aborted'
+      }
       const summary = {
         toolCalls: active.executedCalls,
         simSteps: active.simSteps,
@@ -195,12 +207,13 @@ export function apply(ctx: Context, config: Config = {}) {
         ...(typeof input.summary?.notes === 'string' && input.summary.notes ? { notes: input.summary.notes } : {}),
       }
       const run = await runtime.closeRun(owner, handle.campaign.campaignId, task.taskId, summary)
-      if (task.status === 'heldout-eval') {
+      if (decision) task.pairResult = decision
+      if (task.status === 'heldout-eval' && (!task.pair || decision)) {
         task.heldoutResult = { taskAchieved: outcome === 'success', checkedAt: new Date().toISOString(), runId: run.runId }
       }
       refreshCampaignStatus(handle.campaign)
       await store.saveCampaignAt(handle.dir, handle.campaign)
-      return { campaignId: handle.campaign.campaignId, taskId: task.taskId, runId: run.runId, summary: run.summary }
+      return { campaignId: handle.campaign.campaignId, taskId: task.taskId, runId: run.runId, summary: run.summary, ...(decision ? { pairResult: decision } : {}) }
     },
   }
 
@@ -235,7 +248,7 @@ export function apply(ctx: Context, config: Config = {}) {
       campaignId: { type: 'string' },
       tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         taskId: { type: 'string', required: true }, sceneId: { type: 'string', required: true },
-        partition: { type: 'string', required: true }, goal: { type: 'json', required: true },
+        partition: { type: 'string', required: true }, goal: { type: 'json', required: true }, pair: { type: 'json', description: 'Optional heldout pairing {id,variant,seed,tier,sceneSha256,requirePreflight?,requireSafety?}.' },
       } } },
       budget: { type: 'object', required: true, additionalProperties: false, properties: {
         maxToolCalls: { type: 'integer', required: true }, maxSimSteps: { type: 'integer', required: true }, maxWallSeconds: { type: 'number', required: true },
@@ -254,7 +267,7 @@ export function apply(ctx: Context, config: Config = {}) {
     }, 'campaignId/taskId/to/role?/blockedReason? JSON')
 
   register('campaign_record_run',
-    'Close this session’s active run for a task: writes runs/<runId>/run.json with the real toolCalls/simSteps counters and the declared outcome. Input: {campaignId,taskId,role,summary:{outcome,notes?}}.',
+    'Close this session’s active run for a task: writes runs/<runId>/run.json with the real toolCalls/simSteps counters and the outcome. Paired tasks use matching sim_task_check and completed native recording evidence. Input: {campaignId,taskId,role,summary:{outcome,notes?}}.',
     {
       campaignId: { type: 'string', required: true }, taskId: { type: 'string', required: true },
       role: { type: 'string', required: true },

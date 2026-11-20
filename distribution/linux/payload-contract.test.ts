@@ -14,7 +14,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, sym
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
-import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, NATIVE_SYSTEM_GLIBC_ADDON, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, nativeSystemRuntimeViolations, workspacePayloadDestination, macOSDesktopBootstrap, type PayloadTopLevelRow } from './payload-contract.ts'
+import { PRODUCT_ENTRY, PRODUCT_RUNTIME_FILES, NATIVE_SYSTEM_GLIBC_ADDON, NATIVE_SYSTEM_LANDLOCK, bundledProviderViolations, entryViolations, payloadLinkTarget, productRuntimeViolations, sandboxRuntimeViolations, nativeSystemRuntimeViolations, workspacePayloadDestination, macOSDesktopBootstrap, type PayloadTopLevelRow } from './payload-contract.ts'
 
 const root = join(import.meta.dirname, '..', '..')
 const packager = readFileSync(join(root, 'script/package-linux.ts'), 'utf8')
@@ -59,8 +59,22 @@ describe('Linux x64 glibc 文件锁原生载荷', () => {
     header.writeUInt16LE(3, 16); header.writeUInt16LE(62, 18)
     const bytes = () => Buffer.concat([header, Buffer.from('napi_register_module_v1\0node_api_module_get_api_version_v1\0GLIBC_2.2.5\0')])
     writeFileSync(file, bytes())
-    return { stage, upstream, file, header, bytes }
+    const launcher = join(stage, upstream, NATIVE_SYSTEM_LANDLOCK)
+    const executable = Buffer.from(header)
+    executable.writeUInt16LE(2, 16)
+    writeFileSync(launcher, executable, { mode: 0o755 })
+    return { stage, upstream, file, header, bytes, launcher }
   }
+
+  test('缺失或不可执行的 Landlock 文件会阻止 Linux 归档', () => {
+    const f = fixture()
+    try {
+      rmSync(f.launcher)
+      expect(nativeSystemRuntimeViolations(f.stage, f.upstream)[0]).toContain(NATIVE_SYSTEM_LANDLOCK)
+      writeFileSync(f.launcher, f.header, { mode: 0o644 })
+      expect(nativeSystemRuntimeViolations(f.stage, f.upstream)[0]).toContain(NATIVE_SYSTEM_LANDLOCK)
+    } finally { rmSync(f.stage, { recursive: true, force: true }) }
+  })
 
   test('声明格式通过，删除二进制、空文件与HTML文本均点名拒绝', () => {
     const f = fixture()

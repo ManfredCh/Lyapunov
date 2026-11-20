@@ -205,6 +205,7 @@ export async function apply(ctx:Context,config:Config={}){
   // 技能内部已写明"优先用已连接的 Blender MCP、未连接时用 blender_run"，指针不必判断 MCP 是否挂载。
   {skill:"architectural-world",label:"Blender architectural modeling",pattern:/blender|blend\s*文件|mcp.*(blender|建模)|(blender|建模).*mcp|可编辑.*(建筑|模型|工程)|建筑.*(可编辑|漫游|建模)|architectural world/i},
   {skill:"crowd-control",label:"Crowd control",pattern:/行人|人群|路人|徘徊|散步|来回走|绕圈|原地站|crowd|pedestrian|walker/i},
+  {skill:"robotics-composition",label:"Robotics workflows",pattern:/gauntlet|sim[\s-]*2[\s-]*real|视觉伺服|visual servo|腕相机.{0,12}(抓|纠偏)|配对.{0,8}(仿真|评测)|so[\s-]?101.{0,15}(分拣|评测)|机器人组合技能/i},
   {skill:"action-execution",label:"Action execution",pattern:/抓|举起|拿起|放置|搬|开过去|走两步|走去|走到|货叉|升降|起飞|降落|步态|执行.*(策略|动作)|协同|规划|避障|停止.*(动作|模拟)|pick|grasp|lift|place|move\s|drive|walk|execute|policy|avoid|stop|fleet|gait|takeoff/i},
   {skill:"scene-construction",label:"Scene construction",pattern:/场景|房间|庭院|世界|环境|下载.*(环境|地图)|放个|加.*(桌子|椅子|墙|地板)|scene|room|courtyard|environment|world|build a|place a|furniture|table/i},
   // 生成入口统一由本指针路由：命中即注入 asset-generation 技能指针，由技能内部按形态选路

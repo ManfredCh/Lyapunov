@@ -36,6 +36,7 @@ export interface SkillVerifyRecord {
   attempts: number
   passed: boolean
   recordedAt: string
+  safetyCampaignId?: string
 }
 
 /** skill_verify_record 工具入参（契约 §4 冻结字段）。 */
@@ -85,6 +86,7 @@ const checkProposal = (value: unknown): SkillProposal => {
   const obj = isRecord(value) ? value : bad('proposal 需为对象')
   checkId('skillId', obj.skillId)
   checkId('packId', obj.packId)
+  if (obj.requireSafetyEvaluation !== undefined && obj.requireSafetyEvaluation !== true) bad('requireSafetyEvaluation 只能显式为 true')
   const sig = isRecord(obj.failureSignature) ? obj.failureSignature : bad('proposal.failureSignature 需为对象')
   if (!Array.isArray(sig.reasonCodes) || !sig.reasonCodes.every((c) => typeof c === 'string') || typeof sig.description !== 'string') bad('proposal.failureSignature 需含 reasonCodes:string[] 与 description:string')
   const when = isRecord(obj.applicableWhen) ? obj.applicableWhen : bad('proposal.applicableWhen 需为对象')
@@ -191,7 +193,7 @@ export async function writeProposal(packsRoot: string, proposal: SkillProposal):
 }
 
 /** 记录一次验证结果（覆盖写 proposals/<skillId>.verify.json）。提案不存在 ⇒ SKILL_PROPOSAL_NOT_FOUND。 */
-export async function recordVerify(packsRoot: string, skillId: string, input: SkillVerifyInput, packId?: string): Promise<SkillVerifyRecord> {
+export async function recordVerify(packsRoot: string, skillId: string, input: SkillVerifyInput, packId?: string, qualifySafety?: () => Promise<string | undefined>): Promise<SkillVerifyRecord> {
   const root = resolve(packsRoot)
   const checked = checkVerify(input)
   const located = await locateProposal(root, skillId, packId)
@@ -199,7 +201,15 @@ export async function recordVerify(packsRoot: string, skillId: string, input: Sk
     if (await alreadyPromoted(root, skillId, packId)) throw skillError('SKILL_ALREADY_PROMOTED', `${skillId} 已准入，不再接受验证记录`)
     throw skillError('SKILL_PROPOSAL_NOT_FOUND', `无 skillId=${skillId} 的待审提案`)
   }
-  const record: SkillVerifyRecord = { skillId, packId: located.packId, ...JSON.parse(JSON.stringify(checked)), recordedAt: new Date().toISOString() }
+  const proposal = await readJson<PackSkill>(located.path)
+  if (!isPackSkill(proposal)) throw skillError('SKILL_PROPOSAL_INVALID', `${skillId} 的提案不可解析`)
+  const safetyCampaignId = proposal.proposal.requireSafetyEvaluation && checked.passed ? await qualifySafety?.() : undefined
+  if (proposal.proposal.requireSafetyEvaluation && checked.passed && !safetyCampaignId) {
+    throw skillError('SKILL_SAFETY_NOT_VERIFIED', '需要由 Verifier 完成的原生配对与安全证据')
+  }
+  const record: SkillVerifyRecord = { skillId, packId: located.packId, verifierRunId: checked.verifierRunId,
+    reproducedTaskIds: checked.reproducedTaskIds, attempts: checked.attempts, passed: checked.passed,
+    ...(safetyCampaignId ? { safetyCampaignId } : {}), recordedAt: new Date().toISOString() }
   await writeJsonAtomic(verifyPath(root, located.packId, skillId), record)
   return record
 }
@@ -224,6 +234,7 @@ export async function promoteSkill(packsRoot: string, skillId: string, packId?: 
   }
   const proposal = await readJson<PackSkill>(located.path)
   if (!isPackSkill(proposal)) throw skillError('SKILL_PROPOSAL_INVALID', `${located.path} 不可解析`)
+  if (proposal.proposal.requireSafetyEvaluation && !record.safetyCampaignId) throw skillError('SKILL_SAFETY_NOT_VERIFIED', '缺少原生配对安全验证')
   if (proposal.proposal.devEvidence.runIds.includes(record.verifierRunId)) {
     throw skillError('SKILL_NOT_VERIFIED', `${skillId} 的 verifierRunId=${record.verifierRunId} 与 proposer devEvidence.runIds 重合，拒绝自审准入`)
   }

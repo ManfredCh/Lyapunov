@@ -125,6 +125,30 @@ async function callCommand(name: string, rawInput: string): Promise<{ kind: stri
 }
 
 describe('L384 robot_pick / robot_place：缺必填 ⇒ 结构化拒绝（两条面同一条判据）', () => {
+  test('腕部反馈轮次或精度越界会在接触世界前拒绝', async () => {
+    for (const invalid of [{ feedbackPasses: 1 }, { feedbackPasses: 7 }, { feedbackToleranceM: .001 }]) {
+      const result = await callTool('robot_pick', { input: { ...pickLegal, planning,
+        wristRefinement: { cameraName: 'wrist', outputDir: '.', targetChannel: 'red', estimateXY: [0, 0],
+          targetPlaneZM: .03, maxCorrectionM: .04, ...invalid } } })
+      expect(result.isError).toBe(true)
+      expect(result.text).toContain('ROBOT_ARGS_INVALID')
+      expect(observes).toBe(0)
+    }
+  })
+
+  test('分段请求拒绝未报告支持的规划器，退远复拍拒绝非单位方向', async () => {
+    const ignored = await callCommand('robot_pick', JSON.stringify({ ...pickLegal, planning, descentSegments: 4 }))
+    expect(ignored.kind).toBe('success')
+    const result = JSON.parse(ignored.text)
+    expect(result.reason).toContain('MOTION_PLAN_SEGMENTS_UNSUPPORTED')
+    expect(result.actions.some((action: { actionId: string }) => action.actionId.endsWith('-descend'))).toBe(false)
+    const invalid = await callTool('robot_pick', { input: { ...pickLegal, planning, candidate: { ...pickLegal.candidate, approach: [0, 0, -2] },
+      wristRefinement: { cameraName: 'wrist', outputDir: '.', targetChannel: 'red', estimateXY: [0, 0], targetPlaneZM: .03,
+        maxCorrectionM: .04, reacquireBackoffM: .03 } } })
+    expect(invalid.isError).toBe(true)
+    expect(invalid.text).toContain('ROBOT_ARGS_INVALID')
+  })
+
   test('robot_pick/robot_place 空 input：列出全部缺失字段，且不再漏原生 TypeError', async () => {
     const pick = await callTool('robot_pick', { input: {} })
     expect(pick.isError).toBe(true)

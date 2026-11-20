@@ -117,6 +117,8 @@ export function apply(ctx: Context, config: Config = {}) {
       worldId: frame.worldId, generation: frame.generation,
       ...(frame.sceneRevision === undefined ? {} : { sceneRevision: frame.sceneRevision }),
       taskAchieved: verdict.ok, evaluated: true, failed: verdict.failures, frameId: frame.frameId, stepIndex: frame.stepIndex,
+      ...(frame.executionMode === undefined ? {} : { executionMode: frame.executionMode }),
+      ...(frame.assistAdvanceCount === undefined ? {} : { assistAdvanceCount: frame.assistAdvanceCount }),
       ...(matchedSkills ? { matchedSkills } : {}),
     }
   }

@@ -1,0 +1,128 @@
+{
+  "completePairs": 12,
+  "statistics": {
+    "discordantPairs": 1,
+    "baselineRate": 0.5833333333333334,
+    "candidateRate": 0.5,
+    "exactMcNemarP": 1
+  },
+  "safety": {
+    "complete": 12,
+    "baselineSafePass": 7,
+    "candidateSafePass": 6,
+    "candidateNewViolations": 0
+  },
+  "grouped": {
+    "historical": {
+      "baseline": {
+        "passed": 0,
+        "total": 3,
+        "openingContacts": 3,
+        "openingPrevented": 0
+      },
+      "candidate": {
+        "passed": 0,
+        "total": 3,
+        "openingContacts": 0,
+        "openingPrevented": 1
+      }
+    },
+    "new": {
+      "baseline": {
+        "passed": 7,
+        "total": 9,
+        "openingContacts": 1,
+        "openingPrevented": 0
+      },
+      "candidate": {
+        "passed": 6,
+        "total": 9,
+        "openingContacts": 0,
+        "openingPrevented": 1
+      }
+    }
+  },
+  "videos": 27,
+  "forks": 4,
+  "faultStops": 2,
+  "carriedClearanceCount": 13,
+  "minimumCarryClearanceM": 0.018985785803696822,
+  "historicalOpening": [
+    {
+      "id": "stress-6151",
+      "baseline": {
+        "opened": true,
+        "openContactSteps": 14,
+        "beforePickShiftMm": 4.810591622658013e-11,
+        "finalShiftMm": 208.98688174593545,
+        "notes": [
+          "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=761e1e2f-ce28-46e4-8b54-c297ff3ec04e, pixels=0, bounds=256,192,-1,-1",
+          "POSE_OUTSIDE_BOX position=[0.4417,-0.0761,0.0105]，x 轴超出 0.1957m",
+          "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+        ]
+      },
+      "candidate": {
+        "opened": true,
+        "openContactSteps": 0,
+        "beforePickShiftMm": 0.0,
+        "finalShiftMm": 0.00015090454122363336,
+        "notes": [
+          "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=65087279-52fe-4189-b9e4-83de1269e515, pixels=1948, bounds=125,0,169,56",
+          "POSE_OUTSIDE_BOX position=[0.2431,-0.0110,0.0105]，y 轴超出 0.0480m",
+          "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+        ]
+      }
+    },
+    {
+      "id": "stress-7129",
+      "baseline": {
+        "opened": true,
+        "openContactSteps": 9,
+        "beforePickShiftMm": 4.029569618951845e-06,
+        "finalShiftMm": 62.205426952373536,
+        "notes": [
+          "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=710f95df-d376-46f1-a2be-cddf4510c858, pixels=946, bounds=229,9,255,67",
+          "POSE_OUTSIDE_BOX position=[0.3010,-0.0277,0.0105]，y 轴超出 0.0647m",
+          "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+        ]
+      },
+      "candidate": {
+        "opened": true,
+        "openContactSteps": 0,
+        "beforePickShiftMm": 0.0,
+        "finalShiftMm": 2.7753414225691305e-05,
+        "notes": [
+          "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=2d9ff3c8-1d00-40cc-85b1-a5b3fd4c9c2f, pixels=1944, bounds=121,1,164,62",
+          "POSE_OUTSIDE_BOX position=[0.2405,-0.0133,0.0105]，y 轴超出 0.0503m",
+          "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+        ]
+      }
+    },
+    {
+      "id": "stress-7919",
+      "baseline": {
+        "opened": true,
+        "openContactSteps": 20,
+        "beforePickShiftMm": 4.117121291421046,
+        "finalShiftMm": 52.17532604296802,
+        "notes": [
+          "抓取 Error: WRIST_TARGET_UNRELIABLE: captureId=5dbd4857-6eb2-4230-8aab-a5ffb489959f, pixels=1917, bounds=158,0,210,56",
+          "POSE_OUTSIDE_BOX position=[0.2635,-0.0124,0.0105]，y 轴超出 0.0494m",
+          "CONTACT_MISSING contacts 共 8 对，匹配 0 对"
+        ]
+      },
+      "candidate": {
+        "opened": false,
+        "openContactSteps": 0,
+        "beforePickShiftMm": 0.0,
+        "finalShiftMm": 0.0,
+        "notes": [
+          "抓取 Error: SAFE_OPEN_TARGET_CONTACT",
+          "POSE_OUTSIDE_BOX position=[0.2113,-0.0114,0.0106]，y 轴超出 0.0484m",
+          "CONTACT_MISSING contacts 共 7 对，匹配 0 对",
+          "CONTACT_MISSING 内层谓词已成立"
+        ]
+      }
+    }
+  ]
+}

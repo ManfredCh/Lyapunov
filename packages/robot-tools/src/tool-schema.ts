@@ -136,6 +136,7 @@ const targetMountSpec=union([
 /** 每个稳定operation仍使用原input包装；schema只在DSH边界描述/验证结构。 */
 export const robotToolParameters:Record<keyof RobotOperations,ParameterSchemaSpec>={
  sim_open:{input:required(object({sceneId,options:worldOptions}))},
+ sim_evaluation:{input:required(object({worldId,request:required({type:'json',description:'Native evaluation request with kind and expectedGeneration. Supported kinds: checkpoint, fork, monitor-start, monitor-stop, command, fault-status, gauntlet-configure/status/joints. Gripper-stall is enabled only in a simulation lab.'})}))},
  sim_world_list:{},
  sim_sync:{input:required(object({sceneId,worldId}))},
  sim_set_paused:{input:required(object({worldId,paused:required({type:'boolean',description:"true pauses the actual physics clock; false resumes it."}),expectedGeneration:required({type:'integer',description:"Exact current world generation; reject a stale generation."})}))},

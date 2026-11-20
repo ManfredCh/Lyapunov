@@ -19,7 +19,7 @@ declare module '@deepseek-ai/cordis' { interface Context { sim: SimService } }
  * 当前只有 MuJoCo provider 实现（`packages/sim-mujoco/python/worker.py` 的 trajectory 校验）；
  * Isaac/Newton 仍按默认路径拒绝子集（`packages/sim-isaac/test/worker-robot-metadata.test.ts` 的 `INCOMPLETE_JOINT_VECTOR` 断言不带该字段）。
  */
-export interface JointTrajectory { kind: 'trajectory'; entityId: string; jointNames: string[]; points: Array<{ timeS: number; positions: number[] }>; tolerance?: number; settleTimeS?: number; plan?: MotionPlan; partialJointVector?: boolean }
+export interface JointTrajectory { kind: 'trajectory'; entityId: string; jointNames: string[]; points: Array<{ timeS: number; positions: number[] }>; tolerance?: number; settleTimeS?: number; plan?: MotionPlan; partialJointVector?: boolean; clearance?: { obstacleIds: string[]; carriedObjectId?: string; minimumDistanceM?: number; resumeFromPause?: true } }
 export interface JointTarget { kind: 'joint'; entityId: string; jointNames: string[]; positions: number[]; durationS: number; tolerance?: number; settleTimeS?: number }
 export interface VehicleDrive { kind: 'vehicle'; entityId: string; speedMps: number; steeringAngleRad?: number; yawRateRadps?: number; durationS: number }
 export interface LiftTarget { kind: 'lift'; entityId: string; positionM?: number; velocityMps?: number; durationS: number; tolerance?: number }
@@ -360,7 +360,21 @@ export interface LidarScanOptions {
  * 一套世界服务（一个会话的 Provider 实例拥有的全部世界）。方法语义与修前逐条一致；
  * 区别只在**归属**：这些世界属于取到它的那个会话，别的会话寻址不到（见 `SimService`）。
  */
+/** Native MuJoCo validation operations, scoped to the current world generation. */
+export type WorldEvaluation = { expectedGeneration: number } & (
+  | { kind: 'checkpoint' }
+  | { kind: 'fork'; checkpointId: string; forkWorldId: string }
+  | { kind: 'monitor-start'; robotId: string; targetId: string; limits: { graspForceN: number; otherForceN: number; jointSpeedRps: number } }
+  | { kind: 'monitor-stop' }
+  | { kind: 'gripper-stall'; actionId: string }
+  | { kind: 'gauntlet-configure'; robotId: string; targetId: string; cameraName: string; actionPrefix: string; seed: number; profile: Record<string, unknown> }
+  | { kind: 'gauntlet-status' }
+  | { kind: 'gauntlet-joints'; robotId: string }
+  | { kind: 'fault-status' }
+  | { kind: 'command'; actionId: string }
+)
 export interface SimWorlds {
+  assess?(worldId: string, request: WorldEvaluation): Promise<unknown>
   /** 只读发现当前Provider世界；供Viewer刷新/重连，不启动未使用的SDK。 */
   listWorlds(): Promise<WorldHandle[]>
   /**
