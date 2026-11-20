@@ -99,7 +99,8 @@ export type RunCallArtifact = {
   /** 参数 JSON 的 sha256（不存原文，避免大参数体）。 */
   argsDigest: string
   /** 工具返回里有的回执字段原样转录；没有则省略。 */
-  receipt?: { generation?: number; sceneRevision?: number; startStep?: number; endStep?: number; status?: string; taskAchieved?: boolean; reason?: string }
+  receipt?: { generation?: number; sceneRevision?: number; startStep?: number; endStep?: number; simSteps?: number; status?: string; taskAchieved?: boolean; reason?: string
+    motion?: { clip: string; provider: 'soma-local'; modelRevision: string; modelSha256: string } }
   keyframe?: string
   error?: string
   at: string

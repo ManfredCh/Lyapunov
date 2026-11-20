@@ -8,6 +8,7 @@ import { proceduralHuman, randomSource } from '../src/rig.ts'
 import { proceduralGlb, readRiggedGlb } from '../src/glb.ts'
 import { applyHumanPose } from '../../viewer/src/human-pose.ts'
 import { Bone, Group } from 'three'
+import { generateSoma, inspectSoma } from '../src/soma.ts'
 const input={count:20,seed:42,groupId:'test',region:{min:[-2,-2,0]as[number,number,number],max:[2,2,0]as[number,number,number]}}
 // 包含真实资源落盘和保存重开，保留全部断言并单列 I/O 用例预算。
 test('相同seed空间/独立相位复现；每组只有一份资源rig，单人配置不污染他人，保存重开',async()=>{const a=await mkdtemp(join(tmpdir(),'human-a-')),b=await mkdtemp(join(tmpdir(),'human-b-'));try{const oa=new SceneOperations(a),ob=new SceneOperations(b);await oa.create({sceneId:'s'});await ob.create({sceneId:'s'});const ra=await spawnCrowd(oa,{...input,sceneId:'s',expectedRevision:0}),rb=await spawnCrowd(ob,{...input,sceneId:'s',expectedRevision:0});expect(ra.snapshot.entities.map(e=>e.transform)).toEqual(rb.snapshot.entities.map(e=>e.transform));expect(ra.snapshot.entities.filter(e=>e.components.human?.rig)).toHaveLength(0);expect(ra.snapshot.entities.filter(e=>e.components.humanDefinition)).toHaveLength(1);expect(new Set(ra.snapshot.entities.flatMap(e=>e.components.human?[e.components.human.phase]:[])).size).toBe(20);const updated=await configureCrowd(oa,{sceneId:'s',expectedRevision:1,entityIds:[ra.entityIds[0]!],route:{pointsM:[[3,0,0]],speedMps:1.2,behavior:'walk'}});expect(updated.snapshot.entities.find(e=>e.entityId===ra.entityIds[1])!.components.human!.route).toBeUndefined();const reopened=await new SceneOperations(a).scene.snapshot('s');expect(reopened).toEqual(updated.snapshot);expect((await ob.scene.snapshot('s')).revision).toBe(1);await expect(configureCrowd(oa,{sceneId:'s',expectedRevision:0,entityIds:[ra.entityIds[0]!]})).rejects.toThrow('SCENE_REVISION_MISMATCH')}finally{await rm(a,{recursive:true,force:true});await rm(b,{recursive:true,force:true})}}, 15_000)
@@ -32,7 +33,7 @@ test('crowd_stop回执补全覆盖：requestedEntityIds=范围全部、alreadyId
   expect(missing.requestedEntityIds).toEqual(ids);expect(missing.alreadyIdleEntityIds).toEqual(ids)
  }finally{await rm(root,{recursive:true,force:true})}})
 
-test('真实defineTool schema编译与八个Tool/Command入口全部注册',async()=>{const {apply}=await import('../src/plugin.ts');const tools:string[]=[],commands:string[]=[];apply({tools:{register:(tool:{name:string})=>tools.push(tool.name)},commands:{register:(command:{name:string})=>commands.push(command.name)}} as never);expect(tools.sort()).toEqual(['crowd_configure','crowd_inspect','crowd_spawn','crowd_start','crowd_stop','human_catalog','human_catalog_spawn','human_import']);expect(commands.sort()).toEqual(tools)})
+test('真实 defineTool 编译后，人体 Tool 与 Command 入口全部注册',async()=>{const {apply}=await import('../src/plugin.ts');const tools:string[]=[],commands:string[]=[];apply({tools:{register:(tool:{name:string})=>tools.push(tool.name)},commands:{register:(command:{name:string})=>commands.push(command.name)}} as never);expect(tools.sort()).toEqual(['crowd_configure','crowd_inspect','crowd_spawn','crowd_start','crowd_stop','human_catalog','human_catalog_spawn','human_import','human_play_clip','human_soma_generate','human_soma_status']);expect(commands.sort()).toEqual(tools)})
 
 function replaceGlbJson(bytes:Buffer,update:(json:Record<string,any>)=>void):Buffer{const jl=bytes.readUInt32LE(12),json=JSON.parse(bytes.subarray(20,20+jl).toString());update(json);let data=Buffer.from(JSON.stringify(json));data=Buffer.concat([data,Buffer.alloc((4-data.length%4)%4,32)]);const header=Buffer.from(bytes.subarray(0,12)),chunk=Buffer.alloc(8),bin=bytes.subarray(20+jl);header.writeUInt32LE(12+8+data.length+bin.length,8);chunk.writeUInt32LE(data.length);chunk.writeUInt32LE(0x4e4f534a,4);return Buffer.concat([header,chunk,data,bin])}
 test('非法GLB节点环、多父、重复/越界skin索引在导入层有界拒绝',()=>{const human=proceduralHuman(),bytes=proceduralGlb(human),options={boneMapping:human.boneMapping,license:'Apache-2.0',sourceUpAxis:'Z'as const};expect(()=>readRiggedGlb(replaceGlbJson(bytes,j=>{j.nodes=[{name:'a',children:[1]},{name:'b',children:[0]}];j.skins=[{joints:[0]}]}),options)).toThrow('HUMAN_RIG_CYCLE');expect(()=>readRiggedGlb(replaceGlbJson(bytes,j=>{j.nodes=[{name:'a',children:[2]},{name:'b',children:[2]},{name:'c'}];j.skins=[{joints:[0]}]}),options)).toThrow('HUMAN_RIG_MULTIPLE_PARENTS');expect(()=>readRiggedGlb(replaceGlbJson(bytes,j=>{j.nodes[0].children=[999999]}),options)).toThrow('HUMAN_RIG_INDEX_INVALID');expect(()=>readRiggedGlb(replaceGlbJson(bytes,j=>{j.skins[0].joints=[999999]}),options)).toThrow('HUMAN_SKIN_JOINT_INVALID')})
@@ -124,4 +125,19 @@ test('crowd_configure preset三类路线按人生成：起点/朝向/闭环、�
   const other=await ops.scene.commit({sceneId:'s',expectedRevision:idle.snapshot.revision,patch:[{op:'add' as const,entity:{entityId:'def2',name:'外部定义',transform:t([0,0,0]),resources:[],components:{humanDefinition:{...structuredClone(definition),source:{...definition.source,sha256:'c'.repeat(64)}}}}},{op:'add' as const,entity:person('ext',t([7,7,0]),undefined,'ext')},{op:'update' as const,entityId:'ext',changes:{components:{...person('ext',t([7,7,0])).components,human:{...person('ext',t([7,7,0])).components.human!,definition:{entityId:'def2',resourceId:'r2',version:1}}}}}]}).then(async s=>{await ops.scene.commit({sceneId:'s',expectedRevision:s.revision,patch:[{op:'update' as const,entityId:'ext',changes:{components:{...s.entities.find(e=>e.entityId==='ext')!.components,human:{...s.entities.find(e=>e.entityId==='ext')!.components.human!,definition:{entityId:'def2',resourceId:'r2',version:1}}}}}]});return ops.scene.snapshot('s')})
   await expect(configureCrowd(ops,{sceneId:'s',expectedRevision:other.revision,entityIds:['ext'],preset:{kind:'back-and-forth'}},catalogRoot)).rejects.toThrow('HUMAN_PRESET_DEFAULTS_MISSING')
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('默认启用原有人体能力，可选 SOMA 显式报告未配置', async () => {
+  const previous = process.env.LYAPUNOV_SOMA_MODEL_DIR
+  delete process.env.LYAPUNOV_SOMA_MODEL_DIR
+  try {
+    const signal = new AbortController().signal
+    expect(JSON.stringify(await inspectSoma(signal))).toMatch(/SOMA_DISABLED/)
+    const ops = new SceneOperations(join(tmpdir(), 'soma-disabled'))
+    await expect(generateSoma(ops, {
+      sceneId: 's', entityId: 'body', expectedRevision: 0, name: 'motion', context: [], target: [],
+    }, signal)).rejects.toThrow('SOMA_DISABLED')
+  } finally {
+    if (previous !== undefined) process.env.LYAPUNOV_SOMA_MODEL_DIR = previous
+  }
 })

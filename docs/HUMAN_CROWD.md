@@ -112,3 +112,31 @@ Command 示例（创建后仍须 `sim_sync`，再沿现有 `crowd_start` 执行�
 发行构建从 `LYAPUNOV_HUMAN_AVATAR_STAGING_ROOT` 指定的冻结资源根收集（默认源码根 `.runtime/human-avatar-sources`），该根的 `manifest.json` 必须准确列出全部 12 件，并以相对 `gallery` 目录提供 12 张官方原 PNG、`candidates.json` 和原始 MIT 许可。`script/human-avatar-resources.ts` 在复制前逐件检查 GLB 字节/SHA、固定来源 revision、MIT 原文 SHA、实际动作、两足校准及纹理自含闭包；缺件即停止打包。载荷放在 `packages/human-crowd/assets/rocketbox/`，包含最终 GLB、12 张官方原 PNG 预览、原始 MIT 许可、来源逐件哈希及校准证据。PNG 逐件检查原字节/SHA/Git blob，catalog 的 `preview` 路径相对包内目录；上游预览不作为本项目 World 或 GPU 运行证据。原始大 FBX/TGA 不进入发行包，目录 JSON 不保留构建机绝对路径。产品从插件自身的相对目录读取这些资源，离线导入后 portable 保存会将资源闭包交给现有 Scene 保存逻辑。
 
 代码夹具验证、真实角色导入、实际 World 动作、界面视觉及完整发行包离线启动属于不同证据层。目录与自动化检查通过不代表 RTX 实时、无脚滑或真实安装已验收；真实结果按本次发布与资产回执分别记录。
+
+## 可选 SOMA 本地动作补间
+
+`human_soma_generate` 为当前场景角色的四帧上下文与一至四帧目标姿态生成一个片段。此入口使用 MotionBricks SOMA FP32 ONNX 和本地 CPU 推理。主包只含接口、执行代码、骨架参考与准备脚本。独立 Python 环境、权重和导出文件存放在用户选定的主包外目录。
+
+### 准备与启用
+
+在 Dev 里构建 `human-crowd`。使用固定提交的 [NVIDIA MotionBricks 源码](https://github.com/NVlabs/motionbricks/tree/54fc563aeaaf819a753d72cc9fdc6713989cdd43)，克隆时设 `GIT_LFS_SKIP_SMUDGE=1`。选取主包外的本地路径后执行。
+
+```bash
+bun run build:plugins human-crowd
+uv venv --python 3.12 "/绝对路径/soma-python"
+uv pip install --python "/绝对路径/soma-python/bin/python" -r packages/human-crowd/requirements-soma.txt
+python3.12 packages/human-crowd/python/prepare_soma.py \
+  --upstream "/绝对路径/motionbricks" --output "/绝对路径/soma-model"
+export LYAPUNOV_SOMA_PYTHON="/绝对路径/soma-python/bin/python"
+export LYAPUNOV_SOMA_MODEL_DIR="/绝对路径/soma-model"
+```
+
+SOMA 准备脚本从 [Hugging Face 官方模型页](https://huggingface.co/nvidia/MotionBricks/tree/3cb362d9b95aa40462abcb4d8cfae9ffb6d97410/soma) 对应的固定 revision 取件，允许 Hugging Face 的 HTTPS 文件存储跳转，并逐件核对 NVIDIA 导出器声明的大小和 SHA-256。下载或校验失败时返回 `SOMA_HUB_BLOCKED` 与具体文件。导出器使用固定 Git 提交与经 SHA-256 核对的骨架元数据。成功后写入 `soma.json`，推理阶段只读本地模型并核对哈希。模型遵循 [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/)。随软件携带的坐标参考来自 [Apache 2.0 许可的 SOMA 骨架](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/LICENSE)。
+
+### 生成和回放
+
+1. 用上述环境启动 Dev 的 Host。运行 `human_soma_status` 检查配置与模型文件。返回 `prepared` 表示已核对文件并发现 ONNX Runtime，生成运行另有独立回执。
+2. 把角色导入当前 Scene，使用 `human_soma_generate`。参数包含 `sceneId`、`expectedRevision`、`entityId`、新片段名 `name`、四项 `context`、一至四项 `target`。每项形如 `{"clip":"Idle","timeS":0.1,"positionM":[0,0,0],"yawRad":0}`。位置为人物局部 Z-up 米制，朝向绕 Z，单位弧度。上下文和目标的相邻源姿态按 30 Hz 选取。可选 `allowedTokens` 限定模型可选择的时长，值为 6–16 的整数。
+3. 成功后场景修订号更新，片段存入现有角色共享定义，并记录模型 revision 与哈希。经 `sim_sync` 后，在 MuJoCo 用 `human_play_clip` 传 `sceneId`、`worldId`、`expectedGeneration`、`entityId`、`clip`。播放一次并保持末帧。可把生成片段和原角色一起保存在可移植 Scene 中。
+
+SOMA 使用骨骼姿态约束。导航、场景碰撞和任务完成由应用判断；一次性播放是人体运动学过程，接触、脚滑和穿透需要实测。生成只在显式工具调用时运行，已经保存的片段可由 MuJoCo 独立回放。

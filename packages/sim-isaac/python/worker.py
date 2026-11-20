@@ -1230,6 +1230,8 @@ class World:
         # thrust 与无关节实体的动作在取 articulation **之前**分派：无关节实体没有 self.robot
         # 可取，误入那条路径只会给出 ENTITY_NOT_ARTICULATED 这种与真实原因无关的错误。
         if kind=='human':
+            if 'onceClip' in m:
+                raise SceneError('HUMAN_CLIP_PROVIDER_UNSUPPORTED','一次性人体片段当前由 MuJoCo 执行')
             if e.get('human',{}).get('ira'):
                 import ira_adapter
                 return ira_adapter.prepare(self,e,m,SceneError)

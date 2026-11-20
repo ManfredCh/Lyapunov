@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { SceneOperations } from '../../scene-kit/src/operations.ts'
+import type { HumanDefinition } from '../../lyapunov-contracts/src/types.ts'
+import { playHumanClip } from '../src/soma.ts'
 import { spawnCrowd, importHuman } from '../src/operations.ts'
 import { proceduralGlb } from '../src/glb.ts'
 import { proceduralHuman } from '../src/rig.ts'
@@ -22,3 +24,49 @@ test('MuJoCo原生人物归属：完成/重入/暂停取消/失败/短窗口/部
 test('外部clip被Panda挡住或到短终点后保持末个有效姿态，当前步/窗口不变',{skip:!available,timeout:15000},async()=>{const out=await mkdtemp(join(tmpdir(),'human-clip-stop-'));try{const ops=new SceneOperations(join(out,'catalog'));await ops.create({sceneId:'s'});const human=proceduralHuman(),path=join(out,'own.glb');await writeFile(path,proceduralGlb(human));const imported=await importHuman(ops,{sceneId:'s',expectedRevision:0,path,entityId:'walker',boneMapping:human.boneMapping,license:'Apache-2.0',sourceUpAxis:'Z'}),person=imported.snapshot.entities.find(e=>e.entityId==='walker')!;const scene=await ops.scene.commit({sceneId:'s',expectedRevision:imported.snapshot.revision,patch:[{op:'update',entityId:'walker',changes:{components:{...person.components,human:{...person.components.human!,phase:.25}}}}]}),scenePath=join(out,'scene.json');await writeFile(scenePath,JSON.stringify(scene));for(const endpoint of[false,true]){const result=join(out,endpoint?'endpoint':'blocked'),r=spawnSync(python,[join(root,'packages/human-crowd/scripts/blocked-clip-verify.py'),'--scene',scenePath,'--output',result,'--expect','held','--clip','walk',...endpoint?['--endpoint']:[]],{cwd:root,encoding:'utf8',timeout:6000,env:process.env});assert.equal(r.status,0,(r.stderr??'')+(r.stdout??''));const report=JSON.parse(await readFile(join(result,'blocked-receipt.json'),'utf8'));assert.equal(report.status,'PASSED');assert.equal(report.closed,true);assert.equal(report.lastStep,1000);assert.ok(report.jumpFromLastUnblockedMaxM<1e-12);assert.ok(report.maxPoseChangeWhileBlockedM<1e-12);assert.deepEqual(report.owners,{})}}finally{await rm(out,{recursive:true,force:true})}})
 
 test('20个经GLB导入的真实skin/外部clip精确合批与Mju标量一致，碰撞/选择停/owner保留',{skip:!available,timeout:15000},async()=>{const out=await mkdtemp(join(tmpdir(),'human-external-batch-'));try{const ops=new SceneOperations(join(out,'catalog'));await ops.create({sceneId:'s'});const human=proceduralHuman(),path=join(out,'own.glb');await writeFile(path,proceduralGlb(human));const imported=await importHuman(ops,{sceneId:'s',expectedRevision:0,path,entityId:'template',boneMapping:human.boneMapping,license:'Apache-2.0',sourceUpAxis:'Z'}),spawned=await spawnCrowd(ops,{sceneId:'s',expectedRevision:imported.snapshot.revision,templateEntityId:'template',count:20,seed:42,region:{min:[0,0,0],max:[0,0,0]}}),scene=await ops.scene.commit({sceneId:'s',expectedRevision:spawned.snapshot.revision,patch:[{op:'remove',entityId:'template'}]}),scenePath=join(out,'scene.json');await writeFile(scenePath,JSON.stringify(scene));const r=spawnSync(python,[join(root,'packages/human-crowd/scripts/native-clip-batch.py'),scenePath,'--output',join(out,'compare.json')],{cwd:root,encoding:'utf8',timeout:12000,env:process.env});assert.equal(r.status,0,(r.stderr??'')+(r.stdout??''));const report=JSON.parse(await readFile(join(out,'compare.json'),'utf8'));assert.equal(report.status,'PASSED');assert.equal(report.closed,true);assert.ok(report.maxNativeError<1e-9);assert.ok(report.contactSteps>0);assert.equal(report.maskUnchanged,true);const observed=spawnSync(python,[join(root,'packages/human-crowd/scripts/observe-batch-verify.py'),'--scene',scenePath,'--out',join(out,'observe.json')],{cwd:root,encoding:'utf8',timeout:12000,env:process.env});assert.equal(observed.status,0,(observed.stderr??'')+(observed.stdout??''));const observation=JSON.parse(await readFile(join(out,'observe.json'),'utf8'));assert.equal(observation.status,'PASSED');assert.equal(observation.closed,true);assert.ok(observation.matrixMaxAbsDifference<1e-12);assert.ok(observation.maxErrors.nativeReadback<1e-12);assert.equal(observation.checks.length,4)}finally{await rm(out,{recursive:true,force:true})}})
+
+test('一次性人体动作恰好在非整物理步时长处保持末帧', {
+  skip: !available, timeout: 15000,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'soma-once-'))
+  const sim = new MuJoCoProvider({ pythonPath: python })
+  try {
+    const ops = new SceneOperations(root)
+    const original = proceduralHuman()
+    const asset = join(root, 'human.glb')
+    await writeFile(asset, proceduralGlb(original))
+    await ops.create({ sceneId: 's' })
+    const imported = await importHuman(ops, {
+      sceneId: 's', entityId: 'body', path: asset, expectedRevision: 0,
+      boneMapping: original.boneMapping, license: 'Apache-2.0', sourceUpAxis: 'Z',
+    })
+    const template = imported.snapshot.entities.find(row => row.entityId === imported.definitionEntityId)!
+    const definition = template.components.humanDefinition as HumanDefinition
+    const durationS = 17 / 30
+    const pelvis = definition.boneMapping.pelvis!
+    const neutral = definition.rig.find(joint => joint.name === pelvis)!.offsetM
+    const end: [number, number, number] = [neutral[0] + .2, neutral[1], neutral[2] - .1]
+    const scene = await ops.scene.commit({ sceneId: 's', expectedRevision: imported.snapshot.revision,
+      patch: [{ op: 'update', entityId: template.entityId, changes: { components: {
+        ...template.components, humanDefinition: { ...definition, clips: [...definition.clips, {
+          name: 'sit-once', durationS, tracks: [], translations: [{
+            joint: pelvis, positionsM: [neutral, end], timesS: [0, durationS], interpolation: 'LINEAR',
+          }],
+        }] },
+      } } }],
+    })
+    const world = await sim.open(scene, { clock: 'manual', timestepS: .002 })
+    const receipt = await playHumanClip(ops, sim, { sceneId: 's', worldId: world.worldId,
+      expectedGeneration: world.worldGeneration, entityId: 'body', clip: 'sit-once' }, new AbortController().signal)
+    assert.equal(receipt.status, 'completed')
+    assert.equal('simSteps' in receipt && receipt.simSteps, Math.ceil(durationS / .002))
+    const frame = await sim.observe(world.worldId)
+    assert.equal(frame.stepIndex, Math.ceil(durationS / .002))
+    const terminal = frame.entities.find(entity => entity.entityId === 'body')!.humanPose!
+    assert.equal(terminal.motion?.clip, 'sit-once')
+    assert.ok(Math.hypot(...terminal.joints.find(joint => joint.name === pelvis)!.positionM.map((v, i) => v - end[i]!)) < 1e-8)
+  } finally {
+    await sim.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})

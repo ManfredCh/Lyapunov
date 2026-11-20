@@ -23,7 +23,7 @@ def eligible(info,m):
 
 def clip_eligible(info,m):
  cfg=info.get('human')or{};route=m.get('_route')or{}
- return cfg.get('mode')=='kinematic'and cfg.get('source',{}).get('kind')=='rigged-glb'and bool(route.get('clip'))and not route.get('navigation')and not route.get('yieldToHumans')
+ return 'onceClip'not in m and cfg.get('mode')=='kinematic'and cfg.get('source',{}).get('kind')=='rigged-glb'and bool(route.get('clip'))and not route.get('navigation')and not route.get('yieldToHumans')
 
 def path_eligible(info,m,allow_clips=True):return eligible(info,m)or allow_clips and clip_eligible(info,m)
 

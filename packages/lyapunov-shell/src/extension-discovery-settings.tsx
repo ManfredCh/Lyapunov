@@ -63,6 +63,16 @@ function buildRows(sources: readonly MarketSource[], skills: readonly ExternalSk
     description: tr('人物角色及预设动作。请在场景的「创建或导入人体」中选择角色。', 'Characters and preset motions. Choose a character in Create or import humans in the scene.'),
     sources: [{name: 'Microsoft Rocketbox', url: `https://github.com/${ROCKETBOX_SOURCE.repository}/tree/${ROCKETBOX_SOURCE.revision}`, version: ROCKETBOX_SOURCE.revision}],
   })
+  rows.set('model:motionbricks-g1', {
+    id: 'model:motionbricks-g1', name: 'MotionBricks G1', kind: 'model',
+    description: tr('为 Unitree G1 生成 29 关节参考动作。全身跟踪适配和仿真验收待完成。', 'Generates 29-joint reference motions for Unitree G1. Whole-body tracking integration and simulation validation are pending.'),
+    sources: [{name: 'NVIDIA MotionBricks', url: 'https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/unitree_g1_model.md', version: '0.2.0'}],
+  })
+  rows.set('model:gear-sonic', {
+    id: 'model:gear-sonic', name: 'GEAR-SONIC', kind: 'model',
+    description: tr('Unitree G1 全身动作跟踪控制器。Lyapunov 适配和仿真验收待完成。', 'Unitree G1 whole-body motion tracking controller. Lyapunov integration and simulation validation are pending.'),
+    sources: [{name: 'NVIDIA GR00T Whole-Body Control', url: 'https://github.com/NVlabs/GR00T-WholeBodyControl/blob/main/docs/source/model_card.md'}],
+  })
   for (const skill of skills) {
     const skillId = `skill:${skill.provider}:${skill.name}`
     rows.set(skillId, {id: skillId, skillId, name: skill.name, kind: 'skill', description: skill.description, sources: []})
@@ -167,7 +177,7 @@ export function ExtensionDiscoverySettings({active, visible, tr, skills = [], st
       <span className='lya-market-card-text'>
         <span className='lya-market-card-name'>{row.name}</span>
         {row.description && <span className='lya-market-card-summary'>{row.description}</span>}
-        <span className='lya-market-card-status'>{row.optionsId ? status(row.optionsId) : `${kind(row.kind)}${row.kind==='mcp'||row.kind==='bundle'?tr(' · 候选',' · Candidate'):''}`}</span>
+        <span className='lya-market-card-status'>{row.optionsId ? status(row.optionsId) : `${kind(row.kind)}${row.kind==='mcp'||row.kind==='bundle'||row.kind==='model'?tr(' · 候选',' · Candidate'):''}`}</span>
       </span>
     </button>
     {row.optionsId && canAdd(row.optionsId) ? <Button className='lya-market-card-add' size='sm' variant='outline'

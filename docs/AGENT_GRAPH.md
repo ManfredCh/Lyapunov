@@ -10,6 +10,15 @@ Agent Graph 是 Lyapunov 的"回路之上的回路"：在既有 agent-loop 不�
 原插件技能目录 `packages/lyapunov-shell/skills/skill-debug/`、`skill-campaign/`、`skill-verify/`。
 源码中 `.agents/skills/` 的对应入口链接到同一份文件；安装后由原 `skill` 工具发现，不依赖源码仓路径。
 
+### SOMA 人体动作候选
+
+人体补间任务可在显式配置 SOMA 的主机上走原有 campaign。Worker 使用
+`human_soma_status`、`human_soma_generate`、`sim_sync` 和 `human_play_clip`，
+再由 `crowd_inspect` 和适用的 `sim_task_check` 谓词读取实际执行结果。
+生成回执记录片段名、场景修订、模型 revision 和 SHA-256，MuJoCo 播放的步数计入原 run 预算。
+Verifier 以相同输入和模型身份在自己的 dev 世界复现。SOMA 椅子实验的脚滑和穿透均高于现有动作，
+当前作为可调用候选继续评估，动作质量通过后才可按既有流程晋升。[模型配置](HUMAN_CROWD.md#可选-soma-本地动作补间)
+
 ## 1. 全景图
 
 ```

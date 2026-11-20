@@ -27,6 +27,7 @@ export const CAMPAIGN_VERIFIER_ISOLATION = 'CAMPAIGN_VERIFIER_ISOLATION'
 const SCENE_MUTATION_TOOLS = new Set([
   'scene_edit', 'scene_restore', 'scene_import', 'scene_mount', 'scene_bind_physics', 'scene_physics_update',
   'robot_set_base', 'robot_set_tcp', 'robot_assembly_replace', 'robot_assembly_extract', 'robot_assembly_reassemble',
+  'human_soma_generate',
 ])
 
 /** 内存中的 campaign 句柄：campaign.json 的最新读数 + 其落盘目录（缓存键）。 */
@@ -188,19 +189,29 @@ function receiptSources(value: unknown): Record<string, unknown>[] {
 export function extractReceipt(value: unknown): RunCallArtifact['receipt'] {
   const receipt: NonNullable<RunCallArtifact['receipt']> = {}
   for (const source of receiptSources(value)) {
-    for (const key of ['generation', 'sceneRevision', 'startStep', 'endStep', 'status', 'taskAchieved', 'reason'] as const) {
+    for (const key of ['generation', 'sceneRevision', 'startStep', 'endStep', 'simSteps', 'status', 'taskAchieved', 'reason'] as const) {
+      if (key === 'generation' && typeof source.generation !== 'number') continue
       if (receipt[key] === undefined && source[key] !== undefined) (receipt as Record<string, unknown>)[key] = source[key]
+    }
+    const motion = source.generation as { provider?: unknown; revision?: unknown; modelSha256?: unknown } | undefined
+    if (!receipt.motion && motion?.provider === 'soma-local' && typeof source.clip === 'string' &&
+        typeof motion.revision === 'string' && typeof motion.modelSha256 === 'string') {
+      receipt.motion = { clip: source.clip, provider: motion.provider, modelRevision: motion.revision, modelSha256: motion.modelSha256 }
     }
   }
   return Object.keys(receipt).length ? receipt : undefined
 }
 
-/** sim 步数增量：优先 startStep→endStep 区间；否则取 stepIndex 与本 run 上次读数的正差。 */
+/** sim 步数优先取原操作回执的实际步数，其次按区间或 stepIndex 差计量。 */
 function simStepsDelta(run: ActiveRun, value: unknown): number {
   let stepIndex: number | undefined
   for (const source of receiptSources(value)) {
     const start = typeof source.startStep === 'number' ? source.startStep : undefined
     const end = typeof source.endStep === 'number' ? source.endStep : undefined
+    if (typeof source.simSteps === 'number' && Number.isSafeInteger(source.simSteps) && source.simSteps >= 0) {
+      if (end !== undefined && (run.lastStepIndex === undefined || end > run.lastStepIndex)) run.lastStepIndex = end
+      return source.simSteps
+    }
     if (start !== undefined && end !== undefined) {
       if (run.lastStepIndex === undefined || end > run.lastStepIndex) run.lastStepIndex = end
       return Math.max(0, end - start)

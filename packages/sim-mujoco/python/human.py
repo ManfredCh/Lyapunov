@@ -86,12 +86,12 @@ def compile_pose(cfg):
  identity=hashlib.sha256(json.dumps([rig,cfg['boneMapping'],cfg.get('clips',[])],sort_keys=True,separators=(',',':')).encode()).hexdigest()
  return {'identity':identity,'levels':[np.flatnonzero(depth==n)for n in range(int(depth.max())+1)],'names':[j['name']for j in rig],'parents':parents,'offsets':np.asarray([j['offsetM']for j in rig],dtype=float),'rotations':np.asarray([wxyz(j['quaternionXyzw'])for j in rig]),'clips':clips}
 
-def pose(cfg,root,q,elapsed=0,behavior='stand',speed=0,clip_name=None):
+def pose(cfg,root,q,elapsed=0,behavior='stand',speed=0,clip_name=None,loop=True):
  runtime=cfg.get('_poseRuntime')
  if runtime is None:runtime=compile_pose(cfg)
  rotations=runtime['rotations'].copy();translations=runtime['offsets'].copy();prepared=runtime['clips'].get(clip_name);clip=prepared['source']if prepared else None
  if clip:
-  time=(elapsed+cfg.get('phase',0)*clip['durationS'])%clip['durationS']
+  time=(elapsed+cfg.get('phase',0)*clip['durationS'])%clip['durationS'] if loop else min(max(elapsed,0.),clip['durationS'])
   for group in prepared['groups']:
    times=group['times'];i=min(max(0,int(np.searchsorted(times,time,side='right'))-1),len(times)-1);j=min(i+1,len(times)-1);u=0. if j==i or group['interpolation']=='STEP'else max(0.,min(1.,(time-times[i])/(times[j]-times[i])))
    values=group['values'];a=values[:,i];b=values[:,j]
@@ -205,6 +205,15 @@ def prepare(world,info,m,error):
  duration=m.get('durationS')
  if isinstance(duration,bool)or not isinstance(duration,(int,float))or not math.isfinite(duration)or not 0<duration<=300:raise error('HUMAN_DURATION_INVALID','动作时长须为0-300秒')
  m['_duration']=m['_end']=duration;m['_origin']=info['humanRoot'].copy();m['_rootQ']=info['humanRootQ'].copy();m['_distance']=0.;m['_lastElapsed']=0.;m['_yielded']=False;m['_travelledM']=0.;m['_yaw']=float(2*math.atan2(m['_rootQ'][3],m['_rootQ'][0]));m['_blockedS']=0.
+ if 'onceClip'in m:
+  if info['human']['mode']!='kinematic' or m.get('route')is not None or m.get('forceN')is not None:raise error('HUMAN_CLIP_MODE_UNSUPPORTED','一次性片段只驱动运动学人体')
+  match=next((c for c in info['human']['clips'] if c['name']==m['onceClip']),None)
+  if not match:raise error('HUMAN_CLIP_MISSING','人体缺少一次性片段')
+  if abs(duration-match['durationS'])>1e-9:raise error('HUMAN_DURATION_INVALID','一次性播放时长须匹配片段')
+  dt=float(world.model.opt.timestep)
+  m['_duration']=m['_end']=math.ceil(duration/dt-1e-10)*dt
+  m['_route']={'clip':m['onceClip']}
+  return
  if info['human']['mode']=='ragdoll':
   if m.get('route'):raise error('HUMAN_DYNAMIC_CONTROLLER_UNAVAILABLE','ragdoll无步态/恢复控制器，不能运动学路径回放')
   m['_force']=finite_vector(m.get('forceN',[0,0,0]),3,error,'forceN')
@@ -241,6 +250,12 @@ def advance(world,info,m,elapsed,defer_pose=False,obstacle_candidate=None):
   if info.get('humanMotion'):info['humanMotion']={**info['humanMotion'],'behavior':'stopped'}
   return
  if cfg['mode']=='ragdoll':world.data.xfrc_applied[info['body'],:3]=m['_force'];return
+ if 'onceClip'in m:
+  root,quat=m['_origin'],m['_rootQ']
+  sampled=pose(cfg,root,quat,elapsed,clip_name=m['onceClip'],loop=False)
+  write_mujoco_pose(world,info,root,quat,sampled)
+  record_motion(info,m,root,quat,'clip',None,0.)
+  return
  route=m['_route'];root=m['_origin'].copy();quat=m['_rootQ'].copy();dt=max(0,elapsed-m['_lastElapsed']);m['_lastElapsed']=elapsed;yielded=False
  if route.get('yieldToHumans'):
   radius=route.get('avoidanceRadiusM',.6)

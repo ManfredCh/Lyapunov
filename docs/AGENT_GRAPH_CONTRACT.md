@@ -65,7 +65,10 @@ returns: TaskCheckResult（见契约类型）
 
 - `ctx.on('tools/execute', handler)` waterfall：每次调用前后记录
   `RunCallArtifact`（argsDigest=sha256(args JSON)），取 result.value 里的
-  `generation/sceneRevision/startStep/endStep/status/taskAchieved/reason` 若有；
+  `generation/sceneRevision/startStep/endStep/simSteps/status/taskAchieved/reason` 若有；
+  `generation` 表示数值 World 代次。SOMA 生成回执的片段名、供应方、模型 revision 与 SHA-256 记录在
+  `receipt.motion`，场景修订仍记录在 `receipt.sceneRevision`。
+  MuJoCo 人体片段回执提供包含起止步的实际 `simSteps`，预算优先计该值。
 - 预算：按调用方真实session身份查原CampaignRuntime.openRuns，取最近活动run；
   父会话、字符串id或投影不是代替子会话owner的入口。普通工具按实际dispatch计toolCalls，
   campaign_*编排调用不计；sim步数按同世界／代次的原回执增量累计。

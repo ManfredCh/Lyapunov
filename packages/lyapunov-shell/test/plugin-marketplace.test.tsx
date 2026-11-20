@@ -213,6 +213,18 @@ test('真实React DOM搜索／筛选／详情／唯一关联与歧义选择；�
   await click(marketTab('MCP'));expect(marketGroups()).toEqual(['MCP']);expect(marketButton('Blender MCP')).not.toBeNull();expect(marketButton('Blender')).toBeNull()
   await click(marketTab('Software'));expect(marketGroups()).toEqual(['Software']);expect(marketButton('FastGS')).not.toBeNull();expect(marketButton('SAM 3')).toBeNull()
   await click(marketTab('Models'));expect(marketGroups()).toEqual(['Models']);expect(marketButton('SAM 3')).not.toBeNull();expect(marketButton('Blender MCP')).toBeNull()
+  for (const [name, source] of [
+    ['MotionBricks G1', 'https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/unitree_g1_model.md'],
+    ['GEAR-SONIC', 'https://github.com/NVlabs/GR00T-WholeBodyControl/blob/main/docs/source/model_card.md'],
+  ]) {
+    expect(marketButton(name).textContent).toContain('Model · Candidate')
+    expect(marketButton(`Add ${name}`)).toBeNull()
+    await click(marketButton(name))
+    expect(document.querySelector(`a[href="${source}"]`)).not.toBeNull()
+    expect(button('Confirm installation')).toBeUndefined()
+    await click(button('Back to results'))
+  }
+  expect(posted()).toHaveLength(0)
   await change('blender');expect(marketGroups()).toEqual([]);expect(document.body.textContent).toContain('No matching extensions in this category.')
   await click(marketTab('Software'));expect(marketGroups()).toEqual(['Software']);expect(marketButton('Blender')).not.toBeNull()
   await change('');await click(marketTab('Skill'));expect(marketGroups()).toEqual(['Skill']);expect(marketButton('robot-provisioning')).not.toBeNull()

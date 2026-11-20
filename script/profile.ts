@@ -7,7 +7,7 @@ import { IMAGE_DEVELOPER_ENV_KEYS } from "../packages/generate-image/src/provide
 import { TRIPO_DEVELOPER_ENV_KEYS } from "../packages/generate-tripo/src/provider.ts"
 import { HUNYUAN_DEVELOPER_ENV_KEYS } from "../packages/generate-hunyuan/src/provider.ts"
 import { MARBLE_DEVELOPER_ENV_KEYS } from "../packages/generate-marble/src/provider.ts"
-import { HUMAN_AVATAR_ROOT_ENV } from "../packages/human-crowd/src/env.ts"
+import { HUMAN_AVATAR_ROOT_ENV, SOMA_MODEL_DIR_ENV, SOMA_PYTHON_ENV } from "../packages/human-crowd/src/env.ts"
 import type {VerifiedAccount} from "../packages/lyapunov-product-bundle/src/account/formal.ts"
 import {linkProductPackage,reconcileProductPackageLinks} from './product-link.ts'
 import {migrateLegacyProfile,type LegacyProfileMigration} from './profile-migration.ts'
@@ -370,7 +370,7 @@ export async function backendEnvironment(mode:RunMode, paths:ReturnType<typeof r
   if(mode==="developer"&&options.isolated)for(const key of new Set<string>([...IMAGE_DEVELOPER_ENV_KEYS,...TRIPO_DEVELOPER_ENV_KEYS,...HUNYUAN_DEVELOPER_ENV_KEYS,...MARBLE_DEVELOPER_ENV_KEYS]))if(parent[key]!==undefined)env[key]=parent[key]
   // 本地工具的目录/解释器覆盖在正式、开发入口均有效；逐键搬运明确登记的路径配置。
   // HUMAN_AVATAR_ROOT_ENV 同属本地路径配置（人群外观目录覆盖，读处在 rocketbox-catalog.ts），三种模式同样逐键搬运。
-  for(const key of [...FASTGS_RUNTIME_ENV_KEYS,HUMAN_AVATAR_ROOT_ENV])if(parent[key]!==undefined)env[key]=parent[key]
+  for(const key of [...FASTGS_RUNTIME_ENV_KEYS,HUMAN_AVATAR_ROOT_ENV,SOMA_MODEL_DIR_ENV,SOMA_PYTHON_ENV])if(parent[key]!==undefined)env[key]=parent[key]
   // Profile 在父进程已按这三条规范 SDK 路径生成；子 Host 的设置页/Provider 再读时必须是同一份。
   // 只转发明确登记的解释器路径，formal/local 其余父环境和模型密钥仍受上面的有界白名单约束。
   if(parent[RUNTIME_ENV.policyPython]!==undefined)env[RUNTIME_ENV.policyPython]=parent[RUNTIME_ENV.policyPython]

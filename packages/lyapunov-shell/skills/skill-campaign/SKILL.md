@@ -77,6 +77,9 @@ pending → exploring → debugging → verifying → heldout-eval → done
 
 ## 3. 逐任务派 worker
 
+用户要求人体补间时，将 SOMA 作为 dev 候选交给 Worker。先确认任务有合法角色、姿态锚点与可测目标，
+再按 `skill-debug` 检查本地模型、生成及回放。只有经过 `skill-verify` 独立复现并满足目标的程序才能晋升。
+
 对每个 `pending` dev 任务，派发一个加载原 `skill` 工具 `skill-debug` 的
 fresh Worker（独立会话，不继承父会话历史）。源码入口 `.agents/skills/skill-debug/SKILL.md`
 指向同一插件文件；安装后不依赖源码仓路径。由 **Worker 自己**调用：

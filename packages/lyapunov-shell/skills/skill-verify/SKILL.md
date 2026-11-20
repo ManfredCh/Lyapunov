@@ -34,6 +34,9 @@ description: "Verifier 准入协议：只读 pack_skill_list/pack_skill_get 技�
    重新执行任务（你用与 worker 相同的 typed 工具白名单：
    `scene_edit`/`sim_open`/`robot_state`/`robot_describe`/`robot_move_tcp`/
    `robot_pick`/`robot_place`/`motion_plan`/`sim_task_check`/`sim_stop`）。
+   人体补间任务可使用 `human_soma_status`、`human_soma_generate`、`sim_sync`、`human_play_clip`、
+   `crowd_inspect`。从同一 dev 输入和匹配的本地模型 revision、SHA-256 重新生成，
+   使用自己的场景修订和 MuJoCo 代次。普通末帧检查无法验证整段脚滑和穿透。
    公开 dev 场景导入属于准备步骤，按原工具 schema 完成；不读 Worker 中间产物。
    worldId／代次必须来自自己本轮打开的世界，不能沿用提案证据里的旧运行身份。
 5. **判真值**：以 `sim_task_check` 的平台求值为准——`taskAchieved=true`

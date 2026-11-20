@@ -290,4 +290,15 @@ describe('CampaignRuntime / extractReceipt 单元面', () => {
     expect(extractReceipt({ stepIndex: 3 })).toBeUndefined()
     expect(extractReceipt('plain')).toBeUndefined()
   })
+  test('SOMA 生成回执分开记录模型来源与 MuJoCo 世界代次', () => {
+    const revision = '3cb362d9b95aa40462abcb4d8cfae9ffb6d97410'
+    const modelSha256 = 'a'.repeat(64)
+    expect(extractReceipt({status: 'generated', sceneRevision: 2, clip: 'soma-turn',
+      generation: {provider: 'soma-local', revision, modelSha256, fps: 30}})).toEqual({
+      status: 'generated', sceneRevision: 2,
+      motion: {clip: 'soma-turn', provider: 'soma-local', modelRevision: revision, modelSha256},
+    })
+    expect(extractReceipt({status: 'completed', generation: 3, startStep: 1, endStep: 550, simSteps: 550}))
+      .toEqual({status: 'completed', generation: 3, startStep: 1, endStep: 550, simSteps: 550})
+  })
 })

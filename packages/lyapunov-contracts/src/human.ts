@@ -3,7 +3,7 @@ import type { Quaternion, Vec3 } from './types.ts'
 export interface HumanRigJoint { name: string; parent?: string; offsetM: Vec3; quaternionXyzw: Quaternion }
 export interface HumanRotationTrack { joint: string; timesS: number[]; rotationsXyzw: Quaternion[]; interpolation: 'LINEAR' | 'STEP' }
 export interface HumanTranslationTrack { joint: string; timesS: number[]; positionsM: Vec3[]; interpolation: 'LINEAR' | 'STEP' }
-export interface HumanClip { name: string; durationS: number; tracks: HumanRotationTrack[]; translations?: HumanTranslationTrack[]; rootMotion?: { joint: string; horizontal: 'remove' | 'remove-drift'; baselineM: Vec3; driftM?: Vec3 }; channelReport?: { total: number; rotations: number; translations: number; normalizedUnitScales: number; maxUnitScaleDeviation: number } }
+export interface HumanClip { name: string; durationS: number; tracks: HumanRotationTrack[]; translations?: HumanTranslationTrack[]; rootMotion?: { joint: string; horizontal: 'remove' | 'remove-drift'; baselineM: Vec3; driftM?: Vec3 }; channelReport?: { total: number; rotations: number; translations: number; normalizedUnitScales: number; maxUnitScaleDeviation: number }; generation?: { provider: 'soma-local'; revision: string; modelSha256: string; fps: 30 } }
 /** Isaac IRA 官方行为的最小显式配置；route 仍由既有米制 points/speed 提供，不另建规划。 */
 export interface HumanIraConfig {
   /** 官方角色 seed；整数。场景持久化后重开按同值复现。 */
@@ -35,7 +35,7 @@ export interface HumanComponent {
 export interface HumanPlanarNavigation { bounds: { min: [number,number]; max: [number,number] }; cellSizeM?: number; clearanceM?: number }
 export interface HumanRoute { navigation?: HumanPlanarNavigation; pointsM: Vec3[]; speedMps: number; behavior: 'walk' | 'run' | 'stand'; loop?: boolean; dwellS?: number; yieldToHumans?: boolean; avoidanceRadiusM?: number; avoidObstacles?: boolean; turnRateRadps?: number; clip?: string }
 /** 有界动作由Sim物理tick消费；没有第二套墙钟。ragdoll只受力/自由运动，不冒充稳定控制器。 */
-export interface HumanMotion { kind: 'human'; entityId: string; durationS: number; route?: HumanRoute; forceN?: Vec3 }
+export interface HumanMotion { kind: 'human'; entityId: string; durationS: number; route?: HumanRoute; forceN?: Vec3; onceClip?: string }
 export interface HumanPose {
   source: 'mujoco-body' | 'mujoco-site' | 'isaac-body'
   mode: HumanComponent['mode']

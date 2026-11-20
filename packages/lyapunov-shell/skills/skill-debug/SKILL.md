@@ -23,6 +23,7 @@ runId。进入程序编写／调试阶段时再由自己迁移到 `debugging`，
 - **只用白名单工具。** 任务程序 = typed 工具调用序列，不生成裸控制代码。白名单：
   `scene_edit`、`sim_open`、`robot_state`、`robot_describe`、`robot_move_tcp`、
   `robot_pick`、`robot_place`、`motion_plan`、`sim_task_check`、`sim_stop`。
+  人体动作补间另可用 `human_soma_status`、`human_soma_generate`、`sim_sync`、`human_play_clip`、`crowd_inspect`。
   campaign 编排、查库和公开 dev 场景的读取／导入是准备步骤，按各自原工具 schema 调用，
   不冒充程序动作；不要把场景加载包装成自写执行器。
 - **开跑前必读技能库。** `pack_skill_list` + `pack_skill_get` 查已准入技能；
@@ -35,7 +36,14 @@ runId。进入程序编写／调试阶段时再由自己迁移到 `debugging`，
 
 ## 1. 探索（拿真值，不猜）
 
-在写任何动作之前建立世界与实体的真实读数：
+对于明确要求人体动作补间的 dev 任务，先检查既有角色、素材片段与场景修订，再调用
+`human_soma_status`。本地模型返回 `prepared` 后，用 `human_soma_generate` 写入新片段，
+以返回的场景修订同步 MuJoCo，再用 `human_play_clip` 在本轮 world 和代次执行。
+通过 `crowd_inspect` 读回末帧，按任务已有的 `sim_task_check` 谓词核验。
+依赖缺失时记录具名阻断。生成或播放完成只记录过程状态，动作质量需要实际验收。
+如果任务要求整段脚滑、落座或穿透阈值，末帧谓词不足以覆盖这些条件。
+
+机器人操作在写动作之前建立世界与实体的真实读数：
 
 1. `scene_inspect`（dev 场景）：拿到实体清单、id、声明位姿。
 2. `sim_open`：打开 dev 场景实例的世界，记下 `worldId` 与 `worldGeneration`——
