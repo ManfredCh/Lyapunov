@@ -131,7 +131,7 @@ export LYAPUNOV_SOMA_PYTHON="/绝对路径/soma-python/bin/python"
 export LYAPUNOV_SOMA_MODEL_DIR="/绝对路径/soma-model"
 ```
 
-SOMA 准备脚本从 [Hugging Face 官方模型页](https://huggingface.co/nvidia/MotionBricks/tree/3cb362d9b95aa40462abcb4d8cfae9ffb6d97410/soma) 对应的固定 revision 取件，允许 Hugging Face 的 HTTPS 文件存储跳转，并逐件核对 NVIDIA 导出器声明的大小和 SHA-256。下载或校验失败时返回 `SOMA_HUB_BLOCKED` 与具体文件。导出器使用固定 Git 提交与经 SHA-256 核对的骨架元数据。成功后写入 `soma.json`，推理阶段只读本地模型并核对哈希。模型遵循 [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/)。随软件携带的坐标参考来自 [Apache 2.0 许可的 SOMA 骨架](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/LICENSE)。
+SOMA 准备脚本从 [Hugging Face 镜像](https://hf-mirror.com/nvidia/MotionBricks/tree/3cb362d9b95aa40462abcb4d8cfae9ffb6d97410/soma) 对应的固定 revision 取件，仅跟随镜像及允许的 HTTPS 存储跳转，并逐件核对 NVIDIA 导出器声明的大小和 SHA-256。下载或校验失败时返回 `SOMA_HUB_BLOCKED` 与具体文件。导出器用已校验的本地检查点、固定 Git 提交与经 SHA-256 核对的骨架元数据生成模型。成功后写入 `soma.json`，推理阶段只读本地模型并核对哈希。模型遵循 [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/)。随软件携带的坐标参考来自 [Apache 2.0 许可的 SOMA 骨架](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/LICENSE)。
 
 ### 生成和回放
 

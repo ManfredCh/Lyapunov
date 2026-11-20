@@ -44,8 +44,8 @@ Lyapunov builds on [DSH](https://github.com/deepseek-ai/deepseek-harness)'s “e
 
 ## Release channels
 
-- **Current Linux x64 / Windows WSL2 release — [0.2.5](docs/releases/0.2.5.md).** The workbench uses native scene, file and terminal tabs. Collision overlays use geometry reported by the physics engine.
-- **macOS Apple Silicon — [platform download](https://vorynel.com/lyapunov/).** See the installation page for the current Mac package.
+- **[Lyapunov 0.2.7 发布说明](docs/releases/0.2.7.md)** · Linux x64、Windows WSL2 和 macOS Apple Silicon。新增机器人配对评测、腕相机纠偏和可选 SOMA 动作补间。
+- **[下载安装](https://vorynel.com/lyapunov/)** · 官网提供各平台当前安装包、版本清单和安装命令。
 - **Previous release — [0.2.3](docs/releases/0.2.3.md):** first Apple Silicon release, with crowd, exit/recovery and platform compatibility updates.
 - **[0.2.2](docs/releases/0.2.2.md):** historical release with people/crowds, first-class USD/SimReady assets and NVIDIA rendering.
   - **People and crowds:** 12 bundled Rocketbox characters, a default 20-person crowd in four appearances, routes with obstacle stops and optional fixed-plane navigation.
@@ -60,7 +60,7 @@ Use the versioned release identifier with `--version` to install a previous rele
 
 ## Install on Linux
 
-From a regular terminal in your graphical desktop session. On Linux and WSL2, the default command installs **0.2.5**.
+From a regular terminal in your graphical desktop session. On Linux and WSL2, the default command reads the current release manifest.
 
 ```sh
 curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
@@ -68,8 +68,8 @@ curl -fsSL https://vorynel.com/lyapunov/install.sh | sh
 
 **Direct downloads**
 
-- Linux x64 / WSL2. [0.2.5 archive](https://vorynel.com/lyapunov/releases/0.2.5-linux-4a5f3b79/lyapunov-linux-x64-0.2.5-linux-4a5f3b79.tar.gz) · [Linux JSON manifest](https://vorynel.com/lyapunov/releases/0.2.5-linux-4a5f3b79/linux-x64.json)
-- macOS Apple Silicon. Keep the entire extracted directory. The package uses ad-hoc signing and is not Apple-notarized. [0.2.4.2 portable archive](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/lyapunov-darwin-arm64-0.2.4.2-macos-20261113.tar.gz) · [macOS JSON manifest](https://github.com/ManfredCh/Lyapunov/releases/download/v0.2.4.2/darwin-arm64.json)
+- Linux x64 / WSL2 · [当前下载与安装要求](https://vorynel.com/lyapunov/#install) · [JSON 清单](https://vorynel.com/lyapunov/releases/latest/linux-x64.json)
+- macOS Apple Silicon · [当前下载与安装要求](https://vorynel.com/lyapunov/#install) · [JSON 清单](https://vorynel.com/lyapunov/releases/latest/darwin-arm64.json)。使用便携包时保留完整解包目录。
 
 After installation succeeds and reports ready, start Lyapunov separately:
 
@@ -313,7 +313,7 @@ Lyapunov 将 Agent、文件与代码、三维场景、机器人仿真和相机�
 
 开发版可从工作台右侧工具栏打开「扩展市场」，也可从「设置 → 集成 → 发现扩展」进入。顶部可按 MCP、Skill、软件、模型、DSH 插件和人物筛选；「全部」按同样的类别分组。点卡片或加号查看说明、来源和本机状态，确认后提交安装或下载。公开目录候选提供来源详情。
 
-机器人任务可从 `robotics-composition` 技能组合相机定位、避障规划、资产审计、原生抓放及评测。当前支持的运行时、验证范围和产物见 [0.2.6 候选说明](docs/releases/0.2.6.md)。
+机器人任务可从 `robotics-composition` 技能组合相机定位、避障规划、资产审计、原生抓放及评测。当前支持的运行时、验证范围和产物见 [0.2.7 发布说明](docs/releases/0.2.7.md)。
 
 人体创建、合法蒙皮角色导入与物理时间动作见 [人体创建与运动](docs/HUMAN_CROWD.md)。MuJoCo支持运动学分段碰撞、有界固定Z平面绕障、拥堵解除与原生ragdoll受力；Isaac CPU/none支持同世界原生USD资产+运动学人体、基础路径、原生停障与停止。稳定平衡/恢复控制器、Isaac高级ragdoll/A*与RTX人体成像尚未完成。
 

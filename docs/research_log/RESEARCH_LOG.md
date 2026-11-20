@@ -121,3 +121,7 @@
 Playground 训练种子 42，CPU 24×8×16 共 3,072 实步。直接验收首轮发现默认 CPU 使用 Warp，切换上游明确支持的 C++ 运行分支后，用 playground_eval_so101 原生 Job 在 7100–7105 上做独立仿真回放。权重与训练回执匹配，同种子初态一致。两组上游成功率均 0/6，策略还未达到任务要求。真机、FR3 闭环、无标记场景及上游任务之外的入盒策略不在本轮实测范围。
 
 主控在实际 Dev 工作树运行现有测试清单。agent-graph、robot-workflows、robot-tools、sim-mujoco、runtime-patch.test.ts 共 25 个独立入口通过，两个 TypeScript 项目与修改过的 Python 均通过编译。最初 runtime-patch 装配夹具在缺少本地下载缓存时超时，使用同一固定依赖缓存后对应三份文件复验 68/68。命令、原件和 HTML 集中在 Dev/.runtime/agy-sim-234/。 [实验阶段](../../research/agy-sim-234/STAGE_SUMMARY.md) · [实测摘要](../../research/agy-sim-234/summary.json)
+
+## 2026-11-20 10:52:48 SGT · 启动 0.2.7 正式发行
+
+按用户指令，完成发行源码的 GitHub CI 后构建 Linux x64 与 macOS Apple Silicon，WSL2 使用 Linux x64 包。主仓合并 SHA 为 `080b4467` 和 `db15716d`，对应 CI `44658492488`、`44658500639` 均成功。独立发行源码修正 SOMA 下载端点并准备中英文入口及中文更新说明。下一步在 0.2.7 精确提交上回收 CI，再启动两个原生平台构建。

@@ -22,6 +22,7 @@
 
 | 入口 | 内容 |
 | --- | --- |
+| [0.2.7 发布说明](docs/releases/0.2.7.md) | 机器人组合技能、配对评测和可选 SOMA 动作补间 |
 | [0.2.5 发布说明](docs/releases/0.2.5.md) | 原生工作台清理、碰撞拓扑与安装入口 |
 | [0.2.4.2 发布说明](docs/releases/0.2.4.2.md) | 关节范围判定、中文关节动作与各平台下载 |
 | [0.2.4.1 发布说明](docs/releases/0.2.4.1.md) | Linux、Windows/WSL2 与 macOS Apple Silicon 下载及各平台源码来源 |

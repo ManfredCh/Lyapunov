@@ -1,4 +1,4 @@
-"""从 Hugging Face 官方站备齐并校验 SOMA 检查点，再用固定的 NVIDIA 导出器生成本地 ONNX。"""
+"""从 Hugging Face 镜像备齐并校验 SOMA 检查点，再用固定的 NVIDIA 导出器生成本地 ONNX。"""
 import argparse
 import ast
 import hashlib
@@ -10,7 +10,7 @@ import tempfile
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-ENDPOINT = 'https://huggingface.co'
+ENDPOINT = 'https://hf-mirror.com'
 MODEL = 'nvidia/MotionBricks'
 REVISION = '3cb362d9b95aa40462abcb4d8cfae9ffb6d97410'
 EXPORTER_REVISION = '54fc563aeaaf819a753d72cc9fdc6713989cdd43'
@@ -23,7 +23,7 @@ class HubRedirect(HTTPRedirectHandler):
         url = urlsplit(new_url)
         domain = url.hostname or ''
         if url.scheme != 'https' or not (
-            domain == 'huggingface.co' or domain.endswith(('.huggingface.co', '.hf.co'))
+            domain == 'hf-mirror.com' or domain.endswith(('.hf-mirror.com', '.cdn.hf.co'))
         ):
             raise RuntimeError(f'HTTP {code} 指向 {url.hostname}，未跟随')
         return super().redirect_request(request, fp, code, message, headers, new_url)
@@ -95,7 +95,7 @@ def prepare(upstream, output):
         model = stage / 'soma-fp32.onnx'
         subprocess.run(['uv', 'run', '--locked', '--project', str(exporter / 'tools/onnx'),
                         'motionbricks-onnx', '--model', 'soma', '--checkpoints', str(checkpoint_root),
-                        '--output', str(model)], cwd=exporter, check=True, env={**os.environ, 'HF_ENDPOINT': ENDPOINT})
+                        '--output', str(model)], cwd=exporter, check=True, env={**os.environ, 'HF_ENDPOINT': ENDPOINT, 'HF_HUB_OFFLINE': '1'})
         digest = file_digest(model)
         manifest = dict(schema=1, model=MODEL, revision=REVISION, endpoint=ENDPOINT,
                         exporterRevision=revision, precision='fp32', sha256=digest, bytes=model.stat().st_size,
