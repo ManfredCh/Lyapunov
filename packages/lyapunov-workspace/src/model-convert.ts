@@ -12,7 +12,7 @@
  * 于是同一段代码可以直接 `bun -e` 真跑（见 bugfixHistory 回执）。
  * 路径安全与 RPC 侧 `target()` 同款：先 realpath 再判包含，软链逃逸与越界一律拒绝。
  */
-import {createHash} from "node:crypto"
+import {createHash,randomUUID} from "node:crypto"
 import {createReadStream,existsSync} from "node:fs"
 import {mkdtemp,mkdir,readdir,readFile,realpath,rename,rm,stat,writeFile} from "node:fs/promises"
 import {Readable} from "node:stream"
@@ -369,10 +369,15 @@ async function exportGlb(target:string,source:ModelConvertSource,options:ModelCo
     await mkdir(paths.directory,{recursive:true})
     const convertMs=Date.now()-measured
     // 先写临时名再 rename：并发或崩溃只会留下可整删的临时文件，不会留下半截正式缓存。
-    const staged=`${paths.glb}.${process.pid}.tmp`
+    // 临时名按**每次转换**唯一，而不是只按进程：同一 Host 进程里两个同键转换（两个预览请求、
+    // 预览与 convert-source 重叠）会同时错过缓存写同一个暂存路径，后到的 rename 只会拿到 ENOENT。
+    const staged=`${paths.glb}.${process.pid}.${randomUUID()}.tmp`
     await writeFile(staged,bytes)
     await rename(staged,paths.glb)
-    await writeFile(paths.meta,JSON.stringify({sha256:cacheKey,source,bytes:bytes.length,convertMs,blenderExecutable:executable,sourcePath:target,convertedAt:new Date().toISOString(),...(identity?{cacheBasis:identity.basis,dependenciesVerified:identity.reusable,resourceKey:identity.key}:{})},null,2))
+    // 元数据同样先写临时名再 rename：否则读到 truncate+write 中间态的 readCached 会把完好缓存当 miss。
+    const metadata=`${paths.meta}.${process.pid}.${randomUUID()}.tmp`
+    await writeFile(metadata,JSON.stringify({sha256:cacheKey,source,bytes:bytes.length,convertMs,blenderExecutable:executable,sourcePath:target,convertedAt:new Date().toISOString(),...(identity?{cacheBasis:identity.basis,dependenciesVerified:identity.reusable,resourceKey:identity.key}:{})},null,2))
+    await rename(metadata,paths.meta)
     return {bytes,cachedPath:paths.glb,convertMs,source,cached:false,...(identity?{cacheBasis:identity.basis}:{})}
   }catch(error){
     if(error instanceof ModelPreviewUnsupported)throw error
