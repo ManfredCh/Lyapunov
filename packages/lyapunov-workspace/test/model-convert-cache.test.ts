@@ -11,10 +11,10 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
-import { ModelPreviewUnavailable, ModelPreviewUnsupported, convertCacheIdentity, convertRegisteredSource, verifyDependencies } from "../src/model-convert.ts"
+import { ModelPreviewUnavailable, ModelPreviewUnsupported, convertCacheIdentity, convertRegisteredSource, convertToGlb, verifyDependencies, verifyGlb, type SpawnBlender } from "../src/model-convert.ts"
 import { convertSourceOf, registrableConvertSourceOf } from "../src/model-source.ts"
 
 const read = (relative: string) => readFileSync(join(import.meta.dirname, "..", ...relative.split("/")), "utf8")
@@ -136,6 +136,66 @@ describe("拖拽分发只认可登记的格式（issue 3）", () => {
     expect(registrableConvertSourceOf("/m/model.usdc")).toBe("usd")
     expect(registrableConvertSourceOf("/m/model.blend")).toBe("blend")
   })
+})
+
+/** 最小合法 GLB：头 + JSON 块 + 一个小 BIN 块；只为走真实 verifyGlb，不承载场景内容。 */
+function glbFixture(): Buffer {
+  const json = Buffer.from(JSON.stringify({ asset: { version: "2.0" } }))
+  const bin = Buffer.alloc(4096)
+  const total = 12 + 8 + json.length + 8 + bin.length
+  const header = Buffer.alloc(12)
+  header.writeUInt32LE(0x46546c67, 0)
+  header.writeUInt32LE(2, 4)
+  header.writeUInt32LE(total, 8)
+  const jsonHeader = Buffer.alloc(8)
+  jsonHeader.writeUInt32LE(json.length, 0)
+  jsonHeader.writeUInt32LE(0x4e4f534a, 4)
+  const binHeader = Buffer.alloc(8)
+  binHeader.writeUInt32LE(bin.length, 0)
+  binHeader.writeUInt32LE(0x004e4942, 4)
+  return Buffer.concat([header, jsonHeader, json, binHeader, bin])
+}
+
+/** 假 Blender 的产物路径：`--` 之后依次是 target/source/output/remap/policy。 */
+function blenderOutput(argv: string[]): string {
+  return argv[argv.indexOf("--") + 3]!
+}
+
+describe("并发提交同一缓存键：暂存名按每次转换唯一", () => {
+  test("两个同时到达的 convertToGlb 都成功，缓存仍可复用", async () => {
+    const { root, source } = await fixture(".blend")
+    const cacheRoot = join(root, "cache")
+    const pending: Array<{ argv: string[]; resolve: (outcome: { exitCode: number; signal: null }) => void }> = []
+    // 两个请求都错过缓存后，由测试同时放行两个子进程，保证它们一起走到缓存提交。
+    const spawn: SpawnBlender = argv => {
+      let resolve!: (outcome: { exitCode: number; signal: null }) => void
+      const done = new Promise<{ exitCode: number; signal: null }>(finish => { resolve = finish })
+      pending.push({ argv, resolve })
+      return {
+        collected: { stdout: { readFrom: () => ({ text: "" }) }, stderr: { readFrom: () => ({ text: "fake blender" }) } },
+        done,
+        terminate: () => {},
+      }
+    }
+    const options = { cacheRoot, base: root, spawn }
+    const first = convertToGlb(source, options)
+    const second = convertToGlb(source, options)
+    while (pending.length < 2) await new Promise(done => setTimeout(done, 5))
+    const bytes = glbFixture()
+    for (const child of pending) {
+      writeFileSync(blenderOutput(child.argv), bytes)
+      child.resolve({ exitCode: 0, signal: null })
+    }
+    const settled = await Promise.allSettled([first, second])
+    expect(settled.map(result => result.status)).toEqual(["fulfilled", "fulfilled"])
+    for (const result of settled) {
+      if (result.status === "fulfilled") expect(verifyGlb(result.value.bytes).ok).toBe(true)
+    }
+    // 暂存文件都被 rename 掉，不留 .tmp；下一次调用直接命中缓存，不再启动转换器。
+    expect(readdirSync(join(cacheRoot, "model-preview")).some(name => name.endsWith(".tmp"))).toBe(false)
+    const warm = await convertToGlb(source, { ...options, spawn: () => { throw new Error("缓存命中不应重启 Blender") } })
+    expect(warm.cached).toBe(true)
+  }, 20_000)
 })
 
 describe("convert-source 接线：只消费本会话已登记资源，不再接受客户端路径/边界开关", () => {
