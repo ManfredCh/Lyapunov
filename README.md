@@ -21,7 +21,7 @@
 
 | Publication metadata | Value |
 | --- | --- |
-| Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; Yi Yang; Lidong Chen; Jiale Liu; Xinling Yu |
+| Author team | Mingjun Cheng; Zongjian Ding; Yudong Gao; [Yi Yang](https://github.com/SANS-223); Lidong Chen; Jiale Liu; Xinling Yu |
 | Produced by | [Vorynel Co., Ltd. (杭州奇异宇宙人工智能有限公司)](https://vorynel.com/?lang=en) |
 | Sponsored by | [UAD（浙江大学建筑设计研究院有限公司）](https://www.uad.com.cn/) |
 | Copyright | © 2026 Vorynel Co., Ltd. |
